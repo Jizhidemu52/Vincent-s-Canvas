@@ -1,3 +1,5 @@
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { isFinancialDisplayField } from "@/lib/financial-presentation";
 
@@ -15,15 +17,16 @@ const auditTargets: Record<string, string> = { account: "账号", department: "�
 const auditActions: Record<string, string> = { created: "创建", updated: "更新", deleted: "删除", enabled: "启用", disabled: "停用", password_reset: "重置密码", bulk_created: "批量创建", adjusted: "调整", balance_set: "设置余额", published: "发布", testing: "进入测试", availability_changed: "调整可用性", policy_changed: "调整计费策略", member_removed: "移除成员", history_exported: "导出历史", paused: "暂停", resumed: "恢复", cancelled: "取消", admin_paused: "管理员暂停", admin_resumed: "管理员恢复", admin_cancelled: "管理员取消", activated: "激活", archived: "归档", exported: "导出", viewed: "查看", team_submitted: "提交小组审核", team_approved: "小组审核通过", team_rejected: "小组审核拒绝", public_published: "发布公共库", personal_created: "创建个人模板", personal_updated: "更新个人模板", personal_deleted: "删除个人模板", copied: "复制", reused: "复用" };
 export function adminLabel(value: string | null | undefined) {
     if (!value) return "—";
-    if (labels[value]) return labels[value];
+    if (labels[value]) return staticUiText(labels[value]);
     const [target, action] = value.split(".");
-    return auditTargets[target] && auditActions[action] ? `${auditTargets[target]}：${auditActions[action]}` : value;
+    return auditTargets[target] && auditActions[action] ? staticUiText("{target}：{action}", { target: staticUiText(auditTargets[target]), action: staticUiText(auditActions[action]) }) : value;
 }
 
 export function AdminDetails({ value, audit = false }: { value: unknown; audit?: boolean }) {
+    useUiLocale();
     if (value == null || value === "") return <span>—</span>;
-    if (typeof value === "boolean") return <span>{value ? "是" : "否"}</span>;
-    if (Array.isArray(value)) return value.length ? <ul className="space-y-1">{value.map((item, index) => <li key={index}><AdminDetails value={item} audit={audit} /></li>)}</ul> : <span>无</span>;
-    if (typeof value === "object") return <dl className="grid min-w-0 grid-cols-[minmax(5rem,auto)_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">{Object.entries(value).filter(([key]) => !isFinancialDisplayField(key) && key !== "amount" && key !== "balance").map(([key, item]) => <div className="contents" key={key}><dt className="text-[var(--muted-foreground)]">{adminLabel(key)}</dt><dd className="break-words">{/(?:At|Time)$/.test(key) && typeof item === "string" && /^\d{4}-\d{2}-\d{2}T/.test(item) ? `${formatBeijingDateTime(item)}（北京时间）` : <AdminDetails audit={audit} value={audit && key === "fields" && Array.isArray(item) ? item.filter(field => typeof field !== "string" || !isFinancialDisplayField(field)) : item} />}</dd></div>)}</dl>;
+    if (typeof value === "boolean") return <span>{value ? staticUiText("是") : staticUiText("否")}</span>;
+    if (Array.isArray(value)) return value.length ? <ul className="space-y-1">{value.map((item, index) => <li key={index}><AdminDetails value={item} audit={audit} /></li>)}</ul> : <span>{staticUiText("无")}</span>;
+    if (typeof value === "object") return <dl className="grid min-w-0 grid-cols-[minmax(5rem,auto)_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">{Object.entries(value).filter(([key]) => !isFinancialDisplayField(key) && key !== "amount" && key !== "balance").map(([key, item]) => <div className="contents" key={key}><dt className="text-[var(--muted-foreground)]">{adminLabel(key)}</dt><dd className="break-words">{/(?:At|Time)$/.test(key) && typeof item === "string" && /^\d{4}-\d{2}-\d{2}T/.test(item) ? staticUiText("{p0}（北京时间）", { p0: `${formatBeijingDateTime(item)}` }) : <AdminDetails audit={audit} value={audit && key === "fields" && Array.isArray(item) ? item.filter(field => typeof field !== "string" || !isFinancialDisplayField(field)) : item} />}</dd></div>)}</dl>;
     return <span className="whitespace-pre-wrap break-words">{typeof value === "string" ? adminLabel(value) : String(value)}</span>;
 }

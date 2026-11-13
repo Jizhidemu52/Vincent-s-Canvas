@@ -13,12 +13,14 @@ import { downloadDesignLibraryImage, getDesignLibraryEntry, recordDesignLibraryE
 import { useUserStore } from "@/stores/use-user-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import type { DesignLibraryEntry } from "@/types/design-library";
+import { displayNotice, DisplayText, useDisplayText } from "@/hooks/use-display-text";
 const StatsDrawer = lazy(() => import("./stats-drawer").then(module => ({ default: module.StatsDrawer })));
 
 export const statusLabels = { published: "已发布", withdrawn: "本人已撤回", taken_down: "管理员已下架" };
 
 export function EntryDetail({ entry, admin, onClose, onWithdraw, onModerate }: { entry: DesignLibraryEntry; admin: boolean; onClose: () => void; onWithdraw: () => void; onModerate: () => void }) {
     const t = useUiText();
+    const display = useDisplayText();
     const { message } = App.useApp();
     const navigate = useNavigate();
     const ownerId = useUserStore(state => state.user?.id);
@@ -58,7 +60,7 @@ export function EntryDetail({ entry, admin, onClose, onWithdraw, onModerate }: {
         catch (error) {
             if (alive.current && useUserStore.getState().user?.id === ownerId) {
                 if (error instanceof DesignLibraryCanvasPersistenceError) { setSaveFailedProject(error.projectId); setReuseOpen(false); }
-                message.error(error instanceof Error ? error.message : t("操作未完成，请重试"));
+                message.error(displayNotice(error instanceof Error ? error.message : t("操作未完成，请重试")));
             }
         } finally { actionRef.current = false; if (alive.current) setAction(""); }
     };
@@ -68,7 +70,7 @@ export function EntryDetail({ entry, admin, onClose, onWithdraw, onModerate }: {
         const blob = await downloadDesignLibraryImage(entry.id, image.id, requestId, { expectedOwnerId: ownerId });
         if (!alive.current || useUserStore.getState().user?.id !== ownerId) return;
         saveAs(blob, image.filename);
-        message.success(t("原图已交给浏览器下载"));
+        message.success(displayNotice(t("原图已交给浏览器下载")));
         try { await recordDesignLibraryEvent(entry.id, { action: "download", imageId: image.id, requestId }, { expectedOwnerId: ownerId }); }
         catch { if (alive.current) setTrackingError(true); }
     });
@@ -77,7 +79,7 @@ export function EntryDetail({ entry, admin, onClose, onWithdraw, onModerate }: {
         if (!alive.current || useUserStore.getState().user?.id !== ownerId) return;
         if (latest.status !== "published" || !latest.prompt) throw new Error(t("这份分享已不可复制，请刷新作品详情"));
         if (!copy(latest.prompt)) throw new Error(t("复制失败，请手动选择提示词复制"));
-        message.success(t("提示词已复制"));
+        message.success(displayNotice(t("提示词已复制")));
         try { await recordDesignLibraryEvent(entry.id, { action: "prompt_copy", requestId: createClientId() }, { expectedOwnerId: ownerId }); }
         catch { if (alive.current) setTrackingError(true); }
     });
@@ -85,14 +87,14 @@ export function EntryDetail({ entry, admin, onClose, onWithdraw, onModerate }: {
         if (!image) return;
         const result = await addDesignLibraryImageToCanvas(entry, image, target || undefined);
         if (!alive.current || useUserStore.getState().user?.id !== ownerId) return;
-        if (!result.trackingRecorded) message.warning(t("图片已保存到你的画布，但使用统计暂未记入"));
-        else message.success(t("已保存独立图片副本，可以继续创作"));
+        if (!result.trackingRecorded) message.warning(displayNotice(t("图片已保存到你的画布，但使用统计暂未记入")));
+        else message.success(displayNotice(t("已保存独立图片副本，可以继续创作")));
         navigate(`/canvas/${encodeURIComponent(result.projectId)}`);
     });
 
     return <>
-        <Drawer open title={entry.title} size={1120} onClose={onClose}>
-            <div className="mb-5 flex flex-wrap items-center gap-2 text-sm"><span className="font-medium">{entry.author.name}</span><span className="text-muted-foreground">{entry.author.departmentName || t("部门未设置")} · {new Date(entry.createdAt).toLocaleDateString(getUiLocale())}</span><Tag>{t(statusLabels[entry.status])}</Tag>{entry.tags.map(tag => <Tag key={tag}>{tag}</Tag>)}</div>
+        <Drawer open title={<DisplayText text={entry.title} />} size={1120} onClose={onClose}>
+            <div className="mb-5 flex flex-wrap items-center gap-2 text-sm"><span className="font-medium"><DisplayText text={entry.author.name} /></span><span className="text-muted-foreground"><DisplayText text={entry.author.departmentName || t("部门未设置")} /> · {new Date(entry.createdAt).toLocaleDateString(getUiLocale())}</span><Tag>{t(statusLabels[entry.status])}</Tag>{entry.tags.map(tag => <Tag key={tag}><DisplayText text={tag} /></Tag>)}</div>
             {!available && entry.status !== "published" && <Alert className="mb-4" type="warning" showIcon title={t("此作品已停止共享")} description={t("不再允许新的下载、复制提示词或画布复用。已经获得的独立副本不受影响。")} />}
             <div className="grid gap-6 lg:grid-cols-[1.35fr_1fr]">
                 <section className="min-w-0">
@@ -106,8 +108,8 @@ export function EntryDetail({ entry, admin, onClose, onWithdraw, onModerate }: {
                     </> : <div className="flex min-h-56 items-center justify-center rounded-xl border border-dashed border-border bg-muted/20"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("这是一份文字灵感分享")} /></div>}
                 </section>
                 <section className="min-w-0 space-y-5">
-                    {entry.thought && <div><h3 className="mb-2 text-base font-semibold">{t("设计思路")}</h3><p className="whitespace-pre-wrap break-words text-sm leading-7">{entry.thought}</p></div>}
-                    {entry.prompt && <div><div className="mb-2 flex items-center justify-between"><h3 className="font-semibold">{t("生图提示词")}</h3>{!admin && <Button size="small" icon={<Copy size={14} />} loading={action === "copy"} disabled={!available || Boolean(action)} onClick={() => void copyPrompt()}>{t("复制提示词")}</Button>}</div><pre className="max-h-96 overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-muted/50 p-4 font-mono text-xs leading-6">{entry.prompt}</pre></div>}
+                    {entry.thought && <div><h3 className="mb-2 text-base font-semibold">{t("设计思路")}</h3><p className="whitespace-pre-wrap break-words text-sm leading-7"><DisplayText text={entry.thought} /></p></div>}
+                    {entry.prompt && <div><div className="mb-2 flex items-center justify-between"><h3 className="font-semibold">{t("生图提示词")}</h3>{!admin && <Button size="small" icon={<Copy size={14} />} loading={action === "copy"} disabled={!available || Boolean(action)} onClick={() => void copyPrompt()}>{t("复制提示词")}</Button>}</div><pre className="max-h-96 overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-muted/50 p-4 font-mono text-xs leading-6"><DisplayText text={entry.prompt} /></pre></div>}
                     {!admin && <p className="rounded-lg border border-border p-3 text-xs leading-6 text-muted-foreground">{t("下载或放入画布后，作者可看到你的员工姓名、部门和操作时间。浏览仅统计次数与人数，不公开浏览者名单；你的私人画布与后续创作不会共享。")}</p>}
                     {trackingError && <Alert type="warning" title={t("部分使用统计暂未记入，已完成的操作不受影响")} />}
                     {saveFailedProject && <Alert type="error" title={t("图片已加入，但画布保存尚未完成")} description={t("不要重复添加。打开该画布处理保存状态。")} action={<Button onClick={() => navigate(`/canvas/${encodeURIComponent(saveFailedProject)}`)}>{t("打开画布")}</Button>} />}
@@ -117,7 +119,7 @@ export function EntryDetail({ entry, admin, onClose, onWithdraw, onModerate }: {
         </Drawer>
         <Modal open={reuseOpen} title={t("把独立副本放到我的画布")} okText={t("保存副本并打开画布")} cancelText={t("取消")} confirmLoading={action === "reuse"} onOk={() => void reuse()} onCancel={() => { if (!actionRef.current) setReuseOpen(false); }} maskClosable={!action}>
             <p className="mb-4 text-sm text-muted-foreground">{t("只添加当前图片，不覆盖已有节点、连线或聊天。作者之后撤回分享，不影响你保存的副本。")}</p>
-            <Select className="w-full" value={target} onChange={setTarget} disabled={Boolean(action)} showSearch optionFilterProp="label" options={[{ value: "", label: t("新建画布，继续创作") }, ...options]} />
+            <Select className="w-full" value={target} onChange={setTarget} disabled={Boolean(action)} showSearch optionFilterProp="label" options={[{ value: "", label: t("新建画布，继续创作") }, ...options.map(option => ({ ...option, label: reuseOpen ? display(option.label) : option.label }))]} />
         </Modal>
         {statsOpen && <Suspense fallback={<Drawer open title={t("使用统计")} size={860} onClose={() => setStatsOpen(false)}><p role="status">{t("正在加载使用统计…")}</p></Drawer>}><StatsDrawer entry={entry} admin={admin} onClose={() => setStatsOpen(false)} /></Suspense>}
     </>;

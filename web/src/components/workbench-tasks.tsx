@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import { Tooltip } from "antd";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { uiText, useUiText } from "@/lib/i18n";
+import { DisplayTranslationScope } from "@/hooks/use-display-text";
 import { addWorkbenchTask, closeWorkbenchTask, DEFAULT_WORKBENCH_TASK, initialWorkbenchTasks, readWorkbenchTasks, workbenchTaskScope, type WorkbenchTaskState } from "@/lib/workbench-task-state";
 
 type TaskStatus = { busy: boolean; pending?: boolean; ready?: boolean; label?: string };
@@ -25,7 +26,7 @@ function TaskPane({ id, active, ready, creating, createNewTask, urlInputKey, rep
     // Keep inactive workspaces mounted: their original request/observer and frozen
     // input stay intact. Hiding a tab is not cancellation or a new submission.
     return <div role="tabpanel" id={panelId} aria-labelledby={tabId} hidden={!active} style={{ display: active ? "block" : "none" }} className="h-full min-h-0 min-w-0">
-        <WorkbenchTaskContext.Provider value={value}>{children}</WorkbenchTaskContext.Provider>
+        <WorkbenchTaskContext.Provider value={value}><DisplayTranslationScope visible={active}>{children}</DisplayTranslationScope></WorkbenchTaskContext.Provider>
     </div>;
 }
 
@@ -110,7 +111,7 @@ export function WorkbenchTasks({ boardKey, ownerId, urlInputKey, children }: { b
                 {state.tasks.map(task => {
                     const status = statuses[task.id];
                     const title = uiText("任务 {number}", { number: task.number });
-                    const statusText = !status || status.ready === false ? uiText("读取中") : status.busy ? uiText("处理中") : status.pending ? uiText("待核查") : status.label || uiText("可编辑");
+                    const statusText = !status || status.ready === false ? uiText("读取中") : status.busy ? uiText("处理中") : status.pending ? uiText("待核查") : uiText(status.label || "可编辑");
                     const active = state.activeId === task.id;
                     return <div key={task.id} className={`wb-task-item${active ? " is-active" : ""}`}>
                         <Tooltip title={`${title} · ${statusText}`}><span className="inline-flex"><button type="button" role="tab" id={`${prefix}-tab-${task.id}`} aria-controls={`${prefix}-panel-${task.id}`} aria-selected={active} tabIndex={active ? 0 : -1}

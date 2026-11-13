@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
@@ -24,6 +25,7 @@ function picker(models: PublicModel[], current: string, bound = false) {
     const selected: string[] = [];
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
+        "@/hooks/use-display-text": { ...displayHooksHarness, DisplayText: ({ text }: { text: string }) => text },
         react: { ...React, useEffect() {}, useRef: (current: unknown) => ({ current }), useMemo: (factory: () => unknown) => factory(), useId: () => "picker", useState: () => [false, () => undefined] },
         "@/components/ui/select": { Select: "Select", SelectContent: "SelectContent", SelectItem: "SelectItem", SelectTrigger: "SelectTrigger" },
         "@/hooks/use-can-manage-config": { useCanManageConfig: () => false },

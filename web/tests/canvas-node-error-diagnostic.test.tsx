@@ -8,6 +8,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { generationErrorMessage, imageResultProcessingFailureMessage, isImageResultProcessingFailure, mergeGenerationDiagnostics } from "@/lib/generation-feedback";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { i18nHarness } from "./helpers/i18n-harness";
+import { DisplayText } from "@/hooks/use-display-text";
 
 // Evaluate the actual private node card and diagnostic copy callback, with isolated hook/I/O boundaries.
 function loadFunction(path: string, name: string, dependencies: Record<string, unknown>) {
@@ -32,7 +33,7 @@ const node: CanvasNodeData = { id: "white-cup", type: CanvasNodeType.Image, titl
 function harness(patch: Partial<CanvasNodeData["metadata"]> = {}, options: { onReload?: () => void; type?: CanvasNodeType } = {}) {
     const copies: string[] = [], retries: string[] = [];
     const Button = ({ children, href, onClick }: { children: React.ReactNode; href?: string; onClick?: () => void }) => href ? <a href={href}>{children}</a> : <button type="button" onClick={onClick}>{children}</button>;
-    const Diagnostic = loadFunction("../src/components/generation-diagnostic.tsx", "GenerationDiagnostic", { React, Button, ...i18nHarness, generationErrorMessage, isImageResultProcessingFailure, mergeGenerationDiagnostics,
+    const Diagnostic = loadFunction("../src/components/generation-diagnostic.tsx", "GenerationDiagnostic", { React, Button, DisplayText, ...i18nHarness, generationErrorMessage, isImageResultProcessingFailure, mergeGenerationDiagnostics,
         useCopyFeedback: () => ({ copied: false, copy: (value: string) => { copies.push(value); return Promise.resolve(true); } }) });
     const ErrorContent = loadFunction("../src/components/canvas/canvas-node.tsx", "ErrorContent", { React, RefreshCw, ...i18nHarness, CanvasNodeType, GenerationDiagnostic: Diagnostic,
         imageResultProcessingFailureMessage, isImageResultProcessingFailure, mergeGenerationDiagnostics });

@@ -1,3 +1,6 @@
+import { useDisplayUiValue } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Empty, Input, Skeleton, Tabs, Tag } from "antd";
 import { ArrowLeft, RefreshCw } from "lucide-react";
@@ -12,14 +15,15 @@ import { messageOf } from "./model";
 import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
 
 export default function AdminPromptRecipesPage() {
+    useUiLocale();
     const user = useUserStore((state) => state.user);
     const status = useUserStore((state) => state.status);
     if (status !== "authenticated" || user?.role !== "super_admin" || user.status !== "active") {
         return (
             <div className="wb-page p-6">
-                <Alert type="error" showIcon title="仅超级管理员可管理提示词配方" description="此页面不会向当前账号请求配方正文或测试诊断数据。" />
+                <Alert type="error" showIcon title={staticUiText("仅超级管理员可管理提示词配方")} description={staticUiText("此页面不会向当前账号请求配方正文或测试诊断数据。")} />
                 <Link to="/admin">
-                    <Button className="mt-4">返回管理中心</Button>
+                    <Button className="mt-4">{staticUiText("返回管理中心")}</Button>
                 </Link>
             </div>
         );
@@ -28,6 +32,8 @@ export default function AdminPromptRecipesPage() {
 }
 
 function RecipeWorkspace({ ownerId }: { ownerId: string }) {
+    const displayUi = useDisplayUiValue();
+    useUiLocale();
     const [recipes, setRecipes] = useState<AdminPromptRecipe[]>([]);
     const [models, setModels] = useState<PromptAdminModel[]>([]);
     const [selectedKey, setSelectedKey] = useState("");
@@ -38,7 +44,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     const [detailLoading, setDetailLoading] = useState(false);
     const [retry, setRetry] = useState(0);
     const [dirty, setDirty] = useState(false);
-    const { confirmDiscard } = useUnsavedGuard(dirty, "提示词配方尚未保存，离开后将丢失编辑内容；已提交的测试不会被取消。");
+    const { confirmDiscard } = useUnsavedGuard(dirty, staticUiText("提示词配方尚未保存，离开后将丢失编辑内容；已提交的测试不会被取消。"));
     const controller = useRef<AbortController | null>(null);
     const mounted = useRef(true);
     useEffect(() => {
@@ -105,38 +111,35 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
             <main className="mx-auto flex w-full max-w-[1480px] flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
                 <header className="wb-header !mb-0">
                     <div>
-                        <div className="wb-eyebrow">管理工作台 / 提示词中台</div>
-                        <h1 className="wb-title">提示词配方</h1>
-                        <p className="wb-description">独立绑定优化模型，先存草稿、再测试、再激活。创作端只使用已激活版本。</p>
+                        <div className="wb-eyebrow">{staticUiText("管理工作台 / 提示词中台")}</div>
+                        <h1 className="wb-title">{staticUiText("提示词配方")}</h1>
+                        <p className="wb-description">{staticUiText("独立绑定优化模型，先存草稿、再测试、再激活。创作端只使用已激活版本。")}</p>
                     </div>
                     <Link to="/admin">
-                        <Button icon={<ArrowLeft className="size-4" />}>返回管理中心</Button>
+                        <Button icon={<ArrowLeft className="size-4" />}>{staticUiText("返回管理中心")}</Button>
                     </Link>
                 </header>
                 {error && (
                     <Alert
                         type="error"
                         showIcon
-                        title={error}
+                        title={displayUi(error)}
                         action={
-                            <Button size="small" onClick={() => (selectedKey ? void refresh().catch((reason) => setError(messageOf(reason))) : setRetry((value) => value + 1))}>
-                                重试读取
-                            </Button>
+                            <Button size="small" onClick={() => (selectedKey ? void refresh().catch((reason) => setError(messageOf(reason))) : setRetry((value) => value + 1))}>{staticUiText("重试读取")}</Button>
                         }
                     />
                 )}
                 {loading ? (
                     <Skeleton active />
                 ) : recipes.length === 0 ? (
-                    <Empty description="暂无提示词配方" />
+                    <Empty description={staticUiText("暂无提示词配方")} />
                 ) : (
                     <div className="grid min-w-0 gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
                         <aside className="wb-surface self-start p-3">
-                            <label className="mb-2 block text-xs text-muted-foreground" htmlFor="recipe-filter">
-                                查找场景配方 · {recipes.length}
+                            <label className="mb-2 block text-xs text-muted-foreground" htmlFor="recipe-filter">{staticUiText("查找场景配方 · ")}{recipes.length}
                             </label>
-                            <Input id="recipe-filter" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="名称或场景标识" allowClear />
-                            <div className="mt-3 flex max-h-[65vh] flex-col gap-1 overflow-y-auto" role="list" aria-label="配方列表">
+                            <Input id="recipe-filter" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={staticUiText("名称或场景标识")} allowClear />
+                            <div className="mt-3 flex max-h-[65vh] flex-col gap-1 overflow-y-auto" role="list" aria-label={staticUiText("配方列表")}>
                                 {recipes
                                     .filter((recipe) => `${recipe.name} ${recipe.key}`.toLowerCase().includes(search.toLowerCase()))
                                     .map((recipe) => (
@@ -148,7 +151,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                             className={`rounded-lg border px-3 py-3 text-left transition-colors ${selectedKey === recipe.key ? "border-primary bg-accent" : "border-transparent hover:bg-accent/60"}`}
                                         >
                                             <div className="flex items-center justify-between gap-2 text-sm font-medium">
-                                                <span>{recipe.name}</span>
+                                                <span>{displayUi(recipe.name)}</span>
                                                 <span className={`size-1.5 shrink-0 rounded-full ${recipe.enabled ? "bg-primary" : "bg-muted-foreground/40"}`} />
                                             </div>
                                             <div className="mt-1 break-all text-xs text-muted-foreground">{recipe.key}</div>
@@ -163,24 +166,22 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                 <>
                                     <div className="wb-surface mb-4 flex flex-wrap items-center justify-between gap-3 p-4">
                                         <div>
-                                            <h2 className="text-lg font-semibold">{selected?.name}</h2>
+                                            <h2 className="text-lg font-semibold">{displayUi(selected?.name)}</h2>
                                             <div className="mt-1 flex flex-wrap gap-1">
-                                                <Tag color={selected?.enabled ? "green" : "default"}>{selected?.enabled ? "已启用" : "已停用"}</Tag>
-                                                <Tag>{detail.versions.find((version) => version.id === selected?.currentVersionId) ? `线上 v${detail.versions.find((version) => version.id === selected?.currentVersionId)!.version}` : "尚未激活"}</Tag>
-                                                {dirty && <Tag color="orange">有未保存修改</Tag>}
+                                                <Tag color={selected?.enabled ? "green" : "default"}>{selected?.enabled ? staticUiText("已启用") : staticUiText("已停用")}</Tag>
+                                                <Tag>{detail.versions.find((version) => version.id === selected?.currentVersionId) ? staticUiText("线上 v{p0}", { p0: `${detail.versions.find((version) => version.id === selected?.currentVersionId)!.version}` }) : staticUiText("尚未激活")}</Tag>
+                                                {dirty && <Tag color="orange">{staticUiText("有未保存修改")}</Tag>}
                                             </div>
                                         </div>
-                                        <Button icon={<RefreshCw className="size-4" />} disabled={dirty} onClick={() => void refresh().catch((reason) => setError(messageOf(reason)))}>
-                                            刷新记录
-                                        </Button>
+                                        <Button icon={<RefreshCw className="size-4" />} disabled={dirty} onClick={() => void refresh().catch((reason) => setError(messageOf(reason)))}>{staticUiText("刷新记录")}</Button>
                                     </div>
                                     <Tabs
                                         key={selectedKey}
                                         defaultActiveKey="edit"
                                         items={[
-                                            { key: "edit", label: "配方与版本", children: <RecipeEditor detail={detail} models={models} refresh={refresh} onDirty={setDirty} /> },
-                                            { key: "test", label: "测试与对比", children: <RecipeTestPanel detail={detail} models={models} refresh={refresh} editorDirty={dirty} /> },
-                                            { key: "history", label: "统计与记录", children: <CompilationHistory detail={detail} /> },
+                                            { key: "edit", label: staticUiText("配方与版本"), children: <RecipeEditor detail={displayUi(detail)} models={models} refresh={refresh} onDirty={setDirty} /> },
+                                            { key: "test", label: staticUiText("测试与对比"), children: <RecipeTestPanel detail={displayUi(detail)} models={models} refresh={refresh} editorDirty={dirty} /> },
+                                            { key: "history", label: staticUiText("统计与记录"), children: <CompilationHistory detail={displayUi(detail)} /> },
                                         ]}
                                     />
                                 </>

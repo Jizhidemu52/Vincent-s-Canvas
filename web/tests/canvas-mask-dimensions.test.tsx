@@ -1,4 +1,5 @@
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -120,6 +121,7 @@ async function submitFromProject(sourceSize: { width: number; height: number }, 
     const seen: AiConfig[] = [], errors: string[] = [];
     let paidCalls = 0;
     const deps = {
+        displayNotice: displayHooksHarness.displayNotice,
         effectiveConfig: globalConfig, currentToolConfig: (config: AiConfig) => config, modelOptionName: (value: string) => value,
         estimateUsage: () => ({ configured: true, credits: 0 }), buildGenerationConfig: () => globalConfig, imageModelProfile: () => markProfile,
         ensureCanvasModelsReady: async () => ({}), resolveCanvasToolModel: () => ({ model: markModel.id }), canvasMaskAdaptationPlan,

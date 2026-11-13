@@ -1,3 +1,6 @@
+import { useDisplayUiValue, useDisplayConfig } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { Alert, Button, Checkbox, Modal, Select, Tag } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { listUsageAnalysisModels } from "@/services/api/usage-analytics";
@@ -24,6 +27,9 @@ export default function AnalysisActionsV2({
     query: UsageV2Query | null;
     disabled: boolean;
 }) {
+    const displayUi = useDisplayUiValue();
+    const displayConfig = useDisplayConfig();
+    useUiLocale();
     const [models, setModels] = useState<Array<{ id: string; name: string }>>([]),
         [model, setModel] = useState<string>();
     const [preview, setPreview] = useState<UsageV2AnalysisPreview | null>(null),
@@ -111,29 +117,23 @@ export default function AnalysisActionsV2({
         }
     };
     return (
-        <section className="wb-surface space-y-3 p-4 sm:p-5" aria-label="V2匿名聚合AI分析">
-            <h3 className="font-semibold">
-                V2 匿名聚合 AI 分析 <Tag>手动确认 · 可能付费</Tag>
+        <section className="wb-surface space-y-3 p-4 sm:p-5" aria-label={staticUiText("V2匿名聚合AI分析")}>
+            <h3 className="font-semibold">{staticUiText("V2 匿名聚合 AI 分析 ")}<Tag>{staticUiText("手动确认 · 可能付费")}</Tag>
             </h3>
-            <p className="text-xs leading-5 text-[var(--muted-foreground)]">
-                使用当前页签、模板和全部已应用筛选，重新冻结同一套 V2 指标；与免费固定模板、下方旧版基础汇总 AI
-                分开。仅预览不调用模型，不发送姓名、提示词或图片。
-            </p>
+            <p className="text-xs leading-5 text-[var(--muted-foreground)]">{staticUiText("使用当前页签、模板和全部已应用筛选，重新冻结同一套 V2 指标；与免费固定模板、下方旧版基础汇总 AI 分开。仅预览不调用模型，不发送姓名、提示词或图片。")}</p>
             <div className="flex max-w-full flex-wrap items-center gap-2">
                 <Button
-                    aria-label="加载 V2 文字模型"
+                    aria-label={staticUiText("加载 V2 文字模型")}
                     disabled={Boolean(blocked || busy || modelsBusy)}
                     loading={modelsBusy}
                     onClick={() => void loadModels()}
-                >
-                    加载 V2 文字模型
-                </Button>
+                >{staticUiText("加载 V2 文字模型")}</Button>
                 <Select
-                    aria-label="V2 AI 文字模型"
-                    placeholder="手动选择已配置文字模型"
+                    aria-label={staticUiText("V2 AI 文字模型")}
+                    placeholder={staticUiText("手动选择已配置文字模型")}
                     style={{ width: 240, maxWidth: "100%" }}
                     value={model}
-                    options={models.map((item) => ({ value: item.id, label: item.name }))}
+                    options={displayConfig(models.map((item) => ({ value: item.id, label: item.name })), "options")}
                     disabled={Boolean(blocked || busy || modelsBusy)}
                     onChange={(value) => {
                         invalidate();
@@ -141,7 +141,7 @@ export default function AnalysisActionsV2({
                     }}
                 />
                 <Button
-                    aria-label="预览 V2 AI 输入"
+                    aria-label={staticUiText("预览 V2 AI 输入")}
                     aria-busy={busy === "preview"}
                     loading={busy === "preview"}
                     disabled={Boolean(blocked || busy || modelsBusy || !selectedModel)}
@@ -157,47 +157,41 @@ export default function AnalysisActionsV2({
                             setOpen(true);
                         })
                     }
-                >
-                    预览 V2 AI 输入
-                </Button>
+                >{staticUiText("预览 V2 AI 输入")}</Button>
                 {busy ? (
-                    <Button aria-label="取消 V2 等待" onClick={cancel}>
-                        取消 V2 等待
-                    </Button>
+                    <Button aria-label={staticUiText("取消 V2 等待")} onClick={cancel}>{staticUiText("取消 V2 等待")}</Button>
                 ) : null}
-                {used ? <Tag>本次已提交，不重复发送</Tag> : null}
+                {used ? <Tag>{staticUiText("本次已提交，不重复发送")}</Tag> : null}
             </div>
-            <p className="text-xs leading-5 text-[var(--muted-foreground)]">
-                改变筛选、模板、页签、模型或刷新会使本页预览失效；取消只停止等待，不能撤回已交给供应商的调用。费用按所选模型与供应商规则结算，此处不估算金额。
-            </p>
+            <p className="text-xs leading-5 text-[var(--muted-foreground)]">{staticUiText("改变筛选、模板、页签、模型或刷新会使本页预览失效；取消只停止等待，不能撤回已交给供应商的调用。费用按所选模型与供应商规则结算，此处不估算金额。")}</p>
             {error ? (
                 <Alert
                     type="error"
                     showIcon
-                    title={error}
-                    description="没有自动重试；失败或结果不确定时，请先核查原调用再明确创建新预览。"
+                    title={displayUi(error)}
+                    description={staticUiText("没有自动重试；失败或结果不确定时，请先核查原调用再明确创建新预览。")}
                 />
             ) : null}
             {notice ? <Alert type="info" title={notice} /> : null}
             {result ? (
                 <div className="rounded-lg border border-[var(--border)] p-3">
-                    <h4 className="mb-2 font-medium">基于 V2 冻结输入的辅助分析 · 请核对证据</h4>
+                    <h4 className="mb-2 font-medium">{staticUiText("基于 V2 冻结输入的辅助分析 · 请核对证据")}</h4>
                     <pre className="whitespace-pre-wrap break-words text-sm leading-7" data-testid="usage-v2-ai-result">
                         {result.content}
                     </pre>
                 </div>
             ) : null}
             <Modal
-                title="确认 V2 AI 冻结输入"
+                title={staticUiText("确认 V2 AI 冻结输入")}
                 open={open && Boolean(preview)}
                 width={{ xs: "96%", sm: "92%", md: "88%", lg: 1100 }}
                 onCancel={cancel}
                 footer={
                     <div className="flex flex-wrap justify-end gap-2">
-                        <Button onClick={cancel}>取消 V2 预览</Button>
+                        <Button onClick={cancel}>{staticUiText("取消 V2 预览")}</Button>
                         <Button
                             type="primary"
-                            aria-label="确认发送 V2 输入 · 可能付费"
+                            aria-label={staticUiText("确认发送 V2 输入 · 可能付费")}
                             aria-busy={busy === "analyze"}
                             loading={busy === "analyze"}
                             disabled={Boolean(blocked || busy || !preview || !acknowledged || used || !selectedModel)}
@@ -228,9 +222,7 @@ export default function AnalysisActionsV2({
                                     setPreview(null);
                                 })
                             }
-                        >
-                            确认发送 V2 输入 · 可能付费
-                        </Button>
+                        >{staticUiText("确认发送 V2 输入 · 可能付费")}</Button>
                     </div>
                 }
             >
@@ -239,41 +231,32 @@ export default function AnalysisActionsV2({
                         <Alert
                             type="warning"
                             showIcon
-                            title="此按钮将调用所选模型，可能产生费用"
-                            description="只发送下面逐字展示的冻结系统提示和匿名数据，不重新读取看板、不附加提示词或图片；同一预览仅可提交一次。取消等待不承诺撤销调用或费用。"
+                            title={staticUiText("此按钮将调用所选模型，可能产生费用")}
+                            description={staticUiText("只发送下面逐字展示的冻结系统提示和匿名数据，不重新读取看板、不附加提示词或图片；同一预览仅可提交一次。取消等待不承诺撤销调用或费用。")}
                         />
-                        <p className="text-sm">
-                            模型：{selectedModel?.name || "未选择"}；来源：V2 / {preview.page}；模板：
-                            {preview.period === "week"
-                                ? "完整自然周"
+                        <p className="text-sm">{staticUiText("模型：")}{displayUi(selectedModel?.name || staticUiText("未选择"))}{staticUiText("；来源：V2 / ")}{preview.page}{staticUiText("；模板：")}{preview.period === "week"
+                                ? staticUiText("完整自然周")
                                 : preview.period === "month"
-                                  ? "完整自然月"
-                                  : "选定区间"}
+                                  ? staticUiText("完整自然月")
+                                  : staticUiText("选定区间")}
                             。
                         </p>
-                        <p className="break-words text-xs leading-6">
-                            精确范围：[{preview.scope.from}, {preview.scope.to})；统计时区 Asia/Shanghai。人员筛选{" "}
-                            {preview.scope.filters.selectedPeopleCount ?? "全部"} 项；部门筛选{" "}
-                            {preview.scope.filters.selectedDepartmentCount ?? "全部"} 项；比较方式{" "}
-                            {preview.scope.compare}；部门口径 {preview.scope.departmentBasis}
-                            。所有匿名筛选和证据详见下方 JSON。
-                        </p>
+                        <p className="break-words text-xs leading-6">{staticUiText("精确范围：[")}{preview.scope.from}, {preview.scope.to}{staticUiText(")；统计时区 Asia/Shanghai。人员筛选")}{" "}
+                            {preview.scope.filters.selectedPeopleCount ?? staticUiText("全部")}{staticUiText(" 项；部门筛选")}{" "}
+                            {preview.scope.filters.selectedDepartmentCount ?? staticUiText("全部")}{staticUiText(" 项；比较方式")}{" "}
+                            {preview.scope.compare}{staticUiText("；部门口径 ")}{preview.scope.departmentBasis}{staticUiText("。所有匿名筛选和证据详见下方 JSON。")}</p>
                         <div className="flex flex-wrap gap-2">
-                            <Tag>V2 冻结输入</Tag>
-                            <Tag>{preview.estimatedCharacters} 数据字符</Tag>
+                            <Tag>{staticUiText("V2 冻结输入")}</Tag>
+                            <Tag>{preview.estimatedCharacters}{staticUiText(" 数据字符")}</Tag>
                             <Tag>{preview.systemPromptVersion}</Tag>
-                            <Tag>15 分钟内单次有效</Tag>
+                            <Tag>{staticUiText("15 分钟内单次有效")}</Tag>
                         </div>
-                        <p className="break-words text-xs">
-                            失效时间：
-                            {new Date(preview.expiresAt).toLocaleString("zh-CN", {
+                        <p className="break-words text-xs">{staticUiText("失效时间：")}{new Date(preview.expiresAt).toLocaleString("zh-CN", {
                                 timeZone: "Asia/Shanghai",
                                 hour12: false,
-                            })}
-                            （北京时间）。
-                        </p>
+                            })}{staticUiText("（北京时间）。")}</p>
                         <details>
-                            <summary className="cursor-pointer text-sm font-medium">冻结的系统提示</summary>
+                            <summary className="cursor-pointer text-sm font-medium">{staticUiText("冻结的系统提示")}</summary>
                             <pre
                                 className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-6"
                                 data-testid="usage-v2-ai-system-input"
@@ -288,13 +271,11 @@ export default function AnalysisActionsV2({
                             {preview.content}
                         </pre>
                         <Checkbox
-                            aria-label="确认已核对 V2 输入与费用"
+                            aria-label={staticUiText("确认已核对 V2 输入与费用")}
                             checked={acknowledged}
                             disabled={Boolean(busy || used || blocked)}
                             onChange={(event) => setAcknowledged(event.target.checked)}
-                        >
-                            我已核对上述确切输入、所选模型与范围，并确认此次发送可能产生费用。
-                        </Checkbox>
+                        >{staticUiText("我已核对上述确切输入、所选模型与范围，并确认此次发送可能产生费用。")}</Checkbox>
                     </div>
                 ) : null}
             </Modal>

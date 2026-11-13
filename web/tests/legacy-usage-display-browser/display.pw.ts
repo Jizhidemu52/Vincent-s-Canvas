@@ -1,0 +1,121 @@
+import { test, expect, type BrowserContext } from "@playwright/test";
+import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+
+const output = resolve(import.meta.dirname, "../../../output/i18n-complete-20261113");
+const base = "/tests/legacy-usage-display-browser/index.html";
+const consent = "Send this displayed text for English translation";
+const modelId = "00000000-0000-4000-8000-000000000097";
+const summary = { visits: 3, interactions: 6, generationRequests: 2, chatRequests: 1, succeeded: 2, failed: 1, pending: 0, totalRmbCost: 0.2684, generatedImages: 5 };
+const coverage = { collectionStartedAt: "2026-10-15T00:00:00Z", historicalTasksAvailable: true, historicalClicksAvailable: false, historicalChatAvailable: false, droppedEventCount: 0, notes: ["隐藏覆盖备注"] };
+const person = { userId: "employee-legacy", displayName: "员工测试甲", departmentName: "针织开发测试部", summary, lastActivityAt: "2026-11-13T02:00:00Z" };
+const breakdowns = { boards: [{ key: "image", label: "测试图片板块", count: 2 }], models: [{ key: modelId, label: "测试图片模型", count: 2 }], controls: [{ key: "submit", label: "测试生成控件", count: 2 }], daily: [] };
+const people = { people: [person], pagination: { page: 1, pageSize: 20, total: 1 }, summary, breakdowns, coverage };
+const record = { id: "legacy-record", kind: "generation", userId: person.userId, displayName: person.displayName, boardKey: "image", boardLabel: "测试图片板块", modelConfigId: modelId, modelName: "测试图片模型", status: "succeeded", occurredAt: person.lastActivityAt, updatedAt: person.lastActivityAt, totalRmbCost: 0.2684, generatedImages: 5, action: "submit", controlKey: "submit", controlLabel: "测试生成控件", prompt: "员工私有花型提示词", promptRedacted: false, parameters: { description: "员工私有参数说明", apiKey: "不可翻译密钥", code: "保留中文代码", billingSnapshot: { description: "不可发送金额说明" }, n: 1, width: 1024 } };
+const preview = { previewId: "preview-original", previewHash: "frozen-original-hash", expiresAt: "2099-10-15T00:00:00Z", content: JSON.stringify({ summary: "待确认私有统计摘要", apiKey: "预览保密密钥", totalRmbCost: 0.2684 }), estimatedCharacters: 40, includesPromptSamples: false, sampleCount: 0, warnings: [] };
+const translations: Record<string, string> = { "员工测试甲": "Test employee A", "针织开发测试部": "Test knitwear department", "测试图片板块": "Test image board", "测试图片模型": "Test image model", "测试生成控件": "Test generation control", "员工私有花型提示词": "Private employee motif prompt", "员工私有参数说明": "Private employee parameter description", "待确认私有统计摘要": "Private summary awaiting approval", "测试文字分析模型": "Test text analysis model", "本地模拟分析结果": "Local mock analysis result" };
+
+async function setup(context: BrowserContext) {
+    const texts: string[] = [], errors: string[] = [], unknown: string[] = [], calls: Array<{ path: string; method: string; body: any; search: string }> = [];
+    context.on("page", page => page.on("pageerror", error => errors.push(error.message)));
+    for (const page of context.pages()) page.on("pageerror", error => errors.push(error.message));
+    await context.routeWebSocket("**/*", socket => socket.close());
+    await context.route("**/*", async route => {
+        const url = new URL(route.request().url());
+        if (url.hostname !== "127.0.0.1") { unknown.push(url.origin); return route.abort(); }
+        if (!url.pathname.startsWith("/api/")) return route.continue();
+        const body = route.request().postDataJSON();
+        calls.push({ path: url.pathname, method: route.request().method(), body, search: url.search });
+        if (url.pathname === "/api/display-translations") { texts.push(...body.texts); return route.fulfill({ json: { translations: body.texts.map((text: string) => translations[text] ?? text) } }); }
+        const ok = (data: unknown) => route.fulfill({ json: { code: 0, data, msg: "ok" } });
+        if (url.pathname === "/api/admin/usage/people") return ok(people);
+        if (url.pathname === `/api/admin/usage/people/${person.userId}`) return ok({ person, summary, breakdowns, coverage, records: [record], pagination: people.pagination });
+        if (url.pathname === "/api/admin/usage/analysis-models") return ok({ models: [{ id: modelId, name: "测试文字分析模型" }] });
+        if (url.pathname === "/api/admin/usage/analysis-preview") return ok(preview);
+        if (url.pathname === "/api/admin/usage/analyze") return ok({ analysisId: "mock-analysis", modelConfigId: modelId, content: "本地模拟分析结果", createdAt: person.lastActivityAt });
+        if (url.pathname === "/api/admin/usage/export") return route.fulfill({ contentType: "application/x-ndjson", body: [JSON.stringify({ type: "manifest", filters: body, coverage, exportedAt: person.lastActivityAt }), JSON.stringify({ type: "record", record }), JSON.stringify({ type: "complete", recordCount: 1 }), ""].join("\n") });
+        unknown.push(url.pathname); return route.fulfill({ status: 501, json: { code: "UNMOCKED" } });
+    });
+    return { texts, errors, calls, unknown };
+}
+
+test("legacy table translates names while private detail requires per-field consent and preserves originals", async ({ page, context }) => {
+    const state = await setup(context), before = JSON.stringify({ people, record });
+    await page.goto(base);
+    const row = page.locator('[data-row-key="employee-legacy"]');
+    await expect(row).toContainText("Test employee A");
+    await expect(row).toContainText("Test knitwear department");
+    expect(state.texts).not.toContain("隐藏覆盖备注");
+    await row.getByRole("button", { name: "Test employee A", exact: true }).click();
+    const card = page.locator('article[aria-label$="legacy-record"]');
+    await expect(card).toContainText("Test image model");
+    await page.waitForTimeout(1100);
+    expect(state.texts).not.toContain(record.prompt);
+    expect(state.texts).not.toContain(record.parameters.description);
+    await card.locator("summary").click();
+    const prompt = card.locator("pre").nth(0), parameters = card.locator("pre").nth(1);
+    await expect(prompt).toContainText(record.prompt);
+    await page.waitForTimeout(1100);
+    expect(state.texts).not.toContain(record.prompt);
+    expect(state.texts).not.toContain(record.parameters.description);
+    await prompt.getByRole("button", { name: consent, exact: true }).click();
+    await expect(prompt).toHaveText("Private employee motif prompt");
+    expect(state.texts).not.toContain(record.parameters.description);
+    await parameters.getByRole("button", { name: consent, exact: true }).click();
+    await expect(parameters).toContainText("Private employee parameter description");
+    await expect(parameters).toContainText('"apiKey": "不可翻译密钥"');
+    await expect(parameters).not.toContainText("billingSnapshot");
+    for (const protectedValue of ["不可翻译密钥", "保留中文代码", "不可发送金额说明"]) expect(state.texts).not.toContain(protectedValue);
+    await page.screenshot({ path: resolve(output, "legacy-usage-en-detail.png"), fullPage: false });
+    await page.locator(".ant-drawer-close").click();
+    await expect(card).toHaveCount(0);
+    await page.getByRole("button", { name: "中文", exact: true }).click();
+    await row.getByRole("button", { name: "员工测试甲", exact: true }).click();
+    await card.locator("summary").click();
+    await expect(prompt).toHaveText(record.prompt);
+    await expect(parameters).toHaveText(JSON.stringify({ description: "员工私有参数说明", apiKey: "不可翻译密钥", code: "保留中文代码", n: 1, width: 1024 }, null, 2));
+    expect(JSON.stringify({ people, record })).toBe(before);
+    expect(state.calls.filter(call => call.method !== "GET" && call.path !== "/api/display-translations")).toEqual([]);
+    expect(state.unknown).toEqual([]); expect(state.errors).toEqual([]);
+});
+
+test("legacy preview translates only after consent; analysis and export retain original contract and content", async ({ page, context }) => {
+    const state = await setup(context), before = JSON.stringify(preview);
+    await page.goto(base);
+    await expect(page.locator('[data-row-key="employee-legacy"]')).toContainText("Test employee A");
+    await page.getByRole("button", { name: "Preview summary to send", exact: true }).click();
+    const shown = page.getByTestId("usage-analysis-preview");
+    await expect(shown).toContainText("待确认私有统计摘要");
+    await expect(shown).not.toContainText("totalRmbCost");
+    await page.waitForTimeout(1100);
+    expect(state.texts).not.toContain("待确认私有统计摘要");
+    await shown.getByRole("button", { name: consent, exact: true }).click();
+    await expect(shown).toContainText("Private summary awaiting approval");
+    expect(state.texts).not.toContain("预览保密密钥");
+    await page.getByLabel("Usage analysis text model", { exact: true }).click();
+    await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option').filter({ hasText: "Test text analysis model" }).click();
+    await page.getByRole("button", { name: "Send previewed summary · analyze manually", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Usage analysis results", exact: true })).toContainText("Local mock analysis result");
+    expect(state.calls.filter(call => call.path === "/api/admin/usage/analyze").map(call => call.body)).toEqual([{ previewId: preview.previewId, previewHash: preview.previewHash, modelConfigId: modelId, confirm: true }]);
+    expect(state.calls.find(call => call.path === "/api/admin/usage/analysis-preview")?.body.includePromptSamples).toBe(false);
+    await page.getByRole("button", { name: "Export all records matching the filters", exact: true }).click();
+    const downloadEvent = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Start full export", exact: true }).click();
+    const download = await downloadEvent, target = resolve(output, "legacy-usage-original-export.jsonl");
+    await download.saveAs(target);
+    const exported = (await readFile(target, "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    expect(exported.find(value => value.type === "record").record).toMatchObject({ prompt: record.prompt, modelConfigId: modelId, parameters: { description: record.parameters.description, apiKey: "不可翻译密钥", code: "保留中文代码" } });
+    expect(JSON.stringify(exported)).not.toContain("Private employee");
+    expect(download.suggestedFilename()).toMatch(/^使用记录-.*-全员\.jsonl$/);
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await expect(page.locator(".ant-modal-mask")).toBeHidden();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await shown.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: resolve(output, "legacy-usage-en-mobile.png"), fullPage: false });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await page.getByRole("button", { name: "中文", exact: true }).click();
+    await expect(shown).toHaveText(JSON.stringify({ summary: "待确认私有统计摘要", apiKey: "预览保密密钥" }, null, 2));
+    expect(JSON.stringify(preview)).toBe(before);
+    expect(state.calls.filter(call => call.path === "/api/admin/usage/analyze")).toHaveLength(1);
+    expect(state.unknown).toEqual([]); expect(state.errors).toEqual([]);
+});

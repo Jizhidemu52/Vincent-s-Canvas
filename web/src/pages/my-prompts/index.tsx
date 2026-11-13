@@ -17,9 +17,11 @@ import {
     type PromptSnapshotInput, type PromptTemplate,
 } from "@/services/api/prompts";
 import { useUserStore } from "@/stores/use-user-store";
+import { displayNotice, useDisplayText  } from "@/hooks/use-display-text";
 
 export default function MyPromptsPage() {
     const t = useUiText();
+    const display = useDisplayText();
     const { message, modal } = App.useApp();
     const { reuse, insertToCanvas, canvasDialog } = usePromptTemplateActions();
     const user = useUserStore((state) => state.user);
@@ -54,7 +56,7 @@ export default function MyPromptsPage() {
 
     const save = async (input: PromptSnapshotInput) => {
         if (editing) await updatePromptTemplate(editing.id, input); else await createPromptTemplate(input);
-        message.success(editing ? t("模板已生成新版本") : t("模板已创建"));
+        message.success(displayNotice(editing ? t("模板已生成新版本") : t("模板已创建")));
         setEditorOpen(false); setEditing(null); await load();
     };
 
@@ -72,7 +74,7 @@ export default function MyPromptsPage() {
                     <label className="flex items-center gap-2 text-sm text-muted-foreground"><Switch size="small" checked={favorite} onChange={(value) => { setFavorite(value); setPage(1); }} />{t("只看收藏")}</label>
                     <span aria-live="polite" className="ml-auto text-xs text-muted-foreground">{loading && items.length ? t("正在更新 · ") : ""}{t("共")} {total} {t("个模板")}</span>
                 </section>
-                {loadError ? <div role="alert" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span>{loadError}</span><Button onClick={() => void load()}>{t("重新加载")}</Button></div> : null}
+                {loadError ? <div role="alert" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span>{display(loadError)}</span><Button onClick={() => void load()}>{t("重新加载")}</Button></div> : null}
                 <div className="mb-5 max-w-2xl"><PracticeExampleRecord /></div>
                 {loading && !items.length ? <div role="status" aria-label={t("正在加载提示词库")} className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }, (_, index) => <div key={index} className="wb-surface p-5"><Skeleton active paragraph={{ rows: 4 }} /></div>)}</div> : items.length ? (
                     <section aria-busy={loading} className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{items.map((item) => (
@@ -80,7 +82,7 @@ export default function MyPromptsPage() {
                             onEdit={() => { setEditing(item); setEditorOpen(true); }}
                             onCopy={async () => { await copyPromptTemplate(item.id); message.success(t("已复制为新模板")); await load(); }}
                             onFavorite={() => onFavorite(item)}
-                            onSubmit={async () => { const result = await submitPromptToTeam(item.id); message.success(result.submission.duplicate ? t("该请求已提交过") : t("已提交组长或管理员审核")); }}
+                            onSubmit={async () => { const result = await submitPromptToTeam(item.id); message.success(displayNotice(result.submission.duplicate ? t("该请求已提交过") : t("已提交组长或管理员审核"))); }}
                             onDelete={() => modal.confirm({ title: t("删除这个个人模板？"), content: t("已发布的团队版本不会受影响。"), okText: t("删除"), okButtonProps: { danger: true }, onOk: async () => { await deletePromptTemplate(item.id); message.success(t("模板已删除")); await load(); } })}
                         />
                     ))}</section>

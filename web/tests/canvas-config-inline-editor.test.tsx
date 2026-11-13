@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
@@ -12,6 +13,16 @@ import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "
 const noop = () => {};
 const node: CanvasNodeData = { id: "config", type: CanvasNodeType.Config, title: "配置", position: { x: 0, y: 0 }, width: 360, height: 420, metadata: { composerContent: "保持主体不变" } };
 const image = (id: string, origin: "upload" | "connection" = "upload") => createImageReferenceItem({ id, name: `${id}.png`, type: "image/png", dataUrl: `blob:${id}`, storageKey: `image:${id}` }, origin);
+
+test("template upload slots remain in the composer but not the real image tray", () => {
+    const pending = { nodeId: "original", type: "image" as const, title: "参考款", pendingUpload: true };
+    const presentation = configReferencePresentation([], [pending], "image", false);
+    expect(presentation.inputs).toEqual([pending]);
+    const html = renderToStaticMarkup(<CanvasConfigNodePanel node={node} inputs={[pending]} imageReferences={[]} isRunning={false} inputSummary={{ textCount: 0, imageCount: 0, videoCount: 0, audioCount: 0 }} onConfigChange={noop} onGenerate={noop} onStop={noop} />);
+    expect(html).toContain("先设置参考款原图");
+    expect(html).toContain("disabled");
+    expect(html).not.toContain("已失效引用");
+});
 
 test("per-image display separates task inputs from common image numbering and mentions", () => {
     const references = [image("a", "connection"), image("b", "connection"), image("common")];
@@ -126,6 +137,7 @@ function uploadHarness(failUpload = false) {
     let nextId = 0;
     const scope = { active: true, owner: "authenticated:designer" };
     const env = {
+        displayNotice: displayHooksHarness.displayNotice,
         node, disabled: false, uploadingRef, scope, operationRef: { current: null as object | null },
         useUserStore: { getState: () => ({ status: "authenticated", user: { id: "designer" } }) },
         latest: { current: { scope, props: { node, references, disabled: false, onChange: (_id: string, patch: typeof patches[number]) => patches.push(patch) } } },

@@ -1,3 +1,6 @@
+import { useDisplayUiValue, useDisplayConfig, useDisplayValue } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { Alert, Button, Modal, Select, Spin, Tabs, Tag } from "antd";
 import { saveAs } from "file-saver";
 import { Download, FileText } from "lucide-react";
@@ -15,6 +18,29 @@ import {
 import { beijingDay } from "./filters";
 import AnalysisActionsV2 from "./analysis-actions-v2";
 
+/** The validated v2 report contains only server-projected anonymous aggregates.
+ * Opt-in display may translate its prose and table labels, never technical
+ * identifiers, state values, numbers or the downloadable source string. */
+export function displayUsageReportJson(value: unknown, translate: (text: string) => string, displayHuman: (value: unknown) => unknown): unknown {
+    const displayed = displayHuman(value);
+    if (!value || typeof value !== "object" || Array.isArray(value) || !displayed || typeof displayed !== "object" || Array.isArray(displayed)) return displayed;
+    const source = value as Record<string, unknown>, result = displayed as Record<string, unknown>;
+    if (source.schemaVersion !== 2 || source.reportVersion !== "usage-report-v2.1") return displayed;
+    const human = (item: unknown) => typeof item === "string" && /[\u3400-\u9fff]/.test(item) ? translate(item) : item;
+    return { ...result,
+        ...(typeof source.instructions === "string" ? { instructions: human(source.instructions) } : {}),
+        ...(Array.isArray(source.warnings) ? { warnings: source.warnings.map(human) } : {}),
+        ...(Array.isArray(result.tables) ? { tables: result.tables.map(table => {
+            if (!table || typeof table !== "object" || Array.isArray(table)) return table;
+            const row = table as Record<string, unknown>;
+            return { ...row,
+                ...(Array.isArray(row.columns) ? { columns: row.columns.map(human) } : {}),
+                ...(Array.isArray(row.rows) ? { rows: row.rows.map(cells => Array.isArray(cells) ? cells.map(human) : cells) } : {}),
+            };
+        }) } : {}),
+    };
+}
+
 /** A scope-keyed, explicit server read. No model, background generation, storage or automatic retry. */
 export default function ReportActions({
     page,
@@ -29,12 +55,19 @@ export default function ReportActions({
     reason?: string;
     scopeText: string;
 }) {
+    const displayUi = useDisplayUiValue();
+    const displayConfig = useDisplayConfig();
+    const displayJson = useDisplayValue();
+    const locale = useUiLocale();
     const [period, setPeriod] = useState<UsageV2ReportPeriod>("selected");
     const [report, setReport] = useState<UsageV2ReportResult | null>(null);
+    const [reportTab, setReportTab] = useState("markdown");
+    const [translationApproval, setTranslationApproval] = useState<{ report: UsageV2ReportResult; tabs: string[] } | null>(null);
     const [open, setOpen] = useState(false),
         [busy, setBusy] = useState(false),
         [error, setError] = useState(""),
         [notice, setNotice] = useState("");
+    const translateReport = open && locale === "en-US" && translationApproval?.report === report && translationApproval.tabs.includes(reportTab);
     const controller = useRef<AbortController | null>(null);
     useEffect(() => () => controller.current?.abort(), []);
     const weekError = usageV2ReportPeriodError("week", query?.from, query?.to),
@@ -48,6 +81,7 @@ export default function ReportActions({
         setError("");
         setNotice("");
         setReport(null);
+        setReportTab("markdown");
         try {
             const next = await generateUsageV2Report(
                 { page, period, filters: { ...query, from: query.from, to: query.to } },
@@ -84,96 +118,79 @@ export default function ReportActions({
     };
     return (
         <>
-            <section className="wb-surface space-y-3 p-4 sm:p-5" aria-label="免费统计报告">
+            <section className="wb-surface space-y-3 p-4 sm:p-5" aria-label={staticUiText("免费统计报告")}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                         <h3 className="flex items-center gap-2 font-semibold">
-                            <FileText size={17} />
-                            免费统计报告<Tag>不调用模型</Tag>
+                            <FileText size={17} />{staticUiText("免费统计报告")}<Tag>{staticUiText("不调用模型")}</Tag>
                         </h3>
-                        <p className="mt-1 text-xs leading-5 text-[var(--muted-foreground)]">
-                            服务端按已应用筛选重新取数，生成固定模板与依据表。仅匿名聚合，不含姓名、原始提示词或图片；与原手动
-                            AI 分析独立。
-                        </p>
+                        <p className="mt-1 text-xs leading-5 text-[var(--muted-foreground)]">{staticUiText("服务端按已应用筛选重新取数，生成固定模板与依据表。仅匿名聚合，不含姓名、原始提示词或图片；与原手动 AI 分析独立。")}</p>
                     </div>
                     <div className="flex max-w-full flex-wrap items-center gap-2">
                         <Select
-                            aria-label="免费统计报告模板"
+                            aria-label={staticUiText("免费统计报告模板")}
                             value={period}
                             disabled={disabled || busy || !query}
                             style={{ width: 180, maxWidth: "100%" }}
-                            options={[
-                                { value: "selected", label: "区间报告 · 当前日期" },
-                                { value: "week", label: "周报 · 完整自然周", disabled: Boolean(weekError) },
-                                { value: "month", label: "月报 · 完整自然月", disabled: Boolean(monthError) },
-                            ]}
+                            options={displayConfig([
+                                { value: "selected", label: staticUiText("区间报告 · 当前日期") },
+                                { value: "week", label: staticUiText("周报 · 完整自然周"), disabled: Boolean(weekError) },
+                                { value: "month", label: staticUiText("月报 · 完整自然月"), disabled: Boolean(monthError) },
+                            ], "options")}
                             onChange={(value) => {
                                 setPeriod(value);
                                 setReport(null);
+                                setReportTab("markdown");
                                 setError("");
                                 setNotice("");
                             }}
                         />
                         <Button
-                            aria-label="生成免费统计报告"
+                            aria-label={staticUiText("生成免费统计报告")}
                             aria-busy={busy}
                             disabled={disabled || !query || Boolean(periodError) || busy}
                             loading={busy}
                             onClick={() => void generate()}
-                        >
-                            生成免费统计报告
-                        </Button>
+                        >{staticUiText("生成免费统计报告")}</Button>
                         {report ? (
-                            <Button disabled={disabled} onClick={() => setOpen(true)}>
-                                打开报告预览
-                            </Button>
+                            <Button disabled={disabled} onClick={() => setOpen(true)}>{staticUiText("打开报告预览")}</Button>
                         ) : null}
                     </div>
                 </div>
                 <p className="text-xs leading-5">{scopeText}</p>
-                <p className="text-xs leading-5 text-[var(--muted-foreground)]">
-                    周报需周一至周日，月报需月初至月末；不符合时请用区间报告。模板不会调整日期。更改筛选、页签或刷新读取后会清空预览。
-                </p>
-                {reason ? <Alert type="info" title={reason} /> : null}
+                <p className="text-xs leading-5 text-[var(--muted-foreground)]">{staticUiText("周报需周一至周日，月报需月初至月末；不符合时请用区间报告。模板不会调整日期。更改筛选、页签或刷新读取后会清空预览。")}</p>
+                {reason ? <Alert type="info" title={displayUi(reason)} /> : null}
                 {busy ? (
                     <div role="status" className="flex items-center gap-2 text-sm">
-                        <Spin size="small" />
-                        正在按本次筛选生成免费报告…
-                        <Button
+                        <Spin size="small" />{staticUiText("正在按本次筛选生成免费报告…")}<Button
                             size="small"
                             onClick={() => {
                                 controller.current?.abort();
                                 setNotice("已取消等待，未自动重试。不会调用模型。");
                             }}
-                        >
-                            取消报告等待
-                        </Button>
+                        >{staticUiText("取消报告等待")}</Button>
                     </div>
                 ) : null}
-                {error ? <Alert type="error" showIcon title={error} /> : null}
+                {error ? <Alert type="error" showIcon title={displayUi(error)} /> : null}
                 {notice ? <Alert type="info" title={notice} /> : null}
                 <Modal
-                    title="免费统计报告预览"
+                    title={staticUiText("免费统计报告预览")}
                     open={open && Boolean(report)}
                     width={{ xs: "96%", sm: "92%", md: "88%", lg: 1100 }}
                     onCancel={() => setOpen(false)}
                     footer={
                         <div className="flex flex-wrap justify-end gap-2">
-                            <Button onClick={() => setOpen(false)}>关闭预览</Button>
+                            <Button onClick={() => setOpen(false)}>{staticUiText("关闭预览")}</Button>
                             <Button
                                 icon={<Download size={14} />}
                                 disabled={!report || disabled}
                                 onClick={() => download("md")}
-                            >
-                                下载 Markdown
-                            </Button>
+                            >{staticUiText("下载 Markdown")}</Button>
                             <Button
                                 icon={<Download size={14} />}
                                 disabled={!report || disabled}
                                 onClick={() => download("json")}
-                            >
-                                下载 JSON
-                            </Button>
+                            >{staticUiText("下载 JSON")}</Button>
                         </div>
                     }
                 >
@@ -182,19 +199,25 @@ export default function ReportActions({
                             <Alert
                                 type="info"
                                 showIcon
-                                title="免费固定模板 · 不调用模型"
-                                description="这是服务端本次重新读取的报告，筛选与看板一致，但读取时点可能不同。文件仅保存本机；不要把结果使用、记账金额或观察差异当作正式采纳、实付或因果。"
+                                title={staticUiText("免费固定模板 · 不调用模型")}
+                                description={staticUiText("这是服务端本次重新读取的报告，筛选与看板一致，但读取时点可能不同。文件仅保存本机；不要把结果使用、记账金额或观察差异当作正式采纳、实付或因果。")}
                             />
                             <div className="my-3 flex flex-wrap gap-2">
-                                <Tag>{report.estimatedCharacters} 字符</Tag>
-                                <Tag>{report.metricVersion || "指标版本不可用"}</Tag>
-                                <Tag>匿名聚合</Tag>
+                                <Tag>{report.estimatedCharacters}{staticUiText(" 字符")}</Tag>
+                                <Tag>{report.metricVersion || staticUiText("指标版本不可用")}</Tag>
+                                <Tag>{staticUiText("匿名聚合")}</Tag>
                             </div>
+                            {locale === "en-US" ? <p className="mb-3 text-xs text-muted-foreground">
+                                Report generation does not use a model. Optional English translation uses the configured text model. Downloads keep the original report.
+                                {!translateReport ? <button type="button" className="ml-2 underline" onClick={() => setTranslationApproval({ report, tabs: [...(translationApproval?.report === report ? translationApproval.tabs : []), reportTab] })}>Translate this preview into English</button> : null}
+                            </p> : null}
                             <Tabs
+                                activeKey={reportTab}
+                                onChange={setReportTab}
                                 items={[
                                     {
                                         key: "markdown",
-                                        label: "报告与依据表",
+                                        label: staticUiText("报告与依据表"),
                                         children: (
                                             <div
                                                 className="max-h-[58vh] min-w-0 space-y-3 overflow-auto text-sm leading-7"
@@ -242,20 +265,20 @@ export default function ReportActions({
                                                         img: () => null,
                                                     }}
                                                 >
-                                                    {report.markdown}
+                                                    {translateReport && reportTab === "markdown" ? displayUi(report.markdown) : report.markdown}
                                                 </ReactMarkdown>
                                             </div>
                                         ),
                                     },
                                     {
                                         key: "json",
-                                        label: "聚合 JSON",
+                                        label: staticUiText("聚合 JSON"),
                                         children: (
                                             <pre
                                                 className="max-h-[58vh] overflow-auto whitespace-pre-wrap break-words text-xs leading-6"
                                                 data-testid="usage-v2-free-report-json"
                                             >
-                                                {JSON.stringify(JSON.parse(report.content), null, 2)}
+                                                {JSON.stringify(translateReport && reportTab === "json" ? displayUsageReportJson(JSON.parse(report.content), displayUi, displayJson) : JSON.parse(report.content), null, 2)}
                                             </pre>
                                         ),
                                     },

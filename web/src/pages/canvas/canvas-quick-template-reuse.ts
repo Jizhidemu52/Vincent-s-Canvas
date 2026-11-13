@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText } from "@/lib/i18n";
 import { promptImageSettings } from "@/lib/prompt-editor-parameters";
 import { hydratePromptReuse } from "@/services/api/prompts";
@@ -49,8 +50,8 @@ export async function fillCanvasQuickTemplate(options: QuickTemplateOptions) {
     if (!inputCurrent()) { keepNewerInput(); return; }
     options.apply(payload.template.prompt, settings, references.filter(reference => reference !== null), batch);
     options.consume();
-    payload.warnings.forEach(warning => message.warning(warning));
-    if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? uiText("模型已变更，当前使用 {value1}", { value1: payload.pricing.selectedModel.name }) : uiText("模型已变更，请选择管理员当前启用的模型"));
+    payload.warnings.forEach(warning => message.warning(displayNotice(warning)));
+    if (payload.pricing.modelChanged) message.warning(displayNotice(payload.pricing.selectedModel ? uiText("模型已变更，当前使用 {value1}", { value1: payload.pricing.selectedModel.name }) : uiText("模型已变更，请选择管理员当前启用的模型")));
     if (payload.mode === "fill_and_generate" && !batch) {
         const appliedInputCurrent = options.captureInput();
         modal.confirm({ title: uiText("确认在画布生成？"), content: uiText("请检查提示词和参考图，确认后提交生成任务。"), okText: uiText("确认生成"), cancelText: uiText("仅保留填入"), onOk: () => {

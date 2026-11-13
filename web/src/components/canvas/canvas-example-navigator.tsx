@@ -7,10 +7,13 @@ import { canvasExampleControlGuides, canvasExampleControlSteps } from "@/lib/can
 import { canvasExampleControlProof } from "@/lib/canvas/canvas-example-practices";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasNodeData } from "@/types/canvas";
+import { useDisplayText } from "@/hooks/use-display-text";
+import { displayText } from "@/lib/display-translations";
 
 /** Navigation changes the viewport only; it never edits, selects, or executes lesson nodes. */
 export function CanvasExampleNavigator({ nodes, onNavigate }: { nodes: CanvasNodeData[]; onNavigate: (ids: string[]) => void }) {
     const t = useUiText();
+    const display = useDisplayText();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const [open, setOpen] = useState(false);
     const [mode, setMode] = useState<"lessons" | "controls">("lessons");
@@ -34,8 +37,8 @@ export function CanvasExampleNavigator({ nodes, onNavigate }: { nodes: CanvasNod
         const needle = query.trim().toLowerCase();
         return canvasExampleControlGuides.map(guide => ({ ...guide, matchingSteps: guide.steps.map((step, index) => ({
             ...step, key: `${guide.id}--${index}`,
-        })).filter(step => !needle || `${guide.title} ${guide.scenario} ${step.control} ${step.action} ${step.result}`.toLowerCase().includes(needle)) })).filter(guide => guide.matchingSteps.length);
-    }, [query]);
+        })).filter(step => !needle || `${guide.title} ${guide.scenario} ${step.control} ${step.action} ${step.result} ${displayText(guide.title)} ${displayText(step.control)}`.toLowerCase().includes(needle)) })).filter(guide => guide.matchingSteps.length);
+    }, [query, display]);
     const navigate = (ids: string[]) => {
         onNavigate(ids);
         setOpen(false);
@@ -60,20 +63,20 @@ export function CanvasExampleNavigator({ nodes, onNavigate }: { nodes: CanvasNod
             </div>
             {mode === "lessons" ? <ol className="space-y-1">
                 {lessons.map(lesson => <li key={lesson.id} className="rounded px-1 py-2"><div className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 text-xs leading-5">{lesson.number} · {t(lesson.title)}</span>
+                    <span className="min-w-0 text-xs leading-5">{lesson.number} · {display(lesson.title)}</span>
                     <div className="flex shrink-0 gap-1">
-                        <button type="button" disabled={!lesson.cases.length} aria-label={t("{number} {title}：看案例", { number: lesson.number, title: t(lesson.title) })} className="min-h-9 rounded px-2 text-xs hover:underline disabled:opacity-40" style={{ color: theme.node.text }} onClick={() => navigate(lesson.cases)}>{t("看案例")}</button>
-                        <button type="button" disabled={!lesson.practice.length} aria-label={t("{number} {title}：到练习", { number: lesson.number, title: t(lesson.title) })} className="min-h-9 rounded px-2 text-xs hover:underline disabled:opacity-40" style={{ color: theme.node.text, background: theme.toolbar.itemHover }} onClick={() => navigate(lesson.practice)}>{t("到练习")}</button>
+                        <button type="button" disabled={!lesson.cases.length} aria-label={t("{number} {title}：看案例", { number: lesson.number, title: display(lesson.title) })} className="min-h-9 rounded px-2 text-xs hover:underline disabled:opacity-40" style={{ color: theme.node.text }} onClick={() => navigate(lesson.cases)}>{t("看案例")}</button>
+                        <button type="button" disabled={!lesson.practice.length} aria-label={t("{number} {title}：到练习", { number: lesson.number, title: display(lesson.title) })} className="min-h-9 rounded px-2 text-xs hover:underline disabled:opacity-40" style={{ color: theme.node.text, background: theme.toolbar.itemHover }} onClick={() => navigate(lesson.practice)}>{t("到练习")}</button>
                     </div></div>
-                    {lesson.extras.map(extra => <button key={extra.area} type="button" disabled={!extra.ids.length} className="ml-auto mt-1 block min-h-9 rounded px-2 text-xs hover:underline disabled:opacity-40" style={{ color: theme.node.text, background: theme.toolbar.itemHover }} onClick={() => navigate(extra.ids)}>{t(extra.title)}</button>)}
+                    {lesson.extras.map(extra => <button key={extra.area} type="button" disabled={!extra.ids.length} className="ml-auto mt-1 block min-h-9 rounded px-2 text-xs hover:underline disabled:opacity-40" style={{ color: theme.node.text, background: theme.toolbar.itemHover }} onClick={() => navigate(extra.ids)}>{display(extra.title)}</button>)}
                 </li>)}
             </ol> : <section aria-label={t("逐项按钮操作案例")}>
                 <input aria-label={t("搜索画布按钮或功能")} placeholder={t("搜索：配置、对比、切换、裁剪…")} value={query} onChange={event => setQuery(event.target.value)} className="mb-3 h-10 w-full rounded border px-3 text-xs outline-none focus:ring-1" style={{ background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }} />
                 <p className="mb-2 text-xs" style={{ color: theme.node.muted }}>{filteredGuides.reduce((sum, guide) => sum + guide.matchingSteps.length, 0)} {t("项可查阅；条件功能在卡片中注明何时出现。")}</p>
                 {!filteredGuides.length ? <p className="py-4 text-sm">{t("未找到对应按钮，请试试简短关键词。")}</p> : filteredGuides.map(guide => <details key={`${guide.id}:${Boolean(query.trim())}`} data-guide-id={guide.id} open={query.trim() ? true : undefined} className="mb-1 rounded border px-2 py-1" style={{ borderColor: theme.node.stroke }}>
-                    <summary className="cursor-pointer py-2 text-xs font-medium leading-5">{t(guide.title)}（{guide.matchingSteps.length}）</summary>
+                    <summary className="cursor-pointer py-2 text-xs font-medium leading-5">{display(guide.title)}（{guide.matchingSteps.length}）</summary>
                     <div className="space-y-1 pb-2">
-                        {guide.matchingSteps.map(step => <button key={step.key} data-control-key={step.key} type="button" aria-label={t("查看按钮详解：{control}", { control: step.control })} disabled={!controlIds.get(step.key)?.length} onClick={() => navigate(controlIds.get(step.key) || [])} className="block min-h-9 w-full rounded px-2 py-2 text-left text-xs leading-5 hover:underline disabled:opacity-40" style={{ background: theme.toolbar.itemHover }}>{t(step.control)}<span className="ml-2 opacity-55">{t(canvasExampleControlProof[step.key] ? "实操截图" : "用法说明")}</span></button>)}
+                        {guide.matchingSteps.map(step => <button key={step.key} data-control-key={step.key} type="button" aria-label={t("查看按钮详解：{control}", { control: display(step.control) })} disabled={!controlIds.get(step.key)?.length} onClick={() => navigate(controlIds.get(step.key) || [])} className="block min-h-9 w-full rounded px-2 py-2 text-left text-xs leading-5 hover:underline disabled:opacity-40" style={{ background: theme.toolbar.itemHover }}>{display(step.control)}<span className="ml-2 opacity-55">{t(canvasExampleControlProof[step.key] ? "实操截图" : "用法说明")}</span></button>)}
                         <button type="button" className="min-h-9 w-full px-2 text-left text-xs hover:underline" style={{ color: theme.node.muted }} onClick={() => navigate(nodes.filter(node => node.id.startsWith(canvasExampleNodePrefix(guide.lessonId, guide.practiceArea || "practice"))).map(node => node.id))}>{t("到对应练习区")}</button>
                     </div>
                 </details>)}

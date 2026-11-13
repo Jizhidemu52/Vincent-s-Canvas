@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText } from "@/lib/i18n";
 import { currentToolConfig } from "@/hooks/use-tool-config";
 import { stopCanvasObservation } from "@/lib/canvas/canvas-project-async-lifecycle";
@@ -143,7 +144,7 @@ export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getC
                 batchInputVersionRef.current += 1;
                 return { ...previous, items, inputVersion: previous.inputVersion + 1 };
             });
-        } catch (error) { if (current()) message.warning(String(error instanceof Error ? error.message : error)); }
+        } catch (error) { if (current()) message.warning(displayNotice(String(error instanceof Error ? error.message : error))); }
     }, [activeBatchEditId, current, message, selectionEpoch, updateBatch]);
     const handleBatchFolderInputChange = useCallback((event: ReactChangeEvent<HTMLInputElement>) => {
         void applyBatchEditFiles(event.target.files); event.target.value = "";
@@ -189,7 +190,7 @@ export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getC
                 flushPendingHistory, message: scopedMessage, signal: controller.signal, isCurrent, waitForWriteAccess: canWrite,
             });
         } catch (error) {
-            if (isCurrent()) message.error(error instanceof Error ? error.message : uiText("批量改图加载失败"));
+            if (isCurrent()) message.error(displayNotice(error instanceof Error ? error.message : uiText("批量改图加载失败")));
         } finally {
             update(value => ({ ...value, running: false, optimizing: false }));
             if (runsRef.current.get(batch.id) === controller) runsRef.current.delete(batch.id);
@@ -205,9 +206,9 @@ export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getC
         try {
             const { controlCanvasBatch } = await loadBatchEditRuntime();
             if (!await waitForWriteAccess() || !current()) return;
-            const scopedMessage = { success: (text: string) => { if (current()) message.success(text); }, error: (text: string) => { if (current()) message.error(text); }, warning: (text: string) => { if (current()) message.warning(text); } };
+            const scopedMessage = { success: (text: Parameters<typeof displayNotice>[0]) => { if (current()) message.success(displayNotice(text)); }, error: (text: Parameters<typeof displayNotice>[0]) => { if (current()) message.error(displayNotice(text)); }, warning: (text: Parameters<typeof displayNotice>[0]) => { if (current()) message.warning(displayNotice(text)); } };
             await controlCanvasBatch(batch.serverId, action, scopedMessage);
-        } catch (error) { if (current()) message.error(String(error instanceof Error ? error.message : error)); }
+        } catch (error) { if (current()) message.error(displayNotice(String(error instanceof Error ? error.message : error))); }
         finally { if (current()) updateBatch(batch.id, previous => ({ ...previous, action: null })); }
     }, [activeBatchEditId, current, message, selectionEpoch, updateBatch, waitForWriteAccess]);
     const active = batches.find(batch => batch.id === activeBatchEditId) || batches[0]!;

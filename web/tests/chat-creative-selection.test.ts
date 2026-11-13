@@ -5,6 +5,7 @@ import ts from "typescript";
 import { i18nHarness } from "./helpers/i18n-harness";
 import { buildCreativeImageCatalog } from "../src/lib/creative-chat";
 import { chatImageOriginal } from "../src/pages/chat/chat-image-selection";
+import { displayNotice } from "../src/hooks/use-display-text";
 
 const source = readFileSync(new URL("../src/pages/chat/index.tsx", import.meta.url), "utf8");
 const ast = ts.createSourceFile("chat.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -25,6 +26,7 @@ function bubbleHarness(actionsDisabled = false) {
         cn: (...values: unknown[]) => values.filter(Boolean).join(" "),
         Bot: () => null, FileText: () => null, Copy: () => null, Pencil: () => null, RotateCcw: () => null,
         useCopyText: () => () => undefined, useCopyFeedback: () => ({ copied: false, copy: async () => true }),
+        useDisplayText: () => (text: string) => text, DisplayText: "display-text", DisplayTranslationScope: "display-scope",
         ChatMarkdown: "div", ChatImage: "chat-image", Tooltip: "div", Button: "review-button", chatImageOriginal,
     };
     const code = ts.transpileModule(`exports.Bubble = ${initializer.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React } }).outputText;
@@ -47,7 +49,7 @@ function bubbleHarness(actionsDisabled = false) {
         walk(node.props.children);
     }
     walk(tree);
-    const text = (value: any): string => Array.isArray(value) ? value.map(text).join("") : React.isValidElement(value) ? text((value as ReactElement<any>).props.children) : typeof value === "string" ? value : "";
+    const text = (value: any): string => Array.isArray(value) ? value.map(text).join("") : React.isValidElement(value) ? text((value as ReactElement<any>).type === "display-text" ? (value as ReactElement<any>).props.text : (value as ReactElement<any>).props.children) : typeof value === "string" ? value : "";
     return { tree, nodes, calls, imageActions, generated, text };
 }
 
@@ -108,7 +110,7 @@ function imageActionHarness() {
     const code = ts.transpileModule(`const selectImageTarget = ${initializers.get("selectImageTarget")}; const addImageReference = ${initializers.get("addImageReference")}; exports.act = ${initializers.get("imageAction")}; exports.select = selectImageTarget; exports.add = addImageReference;`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
     const render = () => {
         const bindings = {
-            ...i18nHarness, buildCreativeImageCatalog, chatImageOriginal, composerImageCatalog: catalog, imageActionsDisabled: memory.disabled,
+            ...i18nHarness, displayNotice, buildCreativeImageCatalog, chatImageOriginal, composerImageCatalog: catalog, imageActionsDisabled: memory.disabled,
             activeSession: memory.session, isCurrentScope: () => memory.currentScope, attachments: memory.attachments,
             updateSession: (_id: string, update: (session: any) => any) => { memory.session = update(memory.session); }, setRegionSelection() {},
             selectedImage: catalog.find((item) => item.id === memory.target?.id),

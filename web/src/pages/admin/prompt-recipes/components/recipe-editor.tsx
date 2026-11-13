@@ -1,3 +1,6 @@
+import { displayNotice, useDisplayUiValue, useDisplayConfig  } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Form, Input, Select, Switch, Tag } from "antd";
 import { activateAdminPromptVersion, createAdminPromptVersion, requirePromptAdmin, updateAdminPromptRecipe, type PromptAdminModel, type PromptRecipeDetail } from "@/services/api/admin-prompt-recipes";
@@ -12,6 +15,9 @@ const fields: Array<{ key: keyof VersionEditorValue; label: string; rows?: numbe
     { key: "changeNote", label: "版本说明", rows: 2 },
 ];
 export function RecipeEditor({ detail, models, refresh, onDirty }: { detail: PromptRecipeDetail; models: PromptAdminModel[]; refresh: () => Promise<PromptRecipeDetail>; onDirty: (dirty: boolean) => void }) {
+    const displayUi = useDisplayUiValue();
+    const displayConfig = useDisplayConfig();
+    useUiLocale();
     const { message, modal } = App.useApp();
     const owner = useRef(requirePromptAdmin()).current;
     const lifetime = useRef(new AbortController());
@@ -53,44 +59,44 @@ export function RecipeEditor({ detail, models, refresh, onDirty }: { detail: Pro
         }
     };
     const changeVersion = (id: string) => {
-        if (versionDirty) modal.confirm({ title: "放弃当前未保存的版本修改？", okText: "放弃并切换", cancelText: "继续编辑", onOk: () => setSelectedId(id) });
+        if (versionDirty) modal.confirm({ title: staticUiText("放弃当前未保存的版本修改？"), okText: staticUiText("放弃并切换"), cancelText: staticUiText("继续编辑"), onOk: () => setSelectedId(id) });
         else setSelectedId(id);
     };
     const compare = detail.versions.find((version) => version.id === compareId);
     const base = compare ? editVersion(compare) : null;
     return (
         <div className="flex min-w-0 flex-col gap-5">
-            {error && <Alert type="error" title={error} showIcon />}
+            {error && <Alert type="error" title={displayUi(error)} showIcon />}
             <section className="wb-surface p-4 sm:p-5">
-                <h3 className="mb-4 font-semibold">运行设置</h3>
+                <h3 className="mb-4 font-semibold">{staticUiText("运行设置")}</h3>
                 <Form layout="vertical" disabled={Boolean(busy)}>
                     <div className="grid gap-x-4 sm:grid-cols-2">
-                        <Form.Item label="配方名称">
-                            <Input aria-label="配方名称" value={settings.name} maxLength={120} onChange={(event) => setSettings({ ...settings, name: event.target.value })} />
+                        <Form.Item label={staticUiText("配方名称")}>
+                            <Input aria-label={staticUiText("配方名称")} value={settings.name} maxLength={120} onChange={(event) => setSettings({ ...settings, name: event.target.value })} />
                         </Form.Item>
-                        <Form.Item label="独立优化模型" extra="仅使用此配方的绑定，不借用聊天模块的全局模型。">
+                        <Form.Item label={staticUiText("独立优化模型")} extra={staticUiText("仅使用此配方的绑定，不借用聊天模块的全局模型。")}>
                             <Select
-                                aria-label="独立优化模型"
+                                aria-label={staticUiText("独立优化模型")}
                                 allowClear
-                                placeholder="尚未绑定"
+                                placeholder={staticUiText("尚未绑定")}
                                 value={settings.modelConfigId ?? undefined}
                                 onChange={(value) => setSettings({ ...settings, modelConfigId: value ?? null })}
-                                options={models.filter((model) => model.capabilities.includes("chat")).map((model) => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))}
+                                options={displayConfig(models.filter((model) => model.capabilities.includes("chat")).map((model) => ({ value: model.id, label: `${model.name} · ${model.modelId}` })), "options")}
                             />
                         </Form.Item>
-                        <Form.Item label="失败策略">
+                        <Form.Item label={staticUiText("失败策略")}>
                             <Select
-                                aria-label="失败策略"
+                                aria-label={staticUiText("失败策略")}
                                 value={settings.failurePolicy}
                                 onChange={(failurePolicy) => setSettings({ ...settings, failurePolicy })}
-                                options={[
-                                    { value: "stop", label: "停止并提示错误（默认）" },
-                                    { value: "fallback", label: "使用该版本的回退提示词" },
-                                ]}
+                                options={displayConfig([
+                                    { value: "stop", label: staticUiText("停止并提示错误（默认）") },
+                                    { value: "fallback", label: staticUiText("使用该版本的回退提示词") },
+                                ], "options")}
                             />
                         </Form.Item>
-                        <Form.Item label="是否启用">
-                            <Switch aria-label="启用配方" checked={settings.enabled} onChange={(enabled) => setSettings({ ...settings, enabled })} />
+                        <Form.Item label={staticUiText("是否启用")}>
+                            <Switch aria-label={staticUiText("启用配方")} checked={settings.enabled} onChange={(enabled) => setSettings({ ...settings, enabled })} />
                         </Form.Item>
                     </div>
                     <Button
@@ -105,51 +111,48 @@ export function RecipeEditor({ detail, models, refresh, onDirty }: { detail: Pro
                                 );
                                 await updateAdminPromptRecipe(detail.recipe.key, settings, options());
                                 await refresh();
-                                message.success("运行设置已保存");
+                                message.success(staticUiText("运行设置已保存"));
                             })
                         }
-                    >
-                        保存运行设置
-                    </Button>
+                    >{staticUiText("保存运行设置")}</Button>
                 </Form>
             </section>
             <section className="wb-surface min-w-0 p-4 sm:p-5">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                    <h3 className="font-semibold">版本内容</h3>
+                    <h3 className="font-semibold">{staticUiText("版本内容")}</h3>
                     <div className="flex flex-wrap items-center gap-2">
                         <Select
-                            aria-label="编辑版本"
+                            aria-label={staticUiText("编辑版本")}
                             className="min-w-48"
                             value={selectedId || undefined}
                             disabled={Boolean(busy)}
                             onChange={changeVersion}
-                            options={detail.versions.map((version) => ({ value: version.id, label: `v${version.version}${version.id === detail.recipe.currentVersionId ? " · 线上" : " · 未激活"}` }))}
+                            options={displayConfig(detail.versions.map((version) => ({ value: version.id, label: `v${version.version}${version.id === detail.recipe.currentVersionId ? staticUiText(" · 线上") : staticUiText(" · 未激活")}` })), "options")}
                         />
                         <Select
-                            aria-label="对比版本"
+                            aria-label={staticUiText("对比版本")}
                             className="min-w-44"
-                            placeholder="选择对比版本"
+                            placeholder={staticUiText("选择对比版本")}
                             allowClear
                             value={compareId || undefined}
                             onChange={(value) => setCompareId(value || "")}
-                            options={detail.versions.filter((version) => version.id !== selectedId).map((version) => ({ value: version.id, label: `与 v${version.version} 对比` }))}
+                            options={displayConfig(detail.versions.filter((version) => version.id !== selectedId).map((version) => ({ value: version.id, label: staticUiText("与 v{p0} 对比", { p0: `${version.version}` }) })), "options")}
                         />
                     </div>
                 </div>
-                <Alert type="info" showIcon className="!mb-4" title="保存只创建新草稿，不会改变线上版本。" description="激活旧版本即回滚。测试也只使用已保存的版本；未保存编辑不会发送给模型。" />
+                <Alert type="info" showIcon className="!mb-4" title={staticUiText("保存只创建新草稿，不会改变线上版本。")} description={staticUiText("激活旧版本即回滚。测试也只使用已保存的版本；未保存编辑不会发送给模型。")} />
                 <Form layout="vertical" disabled={Boolean(busy)}>
-                    {!selected && <Alert className="!mb-4" type="info" showIcon title="尚无版本，请填写规则并保存首个草稿。" description="规则正文仅由管理员保存到服务端；保存不会自动激活，也不会调用模型。" />}
-                    <Form.Item label="执行策略" extra="旧版本保持原策略。模板优先在明确任务中不调用改写模型；智能选色、创作或无法确定处理的字段使用精简改写。模板正文由服务端维护，下面的规则仅用于模型改写，不会暗中拼入固定模板。">
-                        <Select aria-label="执行策略" className="max-w-96" value={editor.executionStrategy ?? "llm"} disabled={isVideo || detail.recipe.key === "reverse-prompt" || Boolean(busy)}
+                    {!selected && <Alert className="!mb-4" type="info" showIcon title={staticUiText("尚无版本，请填写规则并保存首个草稿。")} description={staticUiText("规则正文仅由管理员保存到服务端；保存不会自动激活，也不会调用模型。")} />}
+                    <Form.Item label={staticUiText("执行策略")} extra={staticUiText("旧版本保持原策略。模板优先在明确任务中不调用改写模型；智能选色、创作或无法确定处理的字段使用精简改写。模板正文由服务端维护，下面的规则仅用于模型改写，不会暗中拼入固定模板。")}>
+                        <Select aria-label={staticUiText("执行策略")} className="max-w-96" value={editor.executionStrategy ?? "llm"} disabled={isVideo || detail.recipe.key === "reverse-prompt" || Boolean(busy)}
                             onChange={(executionStrategy) => setEditor({ ...editor, executionStrategy })}
-                            options={[{ value: "llm", label: "原有 LLM 配方" }, { value: "minimal", label: "最小改写 + 中文摘要" }, { value: "template-first", label: "固定模板优先，必要时精简改写" }]} />
-                        {base && base.executionStrategy !== editor.executionStrategy && <Tag color="orange" className="ml-2">执行策略有差异</Tag>}
+                            options={displayConfig([{ value: "llm", label: staticUiText("原有 LLM 配方") }, { value: "minimal", label: staticUiText("最小改写 + 中文摘要") }, { value: "template-first", label: staticUiText("固定模板优先，必要时精简改写") }], "options")} />
+                        {base && base.executionStrategy !== editor.executionStrategy && <Tag color="orange" className="ml-2">{staticUiText("执行策略有差异")}</Tag>}
                     </Form.Item>
                     {base && (
                         <div className="mb-3 grid grid-cols-2 gap-3 text-xs text-muted-foreground">
-                            <span>对照 v{compare?.version}（只读）</span>
-                            <span>
-                                当前编辑 {selected ? `v${selected.version}` : "首个草稿"} {versionDirty ? "· 未保存" : ""}
+                            <span>{staticUiText("对照 v")}{compare?.version}{staticUiText("（只读）")}</span>
+                            <span>{staticUiText("当前编辑 ")}{selected ? `v${selected.version}` : staticUiText("首个草稿")} {versionDirty ? staticUiText("· 未保存") : ""}
                             </span>
                         </div>
                     )}
@@ -158,31 +161,30 @@ export function RecipeEditor({ detail, models, refresh, onDirty }: { detail: Pro
                             key={key}
                             label={
                                 <span>
-                                    {label} {base && base[key] !== editor[key] && <Tag color="orange">有差异</Tag>}
+                                    {displayUi(label)} {base && base[key] !== editor[key] && <Tag color="orange">{staticUiText("有差异")}</Tag>}
                                 </span>
                             }
                         >
                             <div className={base ? "grid min-w-0 gap-3 xl:grid-cols-2" : "min-w-0"}>
-                                {base && <pre className="max-h-[420px] min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/30 p-3 text-xs">{base[key] || "（空）"}</pre>}
-                                <Input.TextArea aria-label={label} className="!font-mono !text-xs" rows={rows} value={editor[key]} onChange={(event) => setEditor({ ...editor, [key]: event.target.value })} />
+                                {base && <pre className="max-h-[420px] min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/30 p-3 text-xs">{base[key] || staticUiText("（空）")}</pre>}
+                                <Input.TextArea aria-label={displayUi(label)} className="!font-mono !text-xs" rows={rows} value={editor[key]} onChange={(event) => setEditor({ ...editor, [key]: event.target.value })} />
                             </div>
                         </Form.Item>
                     ))}
-                    <Form.Item label="输出语言" extra={isVideo ? "视频动效规划固定使用中文提示词与中文摘要。" : undefined}>
+                    <Form.Item label={staticUiText("输出语言")} extra={isVideo ? staticUiText("视频动效规划固定使用中文提示词与中文摘要。") : undefined}>
                         <Select
-                            aria-label="输出语言"
+                            aria-label={staticUiText("输出语言")}
                             className="max-w-64"
                             value={isVideo ? "zh" : editor.outputLanguage}
                             disabled={isVideo || Boolean(busy)}
                             onChange={(outputLanguage) => setEditor({ ...editor, outputLanguage })}
-                            options={[
-                                { value: "en", label: "英文" },
-                                { value: "zh", label: "中文" },
-                            ]}
+                            options={displayConfig([
+                                { value: "en", label: staticUiText("英文") },
+                                { value: "zh", label: staticUiText("中文") },
+                            ], "options")}
                         />
                         {base && base.outputLanguage !== editor.outputLanguage && (
-                            <Tag color="orange" className="ml-2">
-                                对照版本：{base.outputLanguage}
+                            <Tag color="orange" className="ml-2">{staticUiText("对照版本：")}{base.outputLanguage}
                             </Tag>
                         )}
                     </Form.Item>
@@ -197,12 +199,10 @@ export function RecipeEditor({ detail, models, refresh, onDirty }: { detail: Pro
                                     const { version } = await createAdminPromptVersion(detail.recipe.key, content, options());
                                     await refresh();
                                     setSelectedId(version.id);
-                                    message.success(`v${version.version} 草稿已保存，尚未激活`);
+                                    message.success(displayNotice(staticUiText("v{p0} 草稿已保存，尚未激活", { p0: `${version.version}` })));
                                 })
                             }
-                        >
-                            保存为新版本草稿
-                        </Button>
+                        >{staticUiText("保存为新版本草稿")}</Button>
                         <Button
                             disabled={!selected || Boolean(busy) || versionDirty || settingsDirty || selected.id === detail.recipe.currentVersionId}
                             loading={busy === "activate"}
@@ -215,25 +215,24 @@ export function RecipeEditor({ detail, models, refresh, onDirty }: { detail: Pro
                                     return;
                                 }
                                 modal.confirm({
-                                    title: `激活 v${selected.version}？`,
-                                    content: "此操作将切换线上配方；选择旧版本可完成回滚。已提交任务不变。",
-                                    okText: "确认激活",
-                                    cancelText: "取消",
+                                    title: staticUiText("激活 v{p0}？", { p0: `${selected.version}` }),
+                                    content: staticUiText("此操作将切换线上配方；选择旧版本可完成回滚。已提交任务不变。"),
+                                    okText: staticUiText("确认激活"),
+                                    cancelText: staticUiText("取消"),
                                     onOk: () =>
                                         run("activate", async () => {
                                             await activateAdminPromptVersion(detail.recipe.key, selected.id, options());
                                             await refresh();
-                                            message.success(`已激活 v${selected.version}`);
+                                            message.success(displayNotice(staticUiText("已激活 v{p0}", { p0: `${selected.version}` })));
                                         }),
                                 });
                             }}
                         >
-                            {selected && selected.id === detail.recipe.currentVersionId ? "当前线上版本" : "激活此版本 / 回滚"}
+                            {selected && selected.id === detail.recipe.currentVersionId ? staticUiText("当前线上版本") : staticUiText("激活此版本 / 回滚")}
                         </Button>
                     </div>
                     {selected && (
-                        <p className="mt-4 break-all text-xs text-muted-foreground">
-                            保存时间：{new Date(selected.createdAt).toLocaleString()} · 内容指纹：{selected.contentHash}
+                        <p className="mt-4 break-all text-xs text-muted-foreground">{staticUiText("保存时间：")}{new Date(selected.createdAt).toLocaleString()}{staticUiText(" · 内容指纹：")}{selected.contentHash}
                         </p>
                     )}
                 </Form>

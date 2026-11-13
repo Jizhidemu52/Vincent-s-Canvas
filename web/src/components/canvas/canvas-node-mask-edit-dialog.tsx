@@ -1,3 +1,4 @@
+import { staticUiText } from "@/lib/static-ui-copy";
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Button, Input, Modal, Select, Slider } from "antd";
@@ -308,9 +309,9 @@ export function CanvasNodeMaskEditDialog({
                 <div className="flex min-h-[360px] flex-col gap-5">
                     <div className="flex flex-wrap items-center gap-2">
                         <Button size="small" onClick={() => setZoom(value => Math.max(.25, value / 1.25))}>−</Button><span>{Math.round(zoom * 100)}%</span><Button size="small" onClick={() => setZoom(value => Math.min(8, value * 1.25))}>+</Button>
-                        <Button size="small" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}>适应窗口</Button>
-                        <Button size="small" disabled={restoring || historyIndex < 1} onClick={() => void restoreStroke(-1)}>撤销笔画</Button><Button size="small" disabled={restoring || historyIndex >= historyRef.current.length - 1} onClick={() => void restoreStroke(1)}>重做</Button>
-                        <span className="text-xs" style={{ color: theme.node.muted }}>空格拖动 · Ctrl + 滚轮缩放 · [ ] 调笔刷 · B / E 切换</span>
+                        <Button size="small" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}>{staticUiText("适应窗口")}</Button>
+                        <Button size="small" disabled={restoring || historyIndex < 1} onClick={() => void restoreStroke(-1)}>{staticUiText("撤销笔画")}</Button><Button size="small" disabled={restoring || historyIndex >= historyRef.current.length - 1} onClick={() => void restoreStroke(1)}>{staticUiText("重做")}</Button>
+                        <span className="text-xs" style={{ color: theme.node.muted }}>{staticUiText("空格拖动 · Ctrl + 滚轮缩放 · [ ] 调笔刷 · B / E 切换")}</span>
                     </div>
                     <div>
                         <div className="mt-2 text-sm opacity-60">{image ? t("输出尺寸锁定为原图 {value1} × {value2}px", { value1: image.width, value2: image.height }) : t("读取真实像素尺寸中")}</div>
@@ -340,7 +341,7 @@ export function CanvasNodeMaskEditDialog({
                     </div>
 
                     <div className="space-y-3">
-                        <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{adaptation && image && (adaptation.width !== image.width || adaptation.height !== image.height) ? `自动适配至 ${adaptation.width} × ${adaptation.height}px：原图与蒙版等比缩放并补边，结果还原原尺寸，未涂抹区域保留原图像素。` : "按原图像素编辑；未涂抹区域保留原图像素。"}</p>
+                        <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{adaptation && image && (adaptation.width !== image.width || adaptation.height !== image.height) ? staticUiText("自动适配至 {p0} × {p1}px：原图与蒙版等比缩放并补边，结果还原原尺寸，未涂抹区域保留原图像素。", { p0: `${adaptation.width}`, p1: `${adaptation.height}` }) : staticUiText("按原图像素编辑；未涂抹区域保留原图像素。")}</p>
                         {profile.kind === "standard" || profile.kind === "quality-resolution" ? <label className="flex flex-col gap-1 text-xs">
                             <span>{t("图片质量")}</span>
                             <Select aria-label={t("图片质量")} value={lockedSettings?.quality || effectiveConfig.quality} onChange={value => setImageSettings(current => ({ ...current, quality: value }))} options={profile.qualities.map(value => ({ value, label: imageQualityLabel(value) }))} />

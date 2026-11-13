@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText } from "@/lib/i18n";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { App } from "antd";
@@ -82,7 +83,7 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
         } catch (error) {
             if (!isCurrent() || isGenerationCanceled(error)) return;
             const errorDetails = error instanceof Error ? error.message : "原视频任务查询失败";
-            message.error(errorDetails);
+            message.error(displayNotice(errorDetails));
             setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails, ...videoTaskErrorMetadata(error) } } : item));
         } finally {
             finishGenerationRequest(node.id, controller);
@@ -234,7 +235,7 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
         textStreamBufferRef.current?.clear(node.id);
         if (!isCurrent() || isGenerationCanceled(error)) return;
         const errorDetails = error instanceof Error ? error.message : "生成失败";
-        message.error(errorDetails);
+        message.error(displayNotice(errorDetails));
         setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails, ...(item.type === CanvasNodeType.Video ? videoTaskErrorMetadata(error) : {}) } } : item)));
     } finally {
         finishGenerationRequest(node.id, controller);

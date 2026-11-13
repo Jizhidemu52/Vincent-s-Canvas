@@ -1,5 +1,5 @@
 import { uiText } from "@/lib/i18n";
-import { setWorkbenchText, watchWorkbenchUi } from "../ui-text.js";
+import { setWorkbenchText, setWorkbenchDisplayText, watchWorkbenchUi } from "../ui-text.js";
 import { PROJECT_VERSION, MAX_LAYERS, clone, clamp, canvasPoint, pointInLayer, checkDimensions, validateProject, resizeBase } from "./model.js";
 import { createProjectSession, mountProjectBar, sameProject } from "../project-session.js";
 import { bindLocalImageDrop } from "../image-drop";
@@ -106,7 +106,8 @@ export async function mountPlacement(root, services) {
         for (const [src, imagePromise] of images) images.set(src, await imagePromise);
     } catch (error) {
         if (!live || signal.aborted) return cleanup;
-        root.innerHTML = `<div class="placement-error">示例素材未能加载：${escapeHtml(error.message)}。请刷新重试。</div>`;
+        root.innerHTML = '<div class="placement-error"></div>';
+        setWorkbenchDisplayText(root.querySelector(".placement-error"), `示例素材未能加载：${error.message}。请刷新重试。`);
         return cleanup;
     }
     if (!live || signal.aborted) return cleanup;
@@ -311,7 +312,7 @@ export async function mountPlacement(root, services) {
             return;
         }
         query("[data-controls]").innerHTML =
-            `<p class="section-title">${escapeHtml(layer.name)}</p><div class="placement-coordinate">${numberControl("x", "横向 X", layer.x, -state.base.width, state.base.width * 2)}${numberControl("y", "纵向 Y", layer.y, -state.base.height, state.base.height * 2)}</div>${numberControl("width", "图案宽度", layer.width, 1, state.base.width * 2, "像素", 1, true)}${numberControl("rotation", "旋转角度", layer.rotation, -180, 180, "°", 1, true)}${numberControl("opacity", "不透明度", layer.opacity * 100, 0, 100, "%", 1, true)}<label class="field"><span data-ui-text="混合模式">混合模式</span><select aria-label="混合模式" data-ui-aria-label="混合模式" data-workbench-select="blend" data-blend><option value="source-over" data-ui-text="正常" ${layer.blend === "source-over" ? "selected" : ""}>正常</option><option value="multiply" data-ui-text="正片叠底" ${layer.blend === "multiply" ? "selected" : ""}>正片叠底</option></select></label>`;
+            `<p class="section-title" data-ui-display-text="${escapeHtml(layer.name)}">${escapeHtml(layer.name)}</p><div class="placement-coordinate">${numberControl("x", "横向 X", layer.x, -state.base.width, state.base.width * 2)}${numberControl("y", "纵向 Y", layer.y, -state.base.height, state.base.height * 2)}</div>${numberControl("width", "图案宽度", layer.width, 1, state.base.width * 2, "像素", 1, true)}${numberControl("rotation", "旋转角度", layer.rotation, -180, 180, "°", 1, true)}${numberControl("opacity", "不透明度", layer.opacity * 100, 0, 100, "%", 1, true)}<label class="field"><span data-ui-text="混合模式">混合模式</span><select aria-label="混合模式" data-ui-aria-label="混合模式" data-workbench-select="blend" data-blend><option value="source-over" data-ui-text="正常" ${layer.blend === "source-over" ? "selected" : ""}>正常</option><option value="multiply" data-ui-text="正片叠底" ${layer.blend === "multiply" ? "selected" : ""}>正片叠底</option></select></label>`;
         root.dispatchEvent(new Event("workbench:selects-changed"));
     }
 
@@ -330,12 +331,12 @@ export async function mountPlacement(root, services) {
             .reverse()
             .map(
                 (layer) =>
-                    `<li class="placement-layer ${layer.id === selectedId ? "selected" : ""} ${layer.visible ? "" : "hidden-layer"}"><img src="${layer.src}" alt="" /><button class="placement-layer-select" data-select="${layer.id}" aria-pressed="${layer.id === selectedId}">${escapeHtml(layer.name)}</button><button class="placement-eye" data-toggle="${layer.id}" data-ui-label-action="${layer.visible ? "隐藏" : "显示"}" data-ui-label-name="${escapeHtml(layer.name)}" aria-label="${uiText(layer.visible ? "隐藏" : "显示")} ${escapeHtml(layer.name)}" data-workbench-tooltip="${layer.visible ? "隐藏图层" : "显示图层"}" data-ui-text="${layer.visible ? "显" : "隐"}">${uiText(layer.visible ? "显" : "隐")}</button></li>`,
+                    `<li class="placement-layer ${layer.id === selectedId ? "selected" : ""} ${layer.visible ? "" : "hidden-layer"}"><img src="${layer.src}" alt="" /><button class="placement-layer-select" data-select="${layer.id}" aria-pressed="${layer.id === selectedId}" data-ui-display-text="${escapeHtml(layer.name)}">${escapeHtml(layer.name)}</button><button class="placement-eye" data-toggle="${layer.id}" data-ui-label-action="${layer.visible ? "隐藏" : "显示"}" data-ui-label-name="${escapeHtml(layer.name)}" aria-label="${uiText(layer.visible ? "隐藏" : "显示")} ${escapeHtml(layer.name)}" data-workbench-tooltip="${layer.visible ? "隐藏图层" : "显示图层"}" data-ui-text="${layer.visible ? "显" : "隐"}">${uiText(layer.visible ? "显" : "隐")}</button></li>`,
             )
             .join("");
         query("[data-layer-count]").textContent = `${state.layers.length} / 30`;
         query("[data-base-thumb]").src = state.base.src;
-        query(".placement-base-name").textContent = state.base.name;
+        setWorkbenchDisplayText(query(".placement-base-name"), state.base.name);
         setWorkbenchText(query("[data-dimensions]"), () => uiText("{value1} × {value2} 像素 · 原尺寸导出", { value1: state.base.width, value2: state.base.height }));
         renderControls();
         updateToolbar();

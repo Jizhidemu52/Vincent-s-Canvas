@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { uiText } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
@@ -92,6 +93,7 @@ function editor() {
     const project = { current: "project-a" };
     const scope = {
         uiText,
+        displayNotice: displayHooksHarness.displayNotice,
         projectId: "project-a", designProjectIdRef: project,
         useCallback: (fn: unknown) => fn,
         useUserStore: { getState: () => ({ user: ownerId ? { id: ownerId } : null }) },

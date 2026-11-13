@@ -1,3 +1,6 @@
+import { DisplayText, useDisplayConfig } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { Select, Table, Alert } from "antd";
 import { useState } from "react";
 import type { UsageV2Models } from "@/services/api/usage-analytics-v2";
@@ -5,6 +8,8 @@ import { barOption, ChartPanel, DimensionTable, Insights, NotAvailable, type Dri
 import { metricCoverageText, metricLabels } from "./format";
 import CompilationAnalysis from "./compilation-analysis";
 export default function Models({ data, onDrilldown }: { data: UsageV2Models; onDrilldown: Drilldown }) {
+    const displayConfig = useDisplayConfig();
+    useUiLocale();
     const [dimension, setDimension] = useState<keyof UsageV2Models["costBreakdown"]>("boards");
     const [xMetric, setXMetric] = useState<"generationBookedCny" | "costPerImage" | "costPerUsedImage">("costPerImage");
     const [yMetric, setYMetric] = useState<"successRate" | "resultUseRate" | "formalAdoptionRate">("successRate");
@@ -16,11 +21,11 @@ export default function Models({ data, onDrilldown }: { data: UsageV2Models; onD
     };
     return (
         <div className="space-y-4">
-            <Insights items={data.insights} onDrilldown={onDrilldown} fallback="模型按操作类型和板块分开比较。低费用不等于更好的结果，已记账金额不等于供应商最终扣款。" />
+            <Insights items={data.insights} onDrilldown={onDrilldown} fallback={staticUiText("模型按操作类型和板块分开比较。低费用不等于更好的结果，已记账金额不等于供应商最终扣款。")} />
             <div className="grid min-w-0 gap-4 xl:grid-cols-2">
                 <ChartPanel
-                    title="模型成本与结果对比"
-                    description={`横轴：${metricLabels[xMetric]}；纵轴：${metricLabels[yMetric]}。气泡大小为生成任务量；淡色点表示部分覆盖，悬停显示样本缺口。结果使用不是正式采纳，不作性价比或人员能力结论。`}
+                    title={staticUiText("模型成本与结果对比")}
+                    description={staticUiText("横轴：{p0}；纵轴：{p1}。气泡大小为生成任务量；淡色点表示部分覆盖，悬停显示样本缺口。结果使用不是正式采纳，不作性价比或人员能力结论。", { p0: `${staticUiText(metricLabels[xMetric])}`, p1: `${staticUiText(metricLabels[yMetric])}` })}
                     option={
                         data.models.length
                             ? {
@@ -31,7 +36,7 @@ export default function Models({ data, onDrilldown }: { data: UsageV2Models; onD
                                       {
                                           type: "scatter",
                                           data: data.models.map((row) => ({
-                                              name: `${row.label}\n${metricLabels[xMetric]}：${metricCoverageText(row.metrics[xMetric])}\n${metricLabels[yMetric]}：${metricCoverageText(row.metrics[yMetric])}`,
+                                              name: `${row.label}\n${staticUiText(metricLabels[xMetric])}：${metricCoverageText(row.metrics[xMetric])}\n${staticUiText(metricLabels[yMetric])}：${metricCoverageText(row.metrics[yMetric])}`,
                                               value: [
                                                   row.metrics[xMetric].state === "unavailable" ? null : row.metrics[xMetric].value,
                                                   row.metrics[yMetric].state === "unavailable" || row.metrics[yMetric].value === null ? null : row.metrics[yMetric].value! * 100,
@@ -48,13 +53,13 @@ export default function Models({ data, onDrilldown }: { data: UsageV2Models; onD
                     onSelect={drillModel}
                 >
                     <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        <Select aria-label="模型气泡横轴" value={xMetric} onChange={setXMetric} options={(["costPerImage", "costPerUsedImage", "generationBookedCny"] as const).map((value) => ({ value, label: metricLabels[value] }))} />
-                        <Select aria-label="模型气泡纵轴" value={yMetric} onChange={setYMetric} options={(["successRate", "resultUseRate", "formalAdoptionRate"] as const).map((value) => ({ value, label: metricLabels[value] }))} />
+                        <Select aria-label={staticUiText("模型气泡横轴")} value={xMetric} onChange={setXMetric} options={displayConfig((["costPerImage", "costPerUsedImage", "generationBookedCny"] as const).map((value) => ({ value, label: staticUiText(metricLabels[value]) })), "options")} />
+                        <Select aria-label={staticUiText("模型气泡纵轴")} value={yMetric} onChange={setYMetric} options={displayConfig((["successRate", "resultUseRate", "formalAdoptionRate"] as const).map((value) => ({ value, label: staticUiText(metricLabels[value]) })), "options")} />
                     </div>
                 </ChartPanel>
                 <ChartPanel
-                    title="成本结构"
-                    description="按当前维度拆分已记账生成金额；与提示词优化费用分账。"
+                    title={staticUiText("成本结构")}
+                    description={staticUiText("按当前维度拆分已记账生成金额；与提示词优化费用分账。")}
                     option={barOption(
                         rows.map((row) => ({ label: row.label, value: row.metrics.generationBookedCny.value })),
                         "已记账 ¥",
@@ -70,24 +75,24 @@ export default function Models({ data, onDrilldown }: { data: UsageV2Models; onD
                     }}
                 >
                     <Select
-                        aria-label="成本拆分维度"
+                        aria-label={staticUiText("成本拆分维度")}
                         className="mt-3 min-w-40"
                         value={dimension}
                         onChange={setDimension}
-                        options={[
-                            { value: "boards", label: "按板块" },
-                            { value: "departments", label: "按部门" },
-                            { value: "people", label: "按人员" },
-                            { value: "operations", label: "按操作类型" },
-                            { value: "models", label: "按模型" },
-                        ]}
+                        options={displayConfig([
+                            { value: "boards", label: staticUiText("按板块") },
+                            { value: "departments", label: staticUiText("按部门") },
+                            { value: "people", label: staticUiText("按人员") },
+                            { value: "operations", label: staticUiText("按操作类型") },
+                            { value: "models", label: staticUiText("按模型") },
+                        ], "options")}
                     />
                 </ChartPanel>
             </div>
-            <DimensionTable rows={rows} label="当前成本维度" keys={["generationRequests", "generatedImages", "generationBookedCny"]} />
+            <DimensionTable rows={rows} label={staticUiText("当前成本维度")} keys={["generationRequests", "generatedImages", "generationBookedCny"]} />
             <ChartPanel
-                title="模型端到端耗时 · 五数分布"
-                description="仅成功生成任务的有效耗时原样本，不平均每日分位数。箱体为 P25/P50/P75，须线为最小/最大值（非 Tukey 异常判定）。单位毫秒；缺失时间单列，不代表供应商纯推理时长。点击分布按模型 / 操作 / 板块下钻。"
+                title={staticUiText("模型端到端耗时 · 五数分布")}
+                description={staticUiText("仅成功生成任务的有效耗时原样本，不平均每日分位数。箱体为 P25/P50/P75，须线为最小/最大值（非 Tukey 异常判定）。单位毫秒；缺失时间单列，不代表供应商纯推理时长。点击分布按模型 / 操作 / 板块下钻。")}
                 option={
                     latencyRows.length
                         ? {
@@ -117,24 +122,24 @@ export default function Models({ data, onDrilldown }: { data: UsageV2Models; onD
                     pagination={{ pageSize: 10, hideOnSinglePage: true }}
                     scroll={{ x: 950 }}
                     dataSource={data.models}
-                    columns={[
-                        { title: "模型 / 操作 / 板块", dataIndex: "label", width: 210 },
-                        { title: "成功任务", render: (_, row) => row.latency.eligible },
-                        { title: "有效耗时", render: (_, row) => row.latency.available },
-                        { title: "缺失耗时", render: (_, row) => row.latency.missing },
+                    columns={displayConfig([
+                        { title: staticUiText("模型 / 操作 / 板块"), dataIndex: "label", width: 210 },
+                        { title: staticUiText("成功任务"), render: (_, row) => row.latency.eligible },
+                        { title: staticUiText("有效耗时"), render: (_, row) => row.latency.available },
+                        { title: staticUiText("缺失耗时"), render: (_, row) => row.latency.missing },
                         ...(["min", "q1", "median", "q3", "max"] as const).map((key, index) => ({
                             title: ["最小 ms", "P25 ms", "P50 ms", "P75 ms", "最大 ms"][index],
                             key,
-                            render: (_: unknown, row: UsageV2Models["models"][number]) => (row.latency[key] === null ? "不可用" : row.latency[key]!.toLocaleString("zh-CN", { maximumFractionDigits: 2 })),
+                            render: (_: unknown, row: UsageV2Models["models"][number]) => (row.latency[key] === null ? staticUiText("不可用") : row.latency[key]!.toLocaleString("zh-CN", { maximumFractionDigits: 2 })),
                         })),
-                        { title: "失败原因（归类记录数）", render: (_, row) => (row.failures.length ? row.failures.map((item) => `${item.label} ${item.count}`).join("；") : "无失败记录") },
-                    ]}
+                        { title: staticUiText("失败原因（归类记录数）"), render: (_, row) => <DisplayText text={row.failures.length ? row.failures.map((item) => `${item.label} ${item.count}`).join("；") : staticUiText("无失败记录")} /> },
+                    ], "columns", data.models)}
                 />
-                <p className="mt-2 text-xs">失败原因仅为已记录 failed 请求的规则分类，不展示原始供应商错误；取消、暂停与待核查不当作成功任务耗时。</p>
+                <p className="mt-2 text-xs">{staticUiText("失败原因仅为已记录 failed 请求的规则分类，不展示原始供应商错误；取消、暂停与待核查不当作成功任务耗时。")}</p>
             </ChartPanel>
             <DimensionTable
                 rows={data.models.map((row) => ({ ...row, label: `${row.label} · ${row.operationType} · ${row.boardKey || "未关联板块"}` }))}
-                label="模型 / 操作 / 板块"
+                label={staticUiText("模型 / 操作 / 板块")}
                 keys={["generationRequests", "successRate", "waitMsP50", "runMsP50", "totalMsP50", "totalMsP90", "generationBookedCny", "costPerImage", "resultUseRate", "formalAdoptionRate", "costPerUsedImage"]}
                 onSelect={(row) => {
                     const selected = data.models.find((item) => item.key === row.key);
@@ -143,14 +148,12 @@ export default function Models({ data, onDrilldown }: { data: UsageV2Models; onD
             />
             <CompilationAnalysis key={JSON.stringify({ scope: data.meta.scope, asOf: data.meta.asOf })} scope={data.meta.scope} />
             <section className="wb-surface min-w-0 p-4">
-                <h3 className="mb-2 font-semibold">当前筛选任务关联编译 · 独立费用</h3>
-                <p className="mb-3 text-xs text-[var(--muted-foreground)]">以下沿用当前生成任务筛选的关联编译口径，不等同上方按编译创建时间统计的全部编译。</p>
-                <p className="mb-3 text-sm">
-                    执行 {data.optimizationCosts.executions} 次 · 缓存复用 {data.optimizationCosts.cacheHits} 次 · 结果待核查 {data.optimizationCosts.uncertain} 次
-                </p>
+                <h3 className="mb-2 font-semibold">{staticUiText("当前筛选任务关联编译 · 独立费用")}</h3>
+                <p className="mb-3 text-xs text-[var(--muted-foreground)]">{staticUiText("以下沿用当前生成任务筛选的关联编译口径，不等同上方按编译创建时间统计的全部编译。")}</p>
+                <p className="mb-3 text-sm">{staticUiText("执行 ")}{data.optimizationCosts.executions}{staticUiText(" 次 · 缓存复用 ")}{data.optimizationCosts.cacheHits}{staticUiText(" 次 · 结果待核查 ")}{data.optimizationCosts.uncertain}{staticUiText(" 次")}</p>
                 <div className="mb-3 grid gap-2 text-sm sm:grid-cols-2">
-                    <p data-usage-metric={`优化输入 Token：${metricCoverageText(data.optimizationCosts.inputTokens)}`}>优化输入 Token：{metricCoverageText(data.optimizationCosts.inputTokens)}</p>
-                    <p data-usage-metric={`优化输出 Token：${metricCoverageText(data.optimizationCosts.outputTokens)}`}>优化输出 Token：{metricCoverageText(data.optimizationCosts.outputTokens)}</p>
+                    <p data-usage-metric={`优化输入 Token：${metricCoverageText(data.optimizationCosts.inputTokens)}`}>{staticUiText("优化输入 Token：")}<DisplayText text={metricCoverageText(data.optimizationCosts.inputTokens)} /></p>
+                    <p data-usage-metric={`优化输出 Token：${metricCoverageText(data.optimizationCosts.outputTokens)}`}>{staticUiText("优化输出 Token：")}<DisplayText text={metricCoverageText(data.optimizationCosts.outputTokens)} /></p>
                 </div>
                 <Table
                     rowKey="currency"
@@ -158,18 +161,18 @@ export default function Models({ data, onDrilldown }: { data: UsageV2Models; onD
                     pagination={false}
                     scroll={{ x: 700 }}
                     dataSource={data.optimizationCosts.costs}
-                    columns={[
-                        { title: "币种", dataIndex: "currency" },
-                        { title: "供应商返回金额", dataIndex: "providerReportedAmount" },
-                        { title: "估算金额（另列）", dataIndex: "estimatedAmount" },
-                        { title: "已知笔数", dataIndex: "knownCount" },
-                        { title: "估算笔数", dataIndex: "estimatedCount" },
-                        { title: "未知笔数", dataIndex: "unknownCount" },
-                    ]}
+                    columns={displayConfig([
+                        { title: staticUiText("币种"), dataIndex: "currency" },
+                        { title: staticUiText("供应商返回金额"), dataIndex: "providerReportedAmount" },
+                        { title: staticUiText("估算金额（另列）"), dataIndex: "estimatedAmount" },
+                        { title: staticUiText("已知笔数"), dataIndex: "knownCount" },
+                        { title: staticUiText("估算笔数"), dataIndex: "estimatedCount" },
+                        { title: staticUiText("未知笔数"), dataIndex: "unknownCount" },
+                    ], "columns", data.optimizationCosts.costs)}
                 />
-                <Alert className="mt-3" type="info" title="不同币种不相加，估算不冒充实付" description={data.optimizationCosts.notes.join("；")} />
+                <Alert className="mt-3" type="info" title={staticUiText("不同币种不相加，估算不冒充实付")} description={<DisplayText text={data.optimizationCosts.notes.join("；")} />} />
             </section>
-            <NotAvailable title="人民币预算与月底预测" reason={data.budget.definition} />
+            <NotAvailable title={staticUiText("人民币预算与月底预测")} reason={data.budget.definition} />
         </div>
     );
 }

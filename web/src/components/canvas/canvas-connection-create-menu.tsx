@@ -7,6 +7,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { useCanvasGraphStore } from "@/stores/canvas/canvas-graph-store";
 import { canvasConnectionCreateOptions, canvasConnectionMenuPosition, type ConnectionCreateNodeType } from "@/lib/canvas/canvas-connection-create-options";
 import { CanvasNodeType, type ConnectionHandle, type Position } from "@/types/canvas";
+import { loadCanvasConfigNodePanel } from "@/lib/canvas/canvas-node-panel-loaders";
 
 export function ConnectionCreateMenu({
     pending,
@@ -22,6 +23,11 @@ export function ConnectionCreateMenu({
     const theme = canvasThemes[canvasThemeKey];
     const sourceNode = useCanvasGraphStore(state => state.nodeById.get(pending.connection.nodeId));
     const options = canvasConnectionCreateOptions(sourceNode, pending.connection.handleType);
+    const offersConfig = options.some(option => option.type === CanvasNodeType.Config);
+    useEffect(() => {
+        // Warm the editor while choosing a connection, never submit a generation.
+        if (offersConfig) void loadCanvasConfigNodePanel().catch(() => undefined);
+    }, [offersConfig]);
     const icons = { [CanvasNodeType.Text]: List, [CanvasNodeType.Image]: ImageIcon, [CanvasNodeType.Video]: Video, [CanvasNodeType.Audio]: Music2, [CanvasNodeType.Config]: Settings2 };
     const anchorRef = useRef<HTMLSpanElement>(null), menuRef = useRef<HTMLDivElement>(null);
     const closeRef = useRef(onClose); closeRef.current = onClose;

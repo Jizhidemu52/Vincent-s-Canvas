@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText } from "@/lib/i18n";
 import type { ActiveConnectionPathHandle } from "@/components/canvas/canvas-connections";
 import { createCanvasBatchRenderIndex } from "@/lib/canvas/canvas-batch-motion";
@@ -111,7 +112,7 @@ export function useCanvasConnections({ nodesRef, connectionsRef, viewportRef, ge
     const connectNodes = useCallback(
         (current: ConnectionHandle, targetNodeId: string) => {
             const error = connectionError(current, targetNodeId);
-            if (error) { message.warning(error); return; }
+            if (error) { message.warning(displayNotice(error)); return; }
             const connection = normalizeConnection(current.nodeId, targetNodeId, nodesRef.current, current.handleType);
             if (!connection) return;
             const { fromNodeId, toNodeId } = connection;
@@ -327,7 +328,7 @@ export function useCanvasConnections({ nodesRef, connectionsRef, viewportRef, ge
                 connectNodes(currentConnection, dropTarget.nodeId);
                 setConnecting(null);
             } else if (dropTarget.isNearNode) {
-                if (dropTarget.invalidNodeId) message.warning(connectionError(currentConnection, dropTarget.invalidNodeId));
+                if (dropTarget.invalidNodeId) message.warning(displayNotice(connectionError(currentConnection, dropTarget.invalidNodeId)));
                 setConnecting(null);
             } else if (reconnectingIdRef.current) {
                 setConnecting(null);

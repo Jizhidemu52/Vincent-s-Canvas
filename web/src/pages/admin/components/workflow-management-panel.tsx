@@ -1,3 +1,6 @@
+import { displayNotice, useDisplayConfig  } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { App, Button, Form, Input, InputNumber, Select, Switch, Table, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { createServerWorkflow, listServerProviders, listServerWorkflows, updateServerWorkflow, type ServerProvider, type ServerWorkflow } from "@/services/api/model-configuration";
@@ -23,6 +26,8 @@ type Values = {
     enabled: boolean;
 };
 export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
+    const displayConfig = useDisplayConfig();
+    useUiLocale();
     const { message } = App.useApp();
     const [form] = Form.useForm<Values>();
     const [providers, setProviders] = useState<ServerProvider[]>([]);
@@ -31,7 +36,7 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
     const [loading, setLoading] = useState(true);
     const [dirty, setDirty] = useState(false);
     const [saving, setSaving] = useState(false);
-    const { confirmDiscard } = useUnsavedGuard(dirty, "工作流配置尚未保存，离开后将丢失本次修改。");
+    const { confirmDiscard } = useUnsavedGuard(dirty, staticUiText("工作流配置尚未保存，离开后将丢失本次修改。"));
     const applyGptImage2Preset = async () => {
         if (!await confirmDiscard()) return;
         setDirty(true);
@@ -72,7 +77,7 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
             setProviders(p.providers);
             setWorkflows(w.workflows);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "工作流加载失败");
+            message.error(displayNotice(error instanceof Error ? error.message : staticUiText("工作流加载失败")));
         } finally {
             setLoading(false);
         }
@@ -108,13 +113,13 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
             };
             if (selectedId) await updateServerWorkflow(selectedId, input);
             else await createServerWorkflow(input);
-            message.success("工作流已保存到服务端");
+            message.success(staticUiText("工作流已保存到服务端"));
             setSelectedId(null);
             form.resetFields();
             setDirty(false);
             await refresh();
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "工作流保存失败");
+            message.error(displayNotice(error instanceof Error ? error.message : staticUiText("工作流保存失败")));
         } finally { setSaving(false); }
     };
     return (
@@ -126,26 +131,24 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
                 size="small"
                 loading={loading}
                 dataSource={workflows}
-                columns={[
-                    { title: "工作流", dataIndex: "name" },
-                    { title: "API 服务", dataIndex: "providerName" },
-                    { title: "协议", dataIndex: "protocol" },
-                    { title: "能力", dataIndex: "capability", render: adminLabel },
-                    { title: "工作流 ID", dataIndex: "workflowId" },
-                    { title: "状态", render: (_, row: ServerWorkflow) => <Tag color={row.enabled ? "green" : "red"}>{row.enabled ? "启用" : "停用"}</Tag> },
+                columns={displayConfig([
+                    { title: staticUiText("工作流"), dataIndex: "name" },
+                    { title: staticUiText("API 服务"), dataIndex: "providerName" },
+                    { title: staticUiText("协议"), dataIndex: "protocol" },
+                    { title: staticUiText("能力"), dataIndex: "capability", render: adminLabel },
+                    { title: staticUiText("工作流 ID"), dataIndex: "workflowId" },
+                    { title: staticUiText("状态"), render: (_, row: ServerWorkflow) => <Tag color={row.enabled ? "green" : "red"}>{row.enabled ? staticUiText("启用") : staticUiText("停用")}</Tag> },
                     {
-                        title: "操作",
+                        title: staticUiText("操作"),
                         render: (_, row: ServerWorkflow) => (
-                            <Button size="small" onClick={() => edit(row)}>
-                                编辑
-                            </Button>
+                            <Button size="small" onClick={() => edit(row)}>{staticUiText("编辑")}</Button>
                         ),
                     },
-                ]}
+                ], "columns", workflows)}
             />
             <section className="wb-surface p-5">
                 <div className="mb-4 flex items-center justify-between">
-                    <h3 className="text-base font-semibold">{selectedId ? "编辑工作流" : "新增工作流"}</h3>
+                    <h3 className="text-base font-semibold">{selectedId ? staticUiText("编辑工作流") : staticUiText("新增工作流")}</h3>
                     {selectedId ? (
                         <Button
                             size="small"
@@ -155,14 +158,10 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
                                 setSelectedId(null);
                                 form.resetFields();
                             }}
-                        >
-                            取消
-                        </Button>
+                        >{staticUiText("取消")}</Button>
                     ) : null}
                 </div>
-                <Button className="mb-3" size="small" onClick={applyGptImage2Preset} disabled={!isAdmin}>
-                    填入 GPT-Image-2 预设
-                </Button>
+                <Button className="mb-3" size="small" onClick={applyGptImage2Preset} disabled={!isAdmin}>{staticUiText("填入 GPT-Image-2 预设")}</Button>
                 <Form
                     form={form}
                     layout="vertical"
@@ -180,67 +179,65 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
                     }}
                     onFinish={submit}
                 >
-                    <Form.Item name="providerId" label="API 服务" rules={[{ required: true }]}>
-                        <Select options={providers.map((item) => ({ label: item.name, value: item.id }))} />
+                    <Form.Item name="providerId" label={staticUiText("API 服务")} rules={[{ required: true }]}>
+                        <Select options={displayConfig(providers.map((item) => ({ label: item.name, value: item.id })), "options")} />
                     </Form.Item>
                     <div className="grid grid-cols-2 gap-2">
-                        <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+                        <Form.Item name="name" label={staticUiText("名称")} rules={[{ required: true }]}>
                             <Input />
                         </Form.Item>
-                        <Form.Item name="workflowId" label="工作流 ID">
+                        <Form.Item name="workflowId" label={staticUiText("工作流 ID")}>
                             <Input />
                         </Form.Item>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                        <Form.Item name="protocol" label="协议" rules={[{ required: true }]}>
-                            <Select options={["runninghub", "comfyui", "custom"].map((value) => ({ label: value, value }))} />
+                        <Form.Item name="protocol" label={staticUiText("协议")} rules={[{ required: true }]}>
+                            <Select options={displayConfig(["runninghub", "comfyui", "custom"].map((value) => ({ label: value, value })), "options")} />
                         </Form.Item>
-                        <Form.Item name="capability" label="能力" rules={[{ required: true }]}>
-                            <Select options={["generate", "edit", "upscale", "batch"].map((value) => ({ label: adminLabel(value), value }))} />
+                        <Form.Item name="capability" label={staticUiText("能力")} rules={[{ required: true }]}>
+                            <Select options={displayConfig(["generate", "edit", "upscale", "batch"].map((value) => ({ label: adminLabel(value), value })), "options")} />
                         </Form.Item>
                     </div>
-                    <Form.Item name="submitPath" label="提交路径" rules={[{ required: true }]}>
+                    <Form.Item name="submitPath" label={staticUiText("提交路径")} rules={[{ required: true }]}>
                         <Input placeholder="/api/task/submit" />
                     </Form.Item>
-                    <Form.Item name="statusPath" label="状态路径">
+                    <Form.Item name="statusPath" label={staticUiText("状态路径")}>
                         <Input placeholder="/api/task/{taskId}" />
                     </Form.Item>
                     <div className="grid grid-cols-2 gap-2">
-                        <Form.Item name="externalTaskPath" label="任务 ID JSON 路径">
+                        <Form.Item name="externalTaskPath" label={staticUiText("任务 ID JSON 路径")}>
                             <Input placeholder="data.taskId" />
                         </Form.Item>
-                        <Form.Item name="statusValuePath" label="状态 JSON 路径">
+                        <Form.Item name="statusValuePath" label={staticUiText("状态 JSON 路径")}>
                             <Input placeholder="data.status" />
                         </Form.Item>
                     </div>
-                    <Form.Item name="outputPath" label="结果 JSON 路径" rules={[{ required: true }]}>
+                    <Form.Item name="outputPath" label={staticUiText("结果 JSON 路径")} rules={[{ required: true }]}>
                         <Input placeholder="data.outputs" />
                     </Form.Item>
-                    <Form.Item name="requestTemplate" label="提交 JSON 模板" rules={[{ required: true }]}>
+                    <Form.Item name="requestTemplate" label={staticUiText("提交 JSON 模板")} rules={[{ required: true }]}>
                         <Input.TextArea rows={8} className="font-mono" />
                     </Form.Item>
                     <div className="grid grid-cols-2 gap-2">
-                        <Form.Item name="successValues" label="成功状态">
+                        <Form.Item name="successValues" label={staticUiText("成功状态")}>
                             <Select mode="tags" open={false} />
                         </Form.Item>
-                        <Form.Item name="failureValues" label="失败状态">
+                        <Form.Item name="failureValues" label={staticUiText("失败状态")}>
                             <Select mode="tags" open={false} />
                         </Form.Item>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                        <Form.Item name="pollIntervalMs" label="轮询毫秒">
+                        <Form.Item name="pollIntervalMs" label={staticUiText("轮询毫秒")}>
                             <InputNumber className="w-full" min={500} />
                         </Form.Item>
-                        <Form.Item name="timeoutSeconds" label="超时秒数">
+                        <Form.Item name="timeoutSeconds" label={staticUiText("超时秒数")}>
                             <InputNumber className="w-full" min={30} />
                         </Form.Item>
                     </div>
-                    <Form.Item name="enabled" label="启用" valuePropName="checked">
+                    <Form.Item name="enabled" label={staticUiText("启用")} valuePropName="checked">
                         <Switch />
                     </Form.Item>
-                    <Button className="!h-10" type="primary" htmlType="submit" loading={saving} block>
-                        保存工作流
-                    </Button>
+                    <Button className="!h-10" type="primary" htmlType="submit" loading={saving} block>{staticUiText("保存工作流")}</Button>
                 </Form>
             </section>
         </div>

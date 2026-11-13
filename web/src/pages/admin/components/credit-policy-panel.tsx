@@ -1,3 +1,6 @@
+import { useDisplayUiValue } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { Alert, App, Button, Skeleton, Switch } from "antd";
 import { useEffect, useRef, useState } from "react";
 
@@ -6,6 +9,8 @@ import { getCreditPolicy, saveCreditPolicy, type CreditPolicy } from "@/services
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 
 export function CreditPolicyPanel() {
+    const displayUi = useDisplayUiValue();
+    useUiLocale();
     const { modal } = App.useApp();
     const user = useUserStore((store) => store.user);
     const [policy, setPolicy] = useState<CreditPolicy | null>(null);
@@ -45,7 +50,7 @@ export function CreditPolicyPanel() {
     const changePolicy = async (enabled: boolean) => {
         if (!canWrite || !policy || loading || writing.current || confirming.current) return;
         confirming.current = true;
-        const confirmed = await modal.confirm({ title: `确认${enabled ? "开启" : "关闭"}积分计费？`, content: enabled ? "影响全部成员的新任务：将按已发布价格扣除积分，余额不足会阻止提交。现有余额与历史记录保留。" : "影响全部成员的新任务：将停止扣除站内积分，但模型服务仍可能产生人民币成本。现有余额与价格配置保留。", okText: `确认${enabled ? "开启" : "关闭"}`, cancelText: "保持不变", okButtonProps: { danger: true } });
+        const confirmed = await modal.confirm({ title: staticUiText("确认{p0}积分计费？", { p0: `${enabled ? staticUiText("开启") : staticUiText("关闭")}` }), content: enabled ? staticUiText("影响全部成员的新任务：将按已发布价格扣除积分，余额不足会阻止提交。现有余额与历史记录保留。") : staticUiText("影响全部成员的新任务：将停止扣除站内积分，但模型服务仍可能产生人民币成本。现有余额与价格配置保留。"), okText: staticUiText("确认{p0}", { p0: `${enabled ? staticUiText("开启") : staticUiText("关闭")}` }), cancelText: staticUiText("保持不变"), okButtonProps: { danger: true } });
         confirming.current = false;
         if (!confirmed) return;
         if (writing.current) return;
@@ -72,22 +77,22 @@ export function CreditPolicyPanel() {
     };
 
     if (!canRead) return null;
-    return <section className="wb-surface space-y-3 p-5" aria-label="积分计费总开关" aria-busy={loading || saving}>
+    return <section className="wb-surface space-y-3 p-5" aria-label={staticUiText("积分计费总开关")} aria-busy={loading || saving}>
         <div className="flex items-center justify-between gap-3">
-            <h3 className="text-base font-semibold">积分计费总开关</h3>
-            <Button size="small" loading={loading} disabled={saving} onClick={() => void refresh()}>刷新状态</Button>
+            <h3 className="text-base font-semibold">{staticUiText("积分计费总开关")}</h3>
+            <Button size="small" loading={loading} disabled={saving} onClick={() => void refresh()}>{staticUiText("刷新状态")}</Button>
         </div>
         {loading ? <Skeleton active title={false} paragraph={{ rows: 2 }} /> : null}
-        {error ? <Alert type="error" showIcon title="当前计费状态未确认" description={error} /> : null}
+        {error ? <Alert type="error" showIcon title={staticUiText("当前计费状态未确认")} description={displayUi(error)} /> : null}
         {policy && !loading ? <>
             <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-medium">{policy.creditsEnabled ? "已开启积分计费" : "已关闭积分计费"}</span>
-                <Switch aria-label="启用积分计费" checked={policy.creditsEnabled} checkedChildren="开" unCheckedChildren="关" loading={saving} disabled={!canWrite || saving} onChange={(enabled) => void changePolicy(enabled)} />
+                <span className="text-sm font-medium">{policy.creditsEnabled ? staticUiText("已开启积分计费") : staticUiText("已关闭积分计费")}</span>
+                <Switch aria-label={staticUiText("启用积分计费")} checked={policy.creditsEnabled} checkedChildren="开" unCheckedChildren="关" loading={saving} disabled={!canWrite || saving} onChange={(enabled) => void changePolicy(enabled)} />
             </div>
-            <Alert type={policy.creditsEnabled ? "warning" : "info"} showIcon title={policy.creditsEnabled ? "新任务按板块配置扣除积分" : "新任务不扣积分"} description={policy.creditsEnabled
-                ? "按已配置的板块价格与计费规则扣分，余额不足时不能提交需要积分的任务。"
-                : "关闭不清空用户余额，也不清空板块价格；可先设置各人的积分和板块费用，再开启计费。"} />
-            {!canWrite ? <p className="text-xs text-[var(--muted-foreground)]">仅超级管理员可修改此开关；部门管理员可查看当前状态。</p> : null}
+            <Alert type={policy.creditsEnabled ? "warning" : "info"} showIcon title={policy.creditsEnabled ? staticUiText("新任务按板块配置扣除积分") : staticUiText("新任务不扣积分")} description={policy.creditsEnabled
+                ? staticUiText("按已配置的板块价格与计费规则扣分，余额不足时不能提交需要积分的任务。")
+                : staticUiText("关闭不清空用户余额，也不清空板块价格；可先设置各人的积分和板块费用，再开启计费。")} />
+            {!canWrite ? <p className="text-xs text-[var(--muted-foreground)]">{staticUiText("仅超级管理员可修改此开关；部门管理员可查看当前状态。")}</p> : null}
         </> : null}
         {notice ? <Alert type="info" showIcon title={notice} /> : null}
     </section>;

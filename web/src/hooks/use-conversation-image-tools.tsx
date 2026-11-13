@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { App } from "antd";
 import type { ConversationImageItem } from "@/components/conversation-image-controls";
@@ -32,9 +33,9 @@ export function useConversationImageTools() {
         try {
             if (image.unavailableReason || (!image.storageKey && !image.dataUrl)) throw new Error(uiText(image.unavailableReason || "原图暂时无法读取"));
             const mode = await copyConversationImage(conversationImageNode(image), job.signal);
-            if (!job.signal.aborted && useUserStore.getState().user?.id === owner) void message.success(uiText(mode === "system" ? "图片已复制，可粘贴到对话输入框" : "图片已复制，可在本页面的对话输入框粘贴（当前地址不支持复制到其他应用）"));
+            if (!job.signal.aborted && useUserStore.getState().user?.id === owner) void message.success(displayNotice(uiText(mode === "system" ? "图片已复制，可粘贴到对话输入框" : "图片已复制，可在本页面的对话输入框粘贴（当前地址不支持复制到其他应用）")));
         } catch (error) {
-            if (!job.signal.aborted && useUserStore.getState().user?.id === owner) void message.error(error instanceof Error ? uiText(error.message) : uiText("图片复制失败，请重试"));
+            if (!job.signal.aborted && useUserStore.getState().user?.id === owner) void message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("图片复制失败，请重试")));
         } finally { if (jobs.current.get(key) === job) jobs.current.delete(key); }
     }, [message, owner]);
     const download = useCallback(async (image: ConversationImageItem) => {
@@ -46,7 +47,7 @@ export function useConversationImageTools() {
             if (useUserStore.getState().user?.id !== owner) return;
             await downloadCanvasImage(conversationImageNode(image), "original", { signal: job.signal });
         } catch (error) {
-            if (!job.signal.aborted && useUserStore.getState().user?.id === owner) void message.error(error instanceof Error ? error.message : uiText("图片下载失败，请重试"));
+            if (!job.signal.aborted && useUserStore.getState().user?.id === owner) void message.error(displayNotice(error instanceof Error ? error.message : uiText("图片下载失败，请重试")));
         } finally { if (jobs.current.get(image.id) === job) jobs.current.delete(image.id); }
     }, [message, owner]);
     const compare = useCallback((image: ConversationImageItem, originals: ConversationImageItem[]) => {

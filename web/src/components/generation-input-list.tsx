@@ -1,4 +1,5 @@
 import { uiText, useUiText } from "@/lib/i18n";
+import { useDisplayText } from "@/hooks/use-display-text";
 
 const fieldLabels: Record<string, string> = {
     targetProduct: "目标产品", keepDetails: "关键特征保持", carryoverRequirements: "沿用设计要求",
@@ -22,10 +23,11 @@ export function designInputValue(value: unknown, key?: string): string {
 
 export function GenerationInputList({ fields = {} }: { fields?: Record<string, unknown> }) {
     useUiText();
+    const display = useDisplayText();
     return <dl className="my-3 grid gap-2 text-xs leading-6" aria-label={uiText("设计输入清单")}>
         {Object.entries(fields).map(([key, value]) => <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-2" key={key}>
             <dt className="text-muted-foreground">{uiText(fieldLabels[key] || "补充信息")}</dt>
-            <dd className="m-0 whitespace-pre-wrap break-words">{designInputValue(key === "variantIndex" && typeof value === "number" ? value + 1 : value, key)}</dd>
+            <dd className="m-0 whitespace-pre-wrap break-words">{display(designInputValue(key === "variantIndex" && typeof value === "number" ? value + 1 : value, key))}</dd>
         </div>)}
     </dl>;
 }

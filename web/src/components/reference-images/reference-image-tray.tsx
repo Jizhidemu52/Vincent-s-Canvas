@@ -8,6 +8,7 @@ import { INTERNAL_IMAGE_DRAG } from "@/lib/dropped-images";
 import type { ImageReferenceItem } from "@/types/image";
 import { imageReferenceRoleOptions } from "@/lib/image-reference-prompt";
 import { WorkbenchImage } from "@/components/workbench-image";
+import { DisplayText, useDisplayText } from "@/hooks/use-display-text";
 
 type Props = {
     references: ImageReferenceItem[];
@@ -23,6 +24,7 @@ type Props = {
 
 export function ReferenceImageTray({ references, loading, fixedReferenceKey, validation, onChange, onRequestUpload, onRequestAssets, onRequestCanvas, onRequestClipboard }: Props) {
     useUiLocale();
+    const display = useDisplayText();
     const [draggingKey, setDraggingKey] = useState<string | null>(null);
     const move = (from: number, to: number) => {
         if (references[from]?.referenceKey === fixedReferenceKey || references[to]?.referenceKey === fixedReferenceKey) return;
@@ -65,9 +67,9 @@ export function ReferenceImageTray({ references, loading, fixedReferenceKey, val
                         className={`group w-36 shrink-0 rounded-md border border-border bg-muted/30 p-1 transition ${draggingKey === item.referenceKey ? "opacity-50" : ""}`}
                     >
                         <div className="relative h-24 overflow-hidden rounded-md bg-muted">
-                        <WorkbenchImage src={item.dataUrl} alt={item.name} loading="lazy" decoding="async" className="size-full object-contain" />
+                        <WorkbenchImage src={item.dataUrl} alt={display(item.name)} loading="lazy" decoding="async" className="size-full object-contain" />
                         <span className="absolute left-1 top-1 rounded bg-black/65 px-1.5 py-0.5 text-xs font-medium text-white">{uiText("图片{count}", { count: index + 1 })}</span>
-                        <Tag className="absolute bottom-1 left-1 m-0 max-w-[70px] truncate border-0 bg-black/65 px-1.5 py-0.5 text-xs text-white">{item.originLabel}</Tag>
+                        <Tag className="absolute bottom-1 left-1 m-0 max-w-[70px] truncate border-0 bg-black/65 px-1.5 py-0.5 text-xs text-white"><DisplayText text={item.originLabel} /></Tag>
                         {item.referenceKey !== fixedReferenceKey ? <><span className="absolute right-1 bottom-1 rounded bg-black/65 p-1 text-white" aria-hidden="true"><GripVertical className="size-3" /></span>
                         <div className="absolute right-1 top-1 flex gap-1 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
                             <Tooltip title={uiText("前移")}><Button size="small" type="text" className="!size-6 !min-w-0 !bg-black/65 !p-0 !text-white" icon={<ChevronLeft className="size-3.5" />} disabled={index === 0 || references[index - 1]?.referenceKey === fixedReferenceKey} aria-label={uiText("将图片{count}前移", { count: index + 1 })} onClick={() => move(index, index - 1)} /></Tooltip>
@@ -77,14 +79,14 @@ export function ReferenceImageTray({ references, loading, fixedReferenceKey, val
                         </div>
                         <Select size="small" className="mt-1 w-full" aria-label={uiText("图片{count}用途", { count: index + 1 })} placeholder={uiText("选择图片用途")}
                             value={item.role || undefined} allowClear
-                            options={[...new Set([...imageReferenceRoleOptions, ...(item.role ? [item.role] : [])])].map(role => ({ value: role, label: uiText(role) }))}
+                            options={[...new Set([...imageReferenceRoleOptions, ...(item.role ? [item.role] : [])])].map(role => ({ value: role, label: display(role) }))}
                             onChange={role => onChange(references.map(reference => reference.referenceKey === item.referenceKey ? { ...reference, role: role || "" } : reference))}
                             onClick={event => event.stopPropagation()} />
                     </div>
                 ))}
                 {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-muted-foreground">{onRequestCanvas ? uiText("上传图片、从素材库选择，或在画布中选择图片节点。") : uiText("上传、粘贴或拖入图片，也可从素材库选择。")}</div> : null}
             </div>
-            {!validation.valid && validation.message ? <p role="alert" className="mt-2 text-[13px] text-destructive">{validation.message}</p> : null}
+            {!validation.valid && validation.message ? <p role="alert" className="mt-2 text-[13px] text-destructive"><DisplayText text={validation.message} /></p> : null}
             {loading ? <p role="status" className="mt-2 text-xs text-muted-foreground">{uiText("正在读取参考图，请稍候…")}</p> : null}
         </section>
     );

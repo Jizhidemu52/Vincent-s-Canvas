@@ -1,3 +1,5 @@
+import { staticUiText } from "@/lib/static-ui-copy";
+import { DisplayText } from "@/hooks/use-display-text";
 import { useUiText, uiText } from "@/lib/i18n";
 import { ImageIcon, LoaderCircle, RefreshCw, Video } from "lucide-react";
 
@@ -159,8 +161,8 @@ export function CanvasAgentMediaWorkflowCard({
                             <div className="flex flex-wrap gap-2">
                                 {card.initialReferenceSummary.items.map((reference) => {
                                     const node = referenceNodes.find(node => node.id === reference.nodeId);
-                                    return <Tooltip title={node?.title || reference.label} key={reference.nodeId}><span className="inline-flex items-center gap-1 rounded border px-2 py-1" style={{ borderColor: theme.node.stroke }}>
-                                        {node ? <CanvasPersistedMediaPreview kind="image" url={node.metadata?.content} storageKey={node.metadata?.storageKey} alt="" className="size-7 rounded object-cover" /> : null}{reference.label}{node?.title ? ` · ${node.title}` : ""}
+                                    return <Tooltip title={<DisplayText text={node?.title || reference.label} />} key={reference.nodeId}><span className="inline-flex items-center gap-1 rounded border px-2 py-1" style={{ borderColor: theme.node.stroke }}>
+                                        {node ? <CanvasPersistedMediaPreview kind="image" url={node.metadata?.content} storageKey={node.metadata?.storageKey} alt="" className="size-7 rounded object-cover" /> : null}{reference.label}{node?.title ? <> · <DisplayText text={node.title} /></> : null}
                                     </span></Tooltip>;
                                 })}
                             </div>
@@ -213,7 +215,7 @@ export function CanvasAgentMediaWorkflowCard({
                     <ModelSelect ariaLabel={t("选择视频模型")} emptyLabel={t("暂无视频模型")} models={videoModels} value={card.videoModelSelect.value} disabled={card.videoModelSelect.disabled} onChange={onVideoModelChange} />
                     <div className="grid grid-cols-2 gap-2">
                         <WorkflowValueSelect ariaLabel={t("视频时长")} value={card.videoSeconds} values={seconds} suffix={t(" 秒")} disabled={!onVideoSecondsChange} onChange={onVideoSecondsChange} />
-                        {imageRatio ? <span className="self-center text-xs opacity-65">比例由原图决定</span> : <WorkflowValueSelect ariaLabel={t("画面比例")} value={card.aspectRatio} values={ratios} disabled={!onAspectRatioChange} onChange={onAspectRatioChange} />}
+                        {imageRatio ? <span className="self-center text-xs opacity-65">{staticUiText("比例由原图决定")}</span> : <WorkflowValueSelect ariaLabel={t("画面比例")} value={card.aspectRatio} values={ratios} disabled={!onAspectRatioChange} onChange={onAspectRatioChange} />}
                     </div>
                     <p className="text-xs opacity-65">{t("已选图片：")}{card.selectedCandidateSummary}</p>
                     <Button block disabled={card.videoGenerateButton.disabled} icon={workflow.videoStatus === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Video className="size-3.5" />} onClick={onGenerateVideo}>
@@ -244,10 +246,10 @@ function ModelSelect({ ariaLabel, emptyLabel, models, value, disabled, onChange 
     return (
         <Select value={value} disabled={disabled} onValueChange={onChange}>
             <SelectTrigger aria-label={ariaLabel} className="h-9 w-full text-sm">
-                <span className="truncate">{value ? labelFor(value) : ariaLabel}</span>
+                <span className="truncate">{value ? <DisplayText text={labelFor(value)} /> : ariaLabel}</span>
             </SelectTrigger>
             <SelectContent position="popper" align="start" className="z-[var(--cw-z-popover,900)]">
-                {models.length ? models.map((model) => <SelectItem key={model} value={model}>{labelFor(model)}</SelectItem>) : <SelectItem value="__empty_model__" disabled>{emptyLabel}</SelectItem>}
+                {models.length ? models.map((model) => <SelectItem key={model} value={model}><DisplayText text={labelFor(model)} /></SelectItem>) : <SelectItem value="__empty_model__" disabled>{emptyLabel}</SelectItem>}
             </SelectContent>
         </Select>
     );
@@ -260,5 +262,5 @@ function WorkflowStageTitle({ icon, title, status }: { icon: React.ReactNode; ti
 
 function WorkflowError({ error, role, onRetry }: { error: string; role: "alert"; onRetry?: () => void }) {
     const t = useUiText();
-    return <div role={role} className="flex items-center justify-between gap-2 rounded-md bg-red-500/10 px-2 py-2 text-xs text-red-600 dark:text-red-300"><span>{error}</span>{onRetry ? <Button size="small" type="text" icon={<RefreshCw className="size-3" />} onClick={onRetry}>{t("重试")}</Button> : null}</div>;
+    return <div role={role} className="flex items-center justify-between gap-2 rounded-md bg-red-500/10 px-2 py-2 text-xs text-red-600 dark:text-red-300"><span><DisplayText text={error} /></span>{onRetry ? <Button size="small" type="text" icon={<RefreshCw className="size-3" />} onClick={onRetry}>{t("重试")}</Button> : null}</div>;
 }

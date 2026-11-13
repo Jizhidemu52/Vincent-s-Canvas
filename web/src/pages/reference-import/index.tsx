@@ -1,4 +1,5 @@
 import { uiText, useUiText } from "@/lib/i18n";
+import { DisplayText, useDisplayText } from "@/hooks/use-display-text";
 import { PracticeExampleRecord } from "@/components/design-examples";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Empty, Input, Tag, Tooltip } from "antd";
@@ -14,19 +15,22 @@ import { scanReferencePage, type ReferenceScan } from "@/services/api/reference-
 
 type Draft = { payload: ReferencePayload; file: File; preview: string; clientReferenceId: string; selected: boolean; status: "pending" | "uploading" | "done" | "error"; error?: string };
 type PageScan = { result: ReferenceScan; inputUrl: string };
+type UiMessage = string | { source: string; parameters: Record<string, string | number> };
+const messageText = (value: UiMessage) => typeof value === "string" ? value : uiText(value.source, value.parameters);
 
 export default function ReferenceImportPage() {
     useUiText();
+    const display = useDisplayText();
     const user = useUserStore(state => state.user);
     const nonce = useRef(new URLSearchParams(window.location.hash.slice(1)).get("referenceNonce") || "");
     const drafts = useRef<Draft[]>([]);
     const [items, setItems] = useState<Draft[]>([]);
-    const [notice, setNotice] = useState("");
+    const [notice, setNotice] = useState<UiMessage>("");
     const [busy, setBusy] = useState(false);
     const [collecting, setCollecting] = useState(false);
     const [pageUrl, setPageUrl] = useState("");
     const pageUrlRef = useRef("");
-    const [progress, setProgress] = useState("");
+    const [progress, setProgress] = useState<UiMessage>("");
     const [failures, setFailures] = useState<{ name: string; reason: string }[]>([]);
     const [scanWarnings, setScanWarnings] = useState<string[]>([]);
     const [pageTitle, setPageTitle] = useState("");
@@ -57,7 +61,7 @@ export default function ReferenceImportPage() {
                 cancelled.current = true; nonce.current = ""; clear();
                 owner.current = state.user?.id;
                 busyRef.current = false; setBusy(false); setCollecting(false);
-                setNotice(uiText("员工身份已变化，本批采集已停止并清空。请重新采集。"));
+                setNotice("员工身份已变化，本批采集已停止并清空。请重新采集。");
             }
         });
     }, []);
@@ -78,7 +82,7 @@ export default function ReferenceImportPage() {
                 if (drafts.current.length >= MAX_IMAGES || drafts.current.reduce((sum, item) => sum + item.file.size, 0) + file.size > MAX_TOTAL_BYTES) throw new Error("本批最多 20 张、合计 30 MiB；请完成后开始新一批");
                 drafts.current.push({ payload, file, preview: URL.createObjectURL(file), clientReferenceId: `web-reference-${createClientId()}`, selected: true, status: "pending" });
                 publish(); ack(true);
-            } catch (error) { const reason = error instanceof Error ? error.message : "图片接收失败"; setNotice(uiText(reason)); ack(false, reason); }
+            } catch (error) { const reason = error instanceof Error ? error.message : "图片接收失败"; setNotice(reason); ack(false, reason); }
         };
         window.addEventListener("message", receive);
         return () => { cancelled.current = true; revision.current++; controller.current?.abort(); window.removeEventListener("message", receive); drafts.current.forEach(item => URL.revokeObjectURL(item.preview)); };
@@ -86,13 +90,13 @@ export default function ReferenceImportPage() {
 
     const collect = async () => {
         if (busyRef.current || !user?.id) return;
-        if (drafts.current.length) { setNotice(uiText("请先审核、导入或清空本页草稿，再采集另一网页。现有图片不会被覆盖。")); return; }
+        if (drafts.current.length) { setNotice("请先审核、导入或清空本页草稿，再采集另一网页。现有图片不会被覆盖。"); return; }
         invalidateScan();
         const expectedOwnerId = user.id;
         const currentRevision = revision.current;
         const requestController = new AbortController(); controller.current = requestController;
         const active = () => revision.current === currentRevision && useUserStore.getState().user?.id === expectedOwnerId && !requestController.signal.aborted;
-        busyRef.current = true; setBusy(true); setCollecting(true); setNotice(""); setFailures([]); setScanWarnings([]); setPageTitle(""); setProgress(uiText("正在读取公开网页…"));
+        busyRef.current = true; setBusy(true); setCollecting(true); setNotice(""); setFailures([]); setScanWarnings([]); setPageTitle(""); setProgress("正在读取公开网页…");
         try {
             const inputUrl = normalizePageUrl(pageUrlRef.current);
             const result = await scanReferencePage(inputUrl, expectedOwnerId, requestController.signal);
@@ -100,10 +104,10 @@ export default function ReferenceImportPage() {
                 const currentScan = { result, inputUrl }; scanRef.current = currentScan; setScan(currentScan);
                 setCandidateIds(result.candidates.slice(0, MAX_IMAGES).map(item => item.id));
                 setPageTitle(result.pageTitle); setScanWarnings(result.warnings);
-                setProgress(uiText("找到 {length} 张候选图片，请选择最多 20 张后读取；尚未下载图片或写入素材库", { length: result.candidates.length }));
+                setProgress({ source: "找到 {length} 张候选图片，请选择最多 20 张后读取；尚未下载图片或写入素材库", parameters: { length: result.candidates.length } });
             }
         } catch (error) {
-            if (active()) { setNotice(error instanceof Error ? uiText(error.message) : uiText("网页扫描失败")); setProgress(uiText("扫描未完成，可修改链接后重试")); }
+            if (active()) { setNotice(error instanceof Error ? error.message : "网页扫描失败"); setProgress("扫描未完成，可修改链接后重试"); }
         } finally {
             if (revision.current === currentRevision) { controller.current = null; busyRef.current = false; setBusy(false); setCollecting(false); }
         }
@@ -115,12 +119,12 @@ export default function ReferenceImportPage() {
         try {
             inputUrl = normalizePageUrl(pageUrlRef.current);
             if (inputUrl !== scan.inputUrl) throw new Error("网页链接已变化，请重新扫描后读取图片");
-        } catch (error) { invalidateScan(); setNotice(error instanceof Error ? uiText(error.message) : uiText("请重新扫描网页")); return; }
+        } catch (error) { invalidateScan(); setNotice(error instanceof Error ? error.message : "请重新扫描网页"); return; }
         const expectedOwnerId = user.id;
         const currentRevision = ++revision.current;
         const requestController = new AbortController(); controller.current = requestController;
         const active = () => revision.current === currentRevision && useUserStore.getState().user?.id === expectedOwnerId && !requestController.signal.aborted;
-        busyRef.current = true; setBusy(true); setCollecting(true); setNotice(""); setFailures([]); setProgress(uiText("正在读取已选图片…"));
+        busyRef.current = true; setBusy(true); setCollecting(true); setNotice(""); setFailures([]); setProgress("正在读取已选图片…");
         let received = 0;
         try {
             await collectReferencePage({
@@ -133,11 +137,11 @@ export default function ReferenceImportPage() {
                     received++; publish();
                 },
                 onFailure: (name, reason) => { if (active()) setFailures(value => [...value, { name, reason }]); },
-                onProgress: (completed, total) => { if (active()) setProgress(uiText("正在读取图片 {completed}/{total}…", { completed: completed, total: total })); },
+                onProgress: (completed, total) => { if (active()) setProgress({ source: "正在读取图片 {completed}/{total}…", parameters: { completed, total } }); },
             });
-            if (active()) setProgress(received ? uiText("已读取 {received} 张，请审核后确认导入", { received: received }) : uiText("没有可读取的图片，请检查下方提示或尝试其他公开网页"));
+            if (active()) setProgress(received ? { source: "已读取 {received} 张，请审核后确认导入", parameters: { received } } : "没有可读取的图片，请检查下方提示或尝试其他公开网页");
         } catch (error) {
-            if (active()) { setNotice(error instanceof Error ? uiText(error.message) : uiText("网页采集失败")); setProgress(uiText("采集已停止；已读取的图片仍需确认导入")); }
+            if (active()) { setNotice(error instanceof Error ? error.message : "网页采集失败"); setProgress("采集已停止；已读取的图片仍需确认导入"); }
         } finally {
             if (revision.current === currentRevision) { controller.current = null; busyRef.current = false; setBusy(false); setCollecting(false); }
         }
@@ -146,7 +150,7 @@ export default function ReferenceImportPage() {
     const cancelCollection = () => {
         revision.current++; controller.current?.abort(); controller.current = null;
         busyRef.current = false; setBusy(false); setCollecting(false);
-        setProgress(uiText("采集已取消，已读取图片保留供审核；尚未写入素材库"));
+        setProgress("采集已取消，已读取图片保留供审核；尚未写入素材库");
     };
 
     useEffect(() => {
@@ -187,9 +191,9 @@ export default function ReferenceImportPage() {
                 }
                 }));
             }
-            if (revision.current === currentRevision && failed) setNotice(uiText("{failed} 张图片导入失败，其他图片已继续处理。可只重试失败项；成功项不会再次提交。", { failed: failed }));
+            if (revision.current === currentRevision && failed) setNotice({ source: "{failed} 张图片导入失败，其他图片已继续处理。可只重试失败项；成功项不会再次提交。", parameters: { failed } });
         } catch (error) {
-            if (revision.current === currentRevision) setNotice(error instanceof Error ? uiText(error.message) : uiText("导入中断，已成功项保留，可重试剩余图片"));
+            if (revision.current === currentRevision) setNotice(error instanceof Error ? error.message : "导入中断，已成功项保留，可重试剩余图片");
         } finally { if (revision.current === currentRevision) { busyRef.current = false; setBusy(false); } }
     };
 
@@ -202,19 +206,19 @@ export default function ReferenceImportPage() {
                 <label htmlFor="reference-page-url" className="block text-sm font-medium">{uiText("公开网页链接")}</label>
                 <div className="flex flex-col gap-3 sm:flex-row"><Input id="reference-page-url" type="url" value={pageUrl} onChange={event => changePageUrl(event.target.value)} placeholder={uiText("https://example.com/gallery（也支持 HTTP）")} autoComplete="off" disabled={busy} className="min-w-0 flex-1" /><Button htmlType="submit" type="primary" icon={<Search size={16} />} loading={collecting} disabled={busy || !user?.id || !pageUrl.trim()} data-testid="reference-scan">{uiText("采集网页图片")}</Button>{collecting && <Button onClick={cancelCollection}>{uiText("取消采集")}</Button>}</div>
                 <p className="text-xs leading-5 text-muted-foreground">{uiText("扫描公开 HTML 中最多 100 张候选，先选择最多 20 张再读取，不执行网页脚本。登录、动态加载或防盗链图片可能无法读取；已有草稿请先处理，再开始新一批。")}</p>
-                {(progress || pageTitle) && <div role="status" className="break-words text-sm text-muted-foreground">{pageTitle && <span className="mr-3 font-medium text-foreground">{pageTitle}</span>}{uiText(progress || "")}</div>}
+                {(progress || pageTitle) && <div role="status" className="break-words text-sm text-muted-foreground">{pageTitle && <span className="mr-3 font-medium text-foreground"><DisplayText text={pageTitle} /></span>}<DisplayText text={messageText(progress)} /></div>}
             </form>
             {scan && !items.length && <section aria-label={uiText("网页候选图片")} className="space-y-3 rounded-xl border border-border p-4">
                 <div className="flex flex-wrap items-center gap-3"><h2 className="font-medium">{uiText("选择要读取的候选图片")}</h2><span className="text-sm text-muted-foreground">{uiText("已选 ")}{candidateIds.length}{uiText("/20 · 共 ")}{scan.result.candidates.length} {uiText(" 张")}</span><Button size="small" disabled={busy} onClick={() => setCandidateIds([])}>{uiText("清空选择")}</Button><Button size="small" disabled={busy} onClick={() => setCandidateIds(scan.result.candidates.slice(0, MAX_IMAGES).map(item => item.id))}>{uiText("选择前 20 张")}</Button></div>
-                <div className="grid max-h-72 gap-3 overflow-y-auto sm:grid-cols-2">{scan.result.candidates.map((candidate, index) => <div key={candidate.id} className="min-w-0"><Checkbox checked={candidateIds.includes(candidate.id)} disabled={busy || (!candidateIds.includes(candidate.id) && candidateIds.length >= MAX_IMAGES)} onChange={event => setCandidateIds(current => event.target.checked ? [...current, candidate.id] : current.filter(id => id !== candidate.id))}>{index + 1}. {candidate.name}</Checkbox><Tooltip title={candidate.sourceImage}><p className="truncate pl-6 text-xs text-muted-foreground" >{candidate.sourceImage}</p></Tooltip></div>)}</div>
+                <div className="grid max-h-72 gap-3 overflow-y-auto sm:grid-cols-2">{scan.result.candidates.map((candidate, index) => <div key={candidate.id} className="min-w-0"><Checkbox checked={candidateIds.includes(candidate.id)} disabled={busy || (!candidateIds.includes(candidate.id) && candidateIds.length >= MAX_IMAGES)} onChange={event => setCandidateIds(current => event.target.checked ? [...current, candidate.id] : current.filter(id => id !== candidate.id))}>{index + 1}. <DisplayText text={candidate.name} /></Checkbox><Tooltip title={candidate.sourceImage}><p className="truncate pl-6 text-xs text-muted-foreground" >{candidate.sourceImage}</p></Tooltip></div>)}</div>
                 <Button type="primary" disabled={busy || !candidateIds.length} onClick={() => void readSelectedCandidates()}>{uiText("读取所选 ")}{candidateIds.length} {uiText(" 张图片")}</Button><p className="text-xs text-muted-foreground">{uiText("读取后可查看原图并再次审核；候选记录约 5 分钟后过期。")}</p>
             </section>}
-            <Alert type="info" title={uiText("当前员工：{value1} · {length}/20 张 · 原始图片字节，不压缩、不重绘", { value1: user?.displayName || user?.username || "未登录", length: items.length })} description={uiText("仅 PNG / JPEG / WebP / GIF，单张 ≤ 10 MiB、总计 ≤ 30 MiB。来源会移除查询参数和片段。草稿仅在本页内存中，刷新或离页会丢失；请确认你有权保存这些图片。")} />
-            {notice && <Alert type="warning" title={uiText(notice || "")} closable onClose={() => setNotice("")} />}
-            {scanWarnings.length > 0 && <Alert type="info" title={uiText("网页采集提示")} description={<ul className="list-disc space-y-1 pl-4">{scanWarnings.map((warning, index) => <li key={index}>{uiText(warning || "")}</li>)}</ul>} />}
-            {failures.length > 0 && <Alert type="warning" title={uiText("{length} 张图片未能读取，其他图片仍可审核", { length: failures.length })} description={<ul className="list-disc space-y-1 break-words pl-4">{failures.map((failure, index) => <li key={index}>{failure.name}：{uiText(failure.reason || "")}</li>)}</ul>} />}
-            <div className="flex flex-wrap items-center gap-3"><Button type="primary" icon={<Upload size={16} />} disabled={!pending || busy} onClick={() => void importSelected()} data-testid="reference-confirm">{uiText("确认导入 ")}{pending ? uiText("{pending} 张", { pending: pending }) : ""}</Button>{busy && !collecting ? <Button onClick={() => { cancelled.current = true; setNotice(uiText("已取消后续导入；正在上传的图片可能已经保存，请等待其结果。")); }}>{uiText("取消后续导入")}</Button> : <Button disabled={busy || (!items.length && !scan)} onClick={clear}>{uiText("清空本页草稿")}</Button>}<span role="status" className="text-sm text-muted-foreground">{busy && !collecting ? uiText("正在导入，最多同时处理 3 张…") : uiText("已成功 {length} 张", { length: items.filter(item => item.status === "done").length })}</span></div>
-            {!items.length ? <Empty description={collecting ? uiText("正在读取网页中的图片…") : nonce.current ? uiText("可粘贴链接采集，也可回到扩展采集标签页发送图片") : uiText("粘贴网页链接，开始收集参考图片")} /> : <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{items.map(item => <article key={item.clientReferenceId} data-testid="reference-draft" className="overflow-hidden rounded-xl border border-border bg-card"><img src={item.preview} alt={item.file.name} className="aspect-[4/3] w-full object-contain" onError={() => { item.error = "浏览器无法解码这张图片，请勿导入"; item.selected = false; publish(); }} /><div className="space-y-2 p-4"><Checkbox checked={item.selected} disabled={busy || item.status === "done" || Boolean(item.error?.includes("解码"))} onChange={event => { item.selected = event.target.checked; publish(); }}><span className="break-all">{item.file.name}</span></Checkbox><p className="text-xs text-muted-foreground">{(item.file.size / 1024 / 1024).toFixed(2)} MiB · {item.file.type}</p><p className="break-all text-xs text-muted-foreground">{uiText("来源：")}{item.payload.sourcePage || uiText("未提供")}</p>{item.payload.sourceImage && <a className="block break-all text-xs" href={item.payload.sourceImage} target="_blank" rel="noreferrer">{uiText("查看来源图片")}</a>}<Tag color={item.status === "done" ? "green" : undefined}>{uiText(({ pending: "待审核", uploading: "上传中", done: "已导入", error: "失败，可重试" })[item.status])}</Tag>{item.error && <p role="alert" className="text-sm text-destructive">{uiText(item.error || "")}</p>}</div></article>)}</div>}
+            <Alert type="info" title={uiText("当前员工：{value1} · {length}/20 张 · 原始图片字节，不压缩、不重绘", { value1: display(user?.displayName || user?.username || "未登录"), length: items.length })} description={uiText("仅 PNG / JPEG / WebP / GIF，单张 ≤ 10 MiB、总计 ≤ 30 MiB。来源会移除查询参数和片段。草稿仅在本页内存中，刷新或离页会丢失；请确认你有权保存这些图片。")} />
+            {notice && <Alert type="warning" title={<DisplayText text={messageText(notice)} />} closable onClose={() => setNotice("")} />}
+            {scanWarnings.length > 0 && <Alert type="info" title={uiText("网页采集提示")} description={<ul className="list-disc space-y-1 pl-4">{scanWarnings.map((warning, index) => <li key={index}><DisplayText text={warning || ""} /></li>)}</ul>} />}
+            {failures.length > 0 && <Alert type="warning" title={uiText("{length} 张图片未能读取，其他图片仍可审核", { length: failures.length })} description={<ul className="list-disc space-y-1 break-words pl-4">{failures.map((failure, index) => <li key={index}><DisplayText text={failure.name} />：<DisplayText text={failure.reason || ""} /></li>)}</ul>} />}
+            <div className="flex flex-wrap items-center gap-3"><Button type="primary" icon={<Upload size={16} />} disabled={!pending || busy} onClick={() => { void importSelected(); }} data-testid="reference-confirm">{uiText("确认导入 ")}{pending ? uiText("{pending} 张", { pending: pending }) : ""}</Button>{busy && !collecting ? <Button onClick={() => { cancelled.current = true; setNotice("已取消后续导入；正在上传的图片可能已经保存，请等待其结果。"); }}>{uiText("取消后续导入")}</Button> : <Button disabled={busy || (!items.length && !scan)} onClick={clear}>{uiText("清空本页草稿")}</Button>}<span role="status" className="text-sm text-muted-foreground">{busy && !collecting ? uiText("正在导入，最多同时处理 3 张…") : uiText("已成功 {length} 张", { length: items.filter(item => item.status === "done").length })}</span></div>
+            {!items.length ? <Empty description={collecting ? uiText("正在读取网页中的图片…") : nonce.current ? uiText("可粘贴链接采集，也可回到扩展采集标签页发送图片") : uiText("粘贴网页链接，开始收集参考图片")} /> : <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{items.map(item => <article key={item.clientReferenceId} data-testid="reference-draft" className="overflow-hidden rounded-xl border border-border bg-card"><img src={item.preview} alt={display(item.file.name)} className="aspect-[4/3] w-full object-contain" onError={() => { item.error = "浏览器无法解码这张图片，请勿导入"; item.selected = false; publish(); }} /><div className="space-y-2 p-4"><Checkbox checked={item.selected} disabled={busy || item.status === "done" || Boolean(item.error?.includes("解码"))} onChange={event => { item.selected = event.target.checked; publish(); }}><span className="break-all"><DisplayText text={item.file.name} /></span></Checkbox><p className="text-xs text-muted-foreground">{(item.file.size / 1024 / 1024).toFixed(2)} MiB · {item.file.type}</p><p className="break-all text-xs text-muted-foreground">{uiText("来源：")}{item.payload.sourcePage || uiText("未提供")}</p>{item.payload.sourceImage && <a className="block break-all text-xs" href={item.payload.sourceImage} target="_blank" rel="noreferrer">{uiText("查看来源图片")}</a>}<Tag color={item.status === "done" ? "green" : undefined}>{uiText(({ pending: "待审核", uploading: "上传中", done: "已导入", error: "失败，可重试" })[item.status])}</Tag>{item.error && <p role="alert" className="text-sm text-destructive"><DisplayText text={item.error} /></p>}</div></article>)}</div>}
             <div className="max-w-2xl"><PracticeExampleRecord /></div>
             <details id="install" className="rounded-xl border border-border p-5"><summary className="cursor-pointer font-medium">{uiText("可选：使用 Chrome 扩展采集当前网页")}</summary><p className="mt-3 text-sm text-muted-foreground">{uiText("适合查看浏览器当前网页中的图片，不保证能读取登录或防盗链图片的原始字节。普通公开网页直接粘贴链接即可，无需扩展。")}</p><ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-6"><li>{uiText("在本项目目录找到 ")}<code>tools/chrome-reference-importer</code>{uiText("，打开 ")}<code>chrome://extensions</code>{uiText("，启用开发者模式，点击“加载已解压的扩展程序”并选择该目录。")}</li><li>{uiText("先在此浏览器登录画布网站（企业用户仍从 OA 进入）。在需要采集的网页点击扩展图标，会打开独立采集标签页。")}</li><li>{uiText("填写画布地址 ")}<code>{window.location.origin}</code>{uiText("；扫描当前网页、勾选图片，再点击“授权并送到画布审核”。权限只请求画布域名和已勾选图片所在域名。")}</li><li>{uiText("回到自动打开的审核页核对来源与图片，再确认导入。扩展不采视频、不自动翻页，也不绕过登录、付费或 DRM 限制。")}</li></ol><p className="mt-3 text-xs text-muted-foreground">{uiText("本机和可信内网可使用 HTTP；其他地址必须 HTTPS。扩展可在 Chrome 的扩展管理页面随时移除或撤销站点权限。详细打包与测试说明见扩展目录 README.md。")}</p></details>
         </div>

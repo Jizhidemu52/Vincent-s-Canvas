@@ -1,4 +1,4 @@
-import { generalPromptTemplates } from "../../../../shared/general-prompt-templates";
+import { getLocalizedGeneralPrompts } from "@/pages/prompts/general-prompts";
 import { ALL_PROMPTS_OPTION, type Prompt, type PromptLibraryScope } from "@/services/api/prompts";
 
 export const promptLibrarySourceLabels: Record<PromptLibraryScope, string> = {
@@ -8,7 +8,7 @@ export const promptLibrarySourceLabels: Record<PromptLibraryScope, string> = {
 /** Built-ins are text, not database templates: their IDs must never be resolved. */
 export function generalPromptOptions(keyword: string, tags: readonly string[], category: string): Prompt[] {
     const words = keyword.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-    return generalPromptTemplates.filter(item => {
+    return getLocalizedGeneralPrompts().filter(item => {
         const text = [item.title, item.prompt, item.notes, item.category, ...item.tags].join("\n").toLocaleLowerCase();
         return words.every(word => text.includes(word))
             && (!category || category === ALL_PROMPTS_OPTION || item.category === category)

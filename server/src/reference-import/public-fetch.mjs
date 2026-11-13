@@ -63,7 +63,7 @@ function byteLimit(maxBytes) {
 /** Fresh socket, checked address pinned at lookup; original host remains for
  * Host/SNI/certificate identity. No global agent, proxy, cookies or credentials.
  * Exported separately to exercise actual native sockets in offline fixtures. */
-export async function requestPinned(url, address, { maxBytes, signal, kind }) {
+export async function requestPinned(url, address, { maxBytes, signal, kind, connectTimeoutMs }) {
   if (process.versions.bun) throw fail("NATIVE_NODE_REQUIRED", "网页采集需要原生 Node.js 运行环境", 503);
   const secure = url.protocol === "https:";
   const agent = secure ? new https.Agent({ keepAlive: false, maxCachedSessions: 0, proxyEnv: {} }) : new http.Agent({ keepAlive: false, proxyEnv: {} });
@@ -76,8 +76,15 @@ export async function requestPinned(url, address, { maxBytes, signal, kind }) {
       headers: { accept: kind === "html" ? "text/html,application/xhtml+xml" : "image/png,image/jpeg,image/webp,image/gif", "accept-encoding": "gzip, deflate, br", "user-agent": "CanvasReferenceImport/1.0", connection: "close" },
       maxHeaderSize: 16 * 1024,
     });
-    request.once("error", (error) => { agent.destroy(); reject(error); });
-    request.once("response", resolve);
+    // An optional connection-only deadline lets layer downloads try another
+    // already checked DNS answer without truncating a healthy slow body.
+    const connectionTimer = connectTimeoutMs > 0 ? setTimeout(() => {
+      request.destroy(Object.assign(new Error("Public connection timed out"), { code: "ETIMEDOUT" }));
+    }, connectTimeoutMs) : undefined;
+    const connected = () => clearTimeout(connectionTimer);
+    request.once("socket", socket => socket.once(secure ? "secureConnect" : "connect", connected));
+    request.once("error", (error) => { connected(); agent.destroy(); reject(error); });
+    request.once("response", response => { connected(); resolve(response); });
     request.end();
   });
   try {

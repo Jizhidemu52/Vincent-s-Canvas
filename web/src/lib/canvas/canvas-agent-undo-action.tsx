@@ -1,4 +1,6 @@
 import type { App } from "antd";
+import { uiText } from "@/lib/i18n";
+import { DisplayText, displayNotice } from "@/hooks/use-display-text";
 import type { CanvasNodeGroup } from "@/types/canvas";
 import type { CanvasAgentSnapshot, CanvasAgentUndoReport } from "./canvas-agent-ops";
 import { createCanvasAgentUndoPatch, undoCanvasAgentPatch, type CanvasAgentUndoRecord } from "./canvas-agent-undo";
@@ -65,8 +67,8 @@ export function executeCanvasAgentTurnUndo(input: {
 
 function showCanvasAgentUndoResult(report: CanvasAgentUndoReport, { modal, message }: UndoFeedback) {
     if (report.conflicts.length) modal.warning({
-        title: report.applied ? "助手操作已部分撤销" : "助手操作暂未撤销",
-        content: <div className="space-y-2"><p>{canvasAgentUndoMessage(report)}</p><ul className="max-h-64 list-disc overflow-auto pl-4 text-xs">{report.conflicts.map((conflict, index) => <li key={`${conflict.location}:${index}`}>{conflict.location}：{conflict.reason}</li>)}</ul></div>,
+        title: uiText(report.applied ? "助手操作已部分撤销" : "助手操作暂未撤销"),
+        content: <div className="space-y-2"><p><DisplayText text={canvasAgentUndoMessage(report)} /></p><ul className="max-h-64 list-disc overflow-auto pl-4 text-xs">{report.conflicts.map((conflict, index) => <li key={`${conflict.location}:${index}`}><DisplayText text={`${conflict.location}：${conflict.reason}`} /></li>)}</ul></div>,
     });
-    else message.success(canvasAgentUndoMessage(report));
+    else message.success(displayNotice(canvasAgentUndoMessage(report)));
 }

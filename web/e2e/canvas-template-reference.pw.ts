@@ -24,6 +24,14 @@ test("empty template reference uploads an original into the same node and restor
     await expect.poll(() => api.document(id)?.nodes.length).toBe(4);
     const graph = structuredClone(api.document(id)!);
     const source = graph.nodes.find((node: any) => node.type === "image");
+    const branch = graph.nodes.find((node: any) => node.type === "config");
+    const configPanel = page.locator(`[data-node-id="${branch.id}"]`);
+    const chip = configPanel.locator(`[data-reference-node-id="${source.id}"]`);
+    await expect(chip).toHaveAttribute("data-reference-state", "pending");
+    await expect(chip).toHaveText("待上传原图");
+    await expect(configPanel.getByRole("button", { name: "开始生成", exact: true })).toBeDisabled();
+    await expect(configPanel.getByRole("status").filter({ hasText: "先设置参考款原图" })).toBeVisible();
+    await expect(configPanel).not.toContainText("已失效引用");
     await page.locator(`[data-node-id="${source.id}"]`).dblclick({ position: { x: 40, y: 40 } });
     const setup = page.getByRole("region", { name: "参考款原图设置", exact: true });
     await expect(setup).toBeVisible();
@@ -41,12 +49,25 @@ test("empty template reference uploads an original into the same node and restor
     expect(saved.nodes.find((node: any) => node.id === source.id).title).toBe("template-original.png");
     expect(api.submissions).toHaveLength(0);
     expect(api.batchSubmissions).toHaveLength(0);
+    await expect(chip).toHaveAttribute("data-reference-state", "image");
+    await expect(chip.locator("img")).toBeVisible();
+    await expect(configPanel.getByRole("button", { name: "开始生成", exact: true })).toBeEnabled();
     await page.reload();
     const preview = page.locator(`[data-node-id="${source.id}"] img`).first();
     await expect(preview).toBeVisible();
     await expect.poll(() => preview.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
     expect(api.document(id)!.connections).toEqual(graph.connections);
     expect(api.submissions).toHaveLength(0);
+    // A real deletion is still an invalid reference, not another upload slot.
+    await page.locator(`[data-node-id="${source.id}"]`).click({ position: { x: 40, y: 40 } });
+    await page.keyboard.press("Delete");
+    await expect.poll(() => api.document(id)?.nodes.some((node: any) => node.id === source.id)).toBe(false);
+    await expect(chip).toHaveAttribute("data-reference-state", "invalid");
+    await expect(chip).toHaveText("已失效引用 ×");
+    await configPanel.getByRole("button", { name: "开始生成", exact: true }).click();
+    await expect(page.getByText("提示词中含有已失效引用，请移除该引用并重新选择素材。", { exact: true })).toBeVisible();
+    expect(api.submissions).toHaveLength(0);
+    expect(api.batchSubmissions).toHaveLength(0);
 });
 
 test("existing single attachment is promoted with its original storage key and shared cloud asset", async ({ page, api }, info) => {

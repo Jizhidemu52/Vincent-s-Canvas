@@ -1,3 +1,5 @@
+import { displayNotice } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
 import { useUiText } from "@/lib/i18n";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, LoaderCircle, Square, Upload } from "lucide-react";
@@ -143,14 +145,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             onConfigChange(node.id, { ...metadata, ...(mode === "image" ? { draftImageReferences: metadata.manualImageReferences || [] } : {}) });
             updatePrompt(payload.template.prompt);
             promptDraft.flush();
-            payload.warnings.forEach(warning => message.warning(warning));
-            message.success("已套用提示词、模型、参数和参考图，尚未生成");
+            payload.warnings.forEach(warning => message.warning(displayNotice(warning)));
+            message.success(staticUiText("已套用提示词、模型、参数和参考图，尚未生成"));
         } finally { guard.dispose(); }
     };
 
     const submit = () => {
         const text = prompt.trim();
-        if (!config.model) { message.warning(modelError || (modelsStatus === "error" ? "模型列表加载失败，请打开模型选择器重试" : "正在加载模型，请稍候")); return; }
+        if (!config.model) { message.warning(displayNotice(modelError || (modelsStatus === "error" ? staticUiText("模型列表加载失败，请打开模型选择器重试") : staticUiText("正在加载模型，请稍候")))); return; }
         if (!toolEnabled || (requiresPrompt && !text) || isRunning || !referenceValidation.valid || videoValidation || imageInput?.incompleteReferences) return;
         promptDraft.flush();
         void rememberCanvasPrompt(text).catch(() => undefined);
@@ -198,7 +200,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             }));
             saveReferences(dedupeImageReferences([...imageReferences, ...items]));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t("参考图上传失败"));
+            message.error(displayNotice(error instanceof Error ? error.message : t("参考图上传失败")));
         }
     };
 
@@ -214,7 +216,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 <Button loading={settingOriginal} disabled={isRunning || !onUseReferenceAsOriginal} onClick={() => {
                     if (!onUseReferenceAsOriginal || settingOriginal) return;
                     setSettingOriginal(true);
-                    void onUseReferenceAsOriginal(node.id, reference.referenceKey).catch(error => message.error(error instanceof Error ? error.message : t("设置原图失败，请重试"))).finally(() => setSettingOriginal(false));
+                    void onUseReferenceAsOriginal(node.id, reference.referenceKey).catch(error => message.error(displayNotice(error instanceof Error ? error.message : t("设置原图失败，请重试")))).finally(() => setSettingOriginal(false));
                 }}>{t("将这张参考图设为原图")}</Button>
             </div> : attached.length > 1 ? <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{t("当前有多张附加参考图，请上传需要使用的那一张原图；已有参考图会保留。")}</p> : null}
         </section>;
@@ -263,8 +265,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             /> : <p role="status" className="text-xs leading-5">{t("多图融合需要 2–4 张参考图，不使用提示词。原有描述会保留。")}</p>}
 
             {mode === "text" && hasTextContent && node.metadata?.errorDetails?.startsWith("生成已停止，已保留当前文字") ? <div className="mt-2 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}>
-                <span>已保留停止前的文字；续写会新增一个结果，原文不变。</span>
-                <Button size="small" disabled={isRunning || !toolEnabled || !config.model || !config.textModel} onClick={() => { promptDraft.flush(); onGenerate(node.id, "text", `${node.metadata?.prompt || prompt}\n\n请接着当前已有文本继续写，不重复已写内容，保持原要求和行文风格。`); }}>继续生成</Button>
+                <span>{staticUiText("已保留停止前的文字；续写会新增一个结果，原文不变。")}</span>
+                <Button size="small" disabled={isRunning || !toolEnabled || !config.model || !config.textModel} onClick={() => { promptDraft.flush(); onGenerate(node.id, "text", `${node.metadata?.prompt || prompt}\n\n请接着当前已有文本继续写，不重复已写内容，保持原要求和行文风格。`); }}>{staticUiText("继续生成")}</Button>
             </div> : null}
 
             {mode === "image" ? <div className="mt-2">{imageInput?.usesSnapshot ? <section aria-label={t("已选参考图")} className="min-w-0 space-y-2 text-xs">

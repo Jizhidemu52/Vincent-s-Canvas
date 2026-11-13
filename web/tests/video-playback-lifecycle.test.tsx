@@ -43,6 +43,7 @@ function harness(playback: (id: string, options: { signal: AbortSignal }) => Pro
             pending.push(() => { previous?.cleanup?.(); effects[index] = { deps: values, cleanup: effect() }; });
         } },
         "@/lib/i18n": i18nHarness,
+        "@/hooks/use-display-text": { useDisplayText: () => (text: string) => text, DisplayText: ({ text }: { text: string }) => text, DisplayTranslationPreview: () => null },
         // Playback lifecycle runs in the default visible task; task-tab transitions have separate DOM coverage.
         "@/components/workbench-tasks": { WorkbenchTasks: ({ children, urlInputKey: nextKey }: any) => { urlInputKey = nextKey ?? null; return children.type(children.props); }, useWorkbenchTask: () => ({ id: "default", active: true, urlInputKey, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus() {} },
         "@/lib/workspace-storage": { createWorkspaceStorage: () => ({ iterate: async (visit: (value: unknown) => void) => logs.forEach(visit), setItem: async (...args: unknown[]) => writes.push(args) }) },

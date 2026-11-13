@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { App } from "antd";
 import copy from "copy-to-clipboard";
@@ -9,7 +10,7 @@ export function useCopyText({ notifySuccess = true }: { notifySuccess?: boolean 
     return async (value: string, successText = uiText("已复制")) => {
         try {
             const copied = await copy(value);
-            if (copied && notifySuccess) message.success(successText);
+            if (copied && notifySuccess) message.success(displayNotice(successText));
             if (!copied) message.error(uiText("复制失败，请检查浏览器剪贴板权限后重试"));
             return copied;
         } catch {

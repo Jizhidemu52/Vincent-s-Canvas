@@ -27,7 +27,7 @@ test("native workbench language subscriptions touch only explicit UI labels, not
     const all = [fixed, dynamic, userProject, dimension, blend, visibility];
     const root = {
         querySelectorAll(selector: string) {
-            if (selector === "[data-ui-text], [data-ui-bound]") return all.filter(label => label.dataset.uiText !== undefined || label.dataset.uiBound);
+            if (selector === "[data-ui-text], [data-ui-bound], [data-ui-display-text]") return all.filter(label => label.dataset.uiText !== undefined || label.dataset.uiBound || label.dataset.uiDisplayText !== undefined);
             if (selector === "[data-ui-label-action]") return all.filter(label => label.dataset.uiLabelAction);
             const attribute = selector.slice(1, -1);
             return all.filter(label => label.attributes.has(attribute));
@@ -42,7 +42,8 @@ test("native workbench language subscriptions touch only explicit UI labels, not
         expect(fixed.textContent).toBe("Save");
         expect(dynamic.textContent).toBe("Editing · 保存 {count}");
         expect(blend.getAttribute("aria-label")).toBe("Blend mode");
-        expect(visibility.getAttribute("aria-label")).toBe("Hide 保存");
+        expect(visibility.getAttribute("aria-label")).toBe("Hide Save");
+        expect(visibility.dataset.uiLabelName).toBe("保存");
         expect(userProject.textContent).toBe("保存");
         expect(userProject.value).toBe("original-project-id");
         expect(dimension.value).toBe("387.5");

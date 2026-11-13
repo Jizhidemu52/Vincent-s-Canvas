@@ -2,18 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { App, Button, Drawer, Tag } from "antd";
 import { BookOpen, Copy, Save, Send } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { generalPromptTemplates } from "../../../../shared/general-prompt-templates";
 import { useAsyncAction } from "@/hooks/use-async-action";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { useUiText } from "@/lib/i18n";
 import { createPromptActionGuard, promptActionIdentity } from "@/lib/prompt-template-reuse";
 import { createPromptTemplate, promptTargetLabels } from "@/services/api/prompts";
 import { useUserStore } from "@/stores/use-user-store";
-import { generalPromptDestination, generalPromptSnapshot, matchingGeneralPrompts, type GeneralPrompt } from "./general-prompts";
+import { generalPromptDestination, generalPromptSnapshot, getLocalizedGeneralPrompts, matchingGeneralPrompts, type GeneralPrompt } from "./general-prompts";
 
 export function GeneralPromptCatalog({ query, onClear }: { query: string; onClear: () => void }) {
     const t = useUiText();
-    const items = matchingGeneralPrompts(generalPromptTemplates, query);
+    const items = matchingGeneralPrompts(getLocalizedGeneralPrompts(), query);
     return <section aria-label={t("通用提示词")}>
         <p className="mb-5 text-sm leading-6 text-muted-foreground">{t("按公开资料整理的通用起点。替换方括号内的内容后再使用；填入只替换提示词，保留目标页面已有参数和参考图，不会自动生成。")}</p>
         {items.length ? <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{items.map(item => <GeneralPromptCard key={item.id} item={item} />)}</div> : <div className="wb-surface wb-empty"><BookOpen className="size-9" /><strong>{t("没有找到匹配模板")}</strong><p>{t("试试更短的关键词，或清除搜索查看全部内容。")}</p><Button onClick={onClear}>{t("清除搜索")}</Button></div>}
@@ -28,17 +27,19 @@ function GeneralPromptCard({ item }: { item: GeneralPrompt }) {
     const identity = useUserStore(promptActionIdentity);
     const { pending, run } = useAsyncAction(`general-prompt:${item.id}`);
     const [open, setOpen] = useState(false);
-    const [savedIdentity, setSavedIdentity] = useState<string | null>(null);
+    const [savedVariantKey, setSavedVariantKey] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
     const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     useEffect(() => () => clearTimeout(copyTimer.current), []);
+    useEffect(() => { clearTimeout(copyTimer.current); setCopied(false); }, [item.prompt]);
     const copyPrompt = async () => {
         if (!await copyText(item.prompt, t("提示词已复制"))) return;
         clearTimeout(copyTimer.current);
         setCopied(true);
         copyTimer.current = setTimeout(() => setCopied(false), 1200);
     };
-    const saved = savedIdentity === identity;
+    const variantKey = `${identity}:${item.prompt}`;
+    const saved = savedVariantKey === variantKey;
     const fillLabel = `${t("填入")} ${t(promptTargetLabels[item.targetTool])}`;
     const fill = () => navigate(generalPromptDestination(item));
     const save = async () => {
@@ -47,7 +48,7 @@ function GeneralPromptCard({ item }: { item: GeneralPrompt }) {
             guard.assert();
             await createPromptTemplate(generalPromptSnapshot(item));
             if (guard.current()) {
-                setSavedIdentity(identity);
+                setSavedVariantKey(variantKey);
                 message.success(t("已保存到我的提示词"));
             }
         } finally { guard.dispose(); }

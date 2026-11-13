@@ -12,6 +12,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import type { DesignLibraryEntry } from "@/types/design-library";
 import type { DesignLibraryShareDraft } from "./share-draft";
 import { LibraryImage } from "./library-image";
+import { displayNotice, DisplayTranslationPreview, useDisplayText } from "@/hooks/use-display-text";
 
 type DraftFile = { id: string; file: File; preview: string; assetId?: string };
 type Fields = { title: string; thought: string; prompt: string; tags: string[] };
@@ -19,6 +20,7 @@ const supportedTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/
 
 export function PublishDialog({ onClose, onPublished, initialDraft }: { onClose: () => void; onPublished: (entry: DesignLibraryEntry) => void; initialDraft?: DesignLibraryShareDraft }) {
     const t = useUiText();
+    const display = useDisplayText();
     const { message, modal } = App.useApp();
     const ownerId = useUserStore(state => state.user?.id);
     const [form] = Form.useForm<Fields>();
@@ -74,9 +76,9 @@ export function PublishDialog({ onClose, onPublished, initialDraft }: { onClose:
         const incoming = Array.from(selected);
         if (!incoming.length) return;
         if (incoming.some(file => !supportedTypes.has(file.type) || file.size > 20 * 1024 * 1024 || !file.size)) {
-            message.error(t("请选择 PNG、JPG、WebP 或 GIF 图片，每张不超过 20 MB。")); return;
+            message.error(displayNotice(t("请选择 PNG、JPG、WebP 或 GIF 图片，每张不超过 20 MB。"))); return;
         }
-        if (filesRef.current.length + selectedIds.length + incoming.length > 12) { message.warning(t("每次最多分享 12 张图片")); return; }
+        if (filesRef.current.length + selectedIds.length + incoming.length > 12) { message.warning(displayNotice(t("每次最多分享 12 张图片"))); return; }
         dirty.current = true; setAcknowledged(false);
         const next = [...filesRef.current, ...incoming.map(file => ({ id: createClientId(), file, preview: URL.createObjectURL(file) }))];
         filesRef.current = next; setFiles(next);
@@ -113,8 +115,8 @@ export function PublishDialog({ onClose, onPublished, initialDraft }: { onClose:
             const fingerprint = JSON.stringify(input);
             if (requestRef.current.fingerprint !== fingerprint) requestRef.current = { fingerprint, requestId: createClientId() };
             const result = await publishDesignLibrary({ ...input, requestId: requestRef.current.requestId }, { expectedOwnerId: ownerId });
-            assertOwner(); dirty.current = false; message.success(t("已发布到公司设计灵感库")); onPublished(result);
-        } catch (error) { if (mounted.current && useUserStore.getState().user?.id === ownerId) message.error(error instanceof Error ? error.message : t("发布失败，草稿已保留，可重试")); }
+            assertOwner(); dirty.current = false; message.success(displayNotice(t("已发布到公司设计灵感库"))); onPublished(result);
+        } catch (error) { if (mounted.current && useUserStore.getState().user?.id === ownerId) message.error(displayNotice(error instanceof Error ? error.message : t("发布失败，草稿已保留，可重试"))); }
         finally { busyRef.current = false; if (mounted.current) setBusy(false); }
     };
 
@@ -132,17 +134,17 @@ export function PublishDialog({ onClose, onPublished, initialDraft }: { onClose:
                 <p className="my-2 text-xs text-muted-foreground">{t("每张 ≤20 MB，合计 ≤100 MB；按原始图片字节分享。")}</p>
                 <div className="mb-3 grid grid-cols-3 gap-2">{files.map(item => <div key={item.id} className="relative overflow-hidden rounded-lg border border-border"><img className="h-24 w-full object-contain" src={item.preview} alt={item.file.name} /><Tooltip title={item.file.name}><div className="truncate p-1 text-xs" >{item.file.name}</div></Tooltip><button type="button" disabled={busy} aria-label={t("移除 {p0}", { p0: String(item.file.name) })} className="absolute right-1 top-1 rounded-full bg-background p-1" onClick={() => { URL.revokeObjectURL(item.preview); setFiles(current => current.filter(file => file.id !== item.id)); setAcknowledged(false); }}><X size={14} /></button></div>)}</div>
                 <Select className="w-full" mode="multiple" value={selectedIds} loading={assetLoading} maxCount={12 - files.length} placeholder={t("或从我的私有图片选择")} optionFilterProp="label" onOpenChange={open => { if (open && !assetsLoaded) void loadAssets(); }} options={assets.map(asset => ({ value: asset.id, label: `${asset.filename} · ${formatBytes(asset.byteSize)}` }))} onChange={ids => { dirty.current = true; setSelectedIds(ids); setAcknowledged(false); }} />
-                {assetError && <Alert className="mt-2" type="warning" title={assetError} action={<Button size="small" onClick={() => void loadAssets()}>{t("重试")}</Button>} />}
+                {assetError && <Alert className="mt-2" type="warning" title={display(assetError)} action={<Button size="small" onClick={() => void loadAssets()}>{t("重试")}</Button>} />}
                 {assetCursor ? <Button className="mt-2" block loading={assetLoading} onClick={() => void loadAssets(assetCursor)}>{t("加载更多私有图片")}</Button> : null}
                 </section>
             </Form>
             <aside className="space-y-4 rounded-xl bg-muted/40 p-4">
-                <div><div className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground">{t("发布前核对 · 全公司设计师可见")}</div><h3 className="break-words text-lg font-semibold">{title}</h3></div>
+                <div><div className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground">{t("发布前核对 · 全公司设计师可见")}</div><h3 className="break-words text-lg font-semibold">{title}</h3><DisplayTranslationPreview text={title} /></div>
                 <p className="text-sm text-muted-foreground">{t("将公开：你的员工姓名与部门、标题、下方填写的思路和提示词、所选图片及标签。")}</p>
                 {draft?.model && <p className="text-xs text-muted-foreground">{t("来源模型：")}{draft.model}{t("（仅供核对，不自动加入公开内容）")}</p>}
-                {thought && <section><h4 className="mb-1 text-sm font-medium">{t("设计思路")}</h4><p className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-sm">{thought}</p></section>}
-                {prompt && <section><h4 className="mb-1 text-sm font-medium">{t("提示词")}</h4><p className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs">{prompt}</p></section>}
-                {!!tags.length && <div>{tags.map(tag => <Tag key={tag}>{tag}</Tag>)}</div>}
+                {thought && <section><h4 className="mb-1 text-sm font-medium">{t("设计思路")}</h4><p className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-sm">{thought}</p><DisplayTranslationPreview text={thought} /></section>}
+                {prompt && <section><h4 className="mb-1 text-sm font-medium">{t("提示词")}</h4><p className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs">{prompt}</p><DisplayTranslationPreview text={prompt} /></section>}
+                {!!tags.length && <div>{tags.map(tag => <Tag key={tag}>{tag}</Tag>)}{tags.map(tag => <DisplayTranslationPreview key={tag} text={tag} />)}</div>}
                 {!!selectedIds.length && <div className="grid grid-cols-2 gap-2">{assets.filter(asset => selectedIds.includes(asset.id)).map(asset => <figure key={asset.id}><LibraryImage thumbnailUrl={asset.thumbnailUrl} contentUrl={`/api/assets/${encodeURIComponent(asset.id)}/content`} className="h-24 w-full rounded-md object-contain" alt={asset.filename} /><figcaption className="truncate text-xs">{asset.filename}</figcaption></figure>)}</div>}
                 <Alert type="info" showIcon title={t("只分享本次选中的内容")} description={t("不会公开整个画布、聊天记录、未选图片或隐藏提示词。原始素材保持私有。")} />
                 <p className="text-xs leading-5 text-muted-foreground">{t("同事可下载原图、复制提示词、添加到自己的画布。你可查看浏览量与人数，以及下载、复用同事的姓名和部门。撤回只能阻止后续访问，无法收回已下载或已复用的副本。")}</p>

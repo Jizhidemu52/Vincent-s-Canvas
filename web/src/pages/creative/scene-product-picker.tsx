@@ -1,6 +1,7 @@
 import { LoaderCircle, ScanSearch } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { uiText, useUiText } from "@/lib/i18n";
+import { DisplayText } from "@/hooks/use-display-text";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { getImageBlob, resolveImageUrl } from "@/services/image-storage";
 import { uploadServerAsset } from "@/services/api/server-assets";
@@ -93,7 +94,7 @@ export function SceneProductPicker({ sceneId, source, disabled, onConfirm }: {
             <button type="button" className="cs-tool-entry" disabled={disabled || busy || !ready} onClick={() => void act(true)}>{busy ? <LoaderCircle size={14} className="animate-spin" /> : null}{uiText("查询原识别请求")}</button>
         </>}
         {(status === "failed" || rejected) && <>
-            <p className="cs-help" role="status">{rejected ? uiText("本次识别未提交。检查素材或配置后可明确再试，将沿用原编号核验，不会自动重发。") : record?.receipt?.message || uiText("本次识别已结束，未取得有效候选。可手填产品，或明确重新识别。")}</p>
+            <p className="cs-help" role="status"><DisplayText text={rejected ? uiText("本次识别未提交。检查素材或配置后可明确再试，将沿用原编号核验，不会自动重发。") : record?.receipt?.message || uiText("本次识别已结束，未取得有效候选。可手填产品，或明确重新识别。")} /></p>
             <button type="button" className="cs-tool-entry" disabled={disabled || busy || !ready} onClick={() => void act(false, true)}>{busy ? <LoaderCircle size={14} className="animate-spin" /> : null}{uiText("重新识别")}</button>
         </>}
         {status === "success" && !candidates.length && <p className="cs-help" role="status">{uiText("未识别到明确产品，请手动填写要处理的产品。")}</p>}
@@ -101,7 +102,7 @@ export function SceneProductPicker({ sceneId, source, disabled, onConfirm }: {
             <legend className="cs-help">{uiText("请核对候选，再确认要处理的产品")}</legend>
             {candidates.map(item => <label className={`cs-product-candidate${selected === item.id ? " is-active" : ""}`} key={item.id}>
                 <input type="radio" name={`product-${sceneId}-${source?.id}`} value={item.id} checked={selected === item.id} onChange={() => { setSelected(item.id); setConfirmed(false); }} disabled={disabled || busy} />
-                <span><strong>{item.name}</strong><span>{item.brief}</span><small>{uiText("识别依据：")}{item.evidence}</small></span>
+                <span><strong><DisplayText text={item.name} /></strong><span><DisplayText text={item.brief} /></span><small>{uiText("识别依据：")}<DisplayText text={item.evidence} /></small></span>
             </label>)}
             <button type="button" className="cs-tool-entry" disabled={disabled || busy || !candidate} onClick={() => {
                 if (!candidate || disabled || busy || current.current !== key || useUserStore.getState().user?.id !== ownerId) return;
@@ -109,6 +110,6 @@ export function SceneProductPicker({ sceneId, source, disabled, onConfirm }: {
             }}>{uiText("确认使用所选产品")}</button>
         </fieldset>}
         {confirmed && <p className="cs-help" role="status">{uiText("已填入目标产品，可继续手动修改；未生成图片，也未建立像素选区。")}</p>}
-        {(error || record?.error) && <p className="cs-error" role="alert">{error || record?.error}</p>}
+        {(error || record?.error) && <p className="cs-error" role="alert"><DisplayText text={error || record?.error || ""} /></p>}
     </div>;
 }

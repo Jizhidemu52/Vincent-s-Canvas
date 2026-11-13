@@ -159,7 +159,11 @@ export function mountProjectBar(root, session) {
             option.dataset.uiText = "未保存工程";
             select.add(option);
         }
-        for (const project of view.projects) select.add(new Option(project.name, project.id));
+        for (const project of view.projects) {
+            const option = new Option(project.name, project.id);
+            option.dataset.uiDisplayText = project.name;
+            select.add(option);
+        }
         select.value = view.activeId || "";
         for (const control of bar.querySelectorAll("button, select")) control.disabled = !view.ready || view.saving || view.switching;
         const editor = root.querySelector(".workspace");

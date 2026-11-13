@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText } from "@/lib/i18n";
 import { type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasPerformanceScenarioNodeCount } from "@/lib/canvas/canvas-performance-scenario";
@@ -119,7 +120,7 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
         }
         catch (error) {
             if (lifecycle.isCurrent(restoreToken)) {
-                message.error(error instanceof Error ? error.message : uiText("画布读取失败，请重试"));
+                message.error(displayNotice(error instanceof Error ? error.message : uiText("画布读取失败，请重试")));
                 navigate("/canvas", { replace: true });
             }
             return;
@@ -179,7 +180,7 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
             } catch (error) {
                 if (!lifecycle.isCurrent(restoreToken)) return;
                 const reason = error instanceof Error ? error.message : "素材恢复失败";
-                message.warning(uiText("部分素材恢复失败，已保留原始项目内容：{value1}", { value1: reason }));
+                message.warning(displayNotice(uiText("部分素材恢复失败，已保留原始项目内容：{value1}", { value1: reason })));
                 await commitRestoredProject(resetInterruptedGeneration(project.nodes, hydration), project.chatSessions || []);
             }
         };

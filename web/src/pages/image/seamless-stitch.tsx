@@ -1,3 +1,5 @@
+import { displayNotice } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
 import { uiText, useUiText } from "@/lib/i18n";
 import { GenerationAccountHistory } from "@/components/generation-account-history";
 import { formatBeijingTime } from "@/lib/beijing-time";
@@ -166,7 +168,7 @@ export function SeamlessStitchWorkspace() {
             if (initial) setResult({ status: "success", image, durationMs: 0 });
             else setHistoryResult({ status: "success", image, durationMs: 0 });
         } catch (error) {
-            if (sequence === previewSequenceRef.current) message.error(error instanceof Error ? uiText(error.message) : uiText("历史图片读取失败"));
+            if (sequence === previewSequenceRef.current) message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("历史图片读取失败")));
         } finally {
             if (mountedRef.current && sequence === previewSequenceRef.current) setPreviewLoading(false);
         }
@@ -230,7 +232,7 @@ export function SeamlessStitchWorkspace() {
         try {
             await setSourceFromBlob(file, file.name);
         } catch (error) {
-            message.error(error instanceof Error ? uiText(error.message) : uiText("图片上传失败"));
+            message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("图片上传失败")));
         }
     };
 
@@ -240,7 +242,7 @@ export function SeamlessStitchWorkspace() {
             await setSourceFromBlob(image, "clipboard-image.png");
             message.success(uiText("已读取剪贴板图片"));
         } catch (error) {
-            message.error(error instanceof Error ? uiText(error.message) : uiText("剪贴板图片读取失败"));
+            message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("剪贴板图片读取失败")));
         }
     };
 
@@ -256,7 +258,7 @@ export function SeamlessStitchWorkspace() {
             message.success(uiText("已加入参考图"));
             setAssetPickerOpen(false);
         } catch (error) {
-            message.error(error instanceof Error ? uiText(error.message) : uiText("素材读取失败，请重试"));
+            message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("素材读取失败，请重试")));
         }
     };
 
@@ -349,7 +351,7 @@ export function SeamlessStitchWorkspace() {
             const unresolved = submitted && !(error instanceof QueuedTaskFailedError) && (Boolean(taskId) || error instanceof QueuedTaskSubmissionUncertainError);
             if (submitted && !unresolved) await stitchTaskStore.setItem(requestId, { workspaceId, requestId, taskId, pending: false } satisfies StitchTaskRecord);
             const reason = error instanceof Error ? error.message : "无缝拼接失败";
-            if (mountedRef.current) { setHistoryPending(unresolved); setResult({ status: "failed", error: reason }); message.error(uiText(reason)); }
+            if (mountedRef.current) { setHistoryPending(unresolved); setResult({ status: "failed", error: reason }); message.error(displayNotice(uiText(reason))); }
         } finally {
             submitLockRef.current = false;
             if (mountedRef.current && useUserStore.getState().user?.id === ownerId) { setRunning(false); void refreshHistory(); }
@@ -385,14 +387,14 @@ export function SeamlessStitchWorkspace() {
             }
             const firstAssetId = payload.template.referenceAssetIds[0];
             if (firstAssetId) await setSourceFromBlob(await fetchServerAssetContent(firstAssetId), "模板参考图.png");
-            payload.warnings.forEach((warning) => message.warning(uiText(warning)));
+            payload.warnings.forEach((warning) => message.warning(displayNotice(uiText(warning))));
             if (payload.mode === "fill_and_generate") {
                 if (!firstAssetId) message.info(uiText("模板参数已填入，请先选择一张图片后再生成。"));
                 else modal.confirm({ title: uiText("确认开始无缝拼接？"), content: uiText("确认后将直接提交生成任务。"), okText: uiText("确认生成"), cancelText: uiText("仅保留填入"), onOk: () => runStitchRef.current() });
             } else message.success(uiText("模板已填入"));
         }).catch((error) => {
             loadedReuseTokenRef.current.delete(token);
-            message.error(error instanceof Error ? uiText(error.message) : uiText("模板复用失败"));
+            message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("模板复用失败")));
         });
     }, [estimatedUsage.credits, message, modal, searchParams, updateConfig, config.model]);
 
@@ -503,7 +505,7 @@ export function SeamlessStitchWorkspace() {
                     ) : displayedResult.status === "success" ? (
                         <div>
                             <div className="mb-3 flex flex-wrap items-center gap-3">
-                                <Segmented name="seamless-preview" aria-label={uiText("结果预览方式")} value={previewMode} onChange={value => setPreviewMode(value as "single" | "repeat")} options={[{ label: "单图", value: "single" }, { label: "2×2 平铺", value: "repeat" }]} />
+                                <Segmented name="seamless-preview" aria-label={uiText("结果预览方式")} value={previewMode} onChange={value => setPreviewMode(value as "single" | "repeat")} options={[{ label: staticUiText("单图"), value: "single" }, { label: staticUiText("2×2 平铺"), value: "repeat" }]} />
                                 <span className="text-xs" style={{ color: theme.node.muted }}>{uiText("平铺检查接缝，不改变原图或下载文件。")}</span>
                             </div>
                             <div className="overflow-hidden rounded-lg border border-border bg-muted">

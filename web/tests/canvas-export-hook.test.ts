@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { create } from "zustand";
+import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 
 import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
 import { createCanvasProjectsArchive } from "@/lib/canvas/canvas-export";
@@ -16,13 +18,14 @@ const compile = (path: string) => ts.transpileModule(readFileSync(new URL(path, 
 const hookCode = compile("../src/hooks/use-canvas-export.ts");
 const storeCode = compile("../src/stores/canvas/use-canvas-ui-store.ts");
 
-function evaluate(code: string, dependencies: Record<string, unknown>) {
+function evaluate(code: string, dependencies: Record<string, unknown>, storage?: StateStorage) {
     const module = { exports: {} as Record<string, any> };
-    new Function("require", "module", "exports", code)((name: string) => {
+    new Function("require", "module", "exports", "localStorage", code)((name: string) => {
         if (name === "@/lib/i18n") return i18nHarness;
+        if (name === "@/hooks/use-display-text") return displayHooksHarness;
         if (!Object.hasOwn(dependencies, name)) throw new Error(`Unexpected dependency: ${name}`);
         return dependencies[name];
-    }, module, module.exports);
+    }, module, module.exports, storage);
     return module.exports;
 }
 
@@ -51,7 +54,9 @@ function harness(options: {
 } = {}) {
     // A fresh real Zustand store runs the production lock implementation for each test.
     // Only React/message/download boundaries are replaced; no global module mocks leak.
-    const { useCanvasUiStore } = evaluate(storeCode, { zustand: { create } });
+    const viewValues = new Map<string, string>();
+    const viewStorage: StateStorage = { getItem: key => viewValues.get(key) ?? null, setItem: (key, value) => { viewValues.set(key, value); }, removeItem: key => { viewValues.delete(key); } };
+    const { useCanvasUiStore } = evaluate(storeCode, { zustand: { create }, "zustand/middleware": { createJSONStorage, persist } }, viewStorage);
     const loads: string[] = [];
     const exportCalls: ExportCall[] = [];
     const archives: Blob[] = [];

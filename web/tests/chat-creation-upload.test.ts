@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 
 import { parseChatAttachment, type ParsedChatAttachment } from "../src/lib/chat-attachments";
 import { AGENT_DOCUMENT_LIMITS } from "../../shared/image-agent-documents";
@@ -50,6 +51,7 @@ function uploadHarness(legacyMode: Mode) {
     function renderHandlers() {
         const bindings = {
             ...i18nHarness,
+            displayNotice: displayHooksHarness.displayNotice,
             AGENT_DOCUMENT_LIMITS,
             sessionsRef,
             updateSession: (id: string, update: (session: ChatSession) => ChatSession) => { sessionsRef.current = sessionsRef.current.map(session => session.id === id ? update(session) : session); },

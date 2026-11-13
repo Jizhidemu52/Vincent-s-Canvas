@@ -1,5 +1,5 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
-import { createImageSequence, prepareImageSequenceStep, runImageSequence } from "@/lib/canvas/canvas-image-sequence";
+import { createImageSequence, hasPendingImageSequenceAttempt, prepareImageSequenceStep, runImageSequence } from "@/lib/canvas/canvas-image-sequence";
 import type { CanvasConnection, CanvasNodeData, CanvasNodeGroup } from "@/types/canvas";
 import type { CanvasGenerationResult } from "./canvas-shared-generation-runtime";
 import { imageWorkflowDefinitionKey, imageWorkflowPlanStepKey, resolveImageWorkflow } from "@/lib/canvas/canvas-image-workflow";
@@ -57,7 +57,7 @@ export function prepareCanvasImageWorkflow(options: ImageSequenceOptions, nodeId
         && previous.steps.every((step, index) => step.configNodeId === plan.steps[index]?.configNodeId && step.inputConfigId === plan.steps[index]?.inputConfigId)
         && (!previous.definitionKey || previous.definitionKey === definitionKey);
     // A graph edit must not conceal an unresolved paid attempt from the previous run.
-    if (!samePlan && previous?.steps.some(step => step.status === "running" && ids.has(step.configNodeId))) throw new Error("原工作流仍有待核查任务，请先恢复原来的连线并核查结果，不能重新提交");
+    if (!samePlan && previous?.steps.some(step => ids.has(step.configNodeId) && (step.status === "running" || hasPendingImageSequenceAttempt(graph, step.configNodeId)))) throw new Error("原工作流仍有待核查任务，请先恢复原来的连线并核查结果，不能重新提交");
     const invalidated = new Set<string>();
     let legacyKeys: unknown[] = [];
     try { if (previous?.definitionKey) legacyKeys = JSON.parse(previous.definitionKey)[1]; } catch { /* An unrecognized archive is not reusable evidence. */ }
@@ -69,7 +69,7 @@ export function prepareCanvasImageWorkflow(options: ImageSequenceOptions, nodeId
         const unchanged = saved && (saved.definitionKey === key || (!saved.definitionKey && (samePlan || matchesLegacy))) && previous?.sourceNodeId === plan.sourceNodeId;
         const changed = !unchanged || step.configNodeId === rerunStepId || Boolean(step.inputConfigId && invalidated.has(step.inputConfigId));
         if (changed) invalidated.add(step.configNodeId);
-        if (changed && saved?.status === "running") throw new Error("此步骤的原任务尚未确认，请先查询原结果；未重新提交。");
+        if (changed && (saved?.status === "running" || hasPendingImageSequenceAttempt(graph, step.configNodeId))) throw new Error("此步骤的原任务尚未确认，请先查询原结果；未重新提交。");
         return changed ? { ...step, definitionKey: key, status: saved?.outputNodeId ? "stale" as const : "idle" as const, previousOutputIds: graph.connections.filter(edge => edge.kind === "generation-output" && edge.fromNodeId === step.configNodeId).map(edge => edge.toNodeId) } : { ...saved!, definitionKey: key };
     });
     const group: CanvasNodeGroup = {

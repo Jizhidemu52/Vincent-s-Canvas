@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { useUiText } from "@/lib/i18n";
 import { useMemo, useRef, useState } from "react";
 import { App, Button, Modal } from "antd";
@@ -40,7 +41,7 @@ export function CanvasDeleteProjectsDialog() {
             cleanupImages();
             removeSelectedIds(targets);
             setDeleteIds([]);
-        } catch (error) { void message.error(error instanceof Error ? error.message : t("删除失败，请重试。")); }
+        } catch (error) { void message.error(displayNotice(error instanceof Error ? error.message : t("删除失败，请重试。"))); }
         finally { deleteLock.current = false; setDeleting(false); }
     };
 

@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { App, Modal, Select } from "antd";
@@ -28,13 +29,13 @@ export function PromptCanvasDialog({ templateId, title, identity, onClose }: { t
         try {
             const result = await insertPromptIntoCanvas(templateId, target || undefined, guard.assert);
             if (!guard.current()) return;
-            result.warnings.forEach(warning => message.warning(warning));
+            result.warnings.forEach(warning => message.warning(displayNotice(warning)));
             message.success(t("已保存可编辑提示词节点，可双击修改或撤销；未触发生成"));
             navigate(`/canvas/${encodeURIComponent(result.projectId)}`);
             close();
         } catch (error) {
             if (!guard.current()) return;
-            message.error(error instanceof Error ? error.message : t("插入失败，请重试"), 8);
+            message.error(displayNotice(error instanceof Error ? error.message : t("插入失败，请重试")), 8);
             if (error instanceof PromptCanvasPersistenceError) {
                 navigate(`/canvas/${encodeURIComponent(error.projectId)}`);
                 close();

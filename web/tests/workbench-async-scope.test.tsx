@@ -7,6 +7,7 @@ import ts from "typescript";
 import { defaultConfig } from "@/stores/use-config-store";
 import { workbenchTaskScope } from "@/lib/workbench-task-state";
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 const originalFetch = globalThis.fetch;
@@ -56,6 +57,7 @@ function harness(kind: "image" | "video", options: { logs?: any[]; readLogs?: ()
                 if (previous && values && previous.deps?.length === values.length && values.every((value, i) => Object.is(value, previous.deps![i]))) return;
                 owner.pending.push(() => { previous?.cleanup?.(); owner.effects[index] = { deps: values, cleanup: effect() }; }); } },
         "@/lib/i18n": i18nHarness,
+        "@/hooks/use-display-text": { ...displayHooksHarness, DisplayText: ({ text }: { text: string }) => text, DisplayTranslationPreview: () => null },
         // Each task keeps its original hook owners and async closures. The real
         // registry, visible tabs and persistence failure paths run in DOM tests.
         "@/components/workbench-tasks": { WorkbenchTasks: ({ children, urlInputKey: nextKey }: any) => { urlInputKey = nextKey ?? null; return children.type(children.props); }, useWorkbenchTask: () => ({ id: taskId, active: true, ready: true, creating: false, createNewTask: async () => {

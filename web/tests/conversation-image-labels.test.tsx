@@ -28,6 +28,8 @@ function evaluate(path: string, select: (ast: ts.SourceFile) => ts.Node | undefi
 }
 
 const bindings = {
+    DisplayTranslationPreview: () => null,
+    useDisplayText: () => (text: string) => text,
     React, uiText, useUiText: () => uiText, conversationImageLabel, canvasThemes,
     useThemeStore: (select: (state: { theme: "light" }) => unknown) => select({ theme: "light" }),
     CanvasPersistedMediaPreview: "preview", ConversationImageActions: "image-actions", X: "icon", WandSparkles: "icon",

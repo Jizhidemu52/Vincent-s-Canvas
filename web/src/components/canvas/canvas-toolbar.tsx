@@ -4,7 +4,7 @@ import { canvasActionMenuItem } from "./canvas-action-menu-item";
 import { memo, useState } from "react";
 import { Check } from "lucide-react";
 import { Dropdown, Tooltip } from "antd";
-import { Download, Eraser, FolderOpen, FolderPlus, Grid3X3, Hand, Image as ImageIcon, MoreHorizontal, MousePointer2, Music2, Redo2, Settings2, Sparkles, Trash2, Type, Undo2, Upload, Video, WandSparkles, type LucideIcon } from "lucide-react";
+import { Download, Eraser, FolderOpen, FolderPlus, Grid3X3, Hand, Image as ImageIcon, LayoutTemplate, MoreHorizontal, MousePointer2, Music2, Redo2, Settings2, Sparkles, Trash2, Type, Undo2, Upload, Video, WandSparkles, type LucideIcon } from "lucide-react";
 import { canvasToolbarPropsEqual, type CanvasToolbarRenderState } from "@/lib/canvas/canvas-toolbar-render-stability";
 import { isModuleAvailable, useModuleEnabled, useModuleStore } from "@/stores/use-module-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -36,6 +36,7 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRen
                     canvasActionMenuItem("video", onAddVideo, <Video className="size-4" />),
                     canvasActionMenuItem("audio", onAddAudio, <Music2 className="size-4" />),
                     canvasActionMenuItem("batch", onOpenBatchEdit, <WandSparkles className="size-4" />),
+                    ...(localToolsEnabled && props.onOpenTemplate ? [{ key: "designTemplate", icon: <LayoutTemplate className="size-4" />, label: <span data-usage-control="canvas-tool.designTemplate">{t("用模板开始")}</span>, onClick: props.onOpenTemplate }] : []),
                     ...(localToolsEnabled && props.onGroupSelection ? [canvasActionMenuItem("group", props.onGroupSelection, <FolderPlus className="size-4" />, selectedCount < 2)] : []),
                     { type: "divider" as const },
                     { key: "background", label: <span data-usage-control="canvas-tool.background">{t("画布背景")}</span>, children: (["dots", "lines", "blank"] as const).map((mode) => ({ key: mode, icon: <Check aria-hidden className={`size-4 ${backgroundMode === mode ? "" : "invisible"}`} />, label: canvasActionLabel(mode === "dots" ? "backgroundDots" : mode === "lines" ? "backgroundLines" : "backgroundBlank", "toolbar"), onClick: () => onBackgroundModeChange(mode) })) },

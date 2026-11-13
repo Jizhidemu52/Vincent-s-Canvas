@@ -1,4 +1,5 @@
 import { uiText, useUiText } from "@/lib/i18n";
+import { useDisplayText } from "@/hooks/use-display-text";
 import { Select, Tooltip } from "antd";
 import { FolderOpen, ImagePlus, Palette, Plus, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
@@ -53,6 +54,7 @@ function colorPickerValue(color: string): string {
 
 export function SceneFields({ sceneId, form, onChange, disabled = false, sourceImage, hasSecondaryImage = false, productPicker }: SceneFieldsProps) {
     useUiText();
+    const display = useDisplayText();
     const instanceId = useId();
     const [colorSlot, setColorSlot] = useState<number | null>(null);
     const colorLibraryEnabled = useModuleEnabled("standard-colors");
@@ -88,7 +90,7 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
                             {colorLibraryEnabled && sceneId === "garment-colorway" && <Tooltip title={uiText("从标准色库选择")}><button type="button" className="cs-color-library" aria-label={uiText("从标准色库选择颜色 {value1}", { value1: index + 1 })} disabled={disabled} onClick={() => setColorSlot(index)}><Palette size={14} aria-hidden="true" /><span>{uiText("色库")}</span></button></Tooltip>}
                             <button type="button" className="cs-color-remove" aria-label={uiText("删除颜色 {value1}", { value1: index + 1 })} disabled={disabled} onClick={() => onChange(removeSceneColor(form, index))}><Trash2 size={14} aria-hidden="true" /></button>
                         </div>
-                        {selected && <div className="cs-color-source"><Tooltip title={`${selected.library} · ${selected.name}`}><span>{selected.library} · {selected.name}</span></Tooltip><a href={selected.sourceUrl} target="_blank" rel="noreferrer" aria-label={uiText("查看颜色 {value1} 来源", { value1: index + 1 })}>{uiText("来源")}</a></div>}
+                        {selected && <div className="cs-color-source"><Tooltip title={display(`${selected.library} · ${selected.name}`)}><span>{display(`${selected.library} · ${selected.name}`)}</span></Tooltip><a href={selected.sourceUrl} target="_blank" rel="noreferrer" aria-label={uiText("查看颜色 {value1} 来源", { value1: index + 1 })}>{uiText("来源")}</a></div>}
                     </div>;
                 })}
                 <button type="button" className="cs-add-color" disabled={disabled || form.colors.length >= 6} onClick={() => onChange(addSceneColor(form))}><Plus size={14} aria-hidden="true" />{uiText("添加颜色")}</button>
@@ -262,6 +264,7 @@ function SceneUploadSlot({ slot, reference, onImage, onAsset, disabled, scopeKey
     scopeKey: string;
 }) {
     useUiText();
+    const display = useDisplayText();
     const task = useWorkbenchTask();
     const ownerId = useUserStore(state => state.user?.id);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
@@ -287,7 +290,7 @@ function SceneUploadSlot({ slot, reference, onImage, onAsset, disabled, scopeKey
                         event.currentTarget.value = "";
                     }} />
                     {reference ? <>
-                        <img className="cs-upload-preview" src={reference.dataUrl || reference.url} alt={reference.name || uiText(slot.label)} />
+                        <img className="cs-upload-preview" src={reference.dataUrl || reference.url} alt={display(reference.name || uiText(slot.label))} />
                         <span className="cs-upload-replace"><Upload size={14} aria-hidden="true" />{uiText("重新上传")}</span>
                     </> : <span className="cs-upload-empty"><ImagePlus size={28} strokeWidth={1.5} aria-hidden="true" /><strong>{uiText("上传")}{uiText(slot.label || "")}</strong><span>{uiText("点击或拖入 PNG / JPG / WebP")}</span></span>}
                 </label>
@@ -300,6 +303,6 @@ function SceneUploadSlot({ slot, reference, onImage, onAsset, disabled, scopeKey
                 }} />}
                 {imageDrop.dragging || imageDrop.reading ? <p role="status" className="cs-help">{imageDrop.dragging ? uiText("松开以添加到{label}，不会自动生成。", { label: uiText(slot.label) }) : uiText("正在读取拖入图片，请稍候。")}</p> : null}
                 <p className="cs-upload-meta">{uiText(slot.hint || "")}</p>
-                {reference && <div className="cs-upload-file"><Tooltip title={reference.name}><span>{reference.name}</span></Tooltip><button type="button" className="cs-upload-remove" aria-label={uiText("移除{label}", { label: uiText(slot.label) })} disabled={disabled} onClick={() => onImage(slot.id, null)}><Trash2 size={13} aria-hidden="true" />{uiText("移除")}</button></div>}
+                {reference && <div className="cs-upload-file"><Tooltip title={display(reference.name)}><span>{display(reference.name)}</span></Tooltip><button type="button" className="cs-upload-remove" aria-label={uiText("移除{label}", { label: uiText(slot.label) })} disabled={disabled} onClick={() => onImage(slot.id, null)}><Trash2 size={13} aria-hidden="true" />{uiText("移除")}</button></div>}
             </section>;
 }

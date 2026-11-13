@@ -1,8 +1,9 @@
-import { useUiText } from "@/lib/i18n";
+import { useUiLocale, useUiText } from "@/lib/i18n";
 import { Check, Plus, Search } from "lucide-react";
 import { type UIEvent, useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Empty, Input, Modal, Select, Spin, Tag } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
+import { DisplayText, useDisplayText } from "@/hooks/use-display-text";
 
 import { ALL_PROMPTS_OPTION, createPromptTemplate, type Prompt, type PromptLibraryScope, type PromptSnapshotInput } from "@/services/api/prompts";
 import { cn } from "@/lib/utils";
@@ -14,6 +15,8 @@ import { usePromptList } from "./use-prompt-list";
 
 export function PromptSelectDialog({ open, onOpenChange, onSelect, onSelectTemplate }: { open: boolean; onOpenChange: (open: boolean) => void; onSelect: (prompt: string) => void; onSelectTemplate?: (templateId: string) => Promise<void> }) {
     const t = useUiText();
+    const display = useDisplayText();
+    const locale = useUiLocale();
     const { message } = App.useApp();
     const client = useQueryClient();
     const [keyword, setKeyword] = useState("");
@@ -40,7 +43,7 @@ export function PromptSelectDialog({ open, onOpenChange, onSelect, onSelectTempl
             else onSelect(item.prompt);
             guard.assert();
             onOpenChange(false);
-        } catch (error) { if (guard.current()) message.error(error instanceof Error ? error.message : t("模板加载失败，请重试")); }
+        } catch (error) { if (guard.current()) message.error(<DisplayText text={error instanceof Error ? error.message : t("模板加载失败，请重试")} />); }
         finally { guard.dispose(); setSelecting(false); }
     };
 
@@ -58,8 +61,11 @@ export function PromptSelectDialog({ open, onOpenChange, onSelect, onSelectTempl
     };
 
     useEffect(() => { setEditorOpen(false); setSelecting(false); }, [identity, open]);
+    // Filter labels belong to the selected catalog language. Keep the user's
+    // search/draft text intact while clearing obsolete translated filters.
+    useEffect(() => { setSelectedTags([]); setSelectedCategory(ALL_PROMPTS_OPTION); }, [locale]);
     useEffect(() => {
-        if (open && query.isError) message.error(query.error instanceof Error ? query.error.message : t("获取提示词失败"));
+        if (open && query.isError) message.error(<DisplayText text={query.error instanceof Error ? query.error.message : t("获取提示词失败")} />);
     }, [message, open, query.error, query.isError]);
 
     const handleListScroll = (event: UIEvent<HTMLDivElement>) => {
@@ -83,7 +89,7 @@ export function PromptSelectDialog({ open, onOpenChange, onSelect, onSelectTempl
                         <div className="flex flex-wrap gap-2">
                             {promptCategories.map((category) => (
                                 <Tag.CheckableTag key={category} checked={selectedCategory === category} className={cn("prompt-filter-tag", selectedCategory === category && "is-active")} onChange={() => setSelectedCategory(category)}>
-                                    {category === ALL_PROMPTS_OPTION ? t(ALL_PROMPTS_OPTION) : category}
+                                    {category === ALL_PROMPTS_OPTION ? t(ALL_PROMPTS_OPTION) : display(category)}
                                 </Tag.CheckableTag>
                             ))}
                         </div>
@@ -95,7 +101,7 @@ export function PromptSelectDialog({ open, onOpenChange, onSelect, onSelectTempl
                                 const active = tag === ALL_PROMPTS_OPTION ? selectedTags.length === 0 : selectedTags.includes(tag);
                                 return (
                                     <Tag.CheckableTag key={tag} checked={active} className={cn("prompt-filter-tag", active && "is-active")} onChange={() => toggleTag(tag)}>
-                                        {tag === ALL_PROMPTS_OPTION ? t(ALL_PROMPTS_OPTION) : tag}
+                                        {tag === ALL_PROMPTS_OPTION ? t(ALL_PROMPTS_OPTION) : display(tag)}
                                     </Tag.CheckableTag>
                                 );
                             })}

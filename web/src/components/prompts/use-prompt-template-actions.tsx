@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { App } from "antd";
@@ -21,10 +22,10 @@ export function usePromptTemplateActions() {
         const guard = createPromptActionGuard(identity, () => alive.current);
         try {
             const result = await resolveCompletePrompt(item.id, mode, guard.assert);
-            if (result.pricing.modelChanged) message.warning(result.pricing.selectedModel ? t("模型已变更，当前使用 {p0}", { p0: String(result.pricing.selectedModel.name) }) : t("模型已变更，请在目标页选择替代模型"));
+            if (result.pricing.modelChanged) message.warning(displayNotice(result.pricing.selectedModel ? t("模型已变更，当前使用 {p0}", { p0: String(result.pricing.selectedModel.name) }) : t("模型已变更，请在目标页选择替代模型")));
             navigate(promptDestination(result.template.targetTool, result.reuseToken));
         } catch (error) {
-            if (guard.current()) message.error(error instanceof Error ? error.message : t("复用失败"));
+            if (guard.current()) message.error(displayNotice(error instanceof Error ? error.message : t("复用失败")));
         } finally { guard.dispose(); }
     };
     return {

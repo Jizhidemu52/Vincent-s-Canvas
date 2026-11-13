@@ -1,6 +1,9 @@
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 
 type CanvasUiStore = {
+    showConnections: boolean;
+    setShowConnections: (show: boolean) => void;
     editingProjectId: string | null;
     editingProjectTitle: string;
     selectedProjectIds: string[];
@@ -17,7 +20,9 @@ type CanvasUiStore = {
     removeSelectedProjectIds: (ids: string[]) => void;
 };
 
-export const useCanvasUiStore = create<CanvasUiStore>((set, get) => ({
+export const useCanvasUiStore = create<CanvasUiStore>()(persist((set, get) => ({
+    showConnections: true,
+    setShowConnections: (showConnections) => set({ showConnections }),
     editingProjectId: null,
     editingProjectTitle: "",
     selectedProjectIds: [],
@@ -36,4 +41,13 @@ export const useCanvasUiStore = create<CanvasUiStore>((set, get) => ({
     setSelectedProjectIds: (ids) => set({ selectedProjectIds: [...new Set(ids)] }),
     setDeleteProjectIds: (deleteProjectIds) => set({ deleteProjectIds }),
     removeSelectedProjectIds: (ids) => set((state) => ({ selectedProjectIds: state.selectedProjectIds.filter((id) => !ids.includes(id)) })),
+}), {
+    name: "wireless-canvas:canvas_view",
+    storage: createJSONStorage(() => localStorage),
+    // A browser view preference is not part of any saved canvas document.
+    partialize: (state) => ({ showConnections: state.showConnections }),
+    merge: (saved, current) => ({
+        ...current,
+        showConnections: saved && typeof saved === "object" && "showConnections" in saved && typeof saved.showConnections === "boolean" ? saved.showConnections : current.showConnections,
+    }),
 }));

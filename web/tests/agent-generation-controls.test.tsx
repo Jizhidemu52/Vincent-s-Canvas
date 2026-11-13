@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
@@ -22,6 +23,7 @@ function controls(patch: Partial<AgentGenerationSettings> = {}) {
     const effects: Array<() => void> = [];
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
+        "@/hooks/use-display-text": { ...displayHooksHarness, DisplayText: ({ text }: { text: string }) => text },
         // External image drops are not part of these generation-parameter controls.
         "@/hooks/use-image-drop": { useImageDrop: () => ({ dropProps: {}, dragging: false, reading: false }) },
         react: { ...React, useEffect: (effect: () => void) => effects.push(effect) },

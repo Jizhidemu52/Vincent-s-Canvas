@@ -80,7 +80,7 @@ test.each([null, undefined, NaN, Infinity, -1])("image history keeps unknown tim
     const log = pageFunction("normalizeLog", { normalizeLogConfig: () => ({}) })({ id: "record", createdAt: 1, status: "成功", durationMs });
     expect(log.durationMs).toBeNull();
     const card = pageFunction("LogCard", {
-        React, useUiText() {}, uiText: (value: string) => value, formatDuration,
+        React, useUiText() {}, uiText: (value: string) => value, useDisplayText: () => (value: string) => value, formatDuration,
         Tag: "tag", Checkbox: "input", formatBeijingDateTime: () => "time",
     })({ log, active: false, onClick() {} });
     expect(treeText(card)).toContain("耗时未知");

@@ -51,4 +51,10 @@ describe("canvas toolbar render stability", () => {
         expect(canvasToolbarPropsEqual(state({ onOpenTools: noop }), state({ onOpenTools: () => undefined }))).toBe(false);
         expect(canvasToolbarPropsEqual(state({ onOpenTools: noop, viewControls: "100%" }), state({ onOpenTools: noop, viewControls: "100%" }))).toBe(true);
     });
+
+    test("refreshes the persistent template action without coupling it to selection", () => {
+        expect(canvasToolbarPropsEqual(state(), state({ onOpenTemplate: noop }))).toBe(false);
+        expect(canvasToolbarPropsEqual(state({ onOpenTemplate: noop }), state({ onOpenTemplate: () => undefined }))).toBe(false);
+        expect(canvasToolbarPropsEqual(state({ selectedCount: 0, onOpenTemplate: noop }), state({ selectedCount: 0, onOpenTemplate: noop }))).toBe(true);
+    });
 });

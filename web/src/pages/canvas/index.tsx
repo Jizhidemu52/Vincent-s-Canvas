@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { useUiLocale, useUiText, uiText } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -66,7 +67,7 @@ export default function CanvasPage() {
             const { createCanvasExampleProject } = await import("@/lib/canvas/canvas-example-graph");
             if (!useCanvasStore.getState().hydrated || ownerId !== useUserStore.getState().user?.id) return;
             navigate(`/canvas/${createCanvasExampleProject()}`);
-        } catch (error) { message.error(error instanceof Error ? error.message : t("教学画布创建失败，请重试。")); }
+        } catch (error) { message.error(displayNotice(error instanceof Error ? error.message : t("教学画布创建失败，请重试。"))); }
         finally { exampleLockRef.current = false; setCreatingExample(false); }
     };
     const clearCache = () => modal.confirm({
@@ -77,8 +78,8 @@ export default function CanvasPage() {
             setClearingCache(true);
             try {
                 const result = await cleanupVerifiedCanvasCache();
-                message.success(t("已清理 {count} 项缓存，释放 {size} MB；跳过 {skipped} 项。云端原件未删除。", { count: result.removed, size: (result.bytes / 1024 / 1024).toFixed(1), skipped: result.skipped }));
-            } catch (error) { message.error(error instanceof Error ? error.message : t("缓存清理失败，原件保持不变。")); throw error; }
+                message.success(displayNotice(t("已清理 {count} 项缓存，释放 {size} MB；跳过 {skipped} 项。云端原件未删除。", { count: result.removed, size: (result.bytes / 1024 / 1024).toFixed(1), skipped: result.skipped })));
+            } catch (error) { message.error(displayNotice(error instanceof Error ? error.message : t("缓存清理失败，原件保持不变。"))); throw error; }
             finally { setClearingCache(false); }
         },
     });
@@ -89,12 +90,12 @@ export default function CanvasPage() {
         const key = "canvas-archive-import";
         try {
             const count = await importCanvasArchive(file, { onProgress: value => {
-                if (value.phase !== "complete") void message.open({ key, type: "loading", content: `${value.label}${value.total ? ` (${value.completed}/${value.total})` : ""}`, duration: 0 });
+                if (value.phase !== "complete") void message.open({ key, type: "loading", content: displayNotice(`${value.label}${value.total ? ` (${value.completed}/${value.total})` : ""}`), duration: 0 });
             } });
-            message.success({ key, content: uiText("已导入 {value1} 个画布", { value1: count }), duration: 3 });
+            message.success({ key, content: displayNotice(uiText("已导入 {value1} 个画布", { value1: count })), duration: 3 });
         } catch (error) {
             console.error("画布导入失败", error);
-            message.error({ key, content: error instanceof Error ? error.message : uiText("导入失败，请重试。"), duration: 5 });
+            message.error({ key, content: displayNotice(error instanceof Error ? error.message : uiText("导入失败，请重试。")), duration: 5 });
         } finally {
             importLockRef.current = false;
             setImporting(false);

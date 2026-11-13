@@ -1,5 +1,6 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText } from "@/lib/i18n";
-import type { Dispatch, RefObject, SetStateAction } from "react";
+import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
 import { flushSync } from "react-dom";
 import { nanoid } from "nanoid";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
@@ -209,7 +210,7 @@ export function confirmCanvasTextRetry(node: CanvasNodeData, context: {
 export async function retryCanvasMediaNode(nodeId: string, context: MediaCanvas & {
     locks: Set<string>; start: (targetId: string, sourceId: string, runningId: string) => AbortController;
     finish: (targetId: string, controller: AbortController) => void; setRunning: Dispatch<SetStateAction<string | null>>;
-    message: { success: (text: string) => unknown; warning: (text: string) => unknown; error: (text: string) => unknown };
+    message: { success: (text: ReactNode) => unknown; warning: (text: ReactNode) => unknown; error: (text: ReactNode) => unknown };
 }) {
     if (context.locks.has(nodeId)) return;
     context.locks.add(nodeId);
@@ -218,7 +219,7 @@ export async function retryCanvasMediaNode(nodeId: string, context: MediaCanvas 
     try {
         const result = await recoverCanvasMediaTask(nodeId, context, controller.signal);
         if (result?.status === "success") context.message.success(uiText("已取回原任务结果"));
-        else context.message.warning(result?.error || uiText("提交状态待核查，请先检查原任务，勿重复生成"));
-    } catch (error) { context.message.error(error instanceof Error ? error.message : uiText("原任务查询失败")); }
+        else context.message.warning(displayNotice(result?.error || uiText("提交状态待核查，请先检查原任务，勿重复生成")));
+    } catch (error) { context.message.error(displayNotice(error instanceof Error ? error.message : uiText("原任务查询失败"))); }
     finally { context.finish(nodeId, controller); context.setRunning(null); context.locks.delete(nodeId); }
 }

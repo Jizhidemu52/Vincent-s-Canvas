@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { App } from "antd";
@@ -47,7 +48,7 @@ export function useCanvasImageSequence(options: ImageSequenceOptions) {
             setDialog(null);
             message.success(uiText("已创建并连接工作流，可直接编辑节点，点击“运行工作流”开始"));
             return created.nodes[0];
-        } catch (error) { if (isCurrent()) message.error(error instanceof Error ? error.message : uiText("添加失败")); }
+        } catch (error) { if (isCurrent()) message.error(displayNotice(error instanceof Error ? error.message : uiText("添加失败"))); }
         finally { adding.current = false; }
     };
     const run = async (groupId?: string, nodeId?: string, onlyStep?: boolean, rerun = false) => {
@@ -61,13 +62,19 @@ export function useCanvasImageSequence(options: ImageSequenceOptions) {
         const sameScope = () => token !== null && scope.current === token && latest.current.projectId === projectId && currentOwnerKey() === ownerKey;
         const isCurrent = () => sameScope() && active.current.has(session) && (latest.current.isObservationCurrent?.() ?? true);
         const refreshActive = () => setActiveGroupIds(new Set([...active.current].filter(item => item.configNodeIds).map(item => item.groupId)));
+        const dismiss = message.loading(uiText("正在准备工作流并核对已有任务…"), 0);
+        let preparing = true;
+        const finishPreparing = () => { if (preparing) { preparing = false; dismiss(); } };
+        session.controller.signal.addEventListener("abort", finishPreparing, { once: true });
         try {
             const { runCanvasImageSequence } = await import("./canvas-image-sequence-runtime");
             if (!isCurrent() || session.controller.signal.aborted) return;
-            await runCanvasImageSequence(() => latest.current, session, lockKey, isCurrent, refreshActive, active.current);
+            await runCanvasImageSequence(() => latest.current, session, lockKey, isCurrent, () => { finishPreparing(); refreshActive(); }, active.current);
         } catch (error) {
-            if (isCurrent()) message.error(error instanceof Error ? error.message : uiText("连续改图加载失败，请重试"));
+            if (isCurrent()) message.error(displayNotice(error instanceof Error ? error.message : uiText("连续改图加载失败，请重试")));
         } finally {
+            finishPreparing();
+            session.controller.signal.removeEventListener("abort", finishPreparing);
             current.locks.current.delete(lockKey);
             session.releaseLocks?.();
             const visible = sameScope();

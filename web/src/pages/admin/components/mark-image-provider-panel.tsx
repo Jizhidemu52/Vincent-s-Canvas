@@ -1,3 +1,6 @@
+import { displayNotice, useDisplayUiValue  } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { Alert, App, Button, Form, Input, InputNumber, Space, Switch, Tag, Typography } from "antd";
 import { KeyRound, RefreshCw, Save } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -36,6 +39,8 @@ function formValues(config: MarkImageConfiguration): Values {
 }
 
 export function MarkImageProviderPanel() {
+    const displayUi = useDisplayUiValue();
+    useUiLocale();
     const { message } = App.useApp();
     const [form] = Form.useForm<Values>();
     const user = useUserStore((state) => state.user);
@@ -45,7 +50,7 @@ export function MarkImageProviderPanel() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [dirty, setDirty] = useState(false);
-    useUnsavedGuard(dirty, "APIMart 平台配置尚未保存，离开后将丢失修改；密钥不会自动保存。");
+    useUnsavedGuard(dirty, staticUiText("APIMart 平台配置尚未保存，离开后将丢失修改；密钥不会自动保存。"));
     const [loadError, setLoadError] = useState("");
     const requestVersion = useRef(0);
     const savingRef = useRef(false);
@@ -97,74 +102,74 @@ export function MarkImageProviderPanel() {
             if (version !== requestVersion.current) return;
             setConfig(result);
             form.setFieldsValue(formValues(result));
-            message.success("APIMart 平台配置已保存到服务端，未发起生成请求");
+            message.success(staticUiText("APIMart 平台配置已保存到服务端，未发起生成请求"));
             setDirty(false);
             try { await refreshBusinessConfig(); }
-            catch { message.warning("配置已保存，但模型列表同步失败；请刷新页面后再选择模型。"); }
+            catch { message.warning(staticUiText("配置已保存，但模型列表同步失败；请刷新页面后再选择模型。")); }
         } catch (error) {
-            if (version === requestVersion.current) message.error(error instanceof MarkImageConfigurationError ? error.message : "APIMart 平台配置保存失败，请重试。");
+            if (version === requestVersion.current) message.error(displayNotice(error instanceof MarkImageConfigurationError ? error.message : staticUiText("APIMart 平台配置保存失败，请重试。")));
         } finally {
             savingRef.current = false;
             setSaving(false);
         }
     };
 
-    if (!isAdmin) return <Alert type="warning" showIcon title="仅超级管理员可配置 APIMart 平台" />;
+    if (!isAdmin) return <Alert type="warning" showIcon title={staticUiText("仅超级管理员可配置 APIMart 平台")} />;
 
     return (
-        <section className="wb-surface p-4 sm:p-5" aria-label="APIMart 平台独立配置">
+        <section className="wb-surface p-4 sm:p-5" aria-label={staticUiText("APIMart 平台独立配置")}>
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <Typography.Title level={3} className="!mb-2 !text-base">APIMart 平台 · 独立 API 配置</Typography.Title>
+                    <Typography.Title level={3} className="!mb-2 !text-base">{staticUiText("APIMart 平台 · 独立 API 配置")}</Typography.Title>
                     <Space wrap size={[6, 6]}>
-                        <Tag>APIMart · 独立密钥</Tag>
-                        <Tag>{imageModelIds.size} 图片 · {textModelIds.size} 文字 · 1 视频 · 1 多图融合</Tag>
+                        <Tag>{staticUiText("APIMart · 独立密钥")}</Tag>
+                        <Tag>{imageModelIds.size}{staticUiText(" 图片 · ")}{textModelIds.size}{staticUiText(" 文字 · 1 视频 · 1 多图融合")}</Tag>
                         <Tag color={config?.provider?.hasCredentials ? "green" : "default"} icon={<KeyRound className="size-3" />}>
-                            {loading ? "正在读取凭据状态" : loadError ? "凭据状态未知" : config?.provider?.hasCredentials ? "服务端密钥已配置" : "服务端密钥未配置"}
+                            {loading ? staticUiText("正在读取凭据状态") : loadError ? staticUiText("凭据状态未知") : config?.provider?.hasCredentials ? staticUiText("服务端密钥已配置") : staticUiText("服务端密钥未配置")}
                         </Tag>
                     </Space>
                 </div>
             </div>
-            <Alert className="mb-5" type="info" showIcon title="服务端独立保存，不改变现有板块绑定" description={`此入口用于正式业务服务，非演示模式配置。图片、文字、视频和多图融合共用此 APIMart 通道密钥，各模型独立启用；图片、视频与多图融合可设置并发。文字模型当前仅配置接入与开关。保存仅更新下方 ${MARK_PLATFORM_MODELS.length} 个模型，不切换其他模型，也不发起生成测试。`} />
-            {loadError ? <Alert className="mb-5" type="error" showIcon title={loadError} action={<Button size="small" icon={<RefreshCw className="size-3" />} onClick={() => void load()} loading={loading}>重试读取</Button>} /> : null}
+            <Alert className="mb-5" type="info" showIcon title={staticUiText("服务端独立保存，不改变现有板块绑定")} description={staticUiText("此入口用于正式业务服务，非演示模式配置。图片、文字、视频和多图融合共用此 APIMart 通道密钥，各模型独立启用；图片、视频与多图融合可设置并发。文字模型当前仅配置接入与开关。保存仅更新下方 {p0} 个模型，不切换其他模型，也不发起生成测试。", { p0: `${MARK_PLATFORM_MODELS.length}` })} />
+            {loadError ? <Alert className="mb-5" type="error" showIcon title={displayUi(loadError)} action={<Button size="small" icon={<RefreshCw className="size-3" />} onClick={() => void load()} loading={loading}>{staticUiText("重试读取")}</Button>} /> : null}
             <Form form={form} layout="vertical" autoComplete="off" disabled={loading || saving || !config || Boolean(loadError)} onValuesChange={() => setDirty(true)} onFinish={submit} initialValues={formValues({ provider: null, models: [] })}>
                 <div className="grid gap-x-5 lg:grid-cols-2">
-                    <Form.Item name="baseUrl" label="APIMart API Base URL" rules={[{ required: true, whitespace: true, message: "请输入 API Base URL" }, { type: "url", message: "请输入有效的 HTTP 或 HTTPS 地址" }]}>
+                    <Form.Item name="baseUrl" label="APIMart API Base URL" rules={[{ required: true, whitespace: true, message: staticUiText("请输入 API Base URL") }, { type: "url", message: staticUiText("请输入有效的 HTTP 或 HTTPS 地址") }]}>
                         <Input placeholder={MARK_IMAGE_BASE_URL} />
                     </Form.Item>
-                    <Form.Item name="apiKey" label="APIMart API Key" extra={config?.provider?.hasCredentials ? "留空保留现有密钥；填写新密钥会替换现有密钥。" : "首次保存必须填写密钥，密钥不会回显。"} rules={[{ validator: async (_, value: string | undefined) => { if (!config?.provider?.hasCredentials && !value?.trim()) throw new Error("首次保存请填写 APIMart API Key"); } }]}>
-                        <Input.Password autoComplete="new-password" placeholder={config?.provider?.hasCredentials ? "留空保留现有密钥" : "输入 APIMart API Key"} />
+                    <Form.Item name="apiKey" label="APIMart API Key" extra={config?.provider?.hasCredentials ? staticUiText("留空保留现有密钥；填写新密钥会替换现有密钥。") : staticUiText("首次保存必须填写密钥，密钥不会回显。")} rules={[{ validator: async (_, value: string | undefined) => { if (!config?.provider?.hasCredentials && !value?.trim()) throw new Error("首次保存请填写 APIMart API Key"); } }]}>
+                        <Input.Password autoComplete="new-password" placeholder={config?.provider?.hasCredentials ? staticUiText("留空保留现有密钥") : staticUiText("输入 APIMart API Key")} />
                     </Form.Item>
                 </div>
-                <Form.Item name="enabled" label="启用 APIMart 平台通道" valuePropName="checked">
+                <Form.Item name="enabled" label={staticUiText("启用 APIMart 平台通道")} valuePropName="checked">
                     <Switch checkedChildren="启用" unCheckedChildren="停用" />
                 </Form.Item>
                 <div className="mb-4">
-                    <Typography.Title level={4} className="!mb-1 !text-sm">独立模型设置</Typography.Title>
-                    <Typography.Text type="secondary" className="text-xs leading-5">每个模型独立控制启用状态与并发；并发范围为 1–100。</Typography.Text>
+                    <Typography.Title level={4} className="!mb-1 !text-sm">{staticUiText("独立模型设置")}</Typography.Title>
+                    <Typography.Text type="secondary" className="text-xs leading-5">{staticUiText("每个模型独立控制启用状态与并发；并发范围为 1–100。")}</Typography.Text>
                 </div>
                 <div className="grid gap-4">
                     {modelGroups.map(group => (
                         <section key={group.key} aria-labelledby={`mark-model-group-${group.key}`} className="space-y-4 border-t border-[var(--border)] pt-4">
                             <div>
-                                <Typography.Title id={`mark-model-group-${group.key}`} level={4} className="!mb-1 !text-sm">{group.title}</Typography.Title>
-                                <Typography.Text type="secondary" className="text-xs">{group.description}</Typography.Text>
+                                <Typography.Title id={`mark-model-group-${group.key}`} level={4} className="!mb-1 !text-sm">{displayUi(group.title)}</Typography.Title>
+                                <Typography.Text type="secondary" className="text-xs">{displayUi(group.description)}</Typography.Text>
                             </div>
                             {MARK_PLATFORM_MODELS.map((model, index) => {
                                 return group.matches(model.modelId) ? (
                                 <div key={model.modelId} className="rounded-lg border border-[var(--border)] p-3 sm:p-4">
                                     <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                                         <div className="min-w-0">
-                                            <Typography.Text strong className="break-all">{model.name}</Typography.Text>
-                                            <Typography.Text type="secondary" className="mt-1 block text-xs" aria-label={`${model.name} 用途`}>用途：{model.description}</Typography.Text>
+                                            <Typography.Text strong className="break-all">{displayUi(model.name)}</Typography.Text>
+                                            <Typography.Text type="secondary" className="mt-1 block text-xs" aria-label={staticUiText("{p0} 用途", { p0: `${model.name}` })}>{staticUiText("用途：")}{displayUi(model.description)}</Typography.Text>
                                         </div>
                                         <Form.Item className="!mb-0" name={["models", index, "enabled"]} valuePropName="checked">
-                                            <Switch aria-label={`启用 ${model.name}`} checkedChildren="启用" unCheckedChildren="停用" />
+                                            <Switch aria-label={staticUiText("启用 {p0}", { p0: `${model.name}` })} checkedChildren="启用" unCheckedChildren="停用" />
                                         </Form.Item>
                                     </div>
                                     <div className="max-w-sm">
-                                        <Form.Item name={["models", index, "concurrencyLimit"]} label="并发上限" rules={[{ required: true, type: "integer", min: 1, max: 100, message: "请输入 1–100 的整数" }]}>
-                                            <InputNumber className="!w-full" min={1} max={100} precision={0} disabled={group.key === "text" ? true : undefined} aria-label={`${model.name} 并发上限`} />
+                                        <Form.Item name={["models", index, "concurrencyLimit"]} label={staticUiText("并发上限")} rules={[{ required: true, type: "integer", min: 1, max: 100, message: staticUiText("请输入 1–100 的整数") }]}>
+                                            <InputNumber className="!w-full" min={1} max={100} precision={0} disabled={group.key === "text" ? true : undefined} aria-label={staticUiText("{p0} 并发上限", { p0: `${model.name}` })} />
                                         </Form.Item>
                                     </div>
                                 </div>
@@ -173,8 +178,8 @@ export function MarkImageProviderPanel() {
                     ))}
                 </div>
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-                    <Typography.Text type="secondary" className="text-xs">密钥仅随保存请求发送至业务后端，不在浏览器持久化；保存成功后输入框会清空。</Typography.Text>
-                    <Button type="primary" htmlType="submit" icon={<Save className="size-4" />} loading={saving}>保存 APIMart 平台配置</Button>
+                    <Typography.Text type="secondary" className="text-xs">{staticUiText("密钥仅随保存请求发送至业务后端，不在浏览器持久化；保存成功后输入框会清空。")}</Typography.Text>
+                    <Button type="primary" htmlType="submit" icon={<Save className="size-4" />} loading={saving}>{staticUiText("保存 APIMart 平台配置")}</Button>
                 </div>
             </Form>
         </section>

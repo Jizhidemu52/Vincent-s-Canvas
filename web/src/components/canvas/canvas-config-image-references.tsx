@@ -1,3 +1,5 @@
+import { displayNotice } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
 import { useUiText, uiText } from "@/lib/i18n";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -88,7 +90,7 @@ export function CanvasConfigImageReferences(props: Props) {
             if (!current()) return;
             const detail = reason instanceof Error ? reason.message : "图片上传失败，请重试";
             setError(detail);
-            void message.error(detail);
+            void message.error(displayNotice(detail));
         } finally {
             if (current()) {
                 const latestProps = latest.current.props;
@@ -114,8 +116,8 @@ export function CanvasConfigImageReferences(props: Props) {
         <input ref={inputRef} aria-label={t("上传参考图")} className="hidden" type="file" accept="image/*" multiple disabled={busy} onChange={event => { const files = Array.from(event.target.files || []); event.target.value = ""; void addFiles(files); }} />
         {references.length ? <div className="thin-scrollbar mt-1 flex gap-2 overflow-x-auto pb-1">
             {references.map((item, index) => <div key={item.referenceKey} className="group relative h-[76px] w-20 shrink-0 overflow-hidden rounded-md border" style={{ borderColor: theme.node.stroke }}>
-                <CanvasPersistedMediaPreview kind="image" url={item.dataUrl} storageKey={item.storageKey} alt={`${labels?.[item.referenceKey] || `图${index + 1}`}：${item.name}`} className="h-full w-full object-cover" />
-                <span className="absolute left-0 top-0 rounded-br px-1 text-xs" style={controlStyle}>{labels?.[item.referenceKey] || `图${index + 1}`}</span>
+                <CanvasPersistedMediaPreview kind="image" url={item.dataUrl} storageKey={item.storageKey} alt={`${labels?.[item.referenceKey] || staticUiText("图{p0}", { p0: `${index + 1}` })}：${item.name}`} className="h-full w-full object-cover" />
+                <span className="absolute left-0 top-0 rounded-br px-1 text-xs" style={controlStyle}>{labels?.[item.referenceKey] || staticUiText("图{p0}", { p0: `${index + 1}` })}</span>
                 <button type="button" disabled={busy} aria-label={t("移除{value1}", { value1: labels?.[item.referenceKey] || uiText("参考图{value1}", { value1: index + 1 }) })} className="absolute right-0 top-0 rounded-bl p-1" style={controlStyle} onClick={() => save(references.filter(reference => reference.referenceKey !== item.referenceKey))}><X className="size-3" /></button>
                 {references.length > 1 ? <div className="absolute bottom-0 right-0 flex rounded-tl" style={controlStyle}>
                     <button type="button" disabled={busy || index === 0} aria-label={t("{value1}前移", { value1: labels?.[item.referenceKey] || uiText("参考图{value1}", { value1: index + 1 }) })} className="p-1 disabled:opacity-30" onClick={() => save(moveImageReference(references, index, index - 1))}><ChevronLeft className="size-3" /></button>

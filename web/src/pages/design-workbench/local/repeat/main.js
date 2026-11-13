@@ -1,5 +1,5 @@
 import { uiText } from "@/lib/i18n";
-import { setWorkbenchText, watchWorkbenchUi } from "../ui-text.js";
+import { setWorkbenchText, setWorkbenchDisplayText, watchWorkbenchUi } from "../ui-text.js";
 import { MODES, cmToPx, periodSize, validateExport, wrapPosition, latticeCopies, mirrorCellTransform, hitElement, previewSize } from "./geometry.mjs";
 import { createProjectSession, mountProjectBar } from "../project-session.js";
 import { bindLocalImageDrop } from "../image-drop";
@@ -317,7 +317,7 @@ export async function mountRepeat(root, services) {
         state.elements.forEach((item, index) => {
             const button = document.createElement("button");
             button.type = "button";
-            button.textContent = `${index + 1} ${item.name}`;
+            setWorkbenchDisplayText(button, `${index + 1} ${item.name}`);
             button.dataset.select = item.id;
             button.setAttribute("aria-pressed", String(item.id === selectedId));
             layers.append(button);

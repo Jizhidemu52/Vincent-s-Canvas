@@ -5,8 +5,9 @@ import { canvasDesignTemplates, createCanvasDesignTemplate, isEmptyCanvasDesignT
 import { replaceCanvasNodeImage } from "../src/pages/canvas/canvas-project-utils";
 import { canvasCompareImages, chooseCanvasComparePair, compareContainRect, drawCanvasCompare } from "../src/lib/canvas/canvas-image-compare";
 import { createCanvasRestoredGenerationNode } from "../src/lib/canvas/canvas-generation-draft";
-import { buildNodeGenerationContext } from "../src/components/canvas/canvas-node-generation";
+import { buildNodeGenerationContext, buildNodeGenerationInputs, createConfigGenerationInputIndex } from "../src/components/canvas/canvas-node-generation";
 import { resolveCanvasImageReferences } from "../src/lib/canvas/canvas-image-references";
+import { cloneCanvasNodeGraph } from "../src/lib/canvas/canvas-node-copy";
 
 const node = (id: string, x = 0, y = 0, width = 100): CanvasNodeData => ({ id, type: CanvasNodeType.Image, title: id, position: { x, y }, width, height: 80, metadata: { content: `data:image/png;base64,${id}`, storageKey: `image:${id}`, imageName: "coat", imageVersion: 1 } });
 
@@ -48,7 +49,7 @@ describe("服装模板真实生成输入", () => {
         source.metadata!.manualImageReferences = [{ id: "attached", referenceKey: "upload:attached", name: "reference.png", type: "image/png", origin: "upload", content: "blob:old-preview", storageKey: "image:existing-original" }];
         const before = structuredClone(result);
         expect(isEmptyCanvasDesignTemplateReference(source, result.nodes, result.connections)).toBe(true);
-        expect(() => buildNodeGenerationContext(result.nodes[1].id, result.nodes, result.connections, result.nodes[1].metadata!.composerContent!)).toThrow("已失效引用");
+        expect(() => buildNodeGenerationContext(result.nodes[1].id, result.nodes, result.connections, result.nodes[1].metadata!.composerContent!)).toThrow("先设置参考款原图");
         const replacement = replaceCanvasNodeImage(source, { url: "blob:resolved-original", storageKey: "image:existing-original", width: 256, height: 512, bytes: 1024, mimeType: "image/png", originalFileName: "reference.png" }, "reference.png");
         const nodes = result.nodes.map(node => node.id === source.id ? replacement : node);
         expect(replacement.id).toBe(source.id);
@@ -73,6 +74,36 @@ describe("服装模板真实生成输入", () => {
         expect(isEmptyCanvasDesignTemplateReference({ ...source, metadata: { storageKey: "image:original" } }, result.nodes, result.connections)).toBe(false);
         const generic = result.nodes.map(node => ({ ...node, metadata: { ...node.metadata, promptInput: undefined } }));
         expect(isEmptyCanvasDesignTemplateReference(source, generic, result.connections)).toBe(false);
+    });
+    test("empty template source remains a display-only pending input; uploading refreshes a cached index", () => {
+        const graph = createCanvasDesignTemplate("development", undefined, { x: 0, y: 0 });
+        const source = graph.nodes[0]!, config = graph.nodes[1]!;
+        const map = new Map(graph.nodes.map(node => [node.id, node]));
+        const index = createConfigGenerationInputIndex(graph.nodes, graph.connections, map);
+        const pending = index.get(config.id);
+        expect(pending).toEqual([{ nodeId: source.id, type: "image", title: source.title, pendingUpload: true }]);
+        expect(buildNodeGenerationInputs(config.id, graph.nodes, graph.connections)).toEqual(pending);
+        expect(index.get(config.id)).toBe(pending);
+        expect(resolveCanvasImageReferences(config, graph.nodes, graph.connections)).toEqual([]);
+        const uploaded = { ...source, metadata: { content: "blob:original", storageKey: "image:original" } };
+        map.set(source.id, uploaded);
+        expect(index.get(config.id)[0]).toMatchObject({ nodeId: source.id, image: { dataUrl: "blob:original", storageKey: "image:original" } });
+        expect(index.get(config.id)[0]?.pendingUpload).toBeUndefined();
+    });
+    test("deleted, disconnected and ordinary blank sources remain invalid rather than pending", () => {
+        const graph = createCanvasDesignTemplate("development", undefined, { x: 0, y: 0 });
+        const source = graph.nodes[0]!, config = graph.nodes[1]!, prompt = config.metadata!.composerContent!;
+        for (const [nodes, edges] of [[graph.nodes.slice(1), graph.connections], [graph.nodes, []], [graph.nodes.map(item => item.id === config.id ? { ...item, metadata: { ...item.metadata, promptInput: undefined } } : item), graph.connections]] as const) {
+            expect(buildNodeGenerationInputs(config.id, nodes, edges)).toEqual([]);
+            expect(() => buildNodeGenerationContext(config.id, nodes, edges, prompt)).toThrow("已失效引用");
+        }
+        const copied = cloneCanvasNodeGraph(graph, { x: 40, y: 40 });
+        const copiedSource = copied.nodes[0]!, copiedConfig = copied.nodes[1]!;
+        expect(copiedSource.id).not.toBe(source.id);
+        expect(copiedConfig.metadata!.composerContent).toContain(`@[node:${copiedSource.id}]`);
+        expect(copiedConfig.metadata!.composerContent).not.toContain(`@[node:${source.id}]`);
+        expect(buildNodeGenerationInputs(copiedConfig.id, copied.nodes, copied.connections)[0]).toMatchObject({ nodeId: copiedSource.id, pendingUpload: true });
+        expect(() => buildNodeGenerationContext(copiedConfig.id, copied.nodes, copied.connections, copiedConfig.metadata!.composerContent!)).toThrow("先设置参考款原图");
     });
 });
 

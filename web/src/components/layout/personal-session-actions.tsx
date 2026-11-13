@@ -1,3 +1,4 @@
+import { displayNotice, useDisplayText } from "@/hooks/use-display-text";
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { App, Popover, Tooltip } from "antd";
 import { KeyRound, LoaderCircle, LogOut } from "lucide-react";
@@ -13,6 +14,7 @@ let logoutInFlight = false;
 
 export function PersonalSessionActions({ onSignedOut, compact = false }: { onSignedOut?: () => void; compact?: boolean }) {
     useUiLocale();
+    const display = useDisplayText();
     const { message } = App.useApp();
     const navigate = useNavigate();
     const user = useUserStore(state => state.user);
@@ -20,6 +22,7 @@ export function PersonalSessionActions({ onSignedOut, compact = false }: { onSig
     const [busy, setBusy] = useState(false);
 
     if (!deploymentFeatures.authenticationEnabled || deploymentFeatures.oaLoginEnabled || status !== "authenticated" || !user) return null;
+    const name = user.displayName ? display(user.displayName) : user.username;
 
     const signOut = async () => {
         if (logoutInFlight || useUserStore.getState().user?.id !== user.id || useUserStore.getState().status !== "authenticated") return;
@@ -41,7 +44,7 @@ export function PersonalSessionActions({ onSignedOut, compact = false }: { onSig
             onSignedOut?.();
             navigate("/login", { replace: true });
         } catch (error) {
-            message.error(error instanceof Error ? error.message : uiText("退出登录失败，请稍后重试。"));
+            message.error(displayNotice(error instanceof Error ? error.message : uiText("退出登录失败，请稍后重试。")));
         } finally {
             logoutInFlight = false;
             setBusy(false);
@@ -51,7 +54,7 @@ export function PersonalSessionActions({ onSignedOut, compact = false }: { onSig
     const actions = (
         <div className="mt-2 flex items-center gap-2 border-t border-stone-200 px-2 pt-3" aria-label={uiText("个人账号")}>
             <div className="min-w-0 flex-1">
-                <Tooltip title={user.displayName || user.username}><div className="truncate text-xs font-medium text-foreground">{user.displayName || user.username}</div></Tooltip>
+                <Tooltip title={name}><div className="truncate text-xs font-medium text-foreground">{name}</div></Tooltip>
                 <div className="mt-0.5 text-xs text-muted-foreground">{uiText("个人账号")}</div>
             </div>
             <Tooltip title={uiText("修改密码")}><span className="inline-flex"><button type="button" className="wb-nav-link inline-flex size-9 items-center justify-center rounded-md" disabled={busy} aria-label={uiText("修改密码")} onClick={() => navigate(`/change-password?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><KeyRound className="size-3.5" /></button></span></Tooltip>
@@ -68,5 +71,5 @@ export function PersonalSessionActions({ onSignedOut, compact = false }: { onSig
             </button></span></Tooltip>
         </div>
     );
-    return compact ? <Popover content={actions} trigger="click" placement="topRight"><Tooltip title={user.displayName || user.username}><button type="button" className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold" aria-label={uiText("个人账号")}>{(user.displayName || user.username || "U").slice(0, 1)}</button></Tooltip></Popover> : actions;
+    return compact ? <Popover content={actions} trigger="click" placement="topRight"><Tooltip title={name}><button type="button" className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold" aria-label={uiText("个人账号")}>{(name || "U").slice(0, 1)}</button></Tooltip></Popover> : actions;
 }

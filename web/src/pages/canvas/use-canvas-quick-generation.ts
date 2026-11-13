@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText } from "@/lib/i18n";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { canvasToolKey, currentToolConfig } from "@/hooks/use-tool-config";
@@ -255,7 +256,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
                 await uploadCanvasQuickReferences(input, { model: quickGenerateModel, references: quickGenerateReferences, current,
                     latest: () => referenceContext.current, append: setQuickGenerateReferences, message });
             } catch (error) {
-                if (current()) message.error(error instanceof Error ? error.message : uiText("参考图上传失败"));
+                if (current()) message.error(displayNotice(error instanceof Error ? error.message : uiText("参考图上传失败")));
             } finally {
                 if (referenceRead.current === token) { referenceRead.current = null; setQuickReferencesLoading(false); }
             }
@@ -320,7 +321,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         }
         const referenceValidation = validateImageReferences(modelId, references, profile);
         if (!referenceValidation.valid) {
-            message.error(referenceValidation.message);
+            message.error(displayNotice(referenceValidation.message));
             return;
         }
         if (!isAiConfigReady(generationConfig, model)) {
@@ -460,9 +461,9 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         if (!await waitForWriteAccess()) return;
         setRunningNodeId((current) => current === targetIds[0] ? null : current);
         if (failureCount) {
-            message.warning(uiText("画布生图完成，成功 {value1} 张，失败 {value2} 张", { value1: successCount, value2: failureCount }));
+            message.warning(displayNotice(uiText("画布生图完成，成功 {value1} 张，失败 {value2} 张", { value1: successCount, value2: failureCount })));
         } else {
-            message.success(uiText("画布生图完成：{value1} 张", { value1: successCount }));
+            message.success(displayNotice(uiText("画布生图完成：{value1} 张", { value1: successCount })));
         }
     }, [
         addAsset,
@@ -532,7 +533,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
             .catch((error) => {
                 if (!ownerCurrent()) return;
                 loadedReuseTokenRef.current.delete(token);
-                message.error(error instanceof Error ? error.message : uiText("模板复用失败"));
+                message.error(displayNotice(error instanceof Error ? error.message : uiText("模板复用失败")));
             });
         return () => { active = false; if (!consumed) loadedReuseTokenRef.current.delete(token); };
     }, [message, modal, projectLoaded, searchParams]);

@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { Fragment, useEffect, useId, useRef, useState, type ChangeEvent, type KeyboardEvent, type SyntheticEvent } from "react";
 import { App, Tooltip } from "antd";
 import { CanvasPersistedMediaPreview } from "@/components/canvas/canvas-persisted-media-preview";
@@ -60,7 +61,7 @@ export function useImageMentions(options: {
             close();
             requestAnimationFrame(() => { if (sourceElement?.isConnected) { sourceElement.focus(); sourceElement.setSelectionRange(next.caret, next.caret); } });
         } catch (error) {
-            if (pending.current === request) void message.error(error instanceof Error ? error.message : t("选择图片失败，请重试"));
+            if (pending.current === request) void message.error(displayNotice(error instanceof Error ? error.message : t("选择图片失败，请重试")));
         } finally {
             if (pending.current === request) { pending.current = null; setChoosing(false); }
         }

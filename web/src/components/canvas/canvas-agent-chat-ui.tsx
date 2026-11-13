@@ -4,6 +4,7 @@ import { App, Button, Tooltip } from "antd";
 import { pastedConversationImageFiles } from "@/lib/conversation-image-clipboard";
 import { ArrowUp, Bot, CheckCircle2, CircleAlert, Copy, ImagePlus, LoaderCircle, Pencil, Square, UserRound, WandSparkles, Wrench, X, XCircle } from "lucide-react";
 import { ChatMarkdown } from "@/pages/chat/chat-markdown";
+import { displayNotice, DisplayText, DisplayTranslationPreview, useDisplayValue  } from "@/hooks/use-display-text";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { displayModelMetadata, maskImageModelText } from "@/lib/model-display";
@@ -41,7 +42,7 @@ export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, us
         return (
             <div className="flex justify-center text-xs">
                 <div className="max-w-[88%] px-3 py-2 text-center" style={{ color: theme.node.muted }}>
-                    {item.text}
+                    <DisplayText text={item.text} />
                     {item.meta ? <span className="ml-2 opacity-60">{maskImageModelText(item.meta)}</span> : null}
                 </div>
             </div>
@@ -59,7 +60,7 @@ export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, us
     return (
         <div data-message-role={item.role} className={`flex min-w-0 items-start gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
             <div className={`min-w-0 text-sm leading-7 [overflow-wrap:anywhere] ${isUser ? "max-w-[88%] rounded-2xl px-3 py-3 text-right" : "w-full text-left"}`} style={{ color, background: isUser ? theme.node.fill : undefined }}>
-                <div className="break-words text-left">{isUser ? <div className="whitespace-pre-wrap">{item.text}</div> : <ChatMarkdown>{item.text}</ChatMarkdown>}</div>
+                <div className="break-words text-left">{isUser ? <div className="whitespace-pre-wrap"><DisplayText text={item.text} /></div> : <ChatMarkdown>{item.text}</ChatMarkdown>}</div>
                 {item.attachments?.length ? <AgentMessageAttachments messageId={item.id} attachments={item.attachments} theme={theme} onUseImageForVideo={onUseImageForVideo} imageControls={imageControls} activeImageId={activeImageId} disabled={imageActionsDisabled} onImageAction={onImageAction} onMaskImage={onMaskImage} conversationOnlyImages={conversationOnlyImages} /> : null}
                 {item.meta ? <div className="mt-1 text-xs opacity-45">{maskImageModelText(item.meta)}</div> : null}
                 <div className="mt-1 flex flex-wrap gap-3 text-xs" style={{ color: theme.node.muted }}>
@@ -103,12 +104,12 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
                                     {showDetails ? <span className="ml-auto text-xs font-normal" style={{ color: theme.node.muted }}>{t("详情")}</span> : null}
                                 </div>
                                 <div className="mt-2 text-sm leading-6" style={{ color: theme.node.text }}>
-                                    {summary}
+                                    <DisplayText text={summary} />
                                 </div>
                                 {Array.isArray(preview) ? preview.map((action, index) => <div key={index} className="mt-2 text-xs" style={{ color: action.destructive ? theme.node.danger : theme.node.muted }} onPointerEnter={() => previewNodes(action.nodes?.map((node: { id: string }) => node.id) || [])} onPointerLeave={() => previewNodes([])}>
-                                    <div>{action.destructive ? `将删除 ${action.count} 个对象` : action.outputCount ? `生成 ${action.outputCount} 张 · ${maskImageModelText(action.model || "当前模型")}` : `影响 ${action.count} 个对象`}</div>
-                                    {action.nodes?.map((node: { id: string; title: string; url?: string; storageKey?: string }) => <span key={node.id} tabIndex={0} className="mr-2 inline-flex items-center gap-1" onPointerEnter={() => previewNodes([node.id])} onPointerLeave={() => previewNodes([])} onFocus={() => previewNodes([node.id])} onBlur={() => previewNodes([])}>{node.url || node.storageKey ? <CanvasPersistedMediaPreview kind="image" url={node.url} storageKey={node.storageKey} alt="" className="size-8 rounded object-cover" /> : null}{node.title || t("未命名节点")}</span>)}
-                                    {action.prompt ? <p className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap">{t("最终提示词：")}{action.prompt}</p> : null}
+                                    <div>{action.destructive ? t("将删除 {count} 个对象", { count: action.count }) : action.outputCount ? t("生成 {count} 张 · {model}", { count: action.outputCount, model: maskImageModelText(action.model || t("当前模型")) }) : t("影响 {count} 个对象", { count: action.count })}</div>
+                                    {action.nodes?.map((node: { id: string; title: string; url?: string; storageKey?: string }) => <span key={node.id} tabIndex={0} className="mr-2 inline-flex items-center gap-1" onPointerEnter={() => previewNodes([node.id])} onPointerLeave={() => previewNodes([])} onFocus={() => previewNodes([node.id])} onBlur={() => previewNodes([])}>{node.url || node.storageKey ? <CanvasPersistedMediaPreview kind="image" url={node.url} storageKey={node.storageKey} alt="" className="size-8 rounded object-cover" /> : null}<DisplayText text={node.title || t("未命名节点")} /></span>)}
+                                    {action.prompt ? <p className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap">{t("最终提示词：")}<DisplayText text={action.prompt} /></p> : null}
                                 </div>) : null}
                             </div>
                         </div>
@@ -144,14 +145,14 @@ export function AgentToolCard({ title, text, detail, theme }: { title: string; t
                     </span>
                     <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2 text-sm font-semibold leading-5">
-                            <span className="min-w-0 truncate">{title}</span>
+                            <span className="min-w-0 truncate"><DisplayText text={title} /></span>
                             <span className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium" style={{ borderColor: state.softBorder, color: state.color, background: state.softBg }}>
                                 {t(state.label)}
                             </span>
                             {showDetails ? <span className="ml-auto text-xs font-normal" style={{ color: theme.node.muted }}>{t("详情")}</span> : null}
                         </div>
                         <div className="mt-2 text-sm leading-6" style={{ color: state.isError ? state.color : theme.node.muted }}>
-                            {text}
+                            <DisplayText text={text} />
                         </div>
                     </div>
                 </div>
@@ -266,7 +267,7 @@ export function AgentChatComposer({
                         void images.catch(() => undefined);
                         event.preventDefault();
                         if (!onAddFiles || sending || disabled) return;
-                        void images.then(onAddFiles).catch(error => message.error(error instanceof Error ? t(error.message) : t("图片复制失败，请重试")));
+                        void images.then(onAddFiles).catch(error => message.error(displayNotice(error instanceof Error ? t(error.message) : t("图片复制失败，请重试"))));
                     }}
                     onKeyDown={(event) => {
                         if (event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -281,6 +282,7 @@ export function AgentChatComposer({
                     placeholder={placeholder}
                 />
                 </div>
+                <DisplayTranslationPreview text={prompt} />
                 {!prompt.trim() && attachments.length ? <p className="px-1 text-xs" style={{ color: theme.node.muted }}>{t("请写下希望如何处理这些图片")}</p> : null}
                 <div data-testid="canvas-agent-composer-controls" className="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
                     {generationControls ? <div data-testid="canvas-agent-generation-slot" className="contents">{generationControls}</div>
@@ -346,9 +348,10 @@ function useToolDetailsEnabled() {
 }
 
 function AgentDetailBlock({ detail, theme }: { detail: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const display = useDisplayValue();
     return (
         <pre data-testid="canvas-agent-tool-detail" className="thin-scrollbar mt-3 max-h-64 overflow-auto rounded-lg border p-3 text-xs leading-4" style={{ borderColor: theme.node.stroke, background: theme.toolbar.panel, color: theme.node.muted }}>
-            {JSON.stringify(displayModelMetadata(toolDetailPreview(detail)), null, 2)}
+            {JSON.stringify(display(displayModelMetadata(toolDetailPreview(detail))), null, 2)}
         </pre>
     );
 }

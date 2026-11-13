@@ -1,3 +1,5 @@
+import { displayNotice } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
 import { useUiText, uiText } from "@/lib/i18n";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -194,7 +196,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
             const text = wasConnected ? "本地 Agent 连接失败或已断开" : "连接失败，请检查地址和 token";
             if (!errorLoggedRef.current || wasConnected) {
                 addEventLog(wasConnected ? "连接断开" : "连接失败", { endpoint, error: text });
-                if (!headless) message.error(text);
+                if (!headless) message.error(displayNotice(text));
             }
             errorLoggedRef.current = true;
             connectedRef.current = false;
@@ -381,13 +383,13 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
         if (!nextEndpoint) {
             const text = "请填写本地 Agent 地址";
             setAgentState({ connectError: text });
-            if (!headless) message.warning(text);
+            if (!headless) message.warning(displayNotice(text));
             return;
         }
         if (!nextToken) {
             const text = "没有发现本地 Agent，请先在 Codex 使用插件或手动启动 Canvas Agent";
             setAgentState({ connectError: text });
-            if (!headless) message.warning(text);
+            if (!headless) message.warning(displayNotice(text));
             return;
         }
         try {
@@ -396,7 +398,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
         } catch {
             const text = "本地 Agent 地址格式不正确";
             setAgentState({ connectError: text });
-            if (!headless) message.warning(text);
+            if (!headless) message.warning(displayNotice(text));
             return;
         }
         errorLoggedRef.current = false;
@@ -447,7 +449,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
         } catch (error) {
             if (requestScope !== scopeRef.current) return;
             addEventLog("新建对话失败", error);
-            message.error(error instanceof Error ? error.message : t("新建对话失败"));
+            message.error(displayNotice(error instanceof Error ? error.message : t("新建对话失败")));
         } finally {
             if (requestScope === scopeRef.current) setAgentState({ loadingThreads: false });
         }
@@ -466,7 +468,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
         } catch (error) {
             if (requestScope !== scopeRef.current) return;
             addEventLog("恢复对话失败", error);
-            message.error(error instanceof Error ? error.message : t("恢复对话失败"));
+            message.error(displayNotice(error instanceof Error ? error.message : t("恢复对话失败")));
         } finally {
             if (requestScope === scopeRef.current) setAgentState({ loadingThreads: false });
         }
@@ -490,7 +492,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
         } catch (error) {
             if (requestScope !== scopeRef.current) return;
             addEventLog("删除对话失败", error);
-            message.error(error instanceof Error ? error.message : t("删除对话失败"));
+            message.error(displayNotice(error instanceof Error ? error.message : t("删除对话失败")));
         } finally {
             if (requestScope === scopeRef.current) setAgentState({ loadingThreads: false });
         }
@@ -622,7 +624,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
                     theme={theme}
                     context={{ endpoint, connected, enabled, activity, waiting, sending, messages: messageCount, pendingTool: pendingTool?.name }}
                     onClear={clearEventLogs}
-                    onCopyBlocked={(text) => message.warning(text)}
+                    onCopyBlocked={(text) => message.warning(displayNotice(text))}
                 />
             ) : (
                 <>
@@ -637,13 +639,13 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
                         {renderedMessages.map((item, index) => {
                             const turnId = objectField(item.detail, "turnId");
                             const showUndo = typeof turnId === "string" && !renderedMessages.slice(index + 1).some(next => objectField(next.detail, "turnId") === turnId);
-                            return <div key={item.id}><AgentChatMessage item={item} theme={theme} user={user} />{showUndo ? <Button size="small" disabled={!canUndoOps || waiting || sending || undoing} onClick={() => void undoLastTool(turnId)}>撤销本轮</Button> : null}</div>;
+                            return <div key={item.id}><AgentChatMessage item={item} theme={theme} user={user} />{showUndo ? <Button size="small" disabled={!canUndoOps || waiting || sending || undoing} onClick={() => void undoLastTool(turnId)}>{staticUiText("撤销本轮")}</Button> : null}</div>;
                         })}
                         {pendingTool ? <AgentPendingToolCard summary={summarizeCanvasAgentOps(pendingTool.input?.ops || []) || toolName(pendingTool.name)} detail={{ status: "pending", preview: canvasToolCallPreview([{ id: pendingTool.requestId, type: "function", function: { name: pendingTool.name, arguments: JSON.stringify(pendingTool.input || {}) } }], snapshotRef.current) }} theme={theme} onReject={rejectPendingTool} onApprove={approvePendingTool} /> : null}
                         {waiting && !pendingTool ? <AgentWorkingMessage theme={theme} /> : null}
                         </div>
                     </div>
-                    {chatFollow.hasNewMessages ? <div className="flex shrink-0 justify-center"><button type="button" className="px-3 py-1 text-xs hover:underline" onClick={chatFollow.scrollToBottom}>↓ 新消息</button></div> : null}
+                    {chatFollow.hasNewMessages ? <div className="flex shrink-0 justify-center"><button type="button" className="px-3 py-1 text-xs hover:underline" onClick={chatFollow.scrollToBottom}>{staticUiText("↓ 新消息")}</button></div> : null}
                     <AgentChatComposer
                         prompt={prompt}
                         attachments={attachments.map(agentAttachmentToChatAttachment)}

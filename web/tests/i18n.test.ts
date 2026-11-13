@@ -4,12 +4,12 @@ import english from "../src/lib/i18n/en";
 
 afterEach(async () => { setUiPathname("/"); await setUiLocale("zh-CN"); });
 
-test("admin pages stay Chinese and returning to employee pages restores the preferred language", async () => {
+test("every board including administration preserves the selected English language", async () => {
     await setUiLocale("en-US");
     for (const pathname of ["/admin", "/admin/login", "/admin/prompt-recipes", "/admin/design-library"]) {
         setUiPathname(pathname);
-        expect(getUiLocale()).toBe("zh-CN");
-        expect(uiText("保存")).toBe("保存");
+        expect(getUiLocale()).toBe("en-US");
+        expect(uiText("保存")).toBe("Save");
     }
     setUiPathname("/canvas");
     expect(getUiLocale()).toBe("en-US");

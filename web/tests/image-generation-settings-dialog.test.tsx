@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import ts from "typescript";
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { defaultConfig } from "@/stores/use-config-store";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { Tooltip } from "antd";
@@ -32,6 +33,7 @@ function settingsPicker(bound = false, variant: "settings" | "default" = "settin
     const selected: string[] = [];
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
+        "@/hooks/use-display-text": { ...displayHooksHarness, DisplayText: ({ text }: { text: string }) => text },
         react: { ...React, useEffect() {}, useMemo: (factory: () => unknown) => factory(), useId: () => "settings-picker", useRef: (current: unknown) => ({ current }), useState: () => [false, () => {}] },
         "@/components/ui/select": { Select: "Select", SelectTrigger: "SelectTrigger", SelectContent: "SelectContent", SelectItem: "SelectItem" },
         "@/hooks/use-can-manage-config": { useCanManageConfig: () => false },

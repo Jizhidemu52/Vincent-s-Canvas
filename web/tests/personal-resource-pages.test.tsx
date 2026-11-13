@@ -1,4 +1,5 @@
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -36,6 +37,7 @@ function page(path: string, exportName: string, dependencies: Record<string, unk
     };
     const mockInput = Object.assign("Input", { Search: "InputSearch", TextArea: "TextArea" });
     const mocks: Record<string, unknown> = {
+        "@/hooks/use-display-text": { ...displayHooksHarness, DisplayTranslationPreview: () => null },
         "@/lib/i18n": i18nHarness,
         react: hooks,
         "@/hooks/use-workbench-field": { useWorkbenchField(_key: string, initial: unknown) { return hooks.useState(initial); } },

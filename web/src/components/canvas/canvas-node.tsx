@@ -1,5 +1,6 @@
 import { Tooltip } from "antd";
 import { useUiText, uiText } from "@/lib/i18n";
+import { DisplayText } from "@/hooks/use-display-text";
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
 import { GenerationElapsed } from "@/components/generation-elapsed";
 import { GenerationQueueProgress } from "@/components/generation-queue-progress";
@@ -446,7 +447,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 className="absolute bottom-full left-0 z-20 mb-1 max-w-full cursor-grab truncate rounded px-1 text-left text-xs active:cursor-grabbing"
                 style={{ color: theme.node.label, background: theme.canvas.background, transform: "scale(var(--canvas-node-ui-scale, 1))", transformOrigin: "bottom left" }}
                 onPointerDown={event => { if (event.button === 0) { onMouseDown(event, data.id); if (event.defaultPrevented) event.currentTarget.setPointerCapture(event.pointerId); } }}
-                onDoubleClick={event => { event.stopPropagation(); onRename?.(data.id); }} onClick={event => { if (event.detail === 0) onRename?.(data.id); }}>{data.title || t("未命名节点")}</button></Tooltip> : null}
+                onDoubleClick={event => { event.stopPropagation(); onRename?.(data.id); }} onClick={event => { if (event.detail === 0) onRename?.(data.id); }}><DisplayText text={data.title || t("未命名节点")} /></button></Tooltip> : null}
             <div
                 data-canvas-image-frame={hasImageContent ? (isSelected ? "selected" : effectiveHovered ? "hovered" : "idle") : undefined}
                 className={`relative h-full w-full overflow-visible ${hasImageContent ? "rounded-none" : "rounded-3xl border-2"}`}
@@ -709,7 +710,7 @@ function TextContent({ node, theme, isEditingContent, textDraft, textareaRef, me
                     style={textStyle}
                     onWheel={(event) => event.stopPropagation()}
                 >
-                    {node.metadata?.content || <span style={{ color: theme.node.placeholder }}>{t("双击编辑文字")}</span>}
+                    {node.metadata?.content ? <DisplayText text={node.metadata.content} /> : <span style={{ color: theme.node.placeholder }}>{t("双击编辑文字")}</span>}
                 </div>
             )}
         </div>
@@ -720,7 +721,7 @@ function ResourceLabelBadge({ reference, theme }: { reference: CanvasResourceRef
     const t = useUiText();
     return (
         <span className={`pointer-events-none absolute right-2 top-2 z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "text-white shadow-sm" : "bg-black/35 text-white/75"}`} style={reference.active ? { background: theme.canvas.selectionStroke } : undefined}>
-            {reference.label}
+            <DisplayText text={reference.label} />
         </span>
     );
 }
@@ -786,7 +787,7 @@ function CanvasNodeOverview({ node, theme }: Pick<NodeContentRendererProps, "nod
     return (
         <div data-testid="canvas-node-overview" className="flex h-full w-full items-center gap-2 overflow-hidden rounded-[inherit] px-3" style={{ background: theme.node.fill, color: theme.node.text }}>
             <span className="grid size-7 shrink-0 place-items-center rounded-lg" style={{ background: theme.toolbar.activeBg, color: theme.node.muted }}>{icon}</span>
-            <span className="truncate text-xs font-medium">{node.title || node.type}</span>
+            <span className="truncate text-xs font-medium"><DisplayText text={node.title || node.type} /></span>
         </div>
     );
 }
@@ -809,7 +810,7 @@ function AudioNodeContent({ node, theme, renderQuality }: NodeContentRendererPro
         <div className="flex h-full w-full flex-col justify-center gap-3 px-4" style={{ background: theme.node.fill, color: theme.node.text }}>
             <div className="flex min-w-0 items-center gap-2 text-sm opacity-70">
                 <Music2 className="size-4 shrink-0" />
-                <span className="truncate">{node.title || t("音频")}</span>
+                <span className="truncate"><DisplayText text={node.title || t("音频")} /></span>
             </div>
             <audio src={previewUrl} {...canvasMediaPlaybackProps(renderQuality)} className="w-full" data-canvas-no-zoom />
         </div>

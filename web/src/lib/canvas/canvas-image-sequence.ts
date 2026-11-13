@@ -18,6 +18,12 @@ type Sequence = NonNullable<CanvasNodeGroup["imageSequence"]>;
 const hasImage = (node?: CanvasNodeData) => node?.type === CanvasNodeType.Image && Boolean(node.metadata?.content || node.metadata?.storageKey) && node.metadata?.status !== "loading" && node.metadata?.status !== "error";
 export const imageSequencePrompt = (node: CanvasNodeData) => (node.metadata?.composerContent ?? node.metadata?.prompt ?? "").replace(/@\[node:[^\]]+\]/g, "").trim();
 
+/** Task bindings, not a failed/stopped view, determine whether an earlier request is settled. */
+export function hasPendingImageSequenceAttempt(graph: Graph, configId: string) {
+    const outputs = new Set(graph.connections.filter(edge => edge.kind === "generation-output" && edge.fromNodeId === configId).map(edge => edge.toNodeId));
+    return graph.nodes.some(node => outputs.has(node.id) && Boolean(node.metadata?.imageTask || node.metadata?.mediaTask || node.metadata?.generationSubmissionUncertain || node.metadata?.videoTaskCanRecover));
+}
+
 /** A shortcut for building the same ordinary nodes and wires that users can draw manually. */
 export function createImageSequence(source: CanvasNodeData, steps: readonly Readonly<ImageSequenceStep>[], position: Position, model?: string, makeId = nanoid) {
     if (!hasImage(source)) throw new Error("请选择一张已加载的图片");
@@ -113,10 +119,16 @@ export async function runImageSequence(runtime: Runtime) {
             } else if (!signal.aborted) {
                 throw new Error(result?.outputs.find(output => output.status === "failed")?.error || "本步未得到唯一的可用图片，后续步骤未提交");
             } else {
-                // The normal generator creates its output node before submitting. If none was
-                // created, cancellation happened before dispatch (for example during lazy loading).
-                const dispatched = getGraph().connections.some(edge => edge.kind === "generation-output" && edge.fromNodeId === step.configNodeId && !step.previousOutputIds?.includes(edge.toNodeId));
-                if (!dispatched) step.status = "idle";
+                const graph = getGraph();
+                const outputIds = new Set(graph.connections.filter(edge => edge.kind === "generation-output" && edge.fromNodeId === step.configNodeId && !step.previousOutputIds?.includes(edge.toNodeId)).map(edge => edge.toNodeId));
+                const attemptOutputs = graph.nodes.filter(node => outputIds.has(node.id));
+                // Image placeholders precede reference uploads and optional preview approval.
+                // Every image POST first persists imageTask; a blank placeholder without that
+                // binding or a source task is not evidence of an accepted request. Keep all
+                // bound, completed and non-image attempts for explicit original-task recovery.
+                const unsubmittedImages = mode === "image" && !hasPendingImageSequenceAttempt(graph, step.configNodeId)
+                    && attemptOutputs.length === outputIds.size && attemptOutputs.every(node => node.type === CanvasNodeType.Image && !hasImage(node) && !node.metadata?.sourceTaskId);
+                if (!outputIds.size || unsubmittedImages) step.status = "idle";
             }
         }
         sequence.status = signal.aborted || sequence.steps.some(step => step.status !== "success") ? "stopped" : "success";
@@ -125,7 +137,7 @@ export async function runImageSequence(runtime: Runtime) {
         sequence.error = error instanceof Error ? error.message : "连续改图失败";
         // Keep unresolved requests marked running so a future continuation cannot blindly resubmit.
         const step = sequence.steps[activeIndex];
-        if (step && step.status !== "success" && !sequence.error.includes("上次请求状态尚未确认")) step.status = "failed";
+        if (step && step.status !== "success" && !sequence.error.includes("上次请求状态尚未确认") && !hasPendingImageSequenceAttempt(getGraph(), step.configNodeId)) step.status = "failed";
     }
     publish();
 }

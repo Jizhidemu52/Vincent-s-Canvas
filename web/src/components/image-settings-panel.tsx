@@ -1,4 +1,5 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
+import { DisplayText, DisplayTranslationScope } from "@/hooks/use-display-text";
 import { type CSSProperties, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { ConfigProvider, Select, Tooltip } from "antd";
 import { ChevronDown, CircleHelp, Ratio, Layers2, SlidersHorizontal } from "lucide-react";
@@ -81,6 +82,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
     useUiLocale();
     const [snapToStep, setSnapToStep] = useState(false);
     const [sizeNotice, setSizeNotice] = useState("");
+    const [advancedExpanded, setAdvancedExpanded] = useState(compact);
     const cachedProfile = useImageModelProfile(config.model || config.imageModel);
     const profile = suppliedProfile || cachedProfile;
     const markupContext = `${uploadContextKey}|${config.model || config.imageModel}|${referenceCount}`;
@@ -166,7 +168,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
         <div className={`image-parameters${spacious ? " ip-spacious" : ""}${dialog ? " ip-dialog" : ""} ${className}`} style={{ "--ip-text": theme.node.text, "--ip-muted": theme.node.muted, "--ip-border": theme.node.stroke, "--ip-soft": theme.node.fill, "--ip-panel": theme.toolbar.panel } as CSSProperties}
             onMouseDown={event => event.stopPropagation()}>
             {showTitle ? <div className="ip-title">{uiText("图像设置")}</div> : null}
-            {sizeNotice ? <p role="status" className="mb-2 text-xs" style={{ color: theme.node.muted }}>{sizeNotice}</p> : null}
+            {sizeNotice ? <p role="status" className="mb-2 text-xs" style={{ color: theme.node.muted }}><DisplayText text={sizeNotice} /></p> : null}
             {automaticReferenceSize ? <p role="status" className="mb-2 text-xs leading-5" style={{ color: theme.node.muted }}>{uiText(automaticReferenceSizeNotice)}</p> : null}
             {profile.kind === "mai-image" ? <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("固定输出 PNG，不支持透明背景参数与蒙版。")}</p> : null}
             {profile.kind === "midjourney-blend" ? <>
@@ -200,7 +202,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
                 <label className="ip-align"><input type="checkbox" checked={snapToStep} onChange={event => setSnapToStep(event.target.checked)} />{uiText(profile.kind === "mai-image" ? "32 倍数对齐" : "16倍数对齐")}</label>
             </details> : null}
             {profile.customAspect && !automaticReferenceSize ? <label className="ip-row"><span className="ip-label">{uiText("自由比例")}</span><input key={normalized.size} aria-label={uiText("自定义宽高比")} defaultValue={normalized.size} placeholder={uiText("例如 7:5")} className="min-w-0 rounded border px-2 py-1.5" style={{ background: theme.node.fill, borderColor: theme.node.stroke }} onBlur={event => { if (/^[1-9]\d*:[1-9]\d*$/.test(event.currentTarget.value)) onConfigChange("size", event.currentTarget.value); else event.currentTarget.value = normalized.size; }} /></label> : null}
-            {sizeError ? <p role="alert" className="text-xs text-destructive">{sizeError}</p> : null}
+            {sizeError ? <p role="alert" className="text-xs text-destructive"><DisplayText text={sizeError} /></p> : null}
             {gif && referenceCount > 0 ? <p role="alert" className="text-xs text-destructive">{uiText("GIF 仅支持文生图，请先移除全部参考图。")}</p> : null}
             {fields.length && spacious ? <section className="ip-section ip-advanced-section" aria-labelledby={`${resolutionNoticeId}-advanced-title`}>
                 <div className="ip-section-heading">
@@ -228,13 +230,13 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
                         </fieldset>;
                     })}
                 </div>
-            </section> : fields.length ? <details className="ip-details" open={compact || undefined}>
+            </section> : fields.length ? <details className="ip-details" open={compact || undefined} onToggle={event => setAdvancedExpanded(event.currentTarget.open)}>
                 <summary>{uiText(dialog ? "高级参数" : "全部高级参数")}<ChevronDown size={13} /></summary>
                 <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("留空使用默认设置；只提交当前模型支持的字段。")}</p>
                 <div className={dialog ? "ip-dialog-options" : "flex flex-col gap-3 py-2"}>
                     {fields.map(field => <label key={field.key} data-image-field={field.key} className="flex flex-col gap-1 text-xs">
                         <span>{uiText(field.label)}</span>
-                        {field.type === "image" ? <ImageMarkupInput key={`${markupContext}|${options[field.key] || ""}`} contextKey={markupContext} value={options[field.key] || ""} referenceCount={referenceCount} onChange={value => updateOption(field.key, value)} /> : field.options || field.type === "boolean" ? <Select aria-label={uiText(field.label)} value={options[field.key] || ""} className="w-full" onChange={value => updateOption(field.key, value)} options={["", ...(field.options || ["true", "false"])].map(value => ({ value, label: imageOptionLabel(value) }))} /> : <input aria-label={uiText(field.label)} type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} step={field.step} value={options[field.key] || ""} placeholder={uiText("默认")} disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(options.output_format || "png")} className="w-full rounded border px-2 py-1.5 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => updateOption(field.key, event.target.value)} />}
+                        {field.type === "image" ? <DisplayTranslationScope visible={advancedExpanded}><ImageMarkupInput key={`${markupContext}|${options[field.key] || ""}`} contextKey={markupContext} value={options[field.key] || ""} referenceCount={referenceCount} onChange={value => updateOption(field.key, value)} /></DisplayTranslationScope> : field.options || field.type === "boolean" ? <Select aria-label={uiText(field.label)} value={options[field.key] || ""} className="w-full" onChange={value => updateOption(field.key, value)} options={["", ...(field.options || ["true", "false"])].map(value => ({ value, label: imageOptionLabel(value) }))} /> : <input aria-label={uiText(field.label)} type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} step={field.step} value={options[field.key] || ""} placeholder={uiText("默认")} disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(options.output_format || "png")} className="w-full rounded border px-2 py-1.5 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => updateOption(field.key, event.target.value)} />}
                         {field.tip ? <span className="leading-5" style={{ color: theme.node.muted }}>{uiText(field.tip || "")}</span> : null}
                     </label>)}
                 </div>
@@ -277,9 +279,9 @@ function ImageMarkupInput({ value, referenceCount, contextKey, onChange }: { val
     return <div className="flex flex-col gap-2">
         <input aria-label={uiText("上传独立透明 PNG 标注层")} type="file" accept="image/png,.png" disabled={busy || referenceCount === 0} onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; void pick(file); }} />
         {busy ? <span role="status">{uiText("正在读取标注层")}</span> : null}
-        {name ? <div>{name} <button type="button" onClick={() => onChange("")}>{uiText("移除标注层")}</button></div> : null}
+        {name ? <div><DisplayText text={name} /> <button type="button" onClick={() => onChange("")}>{uiText("移除标注层")}</button></div> : null}
         {referenceCount === 0 ? <span>{uiText("先添加至少一张参考图；标注层须与第一张参考图同尺寸。")}</span> : null}
-        {error ? <span role="alert" className="text-destructive">{error}</span> : null}
+        {error ? <span role="alert" className="text-destructive"><DisplayText text={error} /></span> : null}
     </div>;
 }
 

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { uiText } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
@@ -33,6 +34,7 @@ const uploadRuntimeCode = ts.transpileModule(readFileSync(new URL("../src/pages/
 }).outputText;
 function nodeUploadRuntime(scope: Record<string, unknown>) {
     const dependencies: Record<string, unknown> = {
+        "@/hooks/use-display-text": displayHooksHarness,
         "@/constant/canvas": { NODE_DEFAULT_SIZE }, "@/types/canvas": { CanvasNodeType }, "@/lib/i18n": { uiText },
         "@/lib/canvas/canvas-image-upload-limit": { assertCanvasImageUploadSize, isLargeCanvasImage },
         "@/lib/canvas/canvas-node-size": { fitNodeSize },
@@ -66,7 +68,7 @@ const pageSource = ["project.tsx", "use-canvas-quick-generation.ts"]
     .map(file => readFileSync(new URL(`../src/pages/canvas/${file}`, import.meta.url), "utf8")).join("\n");
 const source = ts.createSourceFile("project.tsx", pageSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 function callback(name: string, scope: Record<string, unknown>): (...args: any[]) => any {
-    scope = { importQueueRef: { current: Promise.resolve() }, pastePositionRef: { current: null }, projectId: "upload-test", designProjectIdRef: { current: "upload-test" },
+    scope = { displayNotice: displayHooksHarness.displayNotice, importQueueRef: { current: Promise.resolve() }, pastePositionRef: { current: null }, projectId: "upload-test", designProjectIdRef: { current: "upload-test" },
         useUserStore: { getState: () => ({ status: "authenticated", user: { id: "owner" } }) }, nanoid: () => "test-import", setImportPlaceholder() {},
         getCanvasCenter: () => ({ x: 0, y: 0 }), getPastePosition: () => ({ x: 0, y: 0 }), isAudioFile: isCanvasAudioFile, canvasImportGridPosition, placeCanvasImportedNodes, mapCanvasAsyncPool,
         flushEditorDrafts() {}, flushPendingHistory() {}, setNodes() {}, nodesRef: { current: [] }, commitSelectedNodeIds() {}, setSelectedConnectionId() {},
@@ -97,7 +99,7 @@ function callback(name: string, scope: Record<string, unknown>): (...args: any[]
         const code = ts.transpileModule(`const run = ${action.getText(hook)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText.replace('import("@/lib/dropped-images")', "Promise.resolve(droppedImages)");
         const message = scope.message as { error: unknown; warning?: unknown };
         const latest = { current: { scopeKey: "upload-test", owner: "owner", onReadingChange() {}, screenToCanvas: scope.screenToCanvas, importFiles: scope.importFiles, error: message.error, warning: message.warning } };
-        const env = { uiText, latest, isCanvasAudioFile, droppedImages, request: { current: null }, ...droppedImages };
+        const env = { uiText, displayNotice: displayHooksHarness.displayNotice, latest, isCanvasAudioFile, droppedImages, request: { current: null }, ...droppedImages };
         return new Function("env", `const { ${Object.keys(env).join(",")} } = env; ${code} return run;`)(env);
     }
     let expression: ts.Expression | undefined;

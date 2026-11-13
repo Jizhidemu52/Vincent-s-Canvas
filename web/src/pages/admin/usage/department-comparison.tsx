@@ -1,3 +1,6 @@
+import { DisplayText, useDisplayConfig } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { App, Button, Select, Table } from "antd";
 import { useState } from "react";
 import type { UsageV2Dimension, UsageV2Meta, UsageV2Metric, UsageV2MetricKey } from "@/services/api/usage-analytics-v2";
@@ -23,13 +26,15 @@ export function departmentComparisonRows(a: UsageV2Dimension, b: UsageV2Dimensio
 }
 
 export default function DepartmentComparison({ departments, meta }: { departments: UsageV2Dimension[]; meta: UsageV2Meta }) {
+    const displayConfig = useDisplayConfig();
+    useUiLocale();
     const { message } = App.useApp();
     const [selected, setSelected] = useState<[string, string] | null>(null);
     const [exporting, setExporting] = useState(false);
     const candidates = departments.filter((row) => row.key !== "unassigned" && !row.key.startsWith("unknown"));
     const a = candidates.find((row) => row.key === selected?.[0]) || candidates[0];
     const b = candidates.find((row) => row.key === selected?.[1] && row.key !== a?.key) || candidates.find((row) => row.key !== a?.key);
-    if (!a || !b) return <p className="text-sm text-[var(--muted-foreground)]">部门 A/B 对照需要当前筛选中至少两个有记录的已知部门；未记录与未知归属不补零、不猜配。</p>;
+    if (!a || !b) return <p className="text-sm text-[var(--muted-foreground)]">{staticUiText("部门 A/B 对照需要当前筛选中至少两个有记录的已知部门；未记录与未知归属不补零、不猜配。")}</p>;
     const rows = departmentComparisonRows(a, b);
     const download = async () => {
         if (exporting) return;
@@ -56,17 +61,16 @@ export default function DepartmentComparison({ departments, meta }: { department
                 ],
             );
         } catch {
-            message.error("对照表导出失败，请手动重试。");
+            message.error(staticUiText("对照表导出失败，请手动重试。"));
         } finally {
             setExporting(false);
         }
     };
     const renderMetric = (value: UsageV2Metric) => (
         <div>
-            <div>{metricCoverageText(value)}</div>
+            <div><DisplayText text={metricCoverageText(value)} /></div>
             {typeof value.denominator === "number" ? (
-                <div className="text-xs text-[var(--muted-foreground)]">
-                    分子 {value.numerator ?? "未提供"} / 分母 {value.denominator}
+                <div className="text-xs text-[var(--muted-foreground)]">{staticUiText("分子 ")}{value.numerator ?? staticUiText("未提供")}{staticUiText(" / 分母 ")}{value.denominator}
                 </div>
             ) : null}
         </div>
@@ -74,15 +78,13 @@ export default function DepartmentComparison({ departments, meta }: { department
     return (
         <section className="wb-surface min-w-0 space-y-3 p-4" data-testid="usage-department-comparison">
             <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="font-semibold">部门 A/B 同周期对照</h3>
-                <Button loading={exporting} onClick={() => void download()}>
-                    导出部门对照 Excel
-                </Button>
+                <h3 className="font-semibold">{staticUiText("部门 A/B 同周期对照")}</h3>
+                <Button loading={exporting} onClick={() => void download()}>{staticUiText("导出部门对照 Excel")}</Button>
             </div>
-            <p className="text-sm">部门率按各自合并分子 / 分母计算，不平均个人百分比。人均金额按有记录活跃人数，不按编制人数；差异不表示人员能力或效率。</p>
+            <p className="text-sm">{staticUiText("部门率按各自合并分子 / 分母计算，不平均个人百分比。人均金额按有记录活跃人数，不按编制人数；差异不表示人员能力或效率。")}</p>
             <div className="grid gap-3 sm:grid-cols-2">
-                <Select aria-label="对照部门 A" value={a.key} options={candidates.map((row) => ({ value: row.key, label: `A · ${row.label}` }))} onChange={(value) => setSelected([value, b.key])} />
-                <Select aria-label="对照部门 B" value={b.key} options={candidates.filter((row) => row.key !== a.key).map((row) => ({ value: row.key, label: `B · ${row.label}` }))} onChange={(value) => setSelected([a.key, value])} />
+                <Select aria-label={staticUiText("对照部门 A")} value={a.key} options={displayConfig(candidates.map((row) => ({ value: row.key, label: `A · ${row.label}` })), "options")} onChange={(value) => setSelected([value, b.key])} />
+                <Select aria-label={staticUiText("对照部门 B")} value={b.key} options={displayConfig(candidates.filter((row) => row.key !== a.key).map((row) => ({ value: row.key, label: `B · ${row.label}` })), "options")} onChange={(value) => setSelected([a.key, value])} />
             </div>
             <Table
                 rowKey="key"
@@ -90,14 +92,14 @@ export default function DepartmentComparison({ departments, meta }: { department
                 pagination={false}
                 scroll={{ x: 900 }}
                 dataSource={rows}
-                columns={[
-                    { title: "指标", dataIndex: "label", width: 180 },
+                columns={displayConfig([
+                    { title: staticUiText("指标"), dataIndex: "label", width: 180 },
                     { title: `A · ${a.label}`, dataIndex: "a", render: renderMetric },
                     { title: `B · ${b.label}`, dataIndex: "b", render: renderMetric },
-                    { title: "差异 A − B", dataIndex: "difference", width: 220 },
-                ]}
+                    { title: staticUiText("差异 A − B"), dataIndex: "difference", width: 220, render: value => <DisplayText text={value} /> },
+                ], "columns", rows)}
             />
-            <p className="text-xs text-[var(--muted-foreground)]">{snapshotText(meta)} 同期结果观察可能来自不同刷新时点，不据此推断变化原因。</p>
+            <p className="text-xs text-[var(--muted-foreground)]"><DisplayText text={snapshotText(meta)} />{staticUiText(" 同期结果观察可能来自不同刷新时点，不据此推断变化原因。")}</p>
         </section>
     );
 }

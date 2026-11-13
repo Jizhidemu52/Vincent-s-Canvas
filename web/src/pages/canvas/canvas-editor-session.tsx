@@ -1,3 +1,5 @@
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { reloadCanvasProject } from "@/stores/canvas/use-canvas-store";
@@ -12,6 +14,7 @@ export type CanvasEditorRecoveryRef = RefObject<{ backup: () => Promise<void>; d
 export function CanvasEditorSession({ owner, projectId, enabled = true, children }: {
     owner: string; projectId: string; enabled?: boolean; children: (flushRef: CanvasEditorFlushRef, writable: CanvasEditorWriteCapability, recoveryRef: CanvasEditorRecoveryRef) => ReactNode;
 }) {
+    useUiLocale();
     const flushRef = useRef<(() => Promise<void>) | null>(null);
     const recoveryRef = useRef<CanvasEditorRecoveryRef["current"]>(null);
     const mountedEditor = useRef(false);
@@ -63,8 +66,8 @@ export function CanvasEditorSession({ owner, projectId, enabled = true, children
     const recovering = lock.status === "recovering";
     const blocked = !lock.isEditable || editorEpoch !== currentEpoch.current;
     const waiting = <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-sm" style={{ background: `${theme.canvas.background}bb`, color: theme.node.text }}>
-        <p role="status">{recovering ? "正在恢复本页编辑连接，画布内容已保留…" : transferring ? "正在保存并移交编辑权…" : viewState === "error" ? "恢复界面暂时无法载入，本页内容已保留。" : "正在确认编辑权…"}</p>
-        {viewState === "error" ? <button type="button" className="underline" onClick={() => setViews(undefined)}>重试载入恢复界面</button> : null}
+        <p role="status">{recovering ? staticUiText("正在恢复本页编辑连接，画布内容已保留…") : transferring ? staticUiText("正在保存并移交编辑权…") : viewState === "error" ? staticUiText("恢复界面暂时无法载入，本页内容已保留。") : staticUiText("正在确认编辑权…")}</p>
+        {viewState === "error" ? <button type="button" className="underline" onClick={() => setViews(undefined)}>{staticUiText("重试载入恢复界面")}</button> : null}
     </div>;
     if (mountedEditor.current) return <div className="relative h-full" data-canvas-edit-blocked={blocked ? "true" : undefined}>
         <div key={editorEpoch} inert={blocked} className="h-full">{children(flushRef, writable, recoveryRef)}</div>

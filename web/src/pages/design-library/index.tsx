@@ -13,9 +13,11 @@ import { PublishDialog } from "./publish-dialog";
 import { LibraryImage } from "./library-image";
 import { readDesignLibraryShareDraft } from "./share-draft";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
+import { displayNotice, DisplayText, DisplayTranslationPreview, useDisplayText } from "@/hooks/use-display-text";
 
 export default function DesignLibraryPage() {
     const t = useUiText();
+    const display = useDisplayText();
     const { message, modal } = App.useApp();
     const location = useLocation();
     const admin = location.pathname.startsWith("/admin/");
@@ -75,7 +77,7 @@ export default function DesignLibraryPage() {
         try {
             const entry = await getDesignLibraryEntry(id, admin, controller.signal);
             if (!controller.signal.aborted) setOpened({ owner, entry, key: `${entry.id}:${Date.now()}` });
-        } catch (reason) { if (!controller.signal.aborted) message.error(reason instanceof Error ? reason.message : t("作品暂不可访问，请刷新列表")); }
+        } catch (reason) { if (!controller.signal.aborted) message.error(displayNotice(reason instanceof Error ? reason.message : t("作品暂不可访问，请刷新列表"))); }
         finally { if (!controller.signal.aborted) setOpening(""); }
     };
     const updateEntry = (entry: DesignLibraryEntry) => {
@@ -86,16 +88,16 @@ export default function DesignLibraryPage() {
         if (!detail) return;
         const entry = detail.entry;
         await modal.confirm({ title: t("撤回这份分享？"), content: t("同事将无法继续访问、下载或复用。已经下载或加入其他画布的副本无法收回。你仍可查看作品和使用统计。"), okText: t("确认撤回"), cancelText: t("保持分享"), okButtonProps: { danger: true }, onOk: async () => {
-            try { updateEntry(await withdrawDesignLibrary(entry.id, { expectedOwnerId: owner })); message.success(t("已撤回，后续共享访问已停止")); }
-            catch (reason) { message.error(reason instanceof Error ? reason.message : t("撤回失败，请重试")); throw reason; }
+            try { updateEntry(await withdrawDesignLibrary(entry.id, { expectedOwnerId: owner })); message.success(displayNotice(t("已撤回，后续共享访问已停止"))); }
+            catch (reason) { message.error(displayNotice(reason instanceof Error ? reason.message : t("撤回失败，请重试"))); throw reason; }
         } });
     };
     const moderate = async () => {
         if (!detail || moderationBusy.current) return;
-        if (!moderationReason.trim()) { message.warning(t("请填写下架原因")); return; }
+        if (!moderationReason.trim()) { message.warning(displayNotice(t("请填写下架原因"))); return; }
         moderationBusy.current = true; setModerating(true);
-        try { updateEntry(await moderateDesignLibrary(detail.entry.id, moderationReason.trim(), { expectedOwnerId: owner })); setModerationOpen(false); message.success(t("作品已下架，原因已写入审计记录")); }
-        catch (reason) { message.error(reason instanceof Error ? reason.message : t("下架失败，请重试")); }
+        try { updateEntry(await moderateDesignLibrary(detail.entry.id, moderationReason.trim(), { expectedOwnerId: owner })); setModerationOpen(false); message.success(displayNotice(t("作品已下架，原因已写入审计记录"))); }
+        catch (reason) { message.error(displayNotice(reason instanceof Error ? reason.message : t("下架失败，请重试"))); }
         finally { moderationBusy.current = false; setModerating(false); }
     };
 
@@ -111,19 +113,19 @@ export default function DesignLibraryPage() {
                     {admin ? <Tag>{t("仅显示当前管理员有权管理的内容")}</Tag> : <Segmented value={scope} options={[{ label: t("全公司共享"), value: "company" }, { label: t("我的发布"), value: "mine" }]} onChange={value => { setScope(value as "company" | "mine"); setPage(1); }} />}
                     <div className="flex min-w-0 flex-wrap items-center gap-2"><Input className="!w-64 max-w-full" prefix={<Search size={15} />} placeholder={t("搜索标题、思路、提示词")} value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} allowClear /><Button aria-label={t("刷新共享库")} icon={<RefreshCw size={16} />} loading={loading} onClick={() => setRevision(value => value + 1)} /></div>
                 </section>
-                {tag && <div className="text-sm">{t("标签筛选：")}<Tag closable onClose={() => { setTag(""); setPage(1); }}>{tag}</Tag></div>}
+                {tag && <div className="text-sm">{t("标签筛选：")}<Tag closable onClose={() => { setTag(""); setPage(1); }}><DisplayText text={tag} /></Tag></div>}
                 {!admin ? <div className="max-w-2xl"><PracticeExampleRecord /></div> : null}
-                {error && <Alert type="error" showIcon title={t("设计灵感库暂未更新")} description={error} action={<Button onClick={() => setRevision(value => value + 1)}>{t("重试")}</Button>} />}
+                {error && <Alert type="error" showIcon title={t("设计灵感库暂未更新")} description={display(error)} action={<Button onClick={() => setRevision(value => value + 1)}>{t("重试")}</Button>} />}
                 {loading && !data ? <div role="status" aria-label={t("正在加载灵感")} className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{Array.from({ length: 8 }, (_, index) => <div key={index} className="wb-surface p-4"><Skeleton.Image active className="!h-40 !w-full" /><Skeleton active title={{ width: "70%" }} paragraph={{ rows: 2 }} /></div>)}</div> : data?.items.length ? <>
                     <div className="flex items-center justify-between text-xs text-muted-foreground"><span>{data.total} {t("份")}{scope === "mine" && !admin ? t("自主发布的") : t("设计")}{t("分享")}</span><span>{t("最新发布优先 · 原画布始终私有")}</span></div>
                     <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-busy={loading}>
                         {data.items.map(entry => <article key={entry.id} className="wb-surface group flex min-w-0 flex-col overflow-hidden">
-                            <button type="button" aria-label={t("查看作品：{p0}", { p0: String(entry.title) })} disabled={opening === entry.id} className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden bg-muted/30 text-left focus-visible:outline-2 focus-visible:outline-primary" onClick={() => void openEntry(entry.id)}>
-                                {entry.images[0] ? <LibraryImage {...entry.images[0]} alt={entry.title} className="size-full object-contain transition-transform duration-300 motion-reduce:transition-none group-hover:scale-[1.025]" /> : <div className="p-6"><BookOpen className="mb-3 text-muted-foreground" /><p className="line-clamp-4 whitespace-pre-wrap text-sm leading-6">{entry.thought || entry.prompt || t("打开阅读这份设计灵感")}</p></div>}
+                            <button type="button" aria-label={t("查看作品：{p0}", { p0: display(entry.title) })} disabled={opening === entry.id} className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden bg-muted/30 text-left focus-visible:outline-2 focus-visible:outline-primary" onClick={() => void openEntry(entry.id)}>
+                                {entry.images[0] ? <LibraryImage {...entry.images[0]} alt={display(entry.title)} className="size-full object-contain transition-transform duration-300 motion-reduce:transition-none group-hover:scale-[1.025]" /> : <div className="p-6"><BookOpen className="mb-3 text-muted-foreground" /><p className="line-clamp-4 whitespace-pre-wrap text-sm leading-6"><DisplayText text={entry.thought || entry.prompt || t("打开阅读这份设计灵感")} /></p></div>}
                                 {entry.images.length > 1 && <span className="absolute bottom-2 right-2 rounded bg-background/90 px-2 py-1 text-xs">{entry.images.length} {t("张图片")}</span>}
                                 {entry.status !== "published" && <span className="absolute left-2 top-2 rounded bg-background/95 px-2 py-1 text-xs">{t(statusLabels[entry.status])}</span>}
                             </button>
-                            <div className="flex flex-1 flex-col gap-2 p-4"><button type="button" className="line-clamp-2 text-left font-semibold leading-6 hover:text-primary" onClick={() => void openEntry(entry.id)}>{entry.title}</button><div className="text-xs text-muted-foreground">{entry.author.name} · {entry.author.departmentName || t("部门未设置")}</div><div className="mt-auto flex flex-wrap gap-1 pt-2">{entry.tags.slice(0, 4).map(value => <button type="button" key={value} className="rounded bg-muted px-2 py-1 text-xs text-muted-foreground hover:text-foreground" onClick={() => { setTag(value); setPage(1); }}>#{value}</button>)}</div><div className="text-xs text-muted-foreground">{new Date(entry.createdAt).toLocaleDateString(getUiLocale())}{opening === entry.id ? t(" · 正在打开…") : ""}</div></div>
+                            <div className="flex flex-1 flex-col gap-2 p-4"><button type="button" className="line-clamp-2 text-left font-semibold leading-6 hover:text-primary" onClick={() => void openEntry(entry.id)}><DisplayText text={entry.title} /></button><div className="text-xs text-muted-foreground"><DisplayText text={entry.author.name} /> · <DisplayText text={entry.author.departmentName || t("部门未设置")} /></div><div className="mt-auto flex flex-wrap gap-1 pt-2">{entry.tags.slice(0, 4).map(value => <button type="button" key={value} className="rounded bg-muted px-2 py-1 text-xs text-muted-foreground hover:text-foreground" onClick={() => { setTag(value); setPage(1); }}>#<DisplayText text={value} /></button>)}</div><div className="text-xs text-muted-foreground">{new Date(entry.createdAt).toLocaleDateString(getUiLocale())}{opening === entry.id ? t(" · 正在打开…") : ""}</div></div>
                         </article>)}
                     </div>
                     <Pagination current={page} pageSize={24} total={data.total} onChange={setPage} showSizeChanger={false} hideOnSinglePage className="self-center" />
@@ -134,6 +136,7 @@ export default function DesignLibraryPage() {
         {detail && <EntryDetail key={detail.key} entry={detail.entry} admin={admin} onClose={() => setOpened(null)} onWithdraw={withdraw} onModerate={() => { setModerationReason(""); setModerationOpen(true); }} />}
         <Modal open={moderationOpen && Boolean(detail)} title={t("下架共享作品")} okText={t("确认下架")} cancelText={t("取消")} okButtonProps={{ danger: true }} confirmLoading={moderating} onOk={() => void moderate()} onCancel={() => { if (!moderationBusy.current) setModerationOpen(false); }}>
             <p className="mb-4 text-sm text-muted-foreground">{t("停止后续访问、下载和复用；已有副本无法收回。下架原因会记录在管理员审计中。")}</p><Input.TextArea aria-label={t("下架原因")} value={moderationReason} maxLength={1000} rows={4} showCount onChange={event => setModerationReason(event.target.value)} placeholder={t("请填写具体下架原因")} />
+            {moderationOpen && <DisplayTranslationPreview text={moderationReason} />}
         </Modal>
     </div>;
 }

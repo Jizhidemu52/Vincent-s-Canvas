@@ -1,5 +1,6 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText } from "@/lib/i18n";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { nanoid } from "nanoid";
 import { canvasToolKey, currentToolConfig } from "@/hooks/use-tool-config";
 import { imageModelProfile } from "@/lib/image-model-settings";
@@ -30,7 +31,7 @@ type Runtime = {
     finish: (nodeId: string, controller: AbortController) => void;
     setRunning: Dispatch<SetStateAction<string | null>>;
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
-    message: { info: (text: string) => unknown; error: (text: string) => unknown };
+    message: { info: (text: ReactNode) => unknown; error: (text: ReactNode) => unknown };
 };
 /** Loaded on execution; all targets are validated before the first paid request. */
 export async function runCanvasGeneration(
@@ -94,7 +95,7 @@ export async function runCanvasGeneration(
                         && node.metadata.generationOrigin.sourceNodeId === target.id);
                     return latest?.metadata?.status !== "success";
                 });
-                if (!targets.length) { message.info("当前任务均已成功，没有需要重试的失败项。"); onResult?.({ mode, outputs: [] }); return; }
+                if (!targets.length) { message.info(displayNotice("当前任务均已成功，没有需要重试的失败项。")); onResult?.({ mode, outputs: [] }); return; }
             }
             // Resolve every input and model before starting: edits during execution affect only the next run.
             const checked = await Promise.allSettled(targets.map(async (target) => {
@@ -120,7 +121,7 @@ export async function runCanvasGeneration(
             const plans = checked.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
             const invalid = checked.flatMap((result, index) => result.status === "rejected" ? [{ nodeId: targets[index]!.id, status: "failed" as const, error: result.reason instanceof Error ? result.reason.message : "参数不合规，未提交" }] : []);
             if (!plans.length) throw new Error(invalid.map(item => item.error).join("；") || "没有可执行的任务");
-            if (invalid.length) message.info(`已跳过 ${invalid.length} 个不合规任务，继续执行其余 ${plans.length} 个。`);
+            if (invalid.length) message.info(displayNotice(`已跳过 ${invalid.length} 个不合规任务，继续执行其余 ${plans.length} 个。`));
             const imageRoutes = new Set(plans.filter(item => item.plan.mode === "image").map(item => `${item.toolKey}:${item.config.model}`));
             if (imageRoutes.size > 1) throw new Error("这些任务对应的生成/编辑板块模型不一致，请拆成两套配置或补齐公共参考");
             const runId = nanoid();
@@ -145,13 +146,13 @@ export async function runCanvasGeneration(
             const failures = outputs.filter((output) => output.status === "failed").length;
             const canceled = controller.signal.aborted;
             if (!canceled) {
-                if (!successes && failures) message.error(`公共配置生成失败：${failures} 个失败，成功 0 个。请检查失败节点后重试失败项。`);
-                else message.info(uiText("公共配置执行完成：{value1}/{value2} 个成功{value3}", { value1: successes, value2: plans.length, value3: failures ? uiText("，{value1} 个失败", { value1: failures }) : "" }));
+                if (!successes && failures) message.error(displayNotice(`公共配置生成失败：${failures} 个失败，成功 0 个。请检查失败节点后重试失败项。`));
+                else message.info(displayNotice(uiText("公共配置执行完成：{value1}/{value2} 个成功{value3}", { value1: successes, value2: plans.length, value3: failures ? uiText("，{value1} 个失败", { value1: failures }) : "" })));
             }
             onResult?.({ mode: inherited.metadata?.generationMode || "image", outputs });
         } catch (error) {
             const detail = error instanceof Error ? error.message : "共享配置执行失败";
-            message.error(detail);
+            message.error(displayNotice(detail));
             onResult?.({ mode, outputs: [{ nodeId, status: "failed", error: detail }] });
         } finally {
             if (controller) finishGenerationRequest(nodeId, controller);

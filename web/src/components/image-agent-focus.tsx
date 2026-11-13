@@ -6,6 +6,7 @@ import { useUiLocale } from "@/lib/i18n";
 import { getImageAgentVersions, imageAgentVersion, originalImageAgentImage, type ImageAgentImage } from "@/lib/image-agent/focus";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { Tooltip } from "antd";
+import { useDisplayText } from "@/hooks/use-display-text";
 
 export type ImageAgentFocusImage = ImageAgentImage & { dataUrl?: string; storageKey?: string; width?: number; height?: number };
 export type ImageAgentFocusProps = {
@@ -48,6 +49,7 @@ function FocusThumbnail({ image, eager = false }: { image: ImageAgentFocusImage;
 /** Controlled presentation only: callers persist focus and lock changes. */
 export function ImageAgentFocus({ images, focusId, locked, newCreation, referenceCount = 0, disabled, onSelect, onNewCreation, children }: ImageAgentFocusProps) {
     const text = copy[useUiLocale()];
+    const display = useDisplayText();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const [expanded, setExpanded] = useState(false);
     const chooserRef = useRef<HTMLButtonElement>(null);
@@ -63,7 +65,7 @@ export function ImageAgentFocus({ images, focusId, locked, newCreation, referenc
     const previous = focus?.parentId ? images.find(image => image.id === focus.parentId) : undefined;
     const label = (image: ImageAgentFocusImage) => {
         const match = /^(原图|图)(\d+)$/u.exec(image.label);
-        return match ? `${match[1] === "原图" ? text.original : text.image}${text.original === "Original" && match[1] === "原图" ? " " : ""}${match[2]}` : image.label;
+        return match ? `${match[1] === "原图" ? text.original : text.image}${text.original === "Original" && match[1] === "原图" ? " " : ""}${match[2]}` : display(image.label);
     };
     const buttonClass = "inline-flex min-h-8 min-w-0 items-center gap-1 rounded px-1.5 py-1 text-left hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40";
     const buttonStyle = { outlineColor: theme.canvas.selectionStroke };
@@ -71,7 +73,7 @@ export function ImageAgentFocus({ images, focusId, locked, newCreation, referenc
     const renderStrip = (items: readonly ImageAgentFocusImage[], title: string, showVersions: boolean) => items.length ? <div className="min-w-0">
         <p className="mb-1.5 text-[11px]" style={{ color: theme.node.faint }}>{title}</p>
         <div role="group" aria-label={title} className="flex min-w-0 gap-2 overflow-x-auto pb-1.5 overscroll-x-contain">
-            {items.map((image, index) => <Tooltip key={image.id} title={image.unavailableReason || image.name || label(image)}><span className="inline-flex shrink-0"><button type="button" aria-pressed={focus?.id === image.id}
+            {items.map((image, index) => <Tooltip key={image.id} title={display(image.unavailableReason || image.name || label(image))}><span className="inline-flex shrink-0"><button type="button" aria-pressed={focus?.id === image.id}
                 aria-label={`${text.choose}: ${label(image)}${showVersions ? ` · V${index + 1}` : ""}`}
                 disabled={disabled || !available(image)} onClick={() => choose(image)}
                 className="flex w-16 shrink-0 flex-col items-center gap-1 rounded p-1 text-center text-[11px] hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-1 disabled:cursor-not-allowed disabled:opacity-40"
@@ -91,7 +93,7 @@ export function ImageAgentFocus({ images, focusId, locked, newCreation, referenc
                     {focus ? <FocusThumbnail key={focus.id} image={focus} eager /> : fresh ? <Sparkles size={20} className="m-2" /> : <ImageIcon size={20} className="m-2" />}
                 </span>
                 <span className="min-w-0 flex-1">
-                    <Tooltip title={focus?.name}><span className="block truncate font-medium" style={{ color: theme.node.text }}>{focus ? `${label(focus)} · V${imageAgentVersion(images, focus.id)}` : missingFocus ? text.unavailable : text.fresh}</span></Tooltip>
+                    <Tooltip title={focus?.name ? display(focus.name) : undefined}><span className="block truncate font-medium" style={{ color: theme.node.text }}>{focus ? `${label(focus)} · V${imageAgentVersion(images, focus.id)}` : missingFocus ? text.unavailable : text.fresh}</span></Tooltip>
                     <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
                         {focus ? available(focus) ? <span className="inline-flex items-center gap-1">{locked ? <LockKeyhole size={10} aria-hidden="true" /> : null}{locked ? text.locked : text.current}</span> : <span>{text.unavailable}</span> : fresh ? <span>{text.freshHint}</span> : null}
                         {referenceCount > 0 ? <span>{text.references} {referenceCount}</span> : null}
@@ -112,8 +114,8 @@ export function ImageAgentFocus({ images, focusId, locked, newCreation, referenc
         {focus?.note && (focus.note.summary.trim() || focus.note.keep.some(value => value.trim())) ? <details key={focus.id} className="mt-1 min-w-0">
             <summary className="w-fit cursor-pointer rounded py-1 text-[11px] hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-1" style={buttonStyle}>{text.note}</summary>
             <div className="space-y-1.5 py-1 text-xs leading-relaxed" style={{ overflowWrap: "anywhere", color: theme.node.text }}>
-                {focus.note.summary ? <p className="whitespace-pre-wrap">{focus.note.summary}</p> : null}
-                {focus.note.keep.length ? <p><span style={{ color: theme.node.muted }}>{text.keep}: </span>{focus.note.keep.join(" · ")}</p> : null}
+                {focus.note.summary ? <p className="whitespace-pre-wrap">{display(focus.note.summary)}</p> : null}
+                {focus.note.keep.length ? <p><span style={{ color: theme.node.muted }}>{text.keep}: </span>{focus.note.keep.map(display).join(" · ")}</p> : null}
                 <p className="text-[11px]" style={{ color: theme.node.faint }}>{text.noteHint}</p>
             </div>
         </details> : null}

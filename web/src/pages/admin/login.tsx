@@ -1,3 +1,6 @@
+import { useDisplayUiValue } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { LockKeyhole, ShieldCheck, UserRound } from "lucide-react";
 import { App, Button, Input } from "antd";
 import { useRef, useState } from "react";
@@ -9,6 +12,8 @@ import { InchoiceBrand } from "@/components/layout/inchoice-brand";
 import { currentLoginReturn } from "@/lib/login-return";
 
 export default function AdminLoginPage() {
+    const displayUi = useDisplayUiValue();
+    useUiLocale();
     const { message } = App.useApp();
     const navigate = useNavigate();
     const login = useUserStore((state) => state.loginWithPassword);
@@ -25,7 +30,7 @@ export default function AdminLoginPage() {
         submittingRef.current = true; setSubmitting(true);
         try {
             const user = await login(loginName, password, "admin");
-            message.success("登录成功");
+            message.success(staticUiText("登录成功"));
             const returnTo = currentLoginReturn("/admin");
             const destination = user.mustChangePassword ? `/change-password?returnTo=${encodeURIComponent(returnTo)}` : isAdminRole(user.role) ? returnTo : "/";
             if (deploymentFeatures.authenticationEnabled) window.location.assign(destination);
@@ -43,24 +48,20 @@ export default function AdminLoginPage() {
                         <ShieldCheck className="size-5" />
                     </div>
                     <div>
-                        <div className="text-xs font-medium text-orange-600">管理员维护</div>
-                        <h1 className="text-xl font-semibold">进入后台管理</h1>
-                        <p className="mt-1 text-xs text-stone-500">管理员在此登录管理中心；超级管理员也可进入自己的个人工作台。{deploymentFeatures.oaLoginEnabled ? "员工请从公司 OA 进入。" : "设计师请使用个人账号登录。"}</p>
+                        <div className="text-xs font-medium text-orange-600">{staticUiText("管理员维护")}</div>
+                        <h1 className="text-xl font-semibold">{staticUiText("进入后台管理")}</h1>
+                        <p className="mt-1 text-xs text-stone-500">{staticUiText("管理员在此登录管理中心；超级管理员也可进入自己的个人工作台。")}{deploymentFeatures.oaLoginEnabled ? staticUiText("员工请从公司 OA 进入。") : staticUiText("设计师请使用个人账号登录。")}</p>
                     </div>
                 </div>
 
                 <form className="mt-6 flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-                    <label htmlFor="admin-login-name" className="block text-sm font-medium">管理员账号</label>
-                    <Input id="admin-login-name" name="username" required size="large" value={loginName} onChange={(event) => setLoginName(event.target.value)} placeholder="请输入管理员账号" autoComplete="username" />
-                    <label htmlFor="admin-login-password" className="mt-2 block text-sm font-medium">登录密码</label>
-                    <Input.Password id="admin-login-password" name="password" required size="large" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" autoComplete="current-password" />
-                    {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-                    <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<LockKeyhole className="size-4" />}>
-                        登录后台
-                    </Button>
-                    <Button size="large" block icon={<UserRound className="size-4" />} onClick={() => deploymentFeatures.authenticationEnabled ? window.location.assign(deploymentFeatures.oaLoginEnabled ? "/" : "/login") : navigate("/")}>
-                        返回工作台
-                    </Button>
+                    <label htmlFor="admin-login-name" className="block text-sm font-medium">{staticUiText("管理员账号")}</label>
+                    <Input id="admin-login-name" name="username" required size="large" value={loginName} onChange={(event) => setLoginName(event.target.value)} placeholder={staticUiText("请输入管理员账号")} autoComplete="username" />
+                    <label htmlFor="admin-login-password" className="mt-2 block text-sm font-medium">{staticUiText("登录密码")}</label>
+                    <Input.Password id="admin-login-password" name="password" required size="large" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={staticUiText("请输入密码")} autoComplete="current-password" />
+                    {error ? <p role="alert" className="text-sm text-destructive">{displayUi(error)}</p> : null}
+                    <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<LockKeyhole className="size-4" />}>{staticUiText("登录后台")}</Button>
+                    <Button size="large" block icon={<UserRound className="size-4" />} onClick={() => deploymentFeatures.authenticationEnabled ? window.location.assign(deploymentFeatures.oaLoginEnabled ? "/" : "/login") : navigate("/")}>{staticUiText("返回工作台")}</Button>
                 </form>
             </main>
         </div>

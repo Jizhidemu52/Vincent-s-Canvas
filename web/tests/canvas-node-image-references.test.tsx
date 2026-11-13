@@ -1,4 +1,5 @@
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -37,6 +38,7 @@ function loadComponent<T = (props: any) => ReactElement<any>>(path: string, name
     const requireModule = createRequire(url);
     const code = ts.transpileModule(readFileSync(url, "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
     const dependencies: Record<string, unknown> = {
+        "@/hooks/use-display-text": { ...displayHooksHarness, DisplayTranslationPreview: () => null },
         react: { ...React, useState: (initial: any) => [typeof initial === "function" ? initial() : initial, noop], useRef: (current: unknown) => ({ current }), useMemo: (factory: () => unknown) => factory(), useEffect: noop },
         antd: { ...requireModule("antd"), App: { useApp: () => ({ message: { error: noop, warning: noop } }) } },
         "@/stores/use-config-store": { ...requireModule("@/stores/use-config-store"), useEffectiveConfig: () => defaultConfig, useConfigStore: (select: Function) => select({ openConfigDialog: noop }) },

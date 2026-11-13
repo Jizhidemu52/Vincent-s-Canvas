@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import * as runtime from "@/pages/canvas/canvas-image-sequence-runtime";
@@ -34,7 +35,8 @@ function harness() {
         async waitForWriteAccess() { return writable; }, isObservationCurrent() { return observation; },
     };
     let owner = "owner-a", role = "designer", status = "active", writable = true, observation = true;
-    const writes: string[] = [], errors: string[] = [], stops: string[] = [];
+    const writes: string[] = [], errors: string[] = [], stops: string[] = [], preparing = new Set<number>();
+    let noticeId = 0, loadRuntime: () => Promise<typeof runtime> = async () => runtime;
     const calls: Array<{ id: string; lockKey: string; signal: AbortSignal; gate: ReturnType<typeof Promise.withResolvers<void>> }> = [];
     const first = runtime.addCanvasImageSequence(options, "source-a", [["A1", "A1"], ["A2", "A2"]]);
     const second = runtime.addCanvasImageSequence(options, "source-b", [["B1", "B1"], ["B2", "B2"]]);
@@ -45,8 +47,11 @@ function harness() {
     const store = Object.assign((selector: (value: any) => any) => selector({ user: user() }), { getState: () => ({ user: user() }) });
     const exports = {} as { hook: (options: ImageSequenceOptions) => ReturnType<typeof import("@/pages/canvas/use-canvas-image-sequence").useCanvasImageSequence> };
     const bindings = {
-        uiText: (value: string) => value, App: { useApp: () => ({ message: { error: (value: string) => errors.push(value), success() {}, info: (value: string) => errors.push(value) } }) },
-        useUserStore: store, createClientId: () => `run-${++sequence}`, stopCanvasObservation, loadRuntime: async () => runtime,
+        displayNotice: displayHooksHarness.displayNotice,
+        uiText: (value: string) => value, App: { useApp: () => ({ message: { error: (value: string) => errors.push(value), success() {}, info: (value: string) => errors.push(value),
+            loading(value: string, duration: number) { expect(value).toBe("正在准备工作流并核对已有任务…"); expect(duration).toBe(0); const id = ++noticeId; preparing.add(id); return () => preparing.delete(id); },
+        } }) },
+        useUserStore: store, createClientId: () => `run-${++sequence}`, stopCanvasObservation, loadRuntime: () => loadRuntime(),
         useRef(value: unknown) { const index = refIndex++; return refs[index] ||= { current: value }; },
         useMemo(factory: () => unknown, deps: unknown[]) { const index = memoIndex++, previous = memos[index]; if (previous && deps.every((value, i) => Object.is(value, previous.deps[i]))) return previous.value; return (memos[index] = { deps, value: factory() }).value; },
         useState(value: unknown) { const index = stateIndex++; if (!(index in states)) states[index] = value; return [states[index], (update: any) => { states[index] = typeof update === "function" ? update(states[index]) : update; }]; },
@@ -54,13 +59,34 @@ function harness() {
     };
     new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exports);
     function render() { refIndex = stateIndex = memoIndex = effectIndex = 0; const result = exports.hook(options); queued.splice(0).forEach(effect => effect()); return result; }
-    return { options, first, second, calls, errors, stops, writes, render,
+    return { options, first, second, calls, errors, stops, writes, render, preparing,
+        setRuntimeLoader(loader: () => Promise<typeof runtime>) { loadRuntime = loader; },
         owner(value: string) { owner = value; }, role() { role = "admin"; }, status() { status = "disabled"; }, revoke() { writable = observation = false; }, cleanup() { effects.forEach(effect => effect.cleanup?.()); },
         result(id: string) { calls.find(call => call.id === id)!.gate.resolve(); },
     };
 }
 
 describe("independent canvas image workflow sessions", () => {
+    test("preparation is visible immediately and clears on dispatch, early failure or departure", async () => {
+        const h = harness(), ui = h.render(), gate = Promise.withResolvers<typeof runtime>();
+        h.setRuntimeLoader(() => gate.promise);
+        const running = ui.run(h.first.group.id);
+        expect(h.preparing.size).toBe(1); expect(h.calls).toHaveLength(0);
+        gate.resolve(runtime); await until(() => h.calls.length === 1);
+        expect(h.preparing.size).toBe(0);
+        ui.stop(h.first.group.id); h.result(h.first.nodes[0]!.id); await running;
+        h.setRuntimeLoader(async () => { throw new Error("runtime unavailable"); });
+        await ui.run(h.second.group.id);
+        expect(h.preparing.size).toBe(0); expect(h.errors).toContain("runtime unavailable");
+        const delayed = Promise.withResolvers<typeof runtime>();
+        h.setRuntimeLoader(() => delayed.promise);
+        const departing = ui.run(h.second.group.id);
+        expect(h.preparing.size).toBe(1);
+        h.cleanup(); expect(h.preparing.size).toBe(0);
+        delayed.resolve(runtime); await departing;
+        expect(h.calls).toHaveLength(1); expect(h.options.locks.current.size).toBe(0);
+    });
+
     test("A unfinished permits B dispatch; B finishes first and both keep step order and progress", async () => {
         const h = harness(), ui = h.render();
         const a = ui.run(h.first.group.id); await until(() => h.calls.length === 1);

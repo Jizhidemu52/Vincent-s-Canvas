@@ -1,3 +1,6 @@
+import { SensitiveDisplayValue, useDisplayUiValue } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { Alert, Button, Modal, Pagination, Spin, Tag } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { adminLabel } from "../../admin-labels";
@@ -16,6 +19,8 @@ const dateText = (value: string | null) =>
     value ? new Date(value).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false }) : "缺失";
 const durationText = (value: number | null) => (value === null ? "缺失" : `${(value / 1000).toFixed(1)} 秒`);
 function ResultItem({ userId, taskId, item }: { userId: string; taskId: string; item: UsageTaskResult }) {
+    const displayUi = useDisplayUiValue();
+    useUiLocale();
     const [url, setUrl] = useState("");
     const [busy, setBusy] = useState(false),
         [error, setError] = useState("");
@@ -54,18 +59,17 @@ function ResultItem({ userId, taskId, item }: { userId: string; taskId: string; 
             className="min-w-0 space-y-2 rounded-lg border border-[var(--border)] p-3"
             data-testid={`usage-task-result-${item.position}`}
         >
-            <h4 className="font-medium">
-                结果项 {item.position} {item.kind === "video" ? "· 视频封面" : ""}
+            <h4 className="font-medium">{staticUiText("结果项 ")}{item.position} {item.kind === "video" ? staticUiText("· 视频封面") : ""}
             </h4>
             {url ? (
                 <img
                     src={url}
-                    alt={`结果项 ${item.position} 缩略预览`}
+                    alt={staticUiText("结果项 {p0} 缩略预览", { p0: `${item.position}` })}
                     className="h-36 w-full rounded object-contain"
                 />
             ) : (
                 <p className="flex min-h-20 items-center justify-center text-center text-xs text-[var(--muted-foreground)]">
-                    {item.assetId ? "尚未加载图片" : "无可授权关联的内部素材；不读取旧外链"}
+                    {item.assetId ? staticUiText("尚未加载图片") : staticUiText("无可授权关联的内部素材；不读取旧外链")}
                 </p>
             )}
             <div className="flex flex-wrap gap-2">
@@ -74,32 +78,27 @@ function ResultItem({ userId, taskId, item }: { userId: string; taskId: string; 
                     disabled={!item.thumbnailAvailable || busy}
                     loading={busy}
                     onClick={() => void load(256)}
-                >
-                    加载缩略图
-                </Button>
-                <Button size="small" disabled={!item.previewAvailable || busy} onClick={() => void load(1024)}>
-                    查看较大预览
-                </Button>
+                >{staticUiText("加载缩略图")}</Button>
+                <Button size="small" disabled={!item.previewAvailable || busy} onClick={() => void load(1024)}>{staticUiText("查看较大预览")}</Button>
             </div>
             {item.assetId && !item.thumbnailAvailable ? (
-                <p className="text-xs text-[var(--muted-foreground)]">缺少 256 缩略图；不改取原图。</p>
+                <p className="text-xs text-[var(--muted-foreground)]">{staticUiText("缺少 256 缩略图；不改取原图。")}</p>
             ) : null}
             {error ? (
                 <p role="alert" className="text-xs leading-5">
-                    {error}
+                    {displayUi(error)}
                 </p>
             ) : null}
             <div className="space-y-1 text-xs leading-5">
                 {item.evidence.length ? (
                     item.evidence.map((event) => (
                         <p key={event.eventType}>
-                            {USAGE_TASK_EVIDENCE_LABELS[event.eventType]} · {event.count} 条
-                            {event.basis === "client_reported" ? "客户端回执" : "服务端记录"}；最近{" "}
+                            {USAGE_TASK_EVIDENCE_LABELS[event.eventType]} · {event.count}{staticUiText(" 条")}{event.basis === "client_reported" ? staticUiText("客户端回执") : staticUiText("服务端记录")}{staticUiText("；最近")}{" "}
                             {dateText(event.lastAt)}
                         </p>
                     ))
                 ) : (
-                    <p className="text-[var(--muted-foreground)]">未找到本素材的有效结果事件；不推断未使用或已采纳。</p>
+                    <p className="text-[var(--muted-foreground)]">{staticUiText("未找到本素材的有效结果事件；不推断未使用或已采纳。")}</p>
                 )}
             </div>
         </article>
@@ -116,6 +115,8 @@ export default function TaskDetail({
     taskId: string;
     onClose: () => void;
 }) {
+    const displayUi = useDisplayUiValue();
+    useUiLocale();
     const [page, setPage] = useState(1),
         [data, setData] = useState<UsageTaskDetail | null>(null);
     const [busy, setBusy] = useState(true),
@@ -164,75 +165,58 @@ export default function TaskDetail({
     };
     return (
         <Modal
-            title="单任务详情 · 按需读取"
+            title={staticUiText("单任务详情 · 按需读取")}
             open
             width={{ xs: "96%", sm: "92%", md: "88%", lg: 1100 }}
             onCancel={onClose}
-            footer={<Button onClick={onClose}>关闭任务详情</Button>}
+            footer={<Button onClick={onClose}>{staticUiText("关闭任务详情")}</Button>}
         >
             <div className="max-h-[72vh] min-w-0 space-y-4 overflow-y-auto pr-1" data-testid="usage-task-detail">
                 <Alert
                     type="info"
                     showIcon
-                    title="仅本次点击的任务；图片与原始提示词分别加载"
-                    description="读取会记录审计。仅显示可核对的已有字段；缺失不补造。缩略图每次核对素材、员工与任务关联，不读取原图或旧外链。"
+                    title={staticUiText("仅本次点击的任务；图片与原始提示词分别加载")}
+                    description={staticUiText("读取会记录审计。仅显示可核对的已有字段；缺失不补造。缩略图每次核对素材、员工与任务关联，不读取原图或旧外链。")}
                 />
                 {busy ? (
                     <div role="status" className="flex items-center gap-2 py-4">
-                        <Spin size="small" />
-                        正在读取此任务…可关闭取消等待。
-                    </div>
+                        <Spin size="small" />{staticUiText("正在读取此任务…可关闭取消等待。")}</div>
                 ) : null}
-                {error ? <Alert type="error" title={error} /> : null}
+                {error ? <Alert type="error" title={displayUi(error)} /> : null}
                 {data ? (
                     <>
-                        <p className="break-all text-xs text-[var(--muted-foreground)]">
-                            任务 {data.taskId} · 本次读取 {dateText(data.asOf)}
-                            （北京时间）；与历史日汇总的读取时点可能不同。
-                        </p>
+                        <p className="break-all text-xs text-[var(--muted-foreground)]">{staticUiText("任务 ")}{data.taskId}{staticUiText(" · 本次读取 ")}{dateText(data.asOf)}{staticUiText("（北京时间）；与历史日汇总的读取时点可能不同。")}</p>
                         <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                            <p>状态：{adminLabel(data.status)}</p>
-                            <p>操作：{adminLabel(data.operationType)}</p>
-                            <p>模型：{data.modelName || "缺失"}</p>
-                            <p>提交：{dateText(data.queuedAt)}</p>
-                            <p>开始：{dateText(data.startedAt)}</p>
-                            <p>完成：{dateText(data.completedAt)}</p>
-                            <p>队列等待：{durationText(data.timing.waitMs)}</p>
-                            <p>Worker 运行段：{durationText(data.timing.runMs)}</p>
-                            <p>提交到完成：{durationText(data.timing.totalMs)}</p>
-                            <p>
-                                已记账金额：<strong>{data.bookedCny === null ? "缺失" : `¥${data.bookedCny}`}</strong>
+                            <p>{staticUiText("状态：")}{adminLabel(data.status)}</p>
+                            <p>{staticUiText("操作：")}{adminLabel(data.operationType)}</p>
+                            <p>{staticUiText("模型：")}{displayUi(data.modelName || staticUiText("缺失"))}</p>
+                            <p>{staticUiText("提交：")}{dateText(data.queuedAt)}</p>
+                            <p>{staticUiText("开始：")}{dateText(data.startedAt)}</p>
+                            <p>{staticUiText("完成：")}{dateText(data.completedAt)}</p>
+                            <p>{staticUiText("队列等待：")}{durationText(data.timing.waitMs)}</p>
+                            <p>{staticUiText("Worker 运行段：")}{durationText(data.timing.runMs)}</p>
+                            <p>{staticUiText("提交到完成：")}{durationText(data.timing.totalMs)}</p>
+                            <p>{staticUiText("已记账金额：")}<strong>{data.bookedCny === null ? staticUiText("缺失") : `¥${data.bookedCny}`}</strong>
                             </p>
-                            <p>提交的参考项数：{data.submittedReferenceCount ?? "缺失"}</p>
+                            <p>{staticUiText("提交的参考项数：")}{data.submittedReferenceCount ?? staticUiText("缺失")}</p>
                         </div>
-                        <p className="text-xs leading-5 text-[var(--muted-foreground)]">
-                            耗时来自任务时间戳，不是员工工时；Worker
-                            段可能含等待、重试和保存。金额仅为同员工成功生成历史的已记账人民币，不等于供应商实付。参考项按数组长度计数，不推断不同图片数。
-                        </p>
+                        <p className="text-xs leading-5 text-[var(--muted-foreground)]">{staticUiText("耗时来自任务时间戳，不是员工工时；Worker 段可能含等待、重试和保存。金额仅为同员工成功生成历史的已记账人民币，不等于供应商实付。参考项按数组长度计数，不推断不同图片数。")}</p>
                         <section className="space-y-2">
-                            <h3 className="font-semibold">
-                                可展示参数 <Tag>安全字段白名单</Tag>
+                            <h3 className="font-semibold">{staticUiText("可展示参数 ")}<Tag>{staticUiText("安全字段白名单")}</Tag>
                             </h3>
                             <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
                                 {Object.entries(USAGE_TASK_PARAMETER_LABELS).map(([key, label]) => (
                                     <p key={key}>
-                                        {label}：{data.parameters[key as keyof typeof data.parameters] ?? "缺失"}
+                                        {displayUi(label)}：{data.parameters[key as keyof typeof data.parameters] ?? staticUiText("缺失")}
                                     </p>
                                 ))}
                             </div>
-                            <p className="text-xs text-[var(--muted-foreground)]">
-                                缺失包含未记录或不符合当前安全格式；不展示任意参数对象、蒙版内容或私有扩展。
-                            </p>
+                            <p className="text-xs text-[var(--muted-foreground)]">{staticUiText("缺失包含未记录或不符合当前安全格式；不展示任意参数对象、蒙版内容或私有扩展。")}</p>
                         </section>
                         <section className="space-y-3">
-                            <h3 className="font-semibold">
-                                保存的结果项 · 本页 {data.results.items.length} / 共{" "}
-                                {data.results.available ? data.results.pagination.total : "未知"} 项
-                            </h3>
-                            <p className="text-xs leading-5 text-[var(--muted-foreground)]">
-                                按保存结果数组逐项展示，不是去重生成图片数，同图不同版本可能重复。事件仅为本素材当前有效记录；下载
-                                / 导出回执不证明文件落盘、正式采纳或质量。
-                            </p>
+                            <h3 className="font-semibold">{staticUiText("保存的结果项 · 本页 ")}{data.results.items.length}{staticUiText(" / 共")}{" "}
+                                {data.results.available ? data.results.pagination.total : staticUiText("未知")}{staticUiText(" 项")}</h3>
+                            <p className="text-xs leading-5 text-[var(--muted-foreground)]">{staticUiText("按保存结果数组逐项展示，不是去重生成图片数，同图不同版本可能重复。事件仅为本素材当前有效记录；下载 / 导出回执不证明文件落盘、正式采纳或质量。")}</p>
                             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                                 {data.results.items.map((item) => (
                                     <ResultItem
@@ -244,7 +228,7 @@ export default function TaskDetail({
                                 ))}
                             </div>
                             {!data.results.items.length ? (
-                                <p className="text-sm text-[var(--muted-foreground)]">本页没有保存的结果项。</p>
+                                <p className="text-sm text-[var(--muted-foreground)]">{staticUiText("本页没有保存的结果项。")}</p>
                             ) : null}
                             <Pagination
                                 current={page}
@@ -255,35 +239,29 @@ export default function TaskDetail({
                             />
                         </section>
                         <section className="space-y-3 border-t border-[var(--border)] pt-3">
-                            <p className="text-xs leading-5">
-                                原始提示词可能包含业务敏感内容；只有点击下面按钮才读取并记录审计，不自动发送给模型或他人。
-                            </p>
+                            <p className="text-xs leading-5">{staticUiText("原始提示词可能包含业务敏感内容；只有点击下面按钮才读取并记录审计，不自动发送给模型或他人。")}</p>
                             <Button
-                                aria-label="明确查看此任务原始提示词"
+                                aria-label={staticUiText("明确查看此任务原始提示词")}
                                 loading={promptBusy}
                                 disabled={promptBusy}
                                 onClick={() => void loadPrompt()}
-                            >
-                                明确查看此任务原始提示词
-                            </Button>
-                            {promptError ? <Alert type="error" title={promptError} /> : null}
+                            >{staticUiText("明确查看此任务原始提示词")}</Button>
+                            {promptError ? <Alert type="error" title={displayUi(promptError)} /> : null}
                             {prompt ? (
                                 <div className="space-y-2" data-testid="usage-task-private-prompt">
-                                    <Button size="small" onClick={() => setPrompt(null)}>
-                                        隐藏已读取提示词
-                                    </Button>
+                                    <Button size="small" onClick={() => setPrompt(null)}>{staticUiText("隐藏已读取提示词")}</Button>
                                     {prompt.truncated ? (
-                                        <Alert type="warning" title="长文本仅展示前 32,000 字符；不是完整原文。" />
+                                        <Alert type="warning" title={staticUiText("长文本仅展示前 32,000 字符；不是完整原文。")} />
                                     ) : null}
-                                    <h4 className="text-sm font-medium">任务保存的提交提示词（可能已优化）</h4>
+                                    <h4 className="text-sm font-medium">{staticUiText("任务保存的提交提示词（可能已优化）")}</h4>
                                     <pre className="max-h-52 overflow-auto whitespace-pre-wrap break-words text-xs leading-6">
-                                        {prompt.prompt || "未保存文本"}
+                                        <SensitiveDisplayValue value={prompt.prompt || staticUiText("未保存文本")} />
                                     </pre>
-                                    <h4 className="text-sm font-medium">保存的原始用户文本（userText）</h4>
+                                    <h4 className="text-sm font-medium">{staticUiText("保存的原始用户文本（userText）")}</h4>
                                     <pre className="max-h-52 overflow-auto whitespace-pre-wrap break-words text-xs leading-6">
-                                        {prompt.userInput === null
-                                            ? "缺失，未从其他字段推断"
-                                            : prompt.userInput || "保存为空文本"}
+                                        <SensitiveDisplayValue value={prompt.userInput === null
+                                            ? staticUiText("缺失，未从其他字段推断")
+                                            : prompt.userInput || staticUiText("保存为空文本")} />
                                     </pre>
                                 </div>
                             ) : null}

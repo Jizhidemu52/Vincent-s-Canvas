@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { useRef, useState } from "react";
 import { App } from "antd";
 import { useNavigate } from "react-router-dom";
@@ -52,7 +53,7 @@ export function useResultCanvas() {
             }
             await flushCanvasPersistence(); assertOwner();
             navigate(`/canvas/${encodeURIComponent(projectId)}`);
-        } catch (error) { message.error(uiText(generationErrorMessage(error))); }
+        } catch (error) { message.error(displayNotice(uiText(generationErrorMessage(error)))); }
         finally { working.current = false; setBusy(false); }
     };
     return { enabled, busy, place };

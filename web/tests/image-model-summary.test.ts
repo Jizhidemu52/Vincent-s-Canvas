@@ -17,7 +17,7 @@ function visit(node: ts.Node) {
 visit(source);
 if (!summaryExpression) throw new Error("Image workspace model summary expression was not found");
 // Evaluate the production summary expression, not a second copy of its label rule.
-const summary = new Function("modelOptionLabel", "imageModelDisplayName", "canvasModelPresentation", "effectiveConfig", "model", "businessModels", "user", `return (${summaryExpression.getText(source)});`);
+const summary = new Function("display", "modelOptionLabel", "imageModelDisplayName", "canvasModelPresentation", "effectiveConfig", "model", "businessModels", "user", `return (${summaryExpression.getText(source)});`).bind(null, (text: string) => text);
 const savedBusiness = useBusinessConfigStore.getState();
 const savedUser = useUserStore.getState();
 afterEach(() => { useBusinessConfigStore.setState(savedBusiness); useUserStore.setState(savedUser); });

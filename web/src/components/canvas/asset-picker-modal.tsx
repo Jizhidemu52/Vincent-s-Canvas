@@ -1,4 +1,5 @@
 import { useUiText } from "@/lib/i18n";
+import { useDisplayText, DisplayText, DisplayTranslationScope } from "@/hooks/use-display-text";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Input, Modal, Spin, Tag, Tooltip } from "antd";
 import { Check, ImageIcon, Search } from "lucide-react";
@@ -33,7 +34,7 @@ export function AssetPickerModal({ open, onInsert, onInsertMany, onClose, select
     const ownerId = useUserStore((state) => state.user?.id);
     return (
         <Modal title={t("选择素材")} open={open} centered onCancel={onClose} footer={null} width={800} destroyOnHidden>
-            <MyAssetsTab key={ownerId || "signed-out"} open={open} onInsert={onInsert} onInsertMany={onInsertMany} selectionMode={selectionMode} />
+            <DisplayTranslationScope visible={open}><MyAssetsTab key={ownerId || "signed-out"} open={open} onInsert={onInsert} onInsertMany={onInsertMany} selectionMode={selectionMode} /></DisplayTranslationScope>
         </Modal>
     );
 }
@@ -49,6 +50,7 @@ const kindOptions = [
 
 function PickerCard({ asset, selected, disabled, onClick }: { asset: Asset; selected?: boolean; disabled: boolean; onClick: () => void }) {
     const t = useUiText();
+    const display = useDisplayText();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const fallback = asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : asset.kind === "video" ? asset.data.url : "");
     const needsResolution = (asset.kind === "image" || asset.kind === "video") && needsCanvasAssetPreviewResolution(asset);
@@ -82,13 +84,13 @@ function PickerCard({ asset, selected, disabled, onClick }: { asset: Asset; sele
             onClick={onClick}
         >
             {cover ? (
-                <img src={cover} alt={asset.title} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" />
+                <img src={cover} alt={display(asset.title)} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" />
             ) : (
-                <div className="flex aspect-[4/3] items-center justify-center p-3 text-center text-[13px] leading-5" style={{ background: theme.node.fill, color: theme.node.muted }}>{asset.title}</div>
+                <div className="flex aspect-[4/3] items-center justify-center p-3 text-center text-[13px] leading-5" style={{ background: theme.node.fill, color: theme.node.muted }}><DisplayText text={asset.title} /></div>
             )}
             <div className="p-3">
                 <div className="flex items-center justify-between gap-2">
-                    <span className="line-clamp-1 text-[13px] font-medium">{asset.title}</span>
+                    <span className="line-clamp-1 text-[13px] font-medium"><DisplayText text={asset.title} /></span>
                     <Tag className="m-0 shrink-0 text-xs">{asset.kind === "image" ? t("图片") : asset.kind === "video" ? t("视频") : t("文本")}</Tag>
                 </div>
             </div>

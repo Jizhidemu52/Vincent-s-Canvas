@@ -1,4 +1,5 @@
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -52,6 +53,7 @@ function page(wecom: boolean | Error = true) {
     });
     const dependencies: Record<string, any> = {
         "@/lib/i18n": i18nHarness,
+        "@/hooks/use-display-text": displayHooksHarness,
         react: { ...React, lazy: () => "LazyPanel",
             useState(initial: any) { const index = cursor++; if (!(index in state)) state[index] = typeof initial === "function" ? initial() : initial; return [state[index], (next: any) => { state[index] = typeof next === "function" ? next(state[index]) : next; }]; },
             useRef(initial: any) { const index = cursor++; return state[index] ||= { current: initial }; },

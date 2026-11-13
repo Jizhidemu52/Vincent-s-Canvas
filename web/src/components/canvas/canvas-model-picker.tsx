@@ -1,5 +1,6 @@
 import { Tooltip } from "antd";
 import { useUiText } from "@/lib/i18n";
+import { DisplayText, useDisplayText } from "@/hooks/use-display-text";
 import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ArrowLeft, Check, ChevronDown, ChevronRight, ImageIcon } from "lucide-react";
 import { Popover } from "radix-ui";
@@ -26,6 +27,7 @@ type CanvasModelPickerProps = {
 
 export function CanvasModelPicker({ options, value, label, emptyLabel, open, disabled, bound, categoryLabel, className, side = "right", onOpenChange, onValueChange }: CanvasModelPickerProps) {
     const t = useUiText();
+    const display = useDisplayText();
     const themeName = useThemeStore(state => state.theme);
     const theme = canvasThemes[themeName];
     const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -78,14 +80,14 @@ export function CanvasModelPicker({ options, value, label, emptyLabel, open, dis
     const row = (option: CanvasModelOption) => <CanvasModelRow key={option.value} option={option} selected={option.value === value} onSelect={select} />;
 
     return <Popover.Root open={open && !disabled} onOpenChange={next => { if (!disabled) onOpenChange(next); }}>
-        <Tooltip title={`${label}${bound ? ` · ${t("后台指定")}` : ""}`}><Popover.Trigger asChild>
+        <Tooltip title={`${display(label)}${bound ? ` · ${t("后台指定")}` : ""}`}><Popover.Trigger asChild>
             <button type="button" role="combobox" aria-label={t("选择模型")} aria-haspopup="dialog" aria-controls={open ? listId : undefined} aria-expanded={open && !disabled}
-                aria-description={`${label}${bound ? ` · ${t("后台指定")}` : ""}`}
+                aria-description={`${display(label)}${bound ? ` · ${t("后台指定")}` : ""}`}
                 disabled={disabled} data-usage-control="model" data-theme={themeName} style={palette}
                 className={cn("canvas-composer-model-picker canvas-model-trigger", className)}
                 onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()}>
                 <ModelLogo option={current} compact />
-                <span className="canvas-model-trigger-name">{label}</span>
+                <span className="canvas-model-trigger-name"><DisplayText text={label} /></span>
                 <ChevronDown className={cn("canvas-model-trigger-chevron", open && !disabled && "is-open")} size={15} aria-hidden="true" />
             </button>
         </Popover.Trigger></Tooltip>
@@ -110,7 +112,7 @@ export function CanvasModelPicker({ options, value, label, emptyLabel, open, dis
                                     const next = new Set(previous); if (next.has(group.name)) next.delete(group.name); else next.add(group.name); return next;
                                 })}>
                                     <ModelLogo option={group.models[0]} />
-                                    <span>{group.name}</span><span className="canvas-model-family-count">{group.models.length} {t(" 个模型")}</span>
+                                    <span><DisplayText text={group.name} /></span><span className="canvas-model-family-count">{group.models.length} {t(" 个模型")}</span>
                                     <ChevronRight size={14} aria-hidden="true" className={expanded.has(group.name) ? "canvas-model-family-expanded" : undefined} />
                                 </button>
                                 {expanded.has(group.name) ? <div role="listbox" aria-label={t("{value1} 模型", { value1: group.name })}>{group.models.map(row)}</div> : null}
@@ -124,13 +126,14 @@ export function CanvasModelPicker({ options, value, label, emptyLabel, open, dis
 
 export function CanvasModelRow({ option, selected, onSelect }: { option: CanvasModelOption; selected: boolean; onSelect: (value: string) => void }) {
     const t = useUiText();
-    return <button type="button" role="option" aria-selected={selected} aria-label={option.name} data-model-choice data-usage-control="model" data-usage-value={option.usageModelId}
+    const display = useDisplayText();
+    return <button type="button" role="option" aria-selected={selected} aria-label={display(option.name)} data-model-choice data-usage-control="model" data-usage-value={option.usageModelId}
         className="canvas-model-option" onClick={() => onSelect(option.value)}>
         <ModelLogo option={option} />
         <span className="canvas-model-option-copy">
-            <span className="canvas-model-option-heading"><span className="canvas-model-option-name">{option.name}</span>{option.channel ? <span className="canvas-model-channel">{option.channel}</span> : null}</span>
-            {option.description ? <span className="canvas-model-option-description">{option.description}</span> : null}
-            {option.details.length ? <span className="canvas-model-option-details">{option.details.join(" · ")}</span> : null}
+            <span className="canvas-model-option-heading"><span className="canvas-model-option-name"><DisplayText text={option.name} /></span>{option.channel ? <span className="canvas-model-channel"><DisplayText text={option.channel} /></span> : null}</span>
+            {option.description ? <span className="canvas-model-option-description"><DisplayText text={option.description} /></span> : null}
+            {option.details.length ? <span className="canvas-model-option-details">{option.details.map(item => display(item)).join(" · ")}</span> : null}
         </span>
         {selected ? <Check className="canvas-model-option-check" size={15} aria-label={t("已选择")} /> : null}
     </button>;

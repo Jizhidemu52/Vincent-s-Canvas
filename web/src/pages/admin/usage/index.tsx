@@ -1,3 +1,7 @@
+import { SensitiveDisplayValue, useDisplayUiValue, useDisplayConfig } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { adminLabel } from "../admin-labels";
+import { useUiLocale } from "@/lib/i18n";
 import { Alert, Button, Input, Modal, Select, Spin, Tabs, Tag, theme } from "antd";
 import { Download, Maximize2, Minimize2, RefreshCw } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -64,6 +68,9 @@ export function exportRows(data: PageData, tab: UsageTab, profile = false): Expo
     return (data as UsageV2Overview).daily.map((row) => ({ 日期: row.day, ...metrics(row.metrics) }));
 }
 export default function UsageAnalyticsDashboard() {
+    const displayUi = useDisplayUiValue();
+    const displayConfig = useDisplayConfig();
+    useUiLocale();
     const [params, setParams] = useSearchParams(),
         locationKey = params.toString();
     const location = useMemo(() => readUsageLocation(new URLSearchParams(locationKey)), [locationKey]);
@@ -294,28 +301,28 @@ export default function UsageAnalyticsDashboard() {
         else next.delete("uLegacy");
         setParams(next);
     };
-    if (!isAdmin) return <Alert type="warning" showIcon title="仅超级管理员可访问使用分析" description="部门管理员与普通员工不能查看、导出或分析其他用户的记录。" />;
+    if (!isAdmin) return <Alert type="warning" showIcon title={staticUiText("仅超级管理员可访问使用分析")} description={staticUiText("部门管理员与普通员工不能查看、导出或分析其他用户的记录。")} />;
     if (showLegacy)
         return (
             <div className="space-y-4">
-                <Alert type="info" showIcon title="旧版实时分析 · 独立筛选范围" description="这里使用旧版独立日期与筛选，不自动继承新版部门 / 多板块 / 多模型等条件。不会补算日事实，也不代表新版范围已经恢复。" />
-                <Button onClick={() => legacyView(false)}>返回新版使用分析</Button>
+                <Alert type="info" showIcon title={staticUiText("旧版实时分析 · 独立筛选范围")} description={staticUiText("这里使用旧版独立日期与筛选，不自动继承新版部门 / 多板块 / 多模型等条件。不会补算日事实，也不代表新版范围已经恢复。")} />
+                <Button onClick={() => legacyView(false)}>{staticUiText("返回新版使用分析")}</Button>
                 <Suspense fallback={<Spin />}>
                     <LegacyPanel />
                 </Suspense>
             </div>
         );
     return (
-        <div ref={root} className={`min-w-0 space-y-4 ${fullScreen ? "overflow-auto p-5" : ""}`} style={{ background: fullScreen ? token.colorBgLayout : undefined }} aria-label="新版使用分析">
+        <div ref={root} className={`min-w-0 space-y-4 ${fullScreen ? "overflow-auto p-5" : ""}`} style={{ background: fullScreen ? token.colorBgLayout : undefined }} aria-label={staticUiText("新版使用分析")}>
             <header className="wb-surface space-y-4 p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                         <div className="mb-2 flex items-center gap-2">
                             <span className="text-xs font-semibold tracking-widest text-[var(--primary)]">WORKSPACE INSIGHTS</span>
-                            <Tag>仅超级管理员</Tag>
+                            <Tag>{staticUiText("仅超级管理员")}</Tag>
                         </div>
-                        <h2 className="text-xl font-semibold">使用分析</h2>
-                        <p className="mt-1 text-sm text-[var(--muted-foreground)]">从可信记录看使用方式、结果与成本。结论可核对，缺口不隐藏。</p>
+                        <h2 className="text-xl font-semibold">{staticUiText("使用分析")}</h2>
+                        <p className="mt-1 text-sm text-[var(--muted-foreground)]">{staticUiText("从可信记录看使用方式、结果与成本。结论可核对，缺口不隐藏。")}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                         <Button
@@ -324,29 +331,29 @@ export default function UsageAnalyticsDashboard() {
                                 void (fullScreen ? document.exitFullscreen() : root.current?.requestFullscreen())?.catch(() => setNotice("浏览器不支持全屏，请使用浏览器全屏功能。"));
                             }}
                         >
-                            {fullScreen ? "退出全屏" : "全屏"}
+                            {fullScreen ? staticUiText("退出全屏") : staticUiText("全屏")}
                         </Button>
                         {(["xlsx", "png", "pdf"] as const).map((kind) => (
                             <Button key={kind} disabled={!data || dirty || locked || loading} icon={<Download size={15} />} onClick={() => setExportKind(kind)}>
-                                {kind === "xlsx" ? "Excel 当前页" : kind === "png" ? "图片" : "PDF"}
+                                {kind === "xlsx" ? staticUiText("Excel 当前页") : kind === "png" ? staticUiText("图片") : "PDF"}
                             </Button>
                         ))}
                     </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                     <Select
-                        aria-label="分析操作类型"
+                        aria-label={staticUiText("分析操作类型")}
                         mode="multiple"
                         maxTagCount="responsive"
                         allowClear
                         disabled={locked}
-                        placeholder="全部操作类型"
+                        placeholder={staticUiText("全部操作类型")}
                         style={{ minWidth: 200, maxWidth: "100%" }}
                         value={draft.operationTypes}
-                        options={options?.operationTypes.map((value) => ({ value, label: value }))}
+                        options={displayConfig(options?.operationTypes.map((value) => ({ value, label: value })), "options")}
                         onChange={(operationTypes) => setDraft((current) => ({ ...current, operationTypes }))}
                     />
-                    <span className="text-xs text-[var(--muted-foreground)]">日期快捷</span>
+                    <span className="text-xs text-[var(--muted-foreground)]">{staticUiText("日期快捷")}</span>
                     {(
                         [
                             { label: "今天", value: 1 },
@@ -356,127 +363,104 @@ export default function UsageAnalyticsDashboard() {
                         ] as const
                     ).map((item) => (
                         <Button key={item.label} size="small" disabled={locked} onClick={() => setDraft((current) => ({ ...current, ...datePreset(item.value) }))}>
-                            {item.label}
+                            {displayUi(item.label)}
                         </Button>
                     ))}
                 </div>
                 <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <label className="grid gap-1.5 text-xs">
-                        开始日期
-                        <Input aria-label="分析开始日期" type="date" value={draft.from} disabled={locked} onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} />
+                    <label className="grid gap-1.5 text-xs">{staticUiText("开始日期")}<Input aria-label={staticUiText("分析开始日期")} type="date" value={draft.from} disabled={locked} onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} />
                     </label>
-                    <label className="grid gap-1.5 text-xs">
-                        结束日期
-                        <Input aria-label="分析结束日期" type="date" value={draft.to} disabled={locked} onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} />
+                    <label className="grid gap-1.5 text-xs">{staticUiText("结束日期")}<Input aria-label={staticUiText("分析结束日期")} type="date" value={draft.to} disabled={locked} onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} />
                     </label>
-                    <label className="grid gap-1.5 text-xs">
-                        对比周期
-                        <Select
-                            aria-label="分析对比周期"
+                    <label className="grid gap-1.5 text-xs">{staticUiText("对比周期")}<Select
+                            aria-label={staticUiText("分析对比周期")}
                             disabled={locked}
                             value={draft.compare}
-                            options={[
-                                { value: "previous_period", label: "上一周期（相同天数）" },
-                                { value: "previous_year", label: "去年同期" },
-                                { value: "none", label: "不比较" },
-                            ]}
+                            options={displayConfig([
+                                { value: "previous_period", label: staticUiText("上一周期（相同天数）") },
+                                { value: "previous_year", label: staticUiText("去年同期") },
+                                { value: "none", label: staticUiText("不比较") },
+                            ], "options")}
                             onChange={(compare) => setDraft((current) => ({ ...current, compare }))}
                         />
                     </label>
-                    <label className="grid gap-1.5 text-xs">
-                        部门归属口径
-                        <Select
-                            aria-label="部门归属口径"
+                    <label className="grid gap-1.5 text-xs">{staticUiText("部门归属口径")}<Select
+                            aria-label={staticUiText("部门归属口径")}
                             disabled={locked}
                             value={draft.departmentBasis}
-                            options={[
-                                { value: "at_event", label: "事件时部门（缺失单列）" },
-                                { value: "current", label: "当前部门" },
-                            ]}
+                            options={displayConfig([
+                                { value: "at_event", label: staticUiText("事件时部门（缺失单列）") },
+                                { value: "current", label: staticUiText("当前部门") },
+                            ], "options")}
                             onChange={(departmentBasis) => setDraft((current) => ({ ...current, departmentBasis }))}
                         />
                     </label>
-                    <label className="grid min-w-0 gap-1.5 text-xs">
-                        部门
-                        <Select
-                            aria-label="分析部门筛选"
+                    <label className="grid min-w-0 gap-1.5 text-xs">{staticUiText("部门")}<Select
+                            aria-label={staticUiText("分析部门筛选")}
                             mode="multiple"
                             maxTagCount="responsive"
                             allowClear
                             disabled={locked}
-                            placeholder="全部部门"
+                            placeholder={staticUiText("全部部门")}
                             value={draft.departmentIds}
-                            options={options?.departments.map((item) => ({ value: item.id, label: item.name }))}
+                            options={displayConfig(options?.departments.map((item) => ({ value: item.id, label: item.name })), "options")}
                             onChange={(departmentIds) => setDraft((current) => ({ ...current, departmentIds }))}
                         />
                     </label>
-                    <label className="grid min-w-0 gap-1.5 text-xs">
-                        人员
-                        <Select
-                            aria-label="分析人员筛选"
+                    <label className="grid min-w-0 gap-1.5 text-xs">{staticUiText("人员")}<Select
+                            aria-label={staticUiText("分析人员筛选")}
                             mode="multiple"
                             maxTagCount="responsive"
                             allowClear
                             disabled={locked}
                             showSearch={{ filterOption: false, onSearch: setPeopleSearch }}
-                            placeholder="输入姓名搜索人员"
+                            placeholder={staticUiText("输入姓名搜索人员")}
                             value={draft.userIds}
-                            options={options?.people.map((item) => ({ value: item.id, label: item.name }))}
+                            options={displayConfig(options?.people.map((item) => ({ value: item.id, label: item.name })), "options")}
                             onChange={(userIds) => setDraft((current) => ({ ...current, userIds }))}
-                            notFoundContent="没有匹配人员；可输入姓名搜索"
+                            notFoundContent={staticUiText("没有匹配人员；可输入姓名搜索")}
                         />
                     </label>
-                    <label className="grid min-w-0 gap-1.5 text-xs">
-                        板块
-                        <Select
-                            aria-label="分析板块筛选"
+                    <label className="grid min-w-0 gap-1.5 text-xs">{staticUiText("板块")}<Select
+                            aria-label={staticUiText("分析板块筛选")}
                             mode="multiple"
                             maxTagCount="responsive"
                             allowClear
                             disabled={locked}
-                            placeholder="全部板块"
+                            placeholder={staticUiText("全部板块")}
                             value={draft.boardKeys}
-                            options={options?.boards.map((item) => ({ value: item.key, label: item.label }))}
+                            options={displayConfig(options?.boards.map((item) => ({ value: item.key, label: item.label })), "options")}
                             onChange={(boardKeys) => setDraft((current) => ({ ...current, boardKeys }))}
                         />
                     </label>
-                    <label className="grid min-w-0 gap-1.5 text-xs">
-                        模型
-                        <Select
-                            aria-label="分析模型筛选"
+                    <label className="grid min-w-0 gap-1.5 text-xs">{staticUiText("模型")}<Select
+                            aria-label={staticUiText("分析模型筛选")}
                             mode="multiple"
                             maxTagCount="responsive"
                             allowClear
                             disabled={locked}
-                            placeholder="全部模型"
+                            placeholder={staticUiText("全部模型")}
                             value={draft.modelConfigIds}
-                            options={options?.models.map((item) => ({ value: item.id, label: item.name }))}
+                            options={displayConfig(options?.models.map((item) => ({ value: item.id, label: item.name })), "options")}
                             onChange={(modelConfigIds) => setDraft((current) => ({ ...current, modelConfigIds }))}
                         />
                     </label>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                    <Button type="primary" disabled={locked} onClick={apply}>
-                        应用筛选
-                    </Button>
+                    <Button type="primary" disabled={locked} onClick={apply}>{staticUiText("应用筛选")}</Button>
                     <Button
                         disabled={locked}
                         onClick={() => {
                             const cleared = { ...filters, departmentIds: [], userIds: [], boardKeys: [], modelConfigIds: [], operationTypes: [] };
                             changeLocation(cleared);
                         }}
-                    >
-                        清除维度筛选
-                    </Button>
-                    <Button disabled={locked || dirty} loading={loading} icon={<RefreshCw size={15} />} onClick={() => setRefresh((value) => value + 1)}>
-                        刷新读取
-                    </Button>
-                    <span className="text-xs text-[var(--muted-foreground)]">只读查询；不触发重算或修改账本</span>
+                    >{staticUiText("清除维度筛选")}</Button>
+                    <Button disabled={locked || dirty} loading={loading} icon={<RefreshCw size={15} />} onClick={() => setRefresh((value) => value + 1)}>{staticUiText("刷新读取")}</Button>
+                    <span className="text-xs text-[var(--muted-foreground)]">{staticUiText("只读查询；不触发重算或修改账本")}</span>
                 </div>
-                <p className="text-xs leading-5" aria-label="当前分析范围">
-                    已应用：{scopeText}
+                <p className="text-xs leading-5" aria-label={staticUiText("当前分析范围")}>{staticUiText("已应用：")}{scopeText}
                 </p>
-                {dirty ? <Alert type="info" title="筛选尚未应用；导出和 AI 确认暂不可用" /> : null}
+                {dirty ? <Alert type="info" title={staticUiText("筛选尚未应用；导出和 AI 确认暂不可用")} /> : null}
                 {optionError ? <Alert type="warning" title={optionError} /> : null}
             </header>
             <RollupActions
@@ -493,7 +477,7 @@ export default function UsageAnalyticsDashboard() {
                 onChange={(key) => {
                     if (!locked) changeLocation(filters, key as UsageTab);
                 }}
-                items={usageTabs.map((item) => ({ ...item, disabled: locked }))}
+                items={usageTabs.map((item) => ({ ...item, label: staticUiText(item.label), disabled: locked }))}
             />
             <ReportActions
                 key={`report:${requestKey}:${JSON.stringify(draft)}`}
@@ -504,12 +488,10 @@ export default function UsageAnalyticsDashboard() {
                 scopeText={scopeText}
             />
             {notice ? <Alert type="info" showIcon title={notice} closable onClose={() => setNotice("")} /> : null}
-            {queryState.error || error ? <Alert type={errorCode === "USAGE_ROLLUP_REFRESH_REQUIRED" ? "warning" : "error"} showIcon title={queryState.error || error} action={<Button onClick={refreshRead}>重新读取（不重算）</Button>} /> : null}
+            {queryState.error || error ? <Alert type={errorCode === "USAGE_ROLLUP_REFRESH_REQUIRED" ? "warning" : "error"} showIcon title={displayUi(queryState.error || error)} action={<Button onClick={refreshRead}>{staticUiText("重新读取（不重算）")}</Button>} /> : null}
             {loading ? (
                 <div role="status" className="flex items-center justify-center gap-3 py-16">
-                    <Spin />
-                    正在读取当前范围的分析数据…
-                </div>
+                    <Spin />{staticUiText("正在读取当前范围的分析数据…")}</div>
             ) : null}
             {data ? (
                 <>
@@ -553,27 +535,27 @@ export default function UsageAnalyticsDashboard() {
             ) : null}
             <LegacyActions key={`${requestKey}:${JSON.stringify(draft)}`} filters={data && !dirty ? legacy.filters : null} reason={dirty ? "请先应用当前筛选。" : legacy.reason} onBusy={busyChange} />
             <Modal
-                title={`导出${exportKind === "xlsx" ? " Excel 当前页" : exportKind === "png" ? "看板图片" : "看板 PDF"}`}
+                title={staticUiText("导出{p0}", { p0: `${exportKind === "xlsx" ? staticUiText(" Excel 当前页") : exportKind === "png" ? staticUiText("看板图片") : staticUiText("看板 PDF")}` })}
                 open={Boolean(exportKind)}
                 onCancel={() => {
                     if (!exporting) setExportKind(null);
                 }}
                 confirmLoading={exporting}
                 onOk={() => void performExport()}
-                okText="确认导出"
-                cancelText="返回"
+                okText={staticUiText("确认导出")}
+                cancelText={staticUiText("返回")}
                 cancelButtonProps={{ disabled: exporting }}
             >
                 <Alert
                     type="warning"
                     showIcon
-                    title="仅保存在本机浏览器，不自动分享"
-                    description={exportKind === "xlsx" ? "Excel 包含当前已载入页的明细和口径；人员页可能含姓名，完整原始记录请使用 JSONL。" : "仅导出当前显式指标与图表，不截入原始提示词、私有图片或隐藏内容。若当前图表按人员拆分，图中名称会保留。"}
+                    title={staticUiText("仅保存在本机浏览器，不自动分享")}
+                    description={exportKind === "xlsx" ? staticUiText("Excel 包含当前已载入页的明细和口径；人员页可能含姓名，完整原始记录请使用 JSONL。") : staticUiText("仅导出当前显式指标与图表，不截入原始提示词、私有图片或隐藏内容。若当前图表按人员拆分，图中名称会保留。")}
                 />
                 <p className="mt-3 text-xs leading-6">{scopeText}</p>
             </Modal>
             <Modal
-                title="明确读取的个人原始记录"
+                title={staticUiText("明确读取的个人原始记录")}
                 open={privateOpen}
                 width={900}
                 footer={null}
@@ -583,33 +565,27 @@ export default function UsageAnalyticsDashboard() {
                     setPrivateData(null);
                 }}
             >
-                <Alert type="warning" title="业务敏感内容，仅供授权管理员核查" description="这里只读取当前已授权人员及筛选范围的记录。不会自动传给 AI，也不加载私有图片。" />
+                <Alert type="warning" title={staticUiText("业务敏感内容，仅供授权管理员核查")} description={staticUiText("这里只读取当前已授权人员及筛选范围的记录。不会自动传给 AI，也不加载私有图片。")} />
                 {privateBusy ? <Spin className="my-5" /> : null}
-                {privateError ? <Alert className="mt-3" type="error" title={privateError} /> : null}
+                {privateError ? <Alert className="mt-3" type="error" title={displayUi(privateError)} /> : null}
                 {privateData ? (
                     <div className="mt-4 space-y-3">
                         {privateData.records.map((record) => (
                             <article key={`${record.kind}:${record.id}`} className="rounded border border-[var(--border)] p-3">
                                 <p className="text-xs">
-                                    {record.occurredAt} · {record.boardLabel} · {record.modelName || "未关联模型"} · {record.status}
+                                    {record.occurredAt} · {displayUi(record.boardLabel)} · {displayUi(record.modelName || staticUiText("未关联模型"))} · {adminLabel(record.status)}
                                 </p>
                                 <details className="mt-2 text-sm">
-                                    <summary className="cursor-pointer">展开已保存提示词与参数</summary>
-                                    <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-words text-xs">{record.prompt || "未采集 / 不可用"}</pre>
-                                    <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(record.parameters, null, 2)}</pre>
+                                    <summary className="cursor-pointer">{staticUiText("展开已保存提示词与参数")}</summary>
+                                    <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-words text-xs"><SensitiveDisplayValue value={record.prompt || staticUiText("未采集 / 不可用")} /></pre>
+                                    <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs"><SensitiveDisplayValue value={record.parameters} /></pre>
                                 </details>
                             </article>
                         ))}
                         <div className="flex items-center gap-3">
-                            <Button disabled={privateData.pagination.page <= 1} onClick={() => void openPrivate(privateData.pagination.page - 1)}>
-                                上一页
-                            </Button>
-                            <span>
-                                第 {privateData.pagination.page} 页 · 共 {privateData.pagination.total} 条
-                            </span>
-                            <Button disabled={privateData.pagination.page * privateData.pagination.pageSize >= privateData.pagination.total} onClick={() => void openPrivate(privateData.pagination.page + 1)}>
-                                下一页
-                            </Button>
+                            <Button disabled={privateData.pagination.page <= 1} onClick={() => void openPrivate(privateData.pagination.page - 1)}>{staticUiText("上一页")}</Button>
+                            <span>{staticUiText("第 ")}{privateData.pagination.page}{staticUiText(" 页 · 共 ")}{privateData.pagination.total}{staticUiText(" 条")}</span>
+                            <Button disabled={privateData.pagination.page * privateData.pagination.pageSize >= privateData.pagination.total} onClick={() => void openPrivate(privateData.pagination.page + 1)}>{staticUiText("下一页")}</Button>
                         </div>
                     </div>
                 ) : null}

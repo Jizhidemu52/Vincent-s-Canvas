@@ -1,3 +1,4 @@
+import { staticUiText } from "@/lib/static-ui-copy";
 import { useUiText, uiText, useUiLocale } from "@/lib/i18n";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import copyToClipboard from "copy-to-clipboard";
@@ -15,6 +16,7 @@ import { ConversationImagePreview } from "@/components/conversation-image-previe
 import { CanvasPanelSizeControl } from "@/components/canvas/canvas-panel-size-control";
 import { conversationImageLabel, type ConversationImageAction, type ConversationImageItem } from "@/components/conversation-image-controls";
 import { useConversationImageTools } from "@/hooks/use-conversation-image-tools";
+import { DisplayText, DisplayTranslationScope, useDisplayText } from "@/hooks/use-display-text";
 import { useImageDrop } from "@/hooks/use-image-drop";
 import { getModelPickerOptions, resolveModelPickerSource } from "@/lib/model-picker-options";
 import { standaloneEdition } from "@/lib/standalone-edition";
@@ -1634,7 +1636,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     };
     const selectPromptTemplate = (value: string) => {
         if (!prompt.trim()) { setPrompt(value); return; }
-        const dialog = Modal.confirm({ title: "如何使用提示词？", content: "当前草稿不会被自动覆盖。可插入到末尾，或明确替换全部内容。", okText: "插入末尾", cancelText: "取消", onOk: () => setPrompt(current => `${current}\n${value}`), footer: (_, { OkBtn, CancelBtn }) => <><CancelBtn /><Button onClick={() => { setPrompt(value); dialog.destroy(); }}>替换草稿</Button><OkBtn /></> });
+        const dialog = Modal.confirm({ title: staticUiText("如何使用提示词？"), content: staticUiText("当前草稿不会被自动覆盖。可插入到末尾，或明确替换全部内容。"), okText: staticUiText("插入末尾"), cancelText: staticUiText("取消"), onOk: () => setPrompt(current => `${current}\n${value}`), footer: (_, { OkBtn, CancelBtn }) => <><CancelBtn /><Button onClick={() => { setPrompt(value); dialog.destroy(); }}>{staticUiText("替换草稿")}</Button><OkBtn /></> });
     };
     const latestResult = messages.findLast(item => item.detail?.kind === "agent_generation" && item.detail.status === "completed" && item.attachments?.length)?.attachments?.[0];
     const [dismissedResult, setDismissedResult] = useState<string | undefined>(latestResult?.id);
@@ -1670,6 +1672,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
 
     // Typing updates the composer, not the entire long conversation subtree.
     const messageReferenceNodes = snapshotRef.current.nodes;
+    const [expandedPromptIds, setExpandedPromptIds] = useState<Set<string>>(new Set());
     const messageItems = useMemo(() => renderedMessages.map(({ source, display: message, pendingTask }, index) => {
         let specText = "";
         const spec = (source.detail?.imageAgent as CanvasImageAgentRecord | undefined)?.spec;
@@ -1678,22 +1681,24 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         <div key={message.id} className="space-y-2">
             <AgentChatMessage item={message} theme={theme} user={user} onRejectTool={handleRejectOnlineTool} onApproveTool={handleApproveOnlineTool} onUseImageForVideo={handleUseImageForVideo}
                 conversationOnlyImages imageControls={conversationImageControls} imageActionsDisabled={isRunning} onImageAction={handleConversationImageAction} onMaskImage={handleMaskImage} onEditMessage={handleEditMessage} />
-            {source.detail?.status === "expired" || source.role === "error" ? <Button size="small" disabled={isRunning} onClick={() => { const preceding = messages.slice(0, messages.findIndex(item => item.id === source.id)).findLast(item => item.role === "user"); if (preceding) handleEditMessage(preceding.id); }}>恢复原问题，核对后重发</Button> : null}
-            {typeof source.detail?.turnId === "string" && !renderedMessages.slice(index + 1).some(item => item.source.detail?.turnId === source.detail?.turnId) ? <Button size="small" disabled={isRunning || !canUndoOps || undoneTurns.has(source.detail.turnId)} loading={undoingTurn === source.detail.turnId} onClick={() => void undoTurn(String(source.detail?.turnId))}>{undoneTurns.has(source.detail.turnId) ? "本轮已撤销" : "撤销本轮"}</Button> : null}
+            {source.detail?.status === "expired" || source.role === "error" ? <Button size="small" disabled={isRunning} onClick={() => { const preceding = messages.slice(0, messages.findIndex(item => item.id === source.id)).findLast(item => item.role === "user"); if (preceding) handleEditMessage(preceding.id); }}>{staticUiText("恢复原问题，核对后重发")}</Button> : null}
+            {typeof source.detail?.turnId === "string" && !renderedMessages.slice(index + 1).some(item => item.source.detail?.turnId === source.detail?.turnId) ? <Button size="small" disabled={isRunning || !canUndoOps || undoneTurns.has(source.detail.turnId)} loading={undoingTurn === source.detail.turnId} onClick={() => void undoTurn(String(source.detail?.turnId))}>{undoneTurns.has(source.detail.turnId) ? staticUiText("本轮已撤销") : staticUiText("撤销本轮")}</Button> : null}
             {pendingTask ? <div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: theme.node.muted }}>
                 <span className="break-all">{t("原任务：")}{pendingTask.taskIds?.join("、") || pendingTask.requestId}</span>
                 <Button size="small" disabled={[...onlineRequestsRef.current.keys()].some(signal => turnIdsRef.current.get(signal) === source.detail?.turnId)} onClick={() => void handleQueryOriginalTask(activeSession!.id, source)}>{t("查询原任务")}</Button>
                 {source.detail?.status === "running" && typeof source.detail.turnId === "string" ? <Button size="small" onClick={() => stopOnlineAgent(String(source.detail?.turnId))}>{t("停止本页等待")}</Button> : null}
             </div> : null}
             {message.references?.length ? <MessageReferences key={attachmentScope} message={message} nodes={messageReferenceNodes} images={conversationImages} /> : null}
-            {typeof source.detail?.prompt === "string" && source.detail.prompt ? <details className="pl-11 text-xs" style={{ color: theme.node.muted }}>
-                <summary className="cursor-pointer">最终提示词</summary>
-                {specText ? <section aria-label="本轮要求与假设" className="mt-2 space-y-1">
-                    <p className="font-medium">本轮要求与假设（待核对）</p>
-                    <p className="whitespace-pre-wrap break-words">{specText}</p>
-                    <p>以上是本轮规划要求，不代表结果已通过视觉检查。</p>
+            {typeof source.detail?.prompt === "string" && source.detail.prompt ? <details className="pl-11 text-xs" style={{ color: theme.node.muted }} onToggle={event => { const open = event.currentTarget.open; setExpandedPromptIds(current => { const next = new Set(current); if (open) next.add(source.id); else next.delete(source.id); return next; }); }}>
+                <summary className="cursor-pointer">{staticUiText("最终提示词")}</summary>
+                <DisplayTranslationScope visible={expandedPromptIds.has(source.id)}>
+                {specText ? <section aria-label={staticUiText("本轮要求与假设")} className="mt-2 space-y-1">
+                    <p className="font-medium">{staticUiText("本轮要求与假设（待核对）")}</p>
+                    <p className="whitespace-pre-wrap break-words"><DisplayText text={specText} /></p>
+                    <p>{staticUiText("以上是本轮规划要求，不代表结果已通过视觉检查。")}</p>
                 </section> : null}
-                <p className="mt-2 whitespace-pre-wrap break-words">{source.detail.prompt}</p>
+                <p className="mt-2 whitespace-pre-wrap break-words"><DisplayText text={source.detail.prompt} /></p>
+                </DisplayTranslationScope>
             </details> : null}
             {source.detail?.kind === "agent_generation" && source.detail.status === "completed" ? source.attachments?.filter(attachment => attachment.mediaType === "image").map(attachment => {
                 const key = `${source.id}:${attachment.id}`;
@@ -1701,23 +1706,23 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 try {
                     if (attachment.imageReview && canvasImageAgentReviewMatches(canvasImageAgentReviewTarget(messages, messageReferenceNodes, source.id, attachment.id), attachment.imageReview)) report = parseImageAgentReview(attachment.imageReview.report);
                 } catch { /* A changed/unavailable source cannot reuse the previous verdict. */ }
-                return <section key={key} aria-label={`结果复核 ${attachment.name}`} data-image-review-id={attachment.id} className="ml-11 space-y-2 text-xs" style={{ color: theme.node.muted }}>
+                return <section key={key} aria-label={staticUiText("结果复核 {p0}", { p0: `${attachment.name}` })} data-image-review-id={attachment.id} className="ml-11 space-y-2 text-xs" style={{ color: theme.node.muted }}>
                     <div className="flex flex-wrap items-center gap-2">
-                        <span>{attachment.name} · 结果复核</span>
-                        <Button size="small" disabled={!onlineEnabled || isRunning} loading={reviewingResults.has(key)} onClick={() => handleReviewResult(activeSession!.id, source.id, attachment.id)}>{report ? "重新检查结果" : "检查结果"}</Button>
+                        <span><DisplayText text={attachment.name} />{staticUiText(" · 结果复核")}</span>
+                        <Button size="small" disabled={!onlineEnabled || isRunning} loading={reviewingResults.has(key)} onClick={() => handleReviewResult(activeSession!.id, source.id, attachment.id)}>{report ? staticUiText("重新检查结果") : staticUiText("检查结果")}</Button>
                     </div>
-                    <p>手动调用视觉模型分析当前图片；不会重新出图。</p>
+                    <p>{staticUiText("手动调用视觉模型分析当前图片；不会重新出图。")}</p>
                     {report ? <div className="space-y-2" role="status">
-                        <p className="whitespace-pre-wrap break-words" style={{ color: theme.node.text }}>{report.summary}</p>
+                        <p className="whitespace-pre-wrap break-words" style={{ color: theme.node.text }}><DisplayText text={report.summary} /></p>
                         <ul className="space-y-2">{report.checks.map((check, checkIndex) => <li key={checkIndex} className="break-words">
-                            <span className="font-medium">{check.result === "pass" ? "可见符合" : check.result === "warning" ? "发现偏差" : "无法确认"} · {check.criterion}</span>
-                            <p className="mt-1 whitespace-pre-wrap">{check.evidence}</p>
+                            <span className="font-medium">{check.result === "pass" ? staticUiText("可见符合") : check.result === "warning" ? staticUiText("发现偏差") : staticUiText("无法确认")} · <DisplayText text={check.criterion} /></span>
+                            <p className="mt-1 whitespace-pre-wrap"><DisplayText text={check.evidence} /></p>
                         </li>)}</ul>
-                        <p>视觉辅助检查，不是像素或生产验收认证。</p>
-                        {report.checks.some(check => check.result === "warning") ? <Button size="small" disabled={isRunning || reviewingResults.has(key)} onClick={() => handleCorrectionDraft(activeSession!.id, source.id, attachment.id)}>根据问题创建纠正草稿</Button> : null}
-                        <p>纠正只填入草稿并锁定本轮底图；请核对后手动发送。</p>
+                        <p>{staticUiText("视觉辅助检查，不是像素或生产验收认证。")}</p>
+                        {report.checks.some(check => check.result === "warning") ? <Button size="small" disabled={isRunning || reviewingResults.has(key)} onClick={() => handleCorrectionDraft(activeSession!.id, source.id, attachment.id)}>{staticUiText("根据问题创建纠正草稿")}</Button> : null}
+                        <p>{staticUiText("纠正只填入草稿并锁定本轮底图；请核对后手动发送。")}</p>
                     </div> : null}
-                    {reviewErrors[key] ? <p role="alert" className="whitespace-pre-wrap break-words">{reviewErrors[key]}</p> : null}
+                    {reviewErrors[key] ? <p role="alert" className="whitespace-pre-wrap break-words"><DisplayText text={reviewErrors[key]} /></p> : null}
                 </section>;
             }) : null}
             {message.detail?.mediaWorkflow ? (
@@ -1753,7 +1758,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 />
             ) : null}
         </div>
-    ); }), [renderedMessages, messages, theme, user, isRunning, onlineEnabled, activeSession?.id, attachmentScope, messageReferenceNodes, mediaWorkflowModels, onMediaWorkflowAction, handleRejectOnlineTool, handleApproveOnlineTool, handleUseImageForVideo, handleQueryOriginalTask, conversationImageControls, conversationImages, handleConversationImageAction, handleMaskImage, handleEditMessage, handleReviewResult, handleCorrectionDraft, reviewingResults, reviewErrors, undoneTurns, undoingTurn, canUndoOps, t]);
+    ); }), [renderedMessages, messages, theme, user, isRunning, onlineEnabled, activeSession?.id, attachmentScope, messageReferenceNodes, mediaWorkflowModels, onMediaWorkflowAction, handleRejectOnlineTool, handleApproveOnlineTool, handleUseImageForVideo, handleQueryOriginalTask, conversationImageControls, conversationImages, handleConversationImageAction, handleMaskImage, handleEditMessage, handleReviewResult, handleCorrectionDraft, reviewingResults, reviewErrors, undoneTurns, undoingTurn, canUndoOps, expandedPromptIds, t]);
 
     const onlineContent = (
         <>
@@ -1863,8 +1868,8 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
 
             {view === "chat" ? (
                 <>
-                    {chatFollow.hasNewMessages ? <div className="flex shrink-0 justify-center"><button type="button" className="px-3 py-1 text-xs hover:underline" onClick={chatFollow.scrollToBottom}>↓ 新消息</button></div> : null}
-                    {latestResult && latestResult.id !== dismissedResult ? <div role="status" className="mx-4 mb-2 flex items-center gap-2 text-xs" style={{ color: theme.node.text }}><CanvasPersistedMediaPreview kind={latestResult.mediaType} url={latestResult.url} storageKey={latestResult.storageKey} alt="" className="size-9 rounded object-cover" /><button type="button" className="flex-1 text-left hover:underline" onClick={() => focusResult(latestResult.id)}>结果已放入画布 · 点击收起并定位</button><button type="button" aria-label="关闭结果提示" onClick={() => setDismissedResult(latestResult.id)}><X size={14} /></button></div> : null}
+                    {chatFollow.hasNewMessages ? <div className="flex shrink-0 justify-center"><button type="button" className="px-3 py-1 text-xs hover:underline" onClick={chatFollow.scrollToBottom}>{staticUiText("↓ 新消息")}</button></div> : null}
+                    {latestResult && latestResult.id !== dismissedResult ? <div role="status" className="mx-4 mb-2 flex items-center gap-2 text-xs" style={{ color: theme.node.text }}><CanvasPersistedMediaPreview kind={latestResult.mediaType} url={latestResult.url} storageKey={latestResult.storageKey} alt="" className="size-9 rounded object-cover" /><button type="button" className="flex-1 text-left hover:underline" onClick={() => focusResult(latestResult.id)}>{staticUiText("结果已放入画布 · 点击收起并定位")}</button><button type="button" aria-label={staticUiText("关闭结果提示")} onClick={() => setDismissedResult(latestResult.id)}><X size={14} /></button></div> : null}
                     {selectedReferences.some(item => !item.dataUrl) ? (
                         <div className="thin-scrollbar flex max-w-full gap-2 overflow-x-auto px-3 pb-1">
                             {selectedReferences.filter(item => !item.dataUrl).map((item) => (
@@ -1938,7 +1943,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                             loading={capabilitiesLoading} error={capabilityError} onRetry={loadCapabilities}
                             extra={<div className="mt-3 grid gap-3 border-t pt-3" style={{ borderColor: theme.node.stroke }}>
                                 <div className="flex items-center justify-between"><span>Agent</span><AgentModeSwitch value={agentMode} theme={theme} onChange={mode => { if (mode === "local" ? localEnabled : onlineEnabled) onAgentModeChange(mode); }} /></div>
-                                <p className="text-xs opacity-70">删除操作始终需要确认。这里的参数只用于当前对话，不修改创建面板。</p>
+                                <p className="text-xs opacity-70">{staticUiText("删除操作始终需要确认。这里的参数只用于当前对话，不修改创建面板。")}</p>
                             </div>} />}
                     />
                     </div>
@@ -2055,6 +2060,7 @@ function modelLabel(modelId: string, isImage: boolean, imageModels: ImageGenerat
 
 function AgentGenerationControls({ settings: savedSettings, config: baseConfig, imageCapabilities, videoCapabilities, theme, onChange, extra, loading, error, onRetry, editing = false }: { settings: AgentGenerationSettings; config: AiConfig; imageCapabilities: ImageGenerationModel[]; videoCapabilities: GenerationCapabilityModel[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange: (patch: Partial<AgentGenerationSettings>) => void; extra?: import("react").ReactNode; loading: boolean; error: string | null; onRetry: () => void; editing?: boolean }) {
     const t = useUiText();
+    const display = useDisplayText();
     const savedProfile = useImageModelProfile(savedSettings.imageModel);
     const toolKey = canvasToolKey(savedSettings.mode, editing, savedProfile.kind);
     const config = useToolConfig({ ...baseConfig, model: savedSettings.mode === "image" ? savedSettings.imageModel : savedSettings.videoModel }, toolKey);
@@ -2088,12 +2094,12 @@ function AgentGenerationControls({ settings: savedSettings, config: baseConfig, 
         <>
             <div data-testid="canvas-agent-generation-actions" className="col-span-2 flex min-w-0 items-center gap-2 text-xs">
             <AntSelect aria-label={t("生成类型")} value={settings.mode} className="min-w-24" onChange={value => onChange(value === "image" ? { ...normalizeAgentImageSettings({ ...settings, mode: "image" }, imageProfile), imageCount: "1" } : videoCapability ? normalizeAgentVideoSettings({ ...settings, mode: "video" }, videoCapability) : { mode: "video" })} options={[{ value: "image", label: t("图片") }, { value: "video", label: t("视频") }]} />
-            <Tooltip title={imageModelDisplayName(modelOptionName(currentModel))}><span className="min-w-0 flex-1 truncate">{imageModelDisplayName(modelOptionName(currentModel))}</span></Tooltip>
+            <Tooltip title={display(imageModelDisplayName(modelOptionName(currentModel)))}><span className="min-w-0 flex-1 truncate">{display(imageModelDisplayName(modelOptionName(currentModel)))}</span></Tooltip>
             <Popover trigger="click" placement="top" content={
                 <div data-canvas-no-zoom className="w-[280px] max-w-[calc(100vw-48px)] max-h-[calc(100dvh-48px)] overflow-y-auto overscroll-contain text-xs">
                     <div className="mb-3 text-sm font-semibold">{isImage ? t("图像设置") : t("视频设置")}</div>
                     <div data-testid="canvas-agent-generation-model">{modelPicker}</div>
-                    {loading ? <p className="mb-3" role="status">{t("正在加载模型与参数…")}</p> : error ? <div className="mb-3 space-y-2" role="alert"><p>{error}</p><Button size="small" onClick={onRetry}>{t("重新加载")}</Button></div> : !currentModels.length ? <p className="mb-3" role="status">{t("尚未配置可用的")}{isImage ? t("图像") : t("视频")}{t("模型，请在后台启用模型后重新加载。")}</p> : null}
+                    {loading ? <p className="mb-3" role="status">{t("正在加载模型与参数…")}</p> : error ? <div className="mb-3 space-y-2" role="alert"><p><DisplayText text={error} /></p><Button size="small" onClick={onRetry}>{t("重新加载")}</Button></div> : !currentModels.length ? <p className="mb-3" role="status">{t("尚未配置可用的")}{isImage ? t("图像") : t("视频")}{t("模型，请在后台启用模型后重新加载。")}</p> : null}
                     <div className="grid gap-2">
                         {isImage ? <>
                             <p className="leading-5 opacity-60">{settings.requestedImageSize ? <>{t("编辑使用已选画幅：")}{settings.requestedImageSize} <button type="button" className="underline" onClick={() => onChange({ requestedImageSize: undefined })}>{t("恢复跟随底图")}</button></> : <>{t("编辑默认参考底图画幅；特殊尺寸由模型自适应，不保证返回原像素尺寸。下方尺寸用于新创作。 ")}<button type="button" className="underline" onClick={() => onChange({ requestedImageSize: imageSettings.size })}>{t("编辑也使用下方尺寸")}</button></>}</p>
@@ -2162,9 +2168,9 @@ function AssistantHistory({ sessions, activeSession, onOpen, onDelete, onRename 
                                     <span className="shrink-0 text-xs font-medium" style={{ color: theme.node.text }}>
                                         {t("当前")}</span>
                                 ) : null}
-                                {editing?.id === session.id ? <Input autoFocus value={editing.title} onChange={event => setEditing({ id: session.id, title: event.target.value })} onBlur={saveName} onKeyDown={event => { if (event.nativeEvent.isComposing || event.keyCode === 229) return; if (event.key === "Enter") saveName(); if (event.key === "Escape") setEditing(null); }} /> : <Tooltip title={t("双击重命名")}><button type="button" className="truncate text-sm font-medium leading-5" onDoubleClick={() => setEditing({ id: session.id, title: session.title })}>{session.title}</button></Tooltip>}
+                                {editing?.id === session.id ? <Input autoFocus value={editing.title} onChange={event => setEditing({ id: session.id, title: event.target.value })} onBlur={saveName} onKeyDown={event => { if (event.nativeEvent.isComposing || event.keyCode === 229) return; if (event.key === "Enter") saveName(); if (event.key === "Escape") setEditing(null); }} /> : <Tooltip title={t("双击重命名")}><button type="button" className="truncate text-sm font-medium leading-5" onDoubleClick={() => setEditing({ id: session.id, title: session.title })}><DisplayText text={session.title} /></button></Tooltip>}
                             </div>
-                            <div className="truncate text-xs leading-4 opacity-65">{sessionPreview(session)}</div>
+                            <div className="truncate text-xs leading-4 opacity-65"><DisplayText text={sessionPreview(session)} /></div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
                             <span className="text-xs opacity-55">{formatSessionTime(session.updatedAt || session.createdAt)}</span>
@@ -2274,21 +2280,22 @@ function MessageReferences({ message, nodes, images = [] }: { message: CanvasAss
 
 function AssistantReferenceChip({ item, label, onRemove, onPreview, onSelect, disabled }: { item: CanvasAssistantReference; label?: string; onRemove?: () => void; onPreview?: () => unknown; onSelect?: () => unknown; disabled?: boolean }) {
     const t = useUiText();
+    const display = useDisplayText();
     const displayLabel = label ? conversationImageLabel(label) : undefined;
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const text = (item.text || item.title).replace(/\s+/g, " ").trim().slice(0, 1) || "文";
     const preview = <>
-        <CanvasPersistedMediaPreview kind="image" url={item.dataUrl} storageKey={item.storageKey} alt={item.title} className="size-full rounded-lg object-contain" />
+        <CanvasPersistedMediaPreview kind="image" url={item.dataUrl} storageKey={item.storageKey} alt={display(item.title)} className="size-full rounded-lg object-contain" />
         {displayLabel ? <span className="absolute bottom-1 left-1 rounded px-1 py-1 text-xs font-medium leading-none" style={{ background: theme.node.panel, color: theme.node.text }}>{displayLabel}</span> : null}
     </>;
     return (
         <div className="group/chip relative inline-flex max-w-[150px] shrink-0 items-center gap-2 rounded-lg text-sm" style={{ color: theme.node.text }}>
             {item.dataUrl || item.storageKey ? (
-                onPreview || onSelect ? <button type="button" disabled={disabled} onClick={onPreview || onSelect} aria-haspopup={onPreview ? "dialog" : undefined} aria-label={onPreview ? `${t("查看大图")} · ${displayLabel || item.title}` : t("选择 {label} 作为编辑目标", { label: displayLabel || item.title })} className={`relative block size-20 shrink-0 rounded-lg border focus-visible:outline-2${onPreview ? " cursor-zoom-in" : ""}`} style={{ borderColor: theme.node.stroke, outlineColor: theme.canvas.selectionStroke }}>{preview}</button>
+                onPreview || onSelect ? <button type="button" disabled={disabled} onClick={onPreview || onSelect} aria-haspopup={onPreview ? "dialog" : undefined} aria-label={onPreview ? `${t("查看大图")} · ${displayLabel || display(item.title)}` : t("选择 {label} 作为编辑目标", { label: displayLabel || display(item.title) })} className={`relative block size-20 shrink-0 rounded-lg border focus-visible:outline-2${onPreview ? " cursor-zoom-in" : ""}`} style={{ borderColor: theme.node.stroke, outlineColor: theme.canvas.selectionStroke }}>{preview}</button>
                     : <span className="relative block size-20 shrink-0 rounded-lg border" style={{ borderColor: theme.node.stroke }}>{preview}</span>
             ) : (
                 <span className="grid size-8 place-items-center rounded-lg border text-sm font-medium" style={{ background: theme.node.panel, borderColor: theme.node.activeStroke }}>
-                    {text}
+                    {display(text).slice(0, 1)}
                 </span>
             )}
             {onRemove ? (

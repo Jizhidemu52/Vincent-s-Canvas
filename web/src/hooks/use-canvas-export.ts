@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { useCallback } from "react";
 import { App } from "antd";
@@ -14,7 +15,7 @@ export function useCanvasExport() {
         const ui = useCanvasUiStore.getState();
         if (!ui.beginExport(ids)) return false;
         const key = "canvas-archive-export";
-        const progress = (content: string) => { void message.open({ key, type: "loading", content, duration: 0 }); };
+        const progress = (content: string) => { void message.open({ key, type: "loading", content: displayNotice(content), duration: 0 }); };
         progress(uiText("正在准备画布备份…"));
         try {
             const projects = await mapCanvasAsyncPool(ids, 4, async id => {
@@ -29,7 +30,7 @@ export function useCanvasExport() {
             void message.success({ key, content: uiText("画布备份已生成"), duration: 3 });
             return true;
         } catch (error) {
-            void message.error({ key, content: error instanceof Error ? error.message : uiText("画布导出失败，请重试。"), duration: 5 });
+            void message.error({ key, content: displayNotice(error instanceof Error ? error.message : uiText("画布导出失败，请重试。")), duration: 5 });
             return false;
         } finally { ui.endExport(); }
     }, [message]);

@@ -1,4 +1,5 @@
-import { useUiText } from "@/lib/i18n";
+import { uiText, useUiText } from "@/lib/i18n";
+import { DisplayText, useDisplayText } from "@/hooks/use-display-text";
 import { Fragment, memo, useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, Ref } from "react";
 import { Button, Image, Tooltip } from "antd";
@@ -42,6 +43,7 @@ export const CONFIG_REFERENCE_PATTERN = /@\[node:([^\]]+)\]/g;
 
 export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, compact = false, disabled = false, label = "提示词", referenceLabels, mentionInputs = inputs, onAddMentionImage }: CanvasConfigComposerProps) {
     const t = useUiText();
+    const display = useDisplayText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
@@ -81,26 +83,39 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
                 return;
             }
             const input = referenceById.get(token.nodeId);
-            if (input) editor.append(createReferenceChip(input, inputs, theme, setImagePreview, referenceLabels));
-            else {
-                const chip = document.createElement("span");
-                chip.contentEditable = "false"; chip.dataset.referenceNodeId = token.nodeId;
-                chip.className = "mx-1 inline-flex cursor-pointer rounded border border-destructive px-1 text-xs text-destructive";
-                chip.textContent = "已失效引用 ×"; chip.title = "点击移除此失效引用，然后重新选择素材";
-                chip.addEventListener("click", () => { chip.remove(); syncFromEditor(); });
-                editor.append(chip);
-            }
+            if (input) editor.append(createReferenceChip(input, inputs, theme, setImagePreview, referenceLabels, display));
+            else editor.append(createInvalidReferenceChip(token.nodeId, syncFromEditor));
         });
-    }, [inputs, referenceById, referenceLabels, theme, tokens]);
+    }, [inputs, referenceById, referenceLabels, theme, tokens, t, display]);
 
-    // Reference reordering changes labels, not the focused draft or caret.
+    // Refresh only the chip when an upload slot becomes ready (or a real source
+    // disappears). Never replace the focused editor or its in-progress text.
     useEffect(() => {
         editorRef.current?.querySelectorAll<HTMLElement>("[data-reference-node-id]").forEach(chip => {
             const input = referenceById.get(chip.dataset.referenceNodeId || "");
+            const state = input ? input.pendingUpload ? "pending" : input.type : "invalid";
+            if (chip.dataset.referenceState !== state) {
+                chip.replaceWith(input ? createReferenceChip(input, inputs, theme, setImagePreview, referenceLabels, display) : createInvalidReferenceChip(chip.dataset.referenceNodeId!, syncFromEditor));
+                return;
+            }
+            if (input?.pendingUpload) {
+                chip.textContent = t("待上传原图");
+                chip.title = t("先设置参考款原图");
+                return;
+            }
             const label = chip.querySelector("[data-reference-label]");
-            if (input && label) label.textContent = resourceLabel(input, inputs, referenceLabels);
+            if (input) {
+                if (label) label.textContent = display(resourceLabel(input, inputs, referenceLabels));
+                const text = chip.querySelector("[data-reference-text]");
+                if (text) text.textContent = display(input.type === "text" ? input.text || input.title : input.title);
+                chip.title = label ? `${label.textContent}：${display(input.title)}` : display(input.text || input.title);
+                const image = chip.querySelector("img");
+                if (image) image.alt = display(input.title);
+            } else {
+                chip.textContent = t("已失效引用 ×"); chip.title = t("点击移除此失效引用，然后重新选择素材");
+            }
         });
-    }, [inputs, referenceById, referenceLabels]);
+    }, [inputs, referenceById, referenceLabels, theme, t, display]);
 
     useEffect(() => {
         setDraftValue((current) => (current === value ? current : value));
@@ -142,7 +157,7 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
         const input = candidate.mentionImage ? onAddMentionImage?.(candidate.mentionImage) : candidate;
         if (!input) return;
         removeActiveMention();
-        const chip = createReferenceChip(input, inputs, theme, setImagePreview, referenceLabels);
+        const chip = createReferenceChip(input, inputs, theme, setImagePreview, referenceLabels, display);
         const space = document.createTextNode(" ");
         const selection = window.getSelection();
         const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
@@ -163,7 +178,7 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
         setDraftValue(next);
         draftRef.current?.reset(next);
         onChange(next);
-    }, [disabled, filterCandidates, inputs, onAddMentionImage, onChange, referenceLabels, theme]);
+    }, [disabled, filterCandidates, inputs, onAddMentionImage, onChange, referenceLabels, theme, display]);
 
     const stopCanvasInteraction = (event: PointerEvent | MouseEvent) => event.stopPropagation();
 
@@ -178,7 +193,7 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
         >
             <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-baseline gap-2">
-                    <div className="shrink-0 text-xs font-semibold">{label}</div>
+                    <div className="shrink-0 text-xs font-semibold">{t(label)}</div>
                     {mentionInputs.length ? <div className="truncate text-xs opacity-55">{t("@ 引用素材")}</div> : null}
                 </div>
                 {onClose ? <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} /> : null}
@@ -189,7 +204,7 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
                     ref={editorRef}
                     contentEditable={!disabled}
                     role="textbox"
-                    aria-label={label}
+                    aria-label={t(label)}
                     aria-multiline="true"
                     aria-disabled={disabled}
                     suppressContentEditableWarning
@@ -266,6 +281,7 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
 
 const MentionMenu = memo(function MentionMenu({ inputs, allInputs, referenceLabels, activeIndex, theme, onSelect }: { inputs: CanvasConfigMentionInput[]; allInputs: NodeGenerationInput[]; referenceLabels?: Record<string, string>; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (input: CanvasConfigMentionInput) => void }) {
     const t = useUiText();
+    const display = useDisplayText();
     const activeItemRef = useRef<HTMLButtonElement | null>(null);
 
     useEffect(() => {
@@ -277,7 +293,7 @@ const MentionMenu = memo(function MentionMenu({ inputs, allInputs, referenceLabe
             {inputs.map((input, index) => (
                 <Fragment key={input.nodeId}>
                 {input.mentionSource && input.mentionSource !== inputs[index - 1]?.mentionSource ? <div className="px-2 pb-1 pt-2 text-xs" style={{ color: theme.node.muted }}>{t(input.mentionSource === "canvas" ? "画布图片" : "对话图片")}</div> : null}
-                <Tooltip title={input.mentionImage?.unavailableReason}><button
+                <Tooltip title={input.mentionImage?.unavailableReason ? display(input.mentionImage.unavailableReason) : undefined}><button
                     ref={index === activeIndex ? activeItemRef : undefined}
                     type="button"
                     role="option"
@@ -293,8 +309,8 @@ const MentionMenu = memo(function MentionMenu({ inputs, allInputs, referenceLabe
                 >
                     <ResourcePreview input={input} />
                     <span className="min-w-0 flex-1">
-                        <span className="block font-medium">{resourceLabel(input, allInputs, referenceLabels)}</span>
-                        <span className="block truncate opacity-65">{input.text || input.title}</span>
+                        <span className="block font-medium"><DisplayText text={resourceLabel(input, allInputs, referenceLabels)} /></span>
+                        <span className="block truncate opacity-65"><DisplayText text={input.text || input.title} /></span>
                     </span>
                 </button></Tooltip>
                 </Fragment>
@@ -315,38 +331,56 @@ function ResourcePreview({ input }: { input: NodeGenerationInput }) {
     );
 }
 
-function createReferenceChip(input: CanvasConfigMentionInput, inputs: NodeGenerationInput[], theme: (typeof canvasThemes)[keyof typeof canvasThemes], onImagePreview: (url: string) => void, labels?: Record<string, string>) {
+function createReferenceChip(input: CanvasConfigMentionInput, inputs: NodeGenerationInput[], theme: (typeof canvasThemes)[keyof typeof canvasThemes], onImagePreview: (url: string) => void, labels?: Record<string, string>, display: (source: string) => string = source => source) {
     const wrapper = document.createElement("span");
     wrapper.contentEditable = "false";
     wrapper.dataset.referenceNodeId = input.nodeId;
+    wrapper.dataset.referenceState = input.pendingUpload ? "pending" : input.type;
     wrapper.className = "mx-px inline-flex h-7 max-w-40 items-center justify-center overflow-hidden rounded-md border px-1 text-xs leading-none align-middle";
     Object.assign(wrapper.style, chipStyle(theme));
-    if (input.type === "image" && input.image) {
+    if (input.pendingUpload) {
+        wrapper.textContent = uiText("待上传原图");
+        wrapper.title = uiText("先设置参考款原图");
+        wrapper.style.borderStyle = "dashed";
+    } else if (input.type === "image" && input.image) {
         const image = document.createElement("img");
         if (!input.image.storageKey) image.src = input.image.dataUrl;
-        else void resolveImageUrl(input.image.storageKey, input.image.dataUrl).then(url => { if (url) image.src = url; }).catch(() => { image.alt = "参考图暂不可用"; });
-        image.alt = input.title;
+        else void resolveImageUrl(input.image.storageKey, input.image.dataUrl).then(url => { if (url) image.src = url; }).catch(() => { image.alt = uiText("参考图暂不可用"); });
+        image.alt = display(input.title);
         image.className = "size-6 rounded object-cover";
         wrapper.className = "mx-px inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded border px-1 align-middle";
         wrapper.appendChild(image);
         const label = document.createElement("span");
         label.dataset.referenceLabel = "true";
-        label.textContent = resourceLabel(input, inputs, labels);
+        label.textContent = display(resourceLabel(input, inputs, labels));
         wrapper.appendChild(label);
-        wrapper.title = `${label.textContent}：${input.title}`;
+        wrapper.title = `${label.textContent}：${display(input.title)}`;
         wrapper.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
             if (image.getAttribute("src")) onImagePreview(image.src);
         });
     } else {
-        wrapper.title = input.text || input.title;
+        wrapper.title = display(input.text || input.title);
         const text = document.createElement("span");
+        text.dataset.referenceText = "true";
         text.className = "block truncate";
-        text.textContent = input.type === "text" ? input.text || input.title : input.title;
+        text.textContent = display(input.type === "text" ? input.text || input.title : input.title);
         wrapper.appendChild(text);
     }
     return wrapper;
+}
+
+function createInvalidReferenceChip(nodeId: string, onRemove: () => void) {
+    const chip = document.createElement("span");
+    chip.contentEditable = "false";
+    chip.dataset.referenceNodeId = nodeId;
+    chip.dataset.referenceState = "invalid";
+    chip.className = "mx-1 inline-flex cursor-pointer rounded border border-destructive px-1 text-xs text-destructive";
+    chip.textContent = uiText("已失效引用 ×");
+    chip.title = uiText("点击移除此失效引用，然后重新选择素材");
+    chip.addEventListener("click", () => { chip.remove(); onRemove(); });
+    return chip;
 }
 
 function serializeEditor(editor: HTMLElement) {
@@ -453,10 +487,10 @@ function resourceLabel(input: CanvasConfigMentionInput, inputs: NodeGenerationIn
     if (input.mentionLabel) return input.mentionLabel;
     const sameTypeInputs = inputs.filter((item) => item.type === input.type);
     const index = Math.max(0, sameTypeInputs.findIndex((item) => item.nodeId === input.nodeId));
-    if (input.type === "image") return `图${index + 1}`;
-    if (input.type === "video") return `视频${index + 1}`;
-    if (input.type === "audio") return `音频${index + 1}`;
-    return `文本${index + 1}`;
+    if (input.type === "image") return uiText("图{number}", { number: index + 1 });
+    if (input.type === "video") return uiText("视频{number}", { number: index + 1 });
+    if (input.type === "audio") return uiText("音频{number}", { number: index + 1 });
+    return uiText("文本{number}", { number: index + 1 });
 }
 
 function chipStyle(theme: (typeof canvasThemes)[keyof typeof canvasThemes]): CSSProperties {

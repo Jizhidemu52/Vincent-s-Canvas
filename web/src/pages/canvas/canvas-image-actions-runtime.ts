@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText } from "@/lib/i18n";
 import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
 import type { CanvasImageCropRect } from "@/components/canvas/canvas-node-crop-dialog";
@@ -55,7 +56,7 @@ export function runCanvasLocalImageOperation({ scope, projectId, message, key, l
     const messageKey = `canvas-image:${projectId}:${key}`;
     return runner.run(key, task, {
         start: () => { void message.loading({ key: messageKey, content: createElement("span", null, uiText("{value1}中…", { value1: uiText(label) }), " ", createElement("button", { type: "button", className: "ml-2 cursor-pointer underline", onClick: () => runner.cancel(key) }, uiText("取消"))), duration: 0 }); },
-        error: error => { void message.error(uiText("{value1}失败：{value2}", { value1: uiText(label), value2: error instanceof Error ? error.message : uiText("请重试") })); },
+        error: error => { void message.error(displayNotice(uiText("{value1}失败：{value2}", { value1: uiText(label), value2: error instanceof Error ? error.message : uiText("请重试") }))); },
         finish: () => message.destroy(messageKey),
     });
 }
@@ -102,7 +103,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
                 setNodes(prev => prev.map(item => item.id === textNode.id ? { ...item, metadata: { ...item.metadata, content: [result.prompt, result.summaryZh].filter(Boolean).join("\n\n"), prompt: result.prompt, optimized: result.optimized, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : item));
                 setDialogNodeId(textNode.id);
             } catch (error) {
-                if (await waitForWriteAccess() && current()) { const detail = error instanceof Error ? error.message : "反推提示词失败"; message.error(detail); setNodes(prev => prev.map(item => item.id === textNode.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: detail, content: detail } } : item)); }
+                if (await waitForWriteAccess() && current()) { const detail = error instanceof Error ? error.message : "反推提示词失败"; message.error(displayNotice(detail)); setNodes(prev => prev.map(item => item.id === textNode.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: detail, content: detail } } : item)); }
             } finally { generationDispatchLocksRef.current.delete(key); }
         };
 
@@ -217,7 +218,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
                 setSelectedConnectionId(null);
                 setDialogNodeId(null);
                 setSplitNodeId(current => current === node.id ? null : current);
-                message.success(uiText("已切分为 {value1} 个子节点", { value1: childNodes.length }));
+                message.success(displayNotice(uiText("已切分为 {value1} 个子节点", { value1: childNodes.length })));
             });
         };
 
@@ -243,7 +244,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
                 adapted = await adaptCanvasMaskInputs(node.metadata.content, payload.maskDataUrl, plan);
                 if (!await waitForWriteAccess() || !isCurrent()) return;
             } catch (error) {
-                message.error(error instanceof Error ? error.message : uiText("无法确认原图与蒙版尺寸，尚未提交生成"));
+                message.error(displayNotice(error instanceof Error ? error.message : uiText("无法确认原图与蒙版尺寸，尚未提交生成")));
                 return;
             }
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
@@ -313,7 +314,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             } catch (error) {
                 if (!await waitForWriteAccess() || !isCurrent() || isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : "局部修改失败";
-                message.error(errorDetails);
+                message.error(displayNotice(errorDetails));
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
             } finally {
                 finishGenerationRequest(childId, controller);
@@ -420,7 +421,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             } catch (error) {
                 if (!await waitForWriteAccess() || !isCurrent() || isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : "生成失败";
-                message.error(errorDetails);
+                message.error(displayNotice(errorDetails));
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
             } finally {
                 finishGenerationRequest(childId, controller);
@@ -438,7 +439,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             const node = nodesRef.current.find(item => item.id === source.id);
             if (!node || node.type !== CanvasNodeType.Image || !(node.metadata?.content || node.metadata?.storageKey)) return;
             const referenceError = quickImageReferenceFileError({ type: node.metadata?.mimeType, size: node.metadata?.bytes });
-            if (referenceError) { message.warning(uiText(referenceError)); return; }
+            if (referenceError) { message.warning(displayNotice(uiText(referenceError))); return; }
             if (node.metadata?.imageTask || node.metadata?.status === "loading" || nodesRef.current.some(item => item.metadata?.quickImageAction && item.metadata?.generationRecord?.sourceNodeId === node.id && (item.metadata.imageTask || item.metadata.status === "loading"))) {
                 message.warning(uiText("已有图片任务待完成，请先查看原任务")); return;
             }
@@ -463,7 +464,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
         } catch (error) {
             if (!await waitForWriteAccess() || !isCurrent() || isGenerationCanceled(error)) return;
             const errorDetails = error instanceof Error ? error.message : "图片处理失败";
-            message.error(uiText(errorDetails));
+            message.error(displayNotice(uiText(errorDetails)));
             if (childId) setNodes(previous => previous.map(item => item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item));
         } finally {
             generationDispatchLocksRef.current.delete(key);

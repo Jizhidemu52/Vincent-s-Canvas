@@ -1,4 +1,5 @@
 import { useUiText } from "@/lib/i18n";
+import { DisplayText, DisplayTranslationPreview, useDisplayText } from "@/hooks/use-display-text";
 import { useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Empty, Input, Modal, Segmented } from "antd";
 import localforage from "localforage";
@@ -14,6 +15,7 @@ type Draft = Pick<TemplateCard, "title" | "steps">;
 
 export function CanvasDesignTemplateDialog({ hasReference, onApply, onClose }: { hasReference: boolean; onApply: (id: CanvasDesignTemplateId, steps: CanvasDesignTemplateSteps, title?: string) => void; onClose: () => void }) {
     const t = useUiText();
+    const display = useDisplayText();
     const { modal } = App.useApp();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const [ownerId] = useState(() => useUserStore.getState().user?.id);
@@ -82,7 +84,7 @@ export function CanvasDesignTemplateDialog({ hasReference, onApply, onClose }: {
         <p className="mb-3 text-sm opacity-70">{hasReference ? t("使用所选图片作为共同参考，保留原图。") : t("先创建参考图片节点，上传服装图后开始。")}{t("每个模板新增 3 个可编辑生成配置及连线，分别点击配置中的“生成”才会调用模型。")}</p>
         <Segmented className="mb-3" value={tab} onChange={value => setTab(value)} options={[{ label: t("内置模板"), value: "builtin" }, { label: t("我的模板{value1}", { value1: personal.length ? `（${personal.length}）` : "" }), value: "mine" }]} />
         <p className="mb-4 text-xs opacity-60">{t("我的模板按当前员工保存在本浏览器，刷新或重开后可复用；暂不跨设备同步。仅保存名称和提示词，不绑定这次的参考图片。")}</p>
-        {notice ? <Alert className="!mb-3" type={notice.error ? "error" : "success"} title={notice.text} /> : null}
+        {notice ? <Alert className="!mb-3" type={notice.error ? "error" : "success"} title={<DisplayText text={notice.text} />} /> : null}
         {loadError ? <Alert className="!mb-3" type="error" title={t("个人模板读取失败：{value1}", { value1: loadError })} action={<Button size="small" onClick={() => setLoadAttempt(value => value + 1)}>{t("重试读取")}</Button>} /> : null}
         {tab === "mine" && !personal.length ? <Empty description={loadError ? t("读取失败，已有模板未修改") : loaded ? t("还没有个人模板。先编辑一个内置流程，再保存为我的模板。") : t("正在读取个人模板…")} /> : null}
         <div className="space-y-3">{cards.map(template => {
@@ -93,7 +95,7 @@ export function CanvasDesignTemplateDialog({ hasReference, onApply, onClose }: {
             const invalid = Boolean(validation);
             const isExpanded = expanded === template.id;
             return <section key={template.id} data-template-id={template.id} className="rounded-lg border p-4" style={{ borderColor: theme.toolbar.border, color: theme.node.text }}>
-                <h3 className="break-words font-medium">{template.title}</h3><p className="my-2 break-words text-sm">{t("得到：参考款 →")}{steps.map(([title]) => title || "未命名步骤").join(" / ")}</p>
+                <h3 className="break-words font-medium"><DisplayText text={template.title} /></h3><p className="my-2 break-words text-sm">{t("得到：参考款 →")}{steps.map(([title]) => display(title || "未命名步骤")).join(" / ")}</p>
                 <div className="flex flex-wrap gap-2">
                     <Button aria-expanded={isExpanded} aria-controls={`template-editor-${template.id}`} onClick={() => setExpanded(isExpanded ? null : template.id)}>{isExpanded ? t("收起提示词") : t("编辑流程提示词")}</Button>
                     <Button type="primary" disabled={invalid || saving} onClick={() => onApply(template.baseTemplateId, steps, template.personal ? draft.title : template.title)}>{t("添加这套流程")}</Button>
@@ -101,13 +103,16 @@ export function CanvasDesignTemplateDialog({ hasReference, onApply, onClose }: {
                 </div>
                 {isExpanded ? <div id={`template-editor-${template.id}`} className="mt-4 space-y-4">
                     <div className="space-y-2"><label className="block text-sm" htmlFor={`${template.id}-name`}>{t("模板名称")}</label><Input id={`${template.id}-name`} maxLength={80} value={draft.title} disabled={saving} onChange={event => change(template, { title: event.target.value })} /></div>
+                    <DisplayTranslationPreview text={draft.title} />
                     {steps.map(([title, prompt], index) => <div key={index} className="space-y-2">
                         <label className="block text-sm" htmlFor={`${template.id}-title-${index}`}>{t("步骤")}{index + 1} {t(" · 名称")}</label>
                         <Input id={`${template.id}-title-${index}`} maxLength={80} value={title} disabled={saving} status={!title.trim() ? "error" : undefined} onChange={event => updateStep(template, index, 0, event.target.value)} />
+                        <DisplayTranslationPreview text={title} />
                         <label className="block text-sm" htmlFor={`${template.id}-prompt-${index}`}>{t("步骤")}{index + 1} {t(" · 提示词")}</label>
                         <Input.TextArea id={`${template.id}-prompt-${index}`} maxLength={12000} value={prompt} disabled={saving} autoSize={{ minRows: 3, maxRows: 8 }} status={!prompt.trim() ? "error" : undefined} onChange={event => updateStep(template, index, 1, event.target.value)} />
+                        <DisplayTranslationPreview text={prompt} />
                     </div>)}
-                    {invalid ? <p role="alert" className="text-sm">{validation}</p> : null}
+                    {invalid ? <p role="alert" className="text-sm"><DisplayText text={validation} /></p> : null}
                     <div className="flex flex-wrap items-center gap-2">
                         <Button type="primary" loading={saving} disabled={invalid || !loaded || saving} onClick={() => void save(template)}>{template.personal ? t("保存修改") : t("保存为我的模板")}</Button>
                         {template.personal ? <Button disabled={invalid || !loaded || saving} onClick={() => void save(template, true)}>{t("另存为新模板")}</Button> : null}

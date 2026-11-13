@@ -1,4 +1,5 @@
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -110,6 +111,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
         return options.generate ? options.generate() : [{ id: "generated-image", dataUrl: "/api/assets/result/content" }];
     };
     const dependencies: Record<string, unknown> = {
+        "@/hooks/use-display-text": { ...displayHooksHarness, DisplayText: ({ text }: { text: string }) => text, DisplayTranslationScope: ({ children }: { children: unknown }) => children },
         // Browser download/dialog effects are covered by their browser tests, not this planner dispatcher.
         "@/hooks/use-conversation-image-tools": { useConversationImageTools: () => ({ download: async () => undefined, compare: () => undefined, compareDialog: null }) },
         // Native drag events are covered separately; onAddFiles below still runs the real attachment reader.

@@ -1,3 +1,6 @@
+import { useDisplayUiValue, useDisplayConfig } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Form, Image, Input, Select, Tag, Tooltip } from "antd";
 import { createClientId } from "@/lib/client-id";
@@ -36,6 +39,9 @@ const wait = (signal: AbortSignal) =>
     });
 
 export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { detail: PromptRecipeDetail; models: PromptAdminModel[]; refresh: () => Promise<PromptRecipeDetail>; editorDirty: boolean }) {
+    const displayUi = useDisplayUiValue();
+    const displayConfig = useDisplayConfig();
+    useUiLocale();
     const { modal } = App.useApp();
     const owner = useRef(requirePromptAdmin()).current;
     const lifetime = useRef(new AbortController());
@@ -173,10 +179,10 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
             return;
         }
         modal.confirm({
-            title: `使用 v${run.version} 的测试结果出图？`,
-            content: "将按这次测试冻结的模型、参考图与提示词创建 1 个正式出图任务。当前表单的新修改不会影响此任务。",
-            okText: "提交 1 张测试图",
-            cancelText: "取消",
+            title: staticUiText("使用 v{p0} 的测试结果出图？", { p0: `${run.version}` }),
+            content: staticUiText("将按这次测试冻结的模型、参考图与提示词创建 1 个正式出图任务。当前表单的新修改不会影响此任务。"),
+            okText: staticUiText("提交 1 张测试图"),
+            cancelText: staticUiText("取消"),
             onOk: () =>
                 start(`image:${run.id}`, async () => {
                     // A second still-open confirmation must not submit another paid task.
@@ -214,35 +220,35 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
     const chosen = runs.filter((run) => compareIds.includes(run.id));
     return (
         <div className="flex min-w-0 flex-col gap-5">
-            {error && <Alert type="error" showIcon title={error} />}
+            {error && <Alert type="error" showIcon title={displayUi(error)} />}
             <Alert
                 type="warning"
                 showIcon
-                title={isVideo ? "只测试动效规划；此页不生成视频。" : "只测试提示词优化；不会自动出图。"}
+                title={isVideo ? staticUiText("只测试动效规划；此页不生成视频。") : staticUiText("只测试提示词优化；不会自动出图。")}
                 description={
                     isVideo
-                        ? "保存版本后测试。仅上传参考图片给规划模型；视频 / 音频素材请在视频创作页使用。离开页面停止本地查询，不会取消已提交请求。"
-                        : "保存版本后测试。参考图只在点击测试时上传；此页不测试蒙版区域编辑。离开页面停止本地查询，不会取消已提交任务。"
+                        ? staticUiText("保存版本后测试。仅上传参考图片给规划模型；视频 / 音频素材请在视频创作页使用。离开页面停止本地查询，不会取消已提交请求。")
+                        : staticUiText("保存版本后测试。参考图只在点击测试时上传；此页不测试蒙版区域编辑。离开页面停止本地查询，不会取消已提交任务。")
                 }
             />
-            {editorDirty && <Alert type="info" title="编辑页有未保存的修改，请先保存后再测试。" />}
+            {editorDirty && <Alert type="info" title={staticUiText("编辑页有未保存的修改，请先保存后再测试。")} />}
             <section className="wb-surface p-4 sm:p-5">
                 <Form layout="vertical" disabled={Boolean(busy)}>
                     <div className="grid gap-x-4 sm:grid-cols-2">
-                        <Form.Item label="测试版本">
+                        <Form.Item label={staticUiText("测试版本")}>
                             <Select
-                                aria-label="测试版本"
+                                aria-label={staticUiText("测试版本")}
                                 value={versionId}
                                 onChange={setVersionId}
-                                options={detail.versions.map((version) => ({ value: version.id, label: `v${version.version}${version.id === detail.recipe.currentVersionId ? " · 线上" : " · 草稿 / 历史"}` }))}
+                                options={displayConfig(detail.versions.map((version) => ({ value: version.id, label: `v${version.version}${version.id === detail.recipe.currentVersionId ? staticUiText(" · 线上") : staticUiText(" · 草稿 / 历史")}` })), "options")}
                             />
                         </Form.Item>
-                        <Form.Item label="场景标识">
-                            <Input aria-label="场景标识" value={scene} readOnly />
+                        <Form.Item label={staticUiText("场景标识")}>
+                            <Input aria-label={staticUiText("场景标识")} value={scene} readOnly />
                         </Form.Item>
-                        <Form.Item label="生成模式">
+                        <Form.Item label={staticUiText("生成模式")}>
                             <Select
-                                aria-label="生成模式"
+                                aria-label={staticUiText("生成模式")}
                                 value={mode}
                                 disabled={isVideo || Boolean(busy)}
                                 onChange={(value) => {
@@ -250,62 +256,62 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
                                     setTargetId("");
                                 }}
                                 options={
-                                    isVideo
-                                        ? [{ value: "video", label: "视频动效" }]
+                                    displayConfig(isVideo
+                                        ? [{ value: "video", label: staticUiText("视频动效") }]
                                         : [
-                                              { value: "edit", label: "编辑 / 参考图" },
-                                              { value: "generate", label: "纯生成" },
-                                          ]
+                                              { value: "edit", label: staticUiText("编辑 / 参考图") },
+                                              { value: "generate", label: staticUiText("纯生成") },
+                                          ], "options")
                                 }
                             />
                         </Form.Item>
-                        <Form.Item label={isVideo ? "目标视频模型" : "目标图像模型"}>
+                        <Form.Item label={isVideo ? staticUiText("目标视频模型") : staticUiText("目标图像模型")}>
                             <Select
-                                aria-label={isVideo ? "目标视频模型" : "目标图像模型"}
-                                placeholder="请选择"
+                                aria-label={isVideo ? staticUiText("目标视频模型") : staticUiText("目标图像模型")}
+                                placeholder={staticUiText("请选择")}
                                 value={targetId || undefined}
                                 onChange={setTargetId}
-                                options={models.filter((model) => model.capabilities.includes(isVideo ? "video" : mode === "edit" ? "edit" : "generate")).map((model) => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))}
+                                options={displayConfig(models.filter((model) => model.capabilities.includes(isVideo ? "video" : mode === "edit" ? "edit" : "generate")).map((model) => ({ value: model.id, label: `${model.name} · ${model.modelId}` })), "options")}
                             />
                         </Form.Item>
-                        <Form.Item label="本次优化模型（可选）" extra="留空使用配方独立绑定模型；不修改线上设置。">
+                        <Form.Item label={staticUiText("本次优化模型（可选）")} extra={staticUiText("留空使用配方独立绑定模型；不修改线上设置。")}>
                             <Select
-                                aria-label="本次优化模型"
+                                aria-label={staticUiText("本次优化模型")}
                                 allowClear
-                                placeholder="使用配方绑定模型"
+                                placeholder={staticUiText("使用配方绑定模型")}
                                 value={optimizerId}
                                 onChange={setOptimizerId}
-                                options={models.filter((model) => model.capabilities.includes("chat")).map((model) => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))}
+                                options={displayConfig(models.filter((model) => model.capabilities.includes("chat")).map((model) => ({ value: model.id, label: `${model.name} · ${model.modelId}` })), "options")}
                             />
                         </Form.Item>
-                        <Form.Item label="测试输出语言">
+                        <Form.Item label={staticUiText("测试输出语言")}>
                             <Select
-                                aria-label="测试输出语言"
+                                aria-label={staticUiText("测试输出语言")}
                                 value={language}
                                 disabled={isVideo || Boolean(busy)}
                                 onChange={setLanguage}
-                                options={[
-                                    { value: "en", label: "英文" },
-                                    { value: "zh", label: "中文" },
-                                ]}
+                                options={displayConfig([
+                                    { value: "en", label: staticUiText("英文") },
+                                    { value: "zh", label: staticUiText("中文") },
+                                ], "options")}
                             />
                         </Form.Item>
                     </div>
                     <Form.Item
-                        label="场景字段（JSON 对象）"
-                        extra={isVideo ? "包含动效选项以及 duration（秒）、ratio、resolution、video_mode；auto 按图片数量选择纯文本、首帧、首尾帧或参考图模式。generate_audio 由 audio 选项同步，无声为 false。" : undefined}
+                        label={staticUiText("场景字段（JSON 对象）")}
+                        extra={isVideo ? staticUiText("包含动效选项以及 duration（秒）、ratio、resolution、video_mode；auto 按图片数量选择纯文本、首帧、首尾帧或参考图模式。generate_audio 由 audio 选项同步，无声为 false。") : undefined}
                     >
-                        <Input.TextArea aria-label="场景字段 JSON" rows={5} className="!font-mono" value={fieldsJson} onChange={(event) => setFieldsJson(event.target.value)} />
+                        <Input.TextArea aria-label={staticUiText("场景字段 JSON")} rows={5} className="!font-mono" value={fieldsJson} onChange={(event) => setFieldsJson(event.target.value)} />
                     </Form.Item>
-                    <Form.Item label="用户要求">
-                        <Input.TextArea aria-label="用户要求" rows={4} value={userText} maxLength={20000} onChange={(event) => setUserText(event.target.value)} />
+                    <Form.Item label={staticUiText("用户要求")}>
+                        <Input.TextArea aria-label={staticUiText("用户要求")} rows={4} value={userText} maxLength={20000} onChange={(event) => setUserText(event.target.value)} />
                     </Form.Item>
-                    <Form.Item label="参考图分工（每行一项，与图片顺序对应）">
-                        <Input.TextArea aria-label="参考图分工" rows={2} value={rolesText} onChange={(event) => setRolesText(event.target.value)} />
+                    <Form.Item label={staticUiText("参考图分工（每行一项，与图片顺序对应）")}>
+                        <Input.TextArea aria-label={staticUiText("参考图分工")} rows={2} value={rolesText} onChange={(event) => setRolesText(event.target.value)} />
                     </Form.Item>
-                    <Form.Item label="参考图片">
+                    <Form.Item label={staticUiText("参考图片")}>
                         <input
-                            aria-label="上传参考图片"
+                            aria-label={staticUiText("上传参考图片")}
                             type="file"
                             multiple
                             accept="image/png,image/jpeg,image/webp"
@@ -318,9 +324,9 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
                         <div className="mt-3 flex flex-wrap gap-3">
                             {files.map((reference, index) => (
                                 <div key={reference.id} className="w-28">
-                                    <img src={reference.preview} alt={`参考图 ${index + 1}`} className="h-24 w-28 rounded-lg border border-border object-contain" />
-                                    <Tooltip title={reference.file.name}><div className="mt-1 truncate text-xs" >
-                                        {index + 1}. {reference.file.name}
+                                    <img src={reference.preview} alt={staticUiText("参考图 {p0}", { p0: `${index + 1}` })} className="h-24 w-28 rounded-lg border border-border object-contain" />
+                                    <Tooltip title={displayUi(reference.file.name)}><div className="mt-1 truncate text-xs" >
+                                        {index + 1}. {displayUi(reference.file.name)}
                                     </div></Tooltip>
                                     <Button
                                         size="small"
@@ -330,33 +336,29 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
                                             filesRef.current = filesRef.current.filter((entry) => entry.id !== reference.id);
                                             setFiles([...filesRef.current]);
                                         }}
-                                    >
-                                        移除
-                                    </Button>
+                                    >{staticUiText("移除")}</Button>
                                 </div>
                             ))}
                         </div>
                     </Form.Item>
-                    <Button aria-label="仅优化测试" type="primary" loading={busy === "optimize"} disabled={Boolean(busy) || editorDirty} onClick={() => void optimize()}>
-                        仅优化测试
-                    </Button>
+                    <Button aria-label={staticUiText("仅优化测试")} type="primary" loading={busy === "optimize"} disabled={Boolean(busy) || editorDirty} onClick={() => void optimize()}>{staticUiText("仅优化测试")}</Button>
                 </Form>
             </section>
             <section className="wb-surface p-4 sm:p-5">
-                <h3 className="mb-3 font-semibold">{isVideo ? "动效规划结果对比" : "测试结果与图片对比"}</h3>
+                <h3 className="mb-3 font-semibold">{isVideo ? staticUiText("动效规划结果对比") : staticUiText("测试结果与图片对比")}</h3>
                 <Select
-                    aria-label="选择测试结果"
+                    aria-label={staticUiText("选择测试结果")}
                     mode="multiple"
                     className="w-full"
-                    placeholder="选择最多两次测试并排对比"
+                    placeholder={staticUiText("选择最多两次测试并排对比")}
                     value={compareIds}
                     onChange={(ids) => setCompareIds(ids.slice(-2))}
-                    options={runs.map((run) => ({ value: run.id, label: `v${run.version} · ${run.compilation ? compilationStatus[run.compilation.status] : "待核查"} · ${run.id.slice(-8)}` }))}
+                    options={displayConfig(runs.map((run) => ({ value: run.id, label: `v${run.version} · ${run.compilation ? staticUiText(compilationStatus[run.compilation.status]) : staticUiText("待核查")} · ${run.id.slice(-8)}` })), "options")}
                 />
                 {!isVideo && (
                     <Form layout="vertical" className="mt-4">
-                        <Form.Item label="出图参数（仅点击单条结果的“测试出图”时使用）" extra="按目标图像模型填写参数；count 固定为 1。测试结果与图片只保留在当前页面，任务本身由服务端保存。">
-                            <Input.TextArea aria-label="出图参数 JSON" rows={3} className="!font-mono" value={parametersJson} disabled={Boolean(busy)} onChange={(event) => setParametersJson(event.target.value)} />
+                        <Form.Item label={staticUiText("出图参数（仅点击单条结果的“测试出图”时使用）")} extra={staticUiText("按目标图像模型填写参数；count 固定为 1。测试结果与图片只保留在当前页面，任务本身由服务端保存。")}>
+                            <Input.TextArea aria-label={staticUiText("出图参数 JSON")} rows={3} className="!font-mono" value={parametersJson} disabled={Boolean(busy)} onChange={(event) => setParametersJson(event.target.value)} />
                         </Form.Item>
                     </Form>
                 )}
@@ -365,47 +367,40 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
                 {chosen.map((run) => (
                     <section key={run.id} className="wb-surface min-w-0 p-4">
                         <h3 className="mb-2 font-semibold">
-                            v{run.version} 测试 <Tag>{run.id.slice(-8)}</Tag>
+                            v{run.version}{staticUiText(" 测试 ")}<Tag>{run.id.slice(-8)}</Tag>
                         </h3>
-                        <p className="mb-3 break-all text-xs text-muted-foreground">请求编号：{run.id}</p>
+                        <p className="mb-3 break-all text-xs text-muted-foreground">{staticUiText("请求编号：")}{run.id}</p>
                         {run.notice && <Alert type="warning" className="!mb-3" title={run.notice} />}
                         {run.diagnostic ? (
                             <CompilationResult compilation={run.diagnostic} />
                         ) : (
                             <>
-                                <Tag>{run.compilation ? compilationStatus[run.compilation.status] : "提交结果待核查"}</Tag>
-                                {run.compilation?.message && <Alert type="warning" title={run.compilation.message} />}
+                                <Tag>{run.compilation ? staticUiText(compilationStatus[run.compilation.status]) : staticUiText("提交结果待核查")}</Tag>
+                                {run.compilation?.message && <Alert type="warning" title={displayUi(run.compilation.message)} />}
                                 <pre className="mt-3 whitespace-pre-wrap break-words text-xs">{run.compilation?.summaryZh}</pre>
                                 <pre className="mt-3 whitespace-pre-wrap break-words text-sm">{run.compilation?.prompt}</pre>
                             </>
                         )}
                         <div className="mt-4 flex flex-wrap gap-2">
-                            <Button aria-label="查询原优化请求" disabled={Boolean(busy)} loading={busy === `query:${run.id}`} onClick={() => void start(`query:${run.id}`, () => observeCompilation(run))}>
-                                查询原优化请求
-                            </Button>
+                            <Button aria-label={staticUiText("查询原优化请求")} disabled={Boolean(busy)} loading={busy === `query:${run.id}`} onClick={() => void start(`query:${run.id}`, () => observeCompilation(run))}>{staticUiText("查询原优化请求")}</Button>
                             {run.input.promptInput.mode !== "video" && (
-                                <Button aria-label="测试出图（1 张）" type="primary" disabled={Boolean(busy) || run.compilation?.status !== "success" || Boolean(run.taskRequestId)} loading={busy === `image:${run.id}`} onClick={() => createImage(run)}>
-                                    测试出图（1 张）
-                                </Button>
+                                <Button aria-label={staticUiText("测试出图（1 张）")} type="primary" disabled={Boolean(busy) || run.compilation?.status !== "success" || Boolean(run.taskRequestId)} loading={busy === `image:${run.id}`} onClick={() => createImage(run)}>{staticUiText("测试出图（1 张）")}</Button>
                             )}
                         </div>
                         {run.taskRequestId && (
                             <div className="mt-4 border-t border-border pt-4">
-                                <p className="break-all text-xs">出图请求：{run.taskRequestId}</p>
-                                <p className="my-2 text-sm">
-                                    任务状态：{run.task?.status || "待核查"}
-                                    {run.task?.failureReason ? ` · ${run.task.failureReason}` : ""}
+                                <p className="break-all text-xs">{staticUiText("出图请求：")}{run.taskRequestId}</p>
+                                <p className="my-2 text-sm">{staticUiText("任务状态：")}{run.task?.status || staticUiText("待核查")}
+                                    {displayUi(run.task?.failureReason ? ` · ${run.task.failureReason}` : "")}
                                 </p>
                                 {run.taskNotice && <Alert type="warning" title={run.taskNotice} />}
-                                <Button className="my-3" disabled={Boolean(busy)} onClick={() => void start(`task-query:${run.id}`, () => observeImage(run, run.taskRequestId!))}>
-                                    查询原出图任务
-                                </Button>
+                                <Button className="my-3" disabled={Boolean(busy)} onClick={() => void start(`task-query:${run.id}`, () => observeImage(run, run.taskRequestId!))}>{staticUiText("查询原出图任务")}</Button>
                                 <Image.PreviewGroup>
                                     <div className="grid grid-cols-1 gap-3">
                                         {run.task?.resultUrls
                                             .filter((url) => /^https?:\/\//.test(url) || url.startsWith("/api/"))
                                             .map((url, index) => (
-                                                <Image key={url} src={url} alt={`v${run.version} 测试结果 ${index + 1}`} className="!max-h-[500px] !object-contain" />
+                                                <Image key={url} src={url} alt={staticUiText("v{p0} 测试结果 {p1}", { p0: `${run.version}`, p1: `${index + 1}` })} className="!max-h-[500px] !object-contain" />
                                             ))}
                                     </div>
                                 </Image.PreviewGroup>

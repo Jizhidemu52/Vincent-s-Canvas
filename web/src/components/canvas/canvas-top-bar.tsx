@@ -1,3 +1,5 @@
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useDisplayText } from "@/hooks/use-display-text";
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { lazy, Suspense, memo, useEffect, useRef, useState } from "react";
 import { ArrowLeft, BookOpen, Check, Download, Images, Info, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
@@ -38,6 +40,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
     onOpenOnboarding,
 }: TopBarProps) {
     const locale = useUiLocale();
+    const display = useDisplayText();
     const titleRef = useRef<HTMLDivElement>(null);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -49,7 +52,8 @@ export const CanvasTopBar = memo(function CanvasTopBar({
         if (copyTimer.current) clearTimeout(copyTimer.current);
         copyTimer.current = setTimeout(() => setCopied(false), 1200);
     };
-    const userName = useUserStore((state) => state.user?.displayName || state.user?.username || uiText("本地工作区"));
+    const user = useUserStore((state) => state.user);
+    const userName = user?.displayName ? display(user.displayName) : user?.username || uiText("本地工作区");
 
     useEffect(() => {
         if (!isTitleEditing) return;
@@ -73,23 +77,23 @@ export const CanvasTopBar = memo(function CanvasTopBar({
                         { type: "divider" },
                         canvasActionMenuItem("commands", onOpenCommands),
                         canvasActionMenuItem("shortcuts", () => setShortcutsOpen(true)),
-                        ...(onOpenOnboarding ? [{ key: "onboarding", icon: <BookOpen className="size-4" />, label: locale === "en-US" ? "Quick start guide" : "新手引导", onClick: onOpenOnboarding }] : []),
+                        ...(onOpenOnboarding ? [{ key: "onboarding", icon: <BookOpen className="size-4" />, label: locale === "en-US" ? "Quick start guide" : staticUiText("新手引导"), onClick: onOpenOnboarding }] : []),
                         ...(onOpenExamples ? [canvasActionMenuItem("examples", onOpenExamples, <BookOpen className="size-4" />)] : []),
                         { type: "divider" },
                         canvasActionMenuItem("deleteProject", onDeleteProject, <Trash2 className="size-4" />),
                     ] }}>
-                        <Tooltip title={locale === "en-US" ? "Canvas file and help" : "画布文件与帮助"}><button type="button" className="cw-icon cw-file-menu" aria-label={uiText("打开画布菜单")}><MoreHorizontal className="size-4" /></button></Tooltip>
+                        <Tooltip title={locale === "en-US" ? "Canvas file and help" : staticUiText("画布文件与帮助")}><button type="button" className="cw-icon cw-file-menu" aria-label={uiText("打开画布菜单")}><MoreHorizontal className="size-4" /></button></Tooltip>
                     </Dropdown>
                     <div ref={titleRef} className="cw-project-title">
                         {isTitleEditing ? (
                             <input autoFocus value={titleDraft} onChange={(event) => onTitleDraftChange(event.target.value)} onBlur={onFinishTitleEditing}
                                 onKeyDown={(event) => { if (event.nativeEvent.isComposing || event.keyCode === 229) return; if (event.key === "Enter") onFinishTitleEditing(); if (event.key === "Escape") onCancelTitleEditing(); }} aria-label={uiText("画布名称")} />
                         ) : (
-                            <Tooltip title={uiText("点击或按 Enter 修改画布名称")}><button type="button" onClick={onStartTitleEditing} onKeyDown={event => { if (event.key === "F2") { event.preventDefault(); onStartTitleEditing(); } }}><span>{title}</span><Pencil className="cw-title-pencil size-3" aria-hidden /></button></Tooltip>
+                            <Tooltip title={uiText("点击或按 Enter 修改画布名称")}><button type="button" onClick={onStartTitleEditing} onKeyDown={event => { if (event.key === "F2") { event.preventDefault(); onStartTitleEditing(); } }}><span>{display(title)}</span><Pencil className="cw-title-pencil size-3" aria-hidden /></button></Tooltip>
                         )}
                     </div>
                     <CanvasSaveStatus compact />
-                    <Tooltip title={uiText("复制链接；不会公开画布。本机试用跨设备请导出")}><button type="button" className="cw-share" aria-live="polite" onClick={() => void copyLink()}>{copied ? <><Check size={14} />{uiText("已复制")}</> : (locale === "en-US" ? "Copy link" : "复制链接")}</button></Tooltip>
+                    <Tooltip title={uiText("复制链接；不会公开画布。本机试用跨设备请导出")}><button type="button" className="cw-share" aria-live="polite" onClick={() => void copyLink()}>{copied ? <><Check size={14} />{uiText("已复制")}</> : (locale === "en-US" ? "Copy link" : staticUiText("复制链接"))}</button></Tooltip>
                 </div>
                 <div className="cw-account-card">
                     <LanguageSwitch compact />

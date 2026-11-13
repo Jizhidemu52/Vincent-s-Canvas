@@ -1,3 +1,6 @@
+import { useDisplayUiValue, useDisplayConfig } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { Alert, Button, Checkbox, Modal, Select, Tag } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { saveAs } from "file-saver";
@@ -5,6 +8,9 @@ import { analyzeUsage, exportUsageRecords, listUsageAnalysisModels, previewUsage
 
 /** Preserve the server-frozen preview and one-shot paid confirmation. No automatic POST retries. */
 export function LegacyActions({ filters, reason, onBusy }: { filters: UsageFilters | null; reason?: string; onBusy: (busy: boolean) => void }) {
+    const displayUi = useDisplayUiValue();
+    const displayConfig = useDisplayConfig();
+    useUiLocale();
     const [models, setModels] = useState<Array<{ id: string; name: string }>>([]),
         [model, setModel] = useState<string>();
     const [samples, setSamples] = useState(false),
@@ -74,25 +80,21 @@ export function LegacyActions({ filters, reason, onBusy }: { filters: UsageFilte
         }
     };
     return (
-        <section className="wb-surface space-y-3 p-4 sm:p-5" aria-label="原始记录与付费分析">
-            <h3 className="font-semibold">原始记录与手动 AI 分析</h3>
-            <p className="text-xs leading-5 text-[var(--muted-foreground)]">保留完整 JSONL 与已有预览确认流程。AI 使用当前日期 / 人员 / 单板块 / 单模型的基础汇总，不包含本页新增的时长、流程、比较指标；默认不发送姓名、原始提示词或图片。</p>
-            {reason ? <Alert type="warning" showIcon title="当前筛选不支持旧版操作" description={reason} /> : null}
+        <section className="wb-surface space-y-3 p-4 sm:p-5" aria-label={staticUiText("原始记录与付费分析")}>
+            <h3 className="font-semibold">{staticUiText("原始记录与手动 AI 分析")}</h3>
+            <p className="text-xs leading-5 text-[var(--muted-foreground)]">{staticUiText("保留完整 JSONL 与已有预览确认流程。AI 使用当前日期 / 人员 / 单板块 / 单模型的基础汇总，不包含本页新增的时长、流程、比较指标；默认不发送姓名、原始提示词或图片。")}</p>
+            {reason ? <Alert type="warning" showIcon title={staticUiText("当前筛选不支持旧版操作")} description={displayUi(reason)} /> : null}
             <div className="flex flex-wrap gap-2">
-                <Button disabled={!filters || Boolean(busy)} onClick={() => setExportOpen(true)}>
-                    导出完整 JSONL
-                </Button>
-                <Button disabled={!filters || Boolean(busy)} loading={modelsBusy} onClick={() => void loadModels()}>
-                    加载 / 刷新文字模型
-                </Button>
+                <Button disabled={!filters || Boolean(busy)} onClick={() => setExportOpen(true)}>{staticUiText("导出完整 JSONL")}</Button>
+                <Button disabled={!filters || Boolean(busy)} loading={modelsBusy} onClick={() => void loadModels()}>{staticUiText("加载 / 刷新文字模型")}</Button>
             </div>
             <div className="flex flex-wrap items-center gap-3">
                 <Select
-                    aria-label="手动分析文字模型"
-                    placeholder="先加载并选择文字模型"
+                    aria-label={staticUiText("手动分析文字模型")}
+                    placeholder={staticUiText("先加载并选择文字模型")}
                     style={{ minWidth: 220, maxWidth: "100%" }}
                     value={model}
-                    options={models.map((item) => ({ value: item.id, label: item.name }))}
+                    options={displayConfig(models.map((item) => ({ value: item.id, label: item.name })), "options")}
                     disabled={!filters || Boolean(busy) || modelsBusy}
                     onChange={setModel}
                 />
@@ -105,9 +107,7 @@ export function LegacyActions({ filters, reason, onBusy }: { filters: UsageFilte
                         setUsed(false);
                         setResult(null);
                     }}
-                >
-                    额外包含少量脱敏提示词摘要
-                </Checkbox>
+                >{staticUiText("额外包含少量脱敏提示词摘要")}</Checkbox>
             </div>
             <div className="flex flex-wrap gap-2">
                 <Button
@@ -123,9 +123,7 @@ export function LegacyActions({ filters, reason, onBusy }: { filters: UsageFilte
                             setPreview(next);
                         })
                     }
-                >
-                    预览将发送的汇总
-                </Button>
+                >{staticUiText("预览将发送的汇总")}</Button>
                 <Button
                     type="primary"
                     disabled={!filters || Boolean(busy) || !preview || used || !model || !models.some((item) => item.id === model)}
@@ -141,23 +139,21 @@ export function LegacyActions({ filters, reason, onBusy }: { filters: UsageFilte
                             setResult(next);
                         })
                     }
-                >
-                    发送已预览汇总 · 可能付费
-                </Button>
-                {busy ? <Button onClick={cancel}>取消{busy === "analyze" ? "等待" : "操作"}</Button> : null}
+                >{staticUiText("发送已预览汇总 · 可能付费")}</Button>
+                {busy ? <Button onClick={cancel}>{staticUiText("取消")}{busy === "analyze" ? staticUiText("等待") : staticUiText("操作")}</Button> : null}
             </div>
-            {error ? <Alert type="error" title={error} description="不会自动重发付费请求；失败或不确定时请先核对再生成新预览。" /> : null}
+            {error ? <Alert type="error" title={displayUi(error)} description={staticUiText("不会自动重发付费请求；失败或不确定时请先核对再生成新预览。")} /> : null}
             {notice ? <Alert type="info" title={notice} /> : null}
             {preview ? (
                 <div className="rounded-lg border border-[var(--border)] p-3">
                     <div className="mb-2 flex flex-wrap gap-2">
-                        <Tag>{preview.estimatedCharacters} 字符</Tag>
-                        <Tag>{preview.includesPromptSamples ? `含 ${preview.sampleCount} 条脱敏摘要` : "仅基础汇总"}</Tag>
-                        {used ? <Tag>已提交，不重复发送</Tag> : null}
+                        <Tag>{preview.estimatedCharacters}{staticUiText(" 字符")}</Tag>
+                        <Tag>{preview.includesPromptSamples ? staticUiText("含 {p0} 条脱敏摘要", { p0: `${preview.sampleCount}` }) : staticUiText("仅基础汇总")}</Tag>
+                        {used ? <Tag>{staticUiText("已提交，不重复发送")}</Tag> : null}
                     </div>
                     {preview.warnings.map((warning, i) => (
                         <p key={i} className="mb-2 text-xs">
-                            {warning}
+                            {displayUi(warning)}
                         </p>
                     ))}
                     <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs leading-6" data-testid="usage-v2-preview">
@@ -167,12 +163,12 @@ export function LegacyActions({ filters, reason, onBusy }: { filters: UsageFilte
             ) : null}
             {result ? (
                 <div className="rounded-lg border border-[var(--border)] p-3">
-                    <h4 className="mb-2 font-medium">辅助分析结果</h4>
+                    <h4 className="mb-2 font-medium">{staticUiText("辅助分析结果")}</h4>
                     <pre className="whitespace-pre-wrap break-words text-sm leading-7">{result.content}</pre>
                 </div>
             ) : null}
             <Modal
-                title="导出当前支持范围的完整 JSONL"
+                title={staticUiText("导出当前支持范围的完整 JSONL")}
                 open={exportOpen}
                 onCancel={() => {
                     if (busy === "export") cancel();
@@ -185,9 +181,7 @@ export function LegacyActions({ filters, reason, onBusy }: { filters: UsageFilte
                                 if (busy === "export") cancel();
                                 setExportOpen(false);
                             }}
-                        >
-                            取消
-                        </Button>
+                        >{staticUiText("取消")}</Button>
                         <Button
                             type="primary"
                             loading={busy === "export"}
@@ -202,20 +196,15 @@ export function LegacyActions({ filters, reason, onBusy }: { filters: UsageFilte
                                     setExportOpen(false);
                                 })
                             }
-                        >
-                            确认导出
-                        </Button>
+                        >{staticUiText("确认导出")}</Button>
                     </>
                 }
             >
-                <Alert type="warning" showIcon title="文件包含业务敏感记录，请妥善保管" description="包含当前可采集的完整请求与已保存提示词，不含密钥或图片字节；不自动发送给他人。浏览器决定保存位置。" />
-                <p className="mt-3 text-xs">
-                    范围：{filters?.from} 至 {filters?.to}（不含终点）；{filters?.userIds ? `${filters.userIds.length} 位指定人员` : "当前范围全部人员"}；{filters?.boardKey || "全部板块"}；{filters?.modelConfigId || "全部模型"}。
+                <Alert type="warning" showIcon title={staticUiText("文件包含业务敏感记录，请妥善保管")} description={staticUiText("包含当前可采集的完整请求与已保存提示词，不含密钥或图片字节；不自动发送给他人。浏览器决定保存位置。")} />
+                <p className="mt-3 text-xs">{staticUiText("范围：")}{filters?.from}{staticUiText(" 至 ")}{filters?.to}{staticUiText("（不含终点）；")}{filters?.userIds ? staticUiText("{p0} 位指定人员", { p0: `${filters.userIds.length}` }) : staticUiText("当前范围全部人员")}；{filters?.boardKey || staticUiText("全部板块")}；{filters?.modelConfigId || staticUiText("全部模型")}。
                 </p>
                 {busy === "export" ? (
-                    <p className="mt-3" role="status">
-                        已读取 {progress} 条，等待完整结束标记…
-                    </p>
+                    <p className="mt-3" role="status">{staticUiText("已读取 ")}{progress}{staticUiText(" 条，等待完整结束标记…")}</p>
                 ) : null}
             </Modal>
         </section>

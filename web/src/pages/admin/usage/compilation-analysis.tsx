@@ -1,3 +1,6 @@
+import { useDisplayUiValue, useDisplayConfig } from "@/hooks/use-display-text";
+import { staticUiText, staticUiConfig } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { Alert, Button, Select, Table } from "antd";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -18,6 +21,9 @@ type ComparisonRow = { key: string; label: string; current: ReactNode; compariso
 
 /** No read occurs on mount. The parent also remounts this section after an applied-scope refresh. */
 export default function CompilationAnalysis({ scope }: { scope: UsageV2Scope }) {
+    const displayUi = useDisplayUiValue();
+    const displayConfig = useDisplayConfig();
+    useUiLocale();
     const user = useUserStore(state => state.user), sessionStatus = useUserStore(state => state.status);
     const allowed = sessionStatus === "authenticated" && user?.role === "super_admin";
     const requestKey = JSON.stringify({ scope, identity: user?.id, role: user?.role, sessionStatus });
@@ -56,7 +62,7 @@ export default function CompilationAnalysis({ scope }: { scope: UsageV2Scope }) 
     const current = data?.current[group], comparison = data?.comparison?.[group];
     const comparisonCell = (render: (value: UsageCompilationSummary) => ReactNode) => comparison ? render(comparison) : "未启用对比";
     const comparisonColumns = [
-        { title: "指标", dataIndex: "label", width: 170 },
+        { title: "指标", dataIndex: "label", width: 170, render: (value: string) => staticUiText(value) },
         { title: "本期", dataIndex: "current", width: 220 },
         { title: "对比期", dataIndex: "comparison", width: 220 },
     ];
@@ -75,87 +81,87 @@ export default function CompilationAnalysis({ scope }: { scope: UsageV2Scope }) 
         ...(comparison?.costs.map(row => ({ ...row, period: "对比期", key: `comparison:${row.currency}` })) ?? []),
     ] : [];
 
-    return <section className="wb-surface min-w-0 space-y-4 p-4" data-testid="usage-compilation-analysis" aria-label="独立提示词编译分析">
+    return <section className="wb-surface min-w-0 space-y-4 p-4" data-testid="usage-compilation-analysis" aria-label={staticUiText("独立提示词编译分析")}>
         <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
-                <h3 className="font-semibold">独立提示词编译分析</h3>
-                <p className="text-xs leading-5 text-[var(--muted-foreground)]">按编译创建时间统计既有记录，包含未关联任务的编译及管理员测试；不等同员工使用量。</p>
+                <h3 className="font-semibold">{staticUiText("独立提示词编译分析")}</h3>
+                <p className="text-xs leading-5 text-[var(--muted-foreground)]">{staticUiText("按编译创建时间统计既有记录，包含未关联任务的编译及管理员测试；不等同员工使用量。")}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-                <Button aria-label={data ? "重新读取编译统计" : "读取独立编译统计"} disabled={!allowed || unsupported.length > 0 || reading} loading={reading} onClick={() => void read()}>{data ? "重新读取编译统计" : "读取独立编译统计"}</Button>
-                {reading ? <Button onClick={cancel}>取消编译统计读取</Button> : null}
+                <Button aria-label={data ? staticUiText("重新读取编译统计") : staticUiText("读取独立编译统计")} disabled={!allowed || unsupported.length > 0 || reading} loading={reading} onClick={() => void read()}>{data ? staticUiText("重新读取编译统计") : staticUiText("读取独立编译统计")}</Button>
+                {reading ? <Button onClick={cancel}>{staticUiText("取消编译统计读取")}</Button> : null}
             </div>
         </div>
-        {!allowed ? <Alert type="warning" showIcon title="仅当前已登录的超级管理员可读取此统计" />
-            : unsupported.length ? <Alert type="warning" showIcon title="当前共享筛选不支持独立编译口径" description={`不支持：${unsupported.join("、")}。未发出请求，也未清空共享筛选。可使用日期、人员、姓名搜索及当前部门；如需读取，请先明确调整并应用共享筛选。`} />
-                : <p className="text-xs leading-5 text-[var(--muted-foreground)]">仅点击后读取已应用的共享筛选；日期采用北京时间、左闭右开区间。切换范围或刷新主页面后需重新点击，不自动读取提示词、规则、原始错误或员工明细，不调用模型。</p>}
-        {notice?.key === requestKey ? <Alert type={notice.error ? "error" : "info"} showIcon title={notice.text} /> : null}
-        {reading ? <p role="status" className="text-sm">正在读取编译统计…可取消等待或切换筛选。</p> : null}
-        {!data && !reading && allowed && !unsupported.length && !notice ? <p className="text-sm text-[var(--muted-foreground)]">尚未读取独立编译统计。</p> : null}
+        {!allowed ? <Alert type="warning" showIcon title={staticUiText("仅当前已登录的超级管理员可读取此统计")} />
+            : unsupported.length ? <Alert type="warning" showIcon title={staticUiText("当前共享筛选不支持独立编译口径")} description={staticUiText("不支持：{p0}。未发出请求，也未清空共享筛选。可使用日期、人员、姓名搜索及当前部门；如需读取，请先明确调整并应用共享筛选。", { p0: `${unsupported.join("、")}` })} />
+                : <p className="text-xs leading-5 text-[var(--muted-foreground)]">{staticUiText("仅点击后读取已应用的共享筛选；日期采用北京时间、左闭右开区间。切换范围或刷新主页面后需重新点击，不自动读取提示词、规则、原始错误或员工明细，不调用模型。")}</p>}
+        {notice?.key === requestKey ? <Alert type={notice.error ? "error" : "info"} showIcon title={displayUi(notice.text)} /> : null}
+        {reading ? <p role="status" className="text-sm">{staticUiText("正在读取编译统计…可取消等待或切换筛选。")}</p> : null}
+        {!data && !reading && allowed && !unsupported.length && !notice ? <p className="text-sm text-[var(--muted-foreground)]">{staticUiText("尚未读取独立编译统计。")}</p> : null}
         {data && current ? <div className="min-w-0 space-y-4" data-testid="usage-compilation-results">
             <div className="space-y-1 text-xs leading-5 text-[var(--muted-foreground)]">
-                <p>观察点：{dateText(data.meta.asOf)}（北京时间）；实时读取既有编译记录，不是日汇总快照。</p>
-                <p>本期：{dateText(data.current.from)}（含）至 {dateText(data.current.to)}（不含）。</p>
-                <p>{data.comparison ? `对比期：${dateText(data.comparison.from)}（含）至 ${dateText(data.comparison.to)}（不含）。` : "未启用对比；不补造对比期。"}</p>
+                <p>{staticUiText("观察点：")}{dateText(data.meta.asOf)}{staticUiText("（北京时间）；实时读取既有编译记录，不是日汇总快照。")}</p>
+                <p>{staticUiText("本期：")}{dateText(data.current.from)}{staticUiText("（含）至 ")}{dateText(data.current.to)}{staticUiText("（不含）。")}</p>
+                <p>{data.comparison ? staticUiText("对比期：{p0}（含）至 {p1}（不含）。", { p0: `${dateText(data.comparison.from)}`, p1: `${dateText(data.comparison.to)}` }) : staticUiText("未启用对比；不补造对比期。")}</p>
             </div>
             <div className="grid min-w-0 gap-3 lg:grid-cols-3">
                 {(Object.keys(groups) as Group[]).map(key => {
                     const now = data.current[key], prior = data.comparison?.[key];
                     return <article key={key} className="min-w-0 space-y-2 rounded-lg border border-[var(--border)] p-3" data-testid={`usage-compilation-group-${key}`}>
-                        <h4 className="text-sm font-medium">{groups[key]}</h4>
-                        <p className="text-2xl font-semibold tabular-nums">{numberText(now.requests)} <span className="text-xs font-normal">条本期编译记录</span></p>
-                        <p className="text-xs">{prior ? `对比期 ${numberText(prior.requests)} 条` : "对比期未启用"}</p>
-                        <p className="text-xs leading-5">本期管理员测试：是 {now.adminTests.yes} · 否 {now.adminTests.no} · 未知 {now.adminTests.unknown}</p>
-                        {prior ? <p className="text-xs leading-5">对比期管理员测试：是 {prior.adminTests.yes} · 否 {prior.adminTests.no} · 未知 {prior.adminTests.unknown}</p> : null}
+                        <h4 className="text-sm font-medium">{staticUiText(groups[key])}</h4>
+                        <p className="text-2xl font-semibold tabular-nums">{numberText(now.requests)} <span className="text-xs font-normal">{staticUiText("条本期编译记录")}</span></p>
+                        <p className="text-xs">{prior ? staticUiText("对比期 {p0} 条", { p0: `${numberText(prior.requests)}` }) : staticUiText("对比期未启用")}</p>
+                        <p className="text-xs leading-5">{staticUiText("本期管理员测试：是 ")}{now.adminTests.yes}{staticUiText(" · 否 ")}{now.adminTests.no}{staticUiText(" · 未知 ")}{now.adminTests.unknown}</p>
+                        {prior ? <p className="text-xs leading-5">{staticUiText("对比期管理员测试：是 ")}{prior.adminTests.yes}{staticUiText(" · 否 ")}{prior.adminTests.no}{staticUiText(" · 未知 ")}{prior.adminTests.unknown}</p> : null}
                     </article>;
                 })}
             </div>
-            <p className="text-xs leading-5 text-[var(--muted-foreground)]">已关联 / 未关联仅按当前观察点、同用户任务的真实编译外键区分；关联任务不限定创建于编译期内。未关联不代表从未提交、放弃或无价值；全部组包含另外两组，三组不能相加。</p>
+            <p className="text-xs leading-5 text-[var(--muted-foreground)]">{staticUiText("已关联 / 未关联仅按当前观察点、同用户任务的真实编译外键区分；关联任务不限定创建于编译期内。未关联不代表从未提交、放弃或无价值；全部组包含另外两组，三组不能相加。")}</p>
             <div className="flex flex-wrap items-center justify-between gap-2">
-                <h4 className="font-medium">{groups[group]} · 分组明细</h4>
-                <Select aria-label="编译分组详情" className="w-full sm:w-56" value={group} onChange={setGroup} options={(Object.keys(groups) as Group[]).map(value => ({ value, label: groups[value] }))} />
+                <h4 className="font-medium">{staticUiText(groups[group])}{staticUiText(" · 分组明细")}</h4>
+                <Select aria-label={staticUiText("编译分组详情")} className="w-full sm:w-56" value={group} onChange={setGroup} options={displayConfig((Object.keys(groups) as Group[]).map(value => ({ value, label: staticUiText(groups[value]) })), "options")} />
             </div>
             <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-                <section className="min-w-0 space-y-2" aria-label="编译关联与缓存">
-                    <h5 className="text-sm font-medium">关联与缓存</h5>
-                    <Table<ComparisonRow> data-testid="usage-compilation-cache" rowKey="key" size="small" pagination={false} scroll={{ x: 610 }} columns={comparisonColumns} dataSource={cacheRows} />
+                <section className="min-w-0 space-y-2" aria-label={staticUiText("编译关联与缓存")}>
+                    <h5 className="text-sm font-medium">{staticUiText("关联与缓存")}</h5>
+                    <Table<ComparisonRow> data-testid="usage-compilation-cache" rowKey="key" size="small" pagination={false} scroll={{ x: 610 }} columns={displayConfig(staticUiConfig(comparisonColumns, "columns"), "columns", cacheRows)} dataSource={cacheRows} />
                 </section>
-                <section className="min-w-0 space-y-2" aria-label="编译Token与耗时覆盖">
-                    <h5 className="text-sm font-medium">源调用 Token 与耗时覆盖</h5>
-                    <Table<ComparisonRow> data-testid="usage-compilation-coverage" rowKey="key" size="small" pagination={false} scroll={{ x: 610 }} columns={comparisonColumns} dataSource={usageRows} />
+                <section className="min-w-0 space-y-2" aria-label={staticUiText("编译Token与耗时覆盖")}>
+                    <h5 className="text-sm font-medium">{staticUiText("源调用 Token 与耗时覆盖")}</h5>
+                    <Table<ComparisonRow> data-testid="usage-compilation-coverage" rowKey="key" size="small" pagination={false} scroll={{ x: 610 }} columns={displayConfig(staticUiConfig(comparisonColumns, "columns"), "columns", usageRows)} dataSource={usageRows} />
                 </section>
             </div>
-            <p className="text-xs leading-5 text-[var(--muted-foreground)]">源调用仅指该期、该分组原筛选内的非缓存编译记录，不证明供应商已接受或扣费。源记录与缓存记录各按自己的直接任务外键分组，因此已关联组可能只有缓存，而源费用位于未关联组。缓存只计复用，不重复计 Token、耗时或费用；跨期缓存源的旧调用费用不挪入本期。耗时为编译器记录，不是员工工时。</p>
-            <section className="min-w-0 space-y-2" aria-label="编译状态分布">
-                <h5 className="text-sm font-medium">状态分开列示</h5>
+            <p className="text-xs leading-5 text-[var(--muted-foreground)]">{staticUiText("源调用仅指该期、该分组原筛选内的非缓存编译记录，不证明供应商已接受或扣费。源记录与缓存记录各按自己的直接任务外键分组，因此已关联组可能只有缓存，而源费用位于未关联组。缓存只计复用，不重复计 Token、耗时或费用；跨期缓存源的旧调用费用不挪入本期。耗时为编译器记录，不是员工工时。")}</p>
+            <section className="min-w-0 space-y-2" aria-label={staticUiText("编译状态分布")}>
+                <h5 className="text-sm font-medium">{staticUiText("状态分开列示")}</h5>
                 <Table data-testid="usage-compilation-statuses" rowKey="key" size="small" pagination={false} scroll={{ x: 760 }}
                     dataSource={USAGE_COMPILATION_STATUSES.map(key => ({ key, label: statuses[key] }))}
-                    columns={[
-                        { title: "状态", dataIndex: "label", width: 120 },
-                        { title: "本期 · 全部记录（含缓存）", render: (_, row) => numberText(current.statuses[row.key]) },
-                        { title: "对比期 · 全部记录（含缓存）", render: (_, row) => comparisonCell(value => numberText(value.statuses[row.key])) },
-                        { title: "本期 · 源调用记录", render: (_, row) => numberText(current.sourceStatuses[row.key]) },
-                        { title: "对比期 · 源调用记录", render: (_, row) => comparisonCell(value => numberText(value.sourceStatuses[row.key])) },
-                    ]} />
-                <p className="text-xs leading-5 text-[var(--muted-foreground)]">待核查不并入失败；缓存状态跟随可核对的源记录。成功可能包含基础模板回退，不等同优化成功或图片生成成功。</p>
+                    columns={displayConfig([
+                        { title: staticUiText("状态"), dataIndex: "label", width: 120 },
+                        { title: staticUiText("本期 · 全部记录（含缓存）"), render: (_, row) => numberText(current.statuses[row.key]) },
+                        { title: staticUiText("对比期 · 全部记录（含缓存）"), render: (_, row) => comparisonCell(value => numberText(value.statuses[row.key])) },
+                        { title: staticUiText("本期 · 源调用记录"), render: (_, row) => numberText(current.sourceStatuses[row.key]) },
+                        { title: staticUiText("对比期 · 源调用记录"), render: (_, row) => comparisonCell(value => numberText(value.sourceStatuses[row.key])) },
+                    ], "columns", USAGE_COMPILATION_STATUSES.map(key => ({ key, label: statuses[key] })))} />
+                <p className="text-xs leading-5 text-[var(--muted-foreground)]">{staticUiText("待核查不并入失败；缓存状态跟随可核对的源记录。成功可能包含基础模板回退，不等同优化成功或图片生成成功。")}</p>
             </section>
-            <section className="min-w-0 space-y-2" aria-label="编译源调用分币种费用">
-                <h5 className="text-sm font-medium">源调用费用 · 币种与金额性质分列</h5>
+            <section className="min-w-0 space-y-2" aria-label={staticUiText("编译源调用分币种费用")}>
+                <h5 className="text-sm font-medium">{staticUiText("源调用费用 · 币种与金额性质分列")}</h5>
                 <Table data-testid="usage-compilation-costs" rowKey="key" size="small" pagination={false} scroll={{ x: 960 }} dataSource={costs}
-                    locale={{ emptyText: "当前分组没有源调用费用记录；金额不可用，不补零。" }}
-                    columns={[
-                        { title: "时段", dataIndex: "period", width: 80 },
-                        { title: "币种", dataIndex: "currency", render: value => value === "unknown" ? "未知" : value },
-                        { title: "源调用记录", dataIndex: "sourceCalls" },
-                        { title: "已记录金额（actual）", dataIndex: "actualAmount", render: value => value === null ? "不可用" : value },
-                        { title: "估算金额（estimated）", dataIndex: "estimatedAmount", render: value => value === null ? "不可用" : value },
-                        { title: "已记录笔数", dataIndex: "actualCount" }, { title: "估算笔数", dataIndex: "estimatedCount" }, { title: "未知笔数", dataIndex: "unknownCount" },
-                    ]} />
-                <p className="text-xs leading-5 text-[var(--muted-foreground)]">不同币种不相加、不换汇；actual 与 estimated 不合并，均不冒充最终账单。未记录金额显示不可用，明确记录的零保留原金额字符串；未知币种不补算金额。</p>
+                    locale={{ emptyText: staticUiText("当前分组没有源调用费用记录；金额不可用，不补零。") }}
+                    columns={displayConfig([
+                        { title: staticUiText("时段"), dataIndex: "period", width: 80 },
+                        { title: staticUiText("币种"), dataIndex: "currency", render: value => value === "unknown" ? staticUiText("未知") : value },
+                        { title: staticUiText("源调用记录"), dataIndex: "sourceCalls" },
+                        { title: staticUiText("已记录金额（actual）"), dataIndex: "actualAmount", render: value => value === null ? staticUiText("不可用") : value },
+                        { title: staticUiText("估算金额（estimated）"), dataIndex: "estimatedAmount", render: value => value === null ? staticUiText("不可用") : value },
+                        { title: staticUiText("已记录笔数"), dataIndex: "actualCount" }, { title: staticUiText("估算笔数"), dataIndex: "estimatedCount" }, { title: staticUiText("未知笔数"), dataIndex: "unknownCount" },
+                    ], "columns", costs)} />
+                <p className="text-xs leading-5 text-[var(--muted-foreground)]">{staticUiText("不同币种不相加、不换汇；actual 与 estimated 不合并，均不冒充最终账单。未记录金额显示不可用，明确记录的零保留原金额字符串；未知币种不补算金额。")}</p>
             </section>
             <details className="text-xs leading-6">
-                <summary className="cursor-pointer font-medium">完整口径与缺失说明 · {data.meta.notes.length} 条</summary>
-                <div className="mt-2 space-y-1 text-[var(--muted-foreground)]">{data.meta.notes.map((note, index) => <p key={index}>{note}</p>)}</div>
+                <summary className="cursor-pointer font-medium">{staticUiText("完整口径与缺失说明 · ")}{data.meta.notes.length}{staticUiText(" 条")}</summary>
+                <div className="mt-2 space-y-1 text-[var(--muted-foreground)]">{data.meta.notes.map((note, index) => <p key={index}>{displayUi(note)}</p>)}</div>
             </details>
         </div> : null}
     </section>;

@@ -28,8 +28,8 @@ function metadataHarness() {
         load(width: number, height: number) { this.naturalWidth = width; this.naturalHeight = height; this.onload?.(); }
     }
     const module = { exports: {} as { readImageMeta: (url: string) => Promise<Metadata> } };
-    new Function("module", "exports", "Image", "setTimeout", "clearTimeout", metadataCode)(
-        module, module.exports, FakeImage,
+    new Function("require", "module", "exports", "Image", "setTimeout", "clearTimeout", metadataCode)(
+        (name: string) => { if (name === "./i18n") return { getUiLocale: () => "zh-CN" }; throw new Error(`Unexpected metadata dependency ${name}`); }, module, module.exports, FakeImage,
         (run: () => void, delay: number) => { timers.set(++timerId, { run, delay }); return timerId; },
         (id: number) => timers.delete(id),
     );

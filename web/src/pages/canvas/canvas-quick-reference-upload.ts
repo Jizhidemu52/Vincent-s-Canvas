@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText } from "@/lib/i18n";
 import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
 import { validateImageReferences } from "@/lib/image-reference-policy";
@@ -22,7 +23,7 @@ export async function uploadCanvasQuickReferences(input: File[], options: Refere
     const remaining = Math.max(0, maximum - options.references.length);
     const files = input.filter(file => file.type.startsWith("image/")).slice(0, remaining);
     if (!files.length) {
-        options.message.warning(remaining ? uiText("请选择图片文件") : maximum ? uiText("当前模型最多添加 {value1} 张参考图", { value1: maximum }) : uiText("当前模型不支持参考图"));
+        options.message.warning(displayNotice(remaining ? uiText("请选择图片文件") : maximum ? uiText("当前模型最多添加 {value1} 张参考图", { value1: maximum }) : uiText("当前模型不支持参考图")));
         return;
     }
     files.forEach(assertCanvasImageUploadSize);

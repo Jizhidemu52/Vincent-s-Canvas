@@ -1,4 +1,5 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
+import { DisplayText, useDisplayText } from "@/hooks/use-display-text";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Cpu } from "lucide-react";
 import { Tooltip } from "antd";
@@ -41,6 +42,7 @@ export function shouldRefreshModelPickerConfig(capability: ModelCapability | und
 
 export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = uiText("选择模型"), onMissingConfig, modelsSource, disabled = false, toolKey, variant, side }: ModelPickerProps) {
     useUiLocale();
+    const display = useDisplayText();
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const automaticRetryRef = useRef(false);
@@ -102,13 +104,13 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
         const selected = current ? presentationFor(current) : undefined;
         const selectedName = binding?.enabled === false ? uiText("此板块已停用") : binding?.modelConfigId && !boundModel ? uiText("绑定模型不可用") : selected?.name || (options.length ? placeholder : emptyLabel);
         return <Select open={open} value={current} disabled={pickerDisabled} onOpenChange={changeOpen} onValueChange={changeValue}>
-            <Tooltip title={selectedName} open={open ? false : undefined}><span className="block min-w-0 w-full">
+            <Tooltip title={display(selectedName)} open={open ? false : undefined}><span className="block min-w-0 w-full">
             <SelectTrigger data-usage-control="model" aria-label={uiText("生成图片模型")} className={cn("settings-model-trigger", className)}
                 onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
                 <span className="settings-model-icon" aria-hidden>{selected?.icon ? <img src={selected.icon} alt="" /> : <Cpu size={20} />}</span>
                 <span className="settings-model-copy">
-                    <span className="settings-model-name">{selectedName}</span>
-                    <span className="settings-model-description">{selected?.description || uiText(options.length ? "选择适合当前创作的图像模型" : emptyLabel)}</span>
+                    <span className="settings-model-name"><DisplayText text={selectedName} /></span>
+                    <span className="settings-model-description"><DisplayText text={selected?.description || uiText(options.length ? "选择适合当前创作的图像模型" : emptyLabel)} /></span>
                 </span>
                 {selected ? <span className="settings-model-current">{uiText(boundModel ? "后台指定" : "当前使用")}</span> : null}
             </SelectTrigger>
@@ -120,7 +122,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                     return <SelectItem key={model} value={model} textValue={modelLabelWithUsage(option.name, option.description)} className="settings-model-option"
                         data-usage-control="model" data-usage-value={serverModels.find(item => item.modelId === model)?.id}>
                         <span className="settings-model-icon" aria-hidden>{option.icon ? <img src={option.icon} alt="" /> : <Cpu size={20} />}</span>
-                        <span className="settings-model-copy"><span className="settings-model-name">{option.name}</span><span className="settings-model-description">{option.description || uiText("按此模型支持的参数生成图像")}</span></span>
+                        <span className="settings-model-copy"><span className="settings-model-name"><DisplayText text={option.name} /></span><span className="settings-model-description"><DisplayText text={option.description || uiText("按此模型支持的参数生成图像")} /></span></span>
                         {model === current ? <span className="settings-model-selected">{uiText("已选")}</span> : null}
                     </SelectItem>;
                 }) : <SelectItem value="__empty__" disabled>{emptyLabel}</SelectItem>}
@@ -132,7 +134,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             const serverModel = serverModels.find(item => item.modelId === model);
             const profile = capability === "image" ? imageModelProfile(model, businessModels) : undefined;
             return { value: model, ...canvasModelPresentation(nameFor(model)), description: serverModel?.publicDescription,
-                details: profile ? canvasImageModelDetails(profile, referencePolicyForModel(model, profile)) : [], usageModelId: serverModel?.id,
+                details: profile ? canvasImageModelDetails(profile, referencePolicyForModel(model, profile), uiText) : [], usageModelId: serverModel?.id,
                 isFeatured: serverModel?.isFeatured === true, displayOrder: serverModel?.displayOrder };
         });
         const label = binding?.enabled === false ? uiText("此板块已停用") : binding?.modelConfigId && !boundModel ? uiText("绑定模型不可用")
@@ -149,7 +151,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             onOpenChange={changeOpen}
             onValueChange={changeValue}
         >
-            <Tooltip title={currentLabel} open={open ? false : undefined}><span className={cn("inline-flex min-w-0 max-w-full", fullWidth && "w-full")}>
+            <Tooltip title={display(currentLabel)} open={open ? false : undefined}><span className={cn("inline-flex min-w-0 max-w-full", fullWidth && "w-full")}>
             <SelectTrigger
                 data-usage-control="model"
                 className={cn(
@@ -162,7 +164,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 onPointerDown={(event) => event.stopPropagation()}
             >
                 <ModelIcon model={current} />
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{currentLabel}</span>
+                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left"><DisplayText text={currentLabel} /></span>
             </SelectTrigger>
             </span></Tooltip>
             <SelectContent
@@ -205,7 +207,7 @@ function ModelLabel({ model, label }: { model: string; label: string }) {
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon model={model} />
             <span className="flex min-w-0 flex-col py-1">
-                <span className="whitespace-normal">{label}</span>
+                <span className="whitespace-normal"><DisplayText text={label} /></span>
             </span>
         </span>
     );

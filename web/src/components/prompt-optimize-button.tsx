@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Modal, Tooltip } from "antd";
@@ -94,7 +95,7 @@ export function PromptOptimizeButton({ config, prompt, references = [], operatio
             if (!mounted.current) return;
             if (error instanceof PromptCompilationUncertainError) setPending(requestId);
             else { setPending(undefined); pendingInput.current = undefined; pendingContext.current = undefined; }
-            message.error(error instanceof Error ? error.message : uiText("提示词优化失败"));
+            message.error(displayNotice(error instanceof Error ? error.message : uiText("提示词优化失败")));
         } finally { lock.current = false; if (mounted.current) { setBusy(false); onBusyChange?.(false); } }
     };
     const difference = preview ? promptTextDifference(preview.context.prompt, preview.result.prompt) : undefined;

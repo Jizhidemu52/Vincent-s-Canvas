@@ -1,3 +1,4 @@
+import { staticUiText } from "@/lib/static-ui-copy";
 import { useUiText } from "@/lib/i18n";
 import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
@@ -97,8 +98,9 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
     const modelIsSynced = mode === "text" || modelIsBound || node.metadata?.model === model;
     const inputModeCheck = separateImages ? configImageInputModeChange(node, references, inputs, "per-image", node.metadata?.composerContent ?? node.metadata?.prompt ?? "") : undefined;
     const fixedTaskReference = inputModeCheck && (!inputModeCheck.patch || inputModeCheck.patch.composerContent !== undefined);
-    const canGenerate = !optimizing && toolEnabled && hasAvailableModel && modelIsSynced && !fixedTaskReference && (linkedTaskCount > 0 || (blend ? imageCount >= 2 && imageCount <= 4 : mode === "video" ? hasPromptInput || hasAnyInput : hasPromptInput));
-    const disabledReason = optimizing ? "正在优化提示词…" : !toolEnabled ? "当前功能已停用" : businessConfigStatus !== "ready" ? businessConfigStatus === "error" ? "模型列表加载失败，请打开模型选择器重试" : "正在加载模型…" : routingError || (!hasAvailableModel ? "当前功能没有可用模型" : !modelIsSynced ? "正在同步模型…" : fixedTaskReference ? "请改为按图片1引用当前任务主图" : blend && (imageCount < 2 || imageCount > 4) ? "融合需要 2–4 张参考图" : !hasPromptInput && !hasAnyInput ? "请先输入提示词或连接素材" : "");
+    const pendingOriginal = inputs.some(input => input.pendingUpload);
+    const canGenerate = !pendingOriginal && !optimizing && toolEnabled && hasAvailableModel && modelIsSynced && !fixedTaskReference && (linkedTaskCount > 0 || (blend ? imageCount >= 2 && imageCount <= 4 : mode === "video" ? hasPromptInput || hasAnyInput : hasPromptInput));
+    const disabledReason = pendingOriginal ? "先设置参考款原图" : optimizing ? "正在优化提示词…" : !toolEnabled ? "当前功能已停用" : businessConfigStatus !== "ready" ? businessConfigStatus === "error" ? "模型列表加载失败，请打开模型选择器重试" : "正在加载模型…" : routingError || (!hasAvailableModel ? "当前功能没有可用模型" : !modelIsSynced ? "正在同步模型…" : fixedTaskReference ? "请改为按图片1引用当前任务主图" : blend && (imageCount < 2 || imageCount > 4) ? "融合需要 2–4 张参考图" : !hasPromptInput && !hasAnyInput ? "请先输入提示词或连接素材" : "");
     const referencePresentation = configReferencePresentation(references, inputs, mode, separateImages);
     const mentionCatalog = useCanvasMentionImages();
     const mentionInputs = configMentionInputs(referencePresentation.inputs, references, mode === "audio" ? [] : mentionCatalog.images, referencePresentation.mentionLabels, separateImages ? 1 : 0);
@@ -186,7 +188,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                         options={[{ value: "per-image", label: t("逐图执行 · {value1} 个任务", { value1: inputImageTaskCount }) }, { value: "combined", label: t("合并参考 · 1 个任务") }]} />
                 </div> : <div>{workflow ? t("工作流：左侧接原图或上一步，右侧接下一步配置") : t("左侧接素材；右侧接下一步生图配置可创建工作流")}</div>}
                 {workflow ? <div role="status">{workflow.stepStatus === "success" ? t("本步已完成，再次运行会复用结果") : workflow.stepStatus === "running" ? isRunning ? t("本步正在执行") : t("请点击继续工作流查询原任务，不会重复生成") : workflow.stepStatus === "stale" ? t("上游或参数已变化，运行时更新本步") : workflow.stepStatus === "failed" ? t("本步失败，下游未提交") : t("上游出图后自动执行本步")} {t(" · 每步单独调用，请保持本页打开")}</div> : null}
-                {workflow?.onRunStep ? <div className="mt-1 flex gap-2"><Button size="small" disabled={isRunning} onClick={() => workflow.onRunStep?.(true)}>重跑本步</Button><Button size="small" disabled={isRunning} onClick={() => workflow.onRunStep?.(false)}>从本步开始</Button></div> : null}
+                {workflow?.onRunStep ? <div className="mt-1 flex gap-2"><Button size="small" disabled={isRunning} onClick={() => workflow.onRunStep?.(true)}>{staticUiText("重跑本步")}</Button><Button size="small" disabled={isRunning} onClick={() => workflow.onRunStep?.(false)}>{staticUiText("从本步开始")}</Button></div> : null}
                 {taskCount > 0 ? <div role="status"><span style={{ color: theme.node.text }}>{t("待执行 {count} 个任务", { count: taskCount })}</span> · {separateImages ? t("每个任务主图均为图片1，公共参考从图片2起") : t("每个任务使用自身输入与公共素材")}</div> : showInputMode ? <div role="status">{t("多张参考图共同生成 1 张结果")}</div> : null}
                 {inputModeFeedback ? <div role={inputModeFeedback.error ? "alert" : "status"} className="mt-1">{t(inputModeFeedback.text)}</div> : null}
                 {fixedTaskReference ? <div role="alert" className="mt-1">{t("逐图提示词仍固定引用某张任务图片。请改为“图片1”（每个任务的主图）；需要固定共享的图片请添加为公共参考，或切回合并参考。")}</div> : null}
@@ -218,8 +220,8 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
             </div> : null}
 
             {mode === "text" ? <div className="mb-2 text-xs" style={{ color: theme.node.muted }}>{t("文本模型")}：{textModelName || t(businessConfigStatus === "ready" ? "未配置" : "正在加载模型…")} · {t("后台统一指定 · 每次生成 1 份")}</div> : null}
-            {!isRunning && !canGenerate && disabledReason ? <div role="status" className="mb-2 text-xs" style={{ color: theme.node.muted }}>{disabledReason}</div> : null}
-            {!workflow && taskCount > 1 && onRetryFailed ? <Button size="small" className="mb-2" disabled={isRunning} onClick={() => onRetryFailed(node.id)}>仅重试失败或未完成项</Button> : null}
+            {!isRunning && !canGenerate && disabledReason ? <div role="status" className="mb-2 text-xs" style={{ color: theme.node.muted }}>{t(disabledReason)}</div> : null}
+            {!workflow && taskCount > 1 && onRetryFailed ? <Button size="small" className="mb-2" disabled={isRunning} onClick={() => onRetryFailed(node.id)}>{staticUiText("仅重试失败或未完成项")}</Button> : null}
             </div>
             <Button
                 type="primary"
@@ -280,6 +282,7 @@ export function configReferencePresentation(references: ImageReferenceItem[], in
         trayLabels, mentionLabels,
         inputs: [
             ...inputs.filter(input => input.type !== "image" && (mode === "video" || input.type === "text")),
+            ...inputs.filter(input => input.pendingUpload),
             ...(mode === "audio" ? [] : common.map(image => ({ nodeId: image.id, type: "image" as const, title: image.name, image }))),
         ],
     };

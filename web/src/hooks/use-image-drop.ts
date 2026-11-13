@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { App } from "antd";
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { isExternalImageDrag, snapshotImageDrop } from "@/lib/dropped-images";
@@ -40,7 +41,7 @@ export function useImageDrop(options: Options) {
         async onDrop(event: DragEvent<HTMLElement>) {
             if (!isExternalImageDrag(event.dataTransfer)) return;
             event.preventDefault(); event.stopPropagation(); depth.current = 0; setDragging(false);
-            if (options.disabled) { message.warning(uiText(options.disabledMessage || "当前暂不能添加图片，请完成正在进行的操作后再拖入。")); return; }
+            if (options.disabled) { message.warning(displayNotice(uiText(options.disabledMessage || "当前暂不能添加图片，请完成正在进行的操作后再拖入。"))); return; }
             if (request.current) { message.info(uiText("正在读取拖入图片，请稍候。")); return; }
             const scope = options.scopeKey, capturedOwner = owner, onFiles = options.onFiles;
             const controller = new AbortController(); request.current = controller; setReading(true);
@@ -54,7 +55,7 @@ export function useImageDrop(options: Options) {
                 if (result.skipped) message.warning(uiText("非图片文件已跳过，请拖入图片原件。"));
                 await onFiles(result.files);
             } catch (error) {
-                if (current()) message.error(error instanceof Error && error.name !== "TypeError" && error.name !== "TimeoutError" ? uiText(error.message) : uiText("无法读取拖入图片，请打开企业微信原图后重试，或保存到桌面再拖入。"));
+                if (current()) message.error(displayNotice(error instanceof Error && error.name !== "TypeError" && error.name !== "TimeoutError" ? uiText(error.message) : uiText("无法读取拖入图片，请打开企业微信原图后重试，或保存到桌面再拖入。")));
             } finally {
                 if (request.current === controller) { request.current = null; setReading(false); }
             }

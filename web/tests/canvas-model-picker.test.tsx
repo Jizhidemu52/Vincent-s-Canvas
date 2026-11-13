@@ -1,4 +1,5 @@
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -23,7 +24,11 @@ function loadComponent(path: string, dependencies: Record<string, unknown>) {
     const localRequire = createRequire(url);
     const code = ts.transpileModule(readFileSync(url, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
     const module = { exports: {} as Record<string, (props: any) => ReactElement<any>> };
-    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => name.endsWith(".css") ? {} : dependencies[name] || localRequire(name))(id), module, module.exports);
+    new Function("require", "module", "exports", code)((id: string) => {
+        if (id === "@/lib/i18n") return i18nHarness;
+        if (id === "@/hooks/use-display-text") return { ...displayHooksHarness, DisplayText: ({ text }: { text: string }) => text };
+        return id.endsWith(".css") ? {} : dependencies[id] || localRequire(id);
+    }, module, module.exports);
     return module.exports;
 }
 

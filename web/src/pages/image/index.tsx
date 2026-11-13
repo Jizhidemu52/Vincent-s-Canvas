@@ -1,4 +1,5 @@
 import { uiText, useUiText, getUiLocale } from "@/lib/i18n";
+import { displayNotice, DisplayText, DisplayTranslationPreview, useDisplayText  } from "@/hooks/use-display-text";
 import { GenerationAccountHistory } from "@/components/generation-account-history";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
@@ -232,6 +233,7 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
 
 function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePreset?: CreativePreset; historyTool: string }) {
     useUiText();
+    const display = useDisplayText();
     const workbenchTask = useWorkbenchTask();
     const acceptsUrlInput = workbenchTask.id === DEFAULT_WORKBENCH_TASK;
     const quickTool = isQuickImageTool(historyTool);
@@ -294,6 +296,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const addAsset = useAssetStore((state) => state.addAsset);
     const [optimizingPrompt, setOptimizingPrompt] = useState(false);
+    const [actualPreviewOpen, setActualPreviewOpen] = useState(false);
     const [optimizedDraft, setOptimizedDraft] = useState<{ prompt: string; input: PromptInputData; references: ReferenceImage[]; context?: string }>();
     const [prompt, setPrompt, promptReady] = useGenerationDraft(`${inputDraftScope}:prompt`, creativePreset?.prompt || "", designRequested ? async value => {
         if (typeof value !== "string") throw new Error("设计草稿提示词无法读取");
@@ -614,7 +617,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             .catch((error) => {
                 loadedRecreateAssetsRef.current.delete(sourceAssetId);
                 if (revision !== inputRevision.current) return;
-                message.error(error instanceof Error ? uiText(error.message) : uiText("复刻来源加载失败"));
+                message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("复刻来源加载失败")));
             });
         return () => { if (!restored) loadedRecreateAssetsRef.current.delete(sourceAssetId); };
     }, [message, searchParams, toolMode, user?.id]);
@@ -644,12 +647,12 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             if (selectedModel) updateConfig("imageModel", selectedModel);
             const settings = promptImageSettings(parameters, selectedModel || effectiveConfig.model);
             for (const key of ["size", "quality", "count", "imageOptions"] as const) updateConfig(key, settings[key]);
-            payload.warnings.forEach((warning) => message.warning(uiText(warning)));
-            if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? uiText("模型已变更，当前使用 {name}", { name: payload.pricing.selectedModel.name }) : uiText("模型已变更，请先选择管理员当前启用的模型"));
+            payload.warnings.forEach((warning) => message.warning(displayNotice(uiText(warning))));
+            if (payload.pricing.modelChanged) message.warning(displayNotice(payload.pricing.selectedModel ? uiText("模型已变更，当前使用 {name}", { name: payload.pricing.selectedModel.name }) : uiText("模型已变更，请先选择管理员当前启用的模型")));
             if (payload.mode === "fill_and_generate") {
                 modal.confirm({ title: uiText("确认使用当前配置生成？"), content: uiText("确认后将直接提交生成任务。"), okText: uiText("确认生成"), cancelText: uiText("仅保留填入"), onOk: () => generateRef.current() });
             } else message.success(uiText("模板已填入，请核对后生成。"));
-        }).catch((error) => { loadedReuseTokenRef.current.delete(token); if (revision === inputRevision.current) message.error(error instanceof Error ? uiText(error.message) : uiText("模板复用失败")); });
+        }).catch((error) => { loadedReuseTokenRef.current.delete(token); if (revision === inputRevision.current) message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("模板复用失败"))); });
         return () => { if (!restored) loadedReuseTokenRef.current.delete(token); };
     }, [message, modal, searchParams, updateConfig, user?.id]);
 
@@ -675,7 +678,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         if (!stillCurrent()) return;
         appendReferences(nextReferences, "upload");
         message.success(uiText("参考图已添加"));
-        } catch (error) { if (stillCurrent()) message.error(uiText(generationErrorMessage(error))); }
+        } catch (error) { if (stillCurrent()) message.error(displayNotice(uiText(generationErrorMessage(error)))); }
         finally { if (stillCurrent()) setReadingReferences(false); }
     };
 
@@ -698,9 +701,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             );
             if (!isCurrentReferenceScope(scope)) return;
             appendReferences(nextReferences, "clipboard");
-            message.success(uiText("已读取 {length} 张参考图", { length: nextReferences.length }));
+            message.success(displayNotice(uiText("已读取 {length} 张参考图", { length: nextReferences.length })));
         } catch (error) {
-            if (isCurrentReferenceScope(scope)) message.error(error instanceof Error ? uiText(error.message) : uiText("剪贴板图片读取失败"));
+            if (isCurrentReferenceScope(scope)) message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("剪贴板图片读取失败")));
         } finally { if (isCurrentReferenceScope(scope)) setReadingReferences(false); }
     };
 
@@ -713,7 +716,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             return;
         }
         if ((placementToken || designRequested) && isBlend) {
-            message.warning(uiText(designRequested ? "沿用设计要求需要文字提示词，请选择支持文字要求的图片编辑模型。" : "定位效果需要位置保持提示词，请选择支持文字要求的图片编辑模型。"));
+            message.warning(displayNotice(uiText(designRequested ? "沿用设计要求需要文字提示词，请选择支持文字要求的图片编辑模型。" : "定位效果需要位置保持提示词，请选择支持文字要求的图片编辑模型。")));
             return;
         }
         const text = prompt;
@@ -722,7 +725,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             return;
         }
         if (missingReference) {
-            message.error(uiText("{title}需要先添加参考图", { title: uiText(toolModeConfig.title) }));
+            message.error(displayNotice(uiText("{title}需要先添加参考图", { title: uiText(toolModeConfig.title) })));
             return;
         }
         if (!user || user.status !== "active") {
@@ -759,7 +762,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         try {
             const result = await Promise.allSettled(tasks);
             const succeeded = result.filter(item => item.status === "fulfilled").length;
-            if (mountedRef.current && succeeded) message.success(uiText("已生成并保存 {succeeded} 张图片", { succeeded: succeeded }));
+            if (mountedRef.current && succeeded) message.success(displayNotice(uiText("已生成并保存 {succeeded} 张图片", { succeeded: succeeded })));
         } finally {
             release();
             activeSubmissionRef.current = false;
@@ -787,7 +790,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 await downloadCanvasImage(resultEditorNode(image, index), format);
             } else saveAs(await resolveImageUrl(image.storageKey, image.dataUrl), canvasImageDownloadFileName(resultEditorNode(image, index)));
         }
-        catch (error) { message.error(error instanceof Error ? uiText(error.message) : uiText("原图读取失败")); }
+        catch (error) { message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("原图读取失败"))); }
     };
 
     const shareResultDesign = (image: GeneratedImage, index: number) => {
@@ -806,7 +809,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         if (!isCurrentReferenceScope(scope)) return;
         appendReferences([{ id: nanoid(), name: image.imageName || `result-${index + 1}.png`, imageName: image.imageName, imageVersion: image.imageVersion, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }], "generated");
         message.success(uiText("已加入参考图"));
-        } catch (error) { if (isCurrentReferenceScope(scope)) message.error(uiText(generationErrorMessage(error))); }
+        } catch (error) { if (isCurrentReferenceScope(scope)) message.error(displayNotice(uiText(generationErrorMessage(error)))); }
         finally { if (isCurrentReferenceScope(scope)) setReadingReferences(false); }
     };
 
@@ -835,7 +838,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             },
         });
         message.success(uiText("已加入我的素材"));
-        } catch (error) { message.error(uiText(generationErrorMessage(error))); }
+        } catch (error) { message.error(displayNotice(uiText(generationErrorMessage(error)))); }
     };
 
     const saveResultPrompt = async (image: GeneratedImage) => {
@@ -847,7 +850,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             await savePromptFromTask(image.sourceTaskId);
             message.success(uiText("已保存到我的提示词"));
         } catch (error) {
-            message.error(error instanceof Error ? uiText(error.message) : uiText("保存提示词失败"));
+            message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("保存提示词失败")));
         }
     };
 
@@ -900,11 +903,11 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 const deletedImages = new Set(logs.filter(log => deleted.deletedIds.includes(log.id)).flatMap(log => log.images.map(image => image.id)));
                 setResults(current => current.filter(result => !result.image || !deletedImages.has(result.image.id)));
                 setDeleteLogIds(deleted.failedIds);
-                if (deleted.failedIds.length) message.error(uiText("已删除 {deleted} 条，{failed} 条删除失败；失败记录仍保留并已选中，可重试。", { deleted: deleted.deletedIds.length, failed: deleted.failedIds.length }));
-                else message.success(uiText("已删除 {count} 条生成记录", { count: deleted.deletedIds.length }));
+                if (deleted.failedIds.length) message.error(displayNotice(uiText("已删除 {deleted} 条，{failed} 条删除失败；失败记录仍保留并已选中，可重试。", { deleted: deleted.deletedIds.length, failed: deleted.failedIds.length })));
+                else message.success(displayNotice(uiText("已删除 {count} 条生成记录", { count: deleted.deletedIds.length })));
             }
         } catch (error) {
-            message.error(error instanceof Error ? uiText(error.message) : uiText("记录删除失败"));
+            message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("记录删除失败")));
         }
     };
 
@@ -924,7 +927,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             const next = await readStoredLogs(historyStore, { ownerId: user?.id || "", tool: historyTool });
             if (revision === logRefreshRevision.current) { setLogs(next.logs); setUnclassifiedLogs(next.unclassified); }
         } catch (error) {
-            if (revision === logRefreshRevision.current) message.error(error instanceof Error ? uiText(error.message) : uiText("历史记录读取失败，请检查浏览器存储"));
+            if (revision === logRefreshRevision.current) message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("历史记录读取失败，请检查浏览器存储")));
         }
     };
 
@@ -952,7 +955,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             setPreviewLog(corrected);
             setLogsOpen(true);
         } catch (error) {
-            if (isCurrent()) message.error(error instanceof Error ? uiText(error.message) : uiText("生成记录读取失败，请重试"));
+            if (isCurrent()) message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("生成记录读取失败，请重试")));
         } finally { if (isCurrent()) setPreviewLoading(false); }
     };
 
@@ -988,12 +991,12 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             updateConfig("imageOptions", draft.config.imageOptions || "");
             updateConfig("count", previewLog.config.count); updateConfig("systemPrompt", draft.config.systemPrompt);
             message.success(uiText("已完整恢复为草稿，可继续修改；尚未生成，AI 再次生成不保证结果相同"));
-        } catch (error) { message.error(error instanceof Error ? uiText(error.message) : uiText("历史恢复失败，当前草稿未改变")); }
+        } catch (error) { message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("历史恢复失败，当前草稿未改变"))); }
         finally { restoreBusy.current = false; setRestoringHistory(false); }
     };
 
     const buildRequestSnapshot = (): ImageRequestSnapshot | null => {
-        if (carryoverError) { message.warning(carryoverError); return null; }
+        if (carryoverError) { message.warning(displayNotice(carryoverError)); return null; }
         previewRevision.current += 1;
         setPreviewLoading(false);
         if (!quickTool && !model) {
@@ -1001,7 +1004,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             return null;
         }
         if (garmentNeedsApply || incompleteCreativePrompt) {
-            message.warning(garmentNeedsApply ? uiText("服装要求或参考图已改变，请重新套用到提示词") : uiText("请先把提示词中的填写位置替换成你的设计要求"));
+            message.warning(displayNotice(garmentNeedsApply ? uiText("服装要求或参考图已改变，请重新套用到提示词") : uiText("请先把提示词中的填写位置替换成你的设计要求")));
             return null;
         }
         const text = prompt.trim();
@@ -1014,7 +1017,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             return null;
         }
         if (!referenceValidation.valid) {
-            message.error(uiText(referenceValidation.message || ""));
+            message.error(displayNotice(uiText(referenceValidation.message || "")));
             return null;
         }
         let promptInput = optimizedDraft?.prompt === text && imageReferencesMatch(optimizedDraft.references, references) ? optimizedDraft.input
@@ -1183,7 +1186,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         try {
             await runGenerationSlot(index, snapshot);
         } catch (error) {
-            message.error(error instanceof Error ? uiText(error.message) : uiText("重试未完成"));
+            message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("重试未完成")));
         } finally { release(); activeSubmissionRef.current = false; setRunning(false); }
     };
 
@@ -1254,7 +1257,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         for (const controller of observationControllers.current) controller.abort();
         setPendingImages(records);
         setResults(value => value.map(result => result.recovery ? { ...result, recovery: { ...result.recovery, stopped: true }, error: result.recovery.recovery === "investigate" ? submissionInvestigationMessage : "已停止本页查询；可手动刷新原任务状态。" } : result));
-        void Promise.all(records.map(persistPending)).catch(error => message.warning(error instanceof Error ? error.message : "停止状态保存失败"));
+        void Promise.all(records.map(persistPending)).catch(error => message.warning(displayNotice(error instanceof Error ? error.message : "停止状态保存失败")));
     };
 
     useEffect(() => {
@@ -1290,7 +1293,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
 
                         {placementToken ? <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm leading-6" role={placementStatus === "error" ? "alert" : "status"}>
                             <strong>{uiText("服装定位 · AI 效果图")}</strong>
-                            <p className="!mb-1">{placementStatus === "loading" ? uiText("正在带入定位合成图、服装原图和图案原稿…") : placementStatus === "error" ? uiText(placementError) : uiText("参考图与位置保持要求已带入独立草稿。检查模型与输出比例后点“开始编辑”提交；原图片编辑草稿未改动。AI 结果仍需核对定位。")}</p>
+                            <p className="!mb-1">{placementStatus === "loading" ? uiText("正在带入定位合成图、服装原图和图案原稿…") : placementStatus === "error" ? display(uiText(placementError)) : uiText("参考图与位置保持要求已带入独立草稿。检查模型与输出比例后点“开始编辑”提交；原图片编辑草稿未改动。AI 结果仍需核对定位。")}</p>
                             <div className="flex flex-wrap gap-3">
                                 <Link to="/creative/pattern-placement">{uiText("返回调整定位")}</Link>
                                 <Link to="/image?tool=image-edit">{uiText("打开原图片编辑草稿")}</Link>
@@ -1299,7 +1302,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         </div> : null}
                         {designRequested ? <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm leading-6" role={designStatus === "error" ? "alert" : "status"}>
                             <strong>{uiText("设计结果 · 继续编辑")}</strong>
-                            <p className="!mb-1">{designStatus === "loading" ? uiText("正在读取设计原图与独立草稿…") : designStatus === "error" ? uiText(designError) : uiText("原图与设计要求已带入独立草稿。填写本次修改后再提交；原图及原图片编辑草稿不会改动。")}</p>
+                            <p className="!mb-1">{designStatus === "loading" ? uiText("正在读取设计原图与独立草稿…") : designStatus === "error" ? display(uiText(designError)) : uiText("原图与设计要求已带入独立草稿。填写本次修改后再提交；原图及原图片编辑草稿不会改动。")}</p>
                             <div className="flex flex-wrap gap-3">
                                 <Link to="/image?tool=image-edit">{uiText("打开原图片编辑草稿")}</Link>
                                 {designStatus === "error" ? <Button size="small" onClick={() => setDesignAttempt(value => value + 1)}>{uiText("重新读取设计交接")}</Button> : null}
@@ -1318,13 +1321,15 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                     </div>
                                 </div>
                                 <Input.TextArea aria-label={uiText("图像提示词")} showCount value={prompt} onPaste={event => { const files = pastedImageFiles(event.clipboardData); if (files.length) { event.preventDefault(); void addReferences(files); } }} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} onKeyDown={(event) => handleSubmitShortcut(event, canGenerate && !running, () => void generate())} rows={5} disabled={!requiresPrompt} placeholder={requiresPrompt ? uiText("{placeholder}（Ctrl/⌘ + Enter 提交）", { placeholder: uiText(toolModeConfig.placeholder) }) : uiText("这个模型直接合成参考图，不需要填写文字")} />
+                                <DisplayTranslationPreview text={prompt} />
                             </div> : !quickTool ? <p className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">{uiText("请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。")}</p> : null}
 
                             {designRequested ? <div>
                                 <label htmlFor="image-carryover-requirements" className="mb-2 block text-base font-semibold">{uiText("沿用设计要求")}</label>
                                 <Input.TextArea id="image-carryover-requirements" aria-label={uiText("沿用设计要求")} value={carryoverRequirements.join("\n")} rows={3} onChange={event => { inputRevision.current += 1; setCarryoverRequirements(event.target.value.split("\n")); setOptimizedDraft(undefined); }} />
+                                <DisplayTranslationPreview text={carryoverRequirements.join("\n")} />
                                 <p className="mt-1 text-xs text-muted-foreground">{uiText("每行一条，可修改或清空；与本次提示词一起提交，不会自动生成。")}</p>
-                                {carryoverError ? <p role="alert" className="mt-1 text-xs text-destructive">{carryoverError}</p> : null}
+                                {carryoverError ? <p role="alert" className="mt-1 text-xs text-destructive">{display(carryoverError)}</p> : null}
                             </div> : null}
                             {requiresPrompt && prompt.trim() ? <PromptOptimizeButton config={effectiveConfig} prompt={prompt} references={references} operationType={operationType} scene={creativePreset?.id as PromptScene | undefined} fields={designRequested ? { carryoverRequirements: normalizedCarryover } : undefined} scopeKey={inputDraftScope} toolKey={toolKey} disabled={running || !draftReady || !handoffReady || Boolean(carryoverError)} onBusyChange={setOptimizingPrompt} onApply={(value, _compilation, input) => { replacePrompt(value); setOptimizedDraft({ prompt: value, input, references: [...references], context: optimizationContext }); }} /> : null}
                             <ReferenceImageTray
@@ -1343,12 +1348,12 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                         updateInputConfig("imageModel", value);
                                         for (const key of ["size", "quality", "count", "imageOptions"] as const) updateInputConfig(key, next[key]);
                                     }} onMissingConfig={() => openConfigDialog(false)} />} /> : null}
-                            {!quickTool && requiresPrompt ? <details className="rounded-md border border-border p-3 text-sm">
+                            {!quickTool && requiresPrompt ? <details className="rounded-md border border-border p-3 text-sm" onToggle={event => setActualPreviewOpen(event.currentTarget.open)}>
                                 <summary className="cursor-pointer font-medium">{uiText("查看实际发送内容")}</summary>
                                 <p className="my-2 text-xs text-muted-foreground">{uiText("自由输入不会自动改写。参考图按以下顺序发送；蒙版和标注层不占参考图编号。")}</p>
-                                {actualPromptPreview === undefined ? <p role="status">{uiText("此工具需要先编译提示词；请先优化并核对预览，当前原文还不是最终发送文本。")}</p> : <><strong>{uiText(previewNegativePrompt.trim() ? "主提示词" : "实际发送文本")}</strong><pre aria-label={uiText(previewNegativePrompt.trim() ? "主提示词" : "实际发送文本")} className="max-h-80 overflow-auto whitespace-pre-wrap break-words bg-muted/30 p-3 font-sans text-sm">{actualPromptPreview}</pre></>}
-                                {previewNegativePrompt.trim() ? <section className="mt-2"><strong>{uiText("排除要求")}</strong><p className="my-1 text-xs text-muted-foreground">{uiText("由服务端按模型规则加入正文或原生排除参数；上方仅为主提示词。")}</p><pre className="whitespace-pre-wrap break-words font-sans text-sm">{previewNegativePrompt}</pre></section> : null}
-                                {references.length ? <ol className="mt-2 space-y-1">{references.map((image, index) => <li key={image.referenceKey}>{uiText("图片{count}", { count: index + 1 })} · {image.name} · {image.role || uiText("用途未指定")}</li>)}</ol> : null}
+                                {actualPromptPreview === undefined ? <p role="status">{uiText("此工具需要先编译提示词；请先优化并核对预览，当前原文还不是最终发送文本。")}</p> : <><strong>{uiText(previewNegativePrompt.trim() ? "主提示词" : "实际发送文本")}</strong><pre aria-label={uiText(previewNegativePrompt.trim() ? "主提示词" : "实际发送文本")} className="max-h-80 overflow-auto whitespace-pre-wrap break-words bg-muted/30 p-3 font-sans text-sm">{actualPromptPreview}</pre>{actualPreviewOpen ? <DisplayTranslationPreview text={actualPromptPreview} /> : null}</>}
+                                {previewNegativePrompt.trim() ? <section className="mt-2"><strong>{uiText("排除要求")}</strong><p className="my-1 text-xs text-muted-foreground">{uiText("由服务端按模型规则加入正文或原生排除参数；上方仅为主提示词。")}</p><pre className="whitespace-pre-wrap break-words font-sans text-sm">{previewNegativePrompt}</pre>{actualPreviewOpen ? <DisplayTranslationPreview text={previewNegativePrompt} /> : null}</section> : null}
+                                {references.length ? <ol className="mt-2 space-y-1">{references.map((image, index) => <li key={image.referenceKey}>{uiText("图片{count}", { count: index + 1 })} · {actualPreviewOpen ? display(image.name) : image.name} · {image.role ? actualPreviewOpen ? display(image.role) : image.role : uiText("用途未指定")}</li>)}</ol> : null}
                             </details> : null}
 
                         </fieldset>
@@ -1356,7 +1361,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         <div ref={submitToolbarRef} className="generation-submit shrink-0 pt-4">
                             {!quickTool && <div className="mb-2 flex items-center justify-between rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm">
                                 <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                                    {canvasModelPresentation(imageModelDisplayName(modelOptionLabel(effectiveConfig, model), businessModels, user?.role)).name} · {imageReferenceSizeIsAutomatic(selectedModelProfile, references.length) ? uiText("模型决定尺寸 · 约 100 万像素") : <>{imageSizeLabel(effectiveConfig.size)} · {imageQualityLabel(effectiveConfig.quality)}</>}
+                                    {display(canvasModelPresentation(imageModelDisplayName(modelOptionLabel(effectiveConfig, model), businessModels, user?.role)).name)} · {imageReferenceSizeIsAutomatic(selectedModelProfile, references.length) ? uiText("模型决定尺寸 · 约 100 万像素") : <>{imageSizeLabel(effectiveConfig.size)} · {imageQualityLabel(effectiveConfig.quality)}</>}
                                 </span>
                                 <Button className="shrink-0" size="small" type="text" disabled={!handoffReady} icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {uiText("切换生成图片模型")}</Button>
@@ -1367,18 +1372,18 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                     <span>{deploymentFeatures.authenticationEnabled ? uiText("个人工作区") : uiText("本机试用")}</span>
                                 </div>
                                 {missingReference ? <div className="mt-1 text-amber-600 dark:text-amber-300">{uiText(toolModeConfig.title || "")}{uiText("需要先添加至少一张参考图。")}</div> : null}
-                                {!referenceValidation.valid ? <div className="mt-1 text-red-500">{referenceValidation.message}</div> : null}
+                                {!referenceValidation.valid ? <div className="mt-1 text-red-500">{display(referenceValidation.message || "")}</div> : null}
                                 {quotaBlocked ? <div className="mt-1 text-red-500">{uiText("当前账号暂时无法提交，请联系管理员。")}</div> : null}
                                 {placementToken && isBlend ? <div className="mt-1 text-red-500">{uiText("定位效果需要位置保持提示词，请选择支持文字要求的图片编辑模型。")}</div> : null}
                                 {designRequested && isBlend ? <div className="mt-1 text-red-500">{uiText("沿用设计要求需要文字提示词，请选择支持文字要求的图片编辑模型。")}</div> : null}
                                 {garmentNeedsApply ? <div className="mt-1" role="status">{uiText("服装要求或参考图已改变，请重新套用。")}<Button size="small" type="link" className="!h-auto !p-0" onClick={resetGarment}>{uiText("改用当前提示词")}</Button></div> : null}
-                                {incompleteCreativePrompt ? <div className="mt-1" role="status">{uiText("请把「")}{CREATIVE_REQUIREMENT_PLACEHOLDER}{uiText("」替换成你的设计要求。")}</div> : null}
+                                {incompleteCreativePrompt ? <div className="mt-1" role="status">{uiText("请把「")}{display(CREATIVE_REQUIREMENT_PLACEHOLDER)}{uiText("」替换成你的设计要求。")}</div> : null}
                                 {!draftReady || readingReferences || optimizingPrompt || (!quickTool && !model) || (requiresPrompt && !prompt.trim()) || invalidBlendReferences || !user || user.status !== "active" ? <div role="status">{!draftReady ? uiText("正在恢复草稿…") : readingReferences ? uiText("正在读取参考图，请稍候") : optimizingPrompt ? uiText("正在优化提示词，请稍候") : !quickTool && !model ? uiText("还差：选择模型") : requiresPrompt && !prompt.trim() ? uiText("还差：填写提示词") : invalidBlendReferences ? uiText("还差：添加 2–4 张参考图") : uiText("当前设计师账号不可用")}</div> : null}
                                 {running ? <div role="status">{uiText(quickTool ? "当前图片正在处理，原图不会覆盖；可新建独立任务继续创作。" : "当前任务继续处理；可新建独立任务，无需等待。")}</div> : null}
                                 {quickTool && !running && pendingImages.length > 0 ? <div role="status">{uiText("暂时无法获取进度，请先刷新原任务进度")}</div> : null}
                                 {!pendingReady && !pendingReadError ? <div role="status">{uiText("正在核对原任务记录…")}</div> : null}
                                 {pendingReadError ? <div role="alert" className="mt-1 text-destructive">
-                                    <p>{pendingReadError}</p><p>{uiText("原记录已保留；读取成功前不能提交或关闭此任务。")}</p>
+                                    <p>{display(pendingReadError)}</p><p>{uiText("原记录已保留；读取成功前不能提交或关闭此任务。")}</p>
                                     <Button size="small" onClick={() => setPendingReadAttempt(value => value + 1)}>{uiText("重试读取原任务")}</Button>
                                 </div> : null}
                             </div>
@@ -1494,9 +1499,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             </Modal>
             {imageEditor.node ? <Suspense fallback={<Modal title={uiText("编辑原图")} open footer={null} onCancel={imageEditor.close}><p role="status">{uiText("正在读取图片编辑器…")}</p></Modal>}>
                 <CanvasImageEditorDialog node={imageEditor.node} onClose={imageEditor.close} onConfirm={imageEditor.confirm}
-                    saveHint="另存到我的素材 · 原图和生成历史保持不变 · 不调用 AI"
-                    successMessage="新版本已保存到我的素材，原图和生成历史保持不变"
-                    cancelDescription="原图和生成历史不会改变，未保存的修改将丢弃。" />
+                    saveHint={uiText("另存到我的素材 · 原图和生成历史保持不变 · 不调用 AI")}
+                    successMessage={uiText("新版本已保存到我的素材，原图和生成历史保持不变")}
+                    cancelDescription={uiText("原图和生成历史不会改变，未保存的修改将丢弃。")} />
             </Suspense> : null}
         </div>
     );
@@ -1548,7 +1553,7 @@ function ResultImageCard({
         <div className="image-result-card overflow-hidden rounded-lg border border-border bg-background">
             <Image src={previewUrl || undefined} preview={{ src: image.dataUrl }} alt={uiText("生成结果 {value1}", { value1: index + 1 })} loading="lazy" decoding="async" className="object-contain" />
             <div className="space-y-2 border-t border-border px-3 py-3">
-                {image.imageName ? <Tooltip title={`${image.imageName}_v${image.imageVersion || 1}`}><div className="truncate text-xs font-medium">{image.imageName}_v{image.imageVersion || 1}</div></Tooltip> : null}
+                {image.imageName ? <Tooltip title={<DisplayText text={`${image.imageName}_v${image.imageVersion || 1}`} />}><div className="truncate text-xs font-medium"><DisplayText text={image.imageName} />_v{image.imageVersion || 1}</div></Tooltip> : null}
                 <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-muted-foreground">
                     <span>
                         {image.width}x{image.height}
@@ -1713,8 +1718,9 @@ function LogPanel({
 
 function LogCard({ log, displayTitle, selected, active, disabled, onSelectedChange, onClick }: { log: GenerationLog; displayTitle?: string; selected?: boolean; active: boolean; disabled?: boolean; onSelectedChange?: (checked: boolean) => void; onClick: () => void }) {
     useUiText();
+    const display = useDisplayText();
     const thumbnails = log.images.slice(0, 4);
-    const title = displayTitle ? uiText(displayTitle) : log.title;
+    const title = displayTitle ? uiText(displayTitle) : display(log.title);
 
     return (
         <button

@@ -1,5 +1,6 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText } from "@/lib/i18n";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { nanoid } from "nanoid";
 import { requestBatchEdit } from "@/services/api/image";
 import { flushSync } from "react-dom";
@@ -55,7 +56,7 @@ type Runtime = {
     signal?: AbortSignal;
     isCurrent?: () => boolean;
     waitForWriteAccess?: () => Promise<boolean>;
-    message: { error: (text: string) => unknown; warning: (text: string) => unknown; success: (text: string) => unknown };
+    message: { error: (text: ReactNode) => unknown; warning: (text: ReactNode) => unknown; success: (text: ReactNode) => unknown };
 };
 
 /** The batch form stays mounted; upload/queue/result handling loads only on execution. */
@@ -89,7 +90,7 @@ export async function runCanvasBatchImageEdit({
         try {
             items.forEach(item => assertCanvasImageUploadSize(item.file));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : uiText("图片过大，未提交批量改图"));
+            message.error(displayNotice(error instanceof Error ? error.message : uiText("图片过大，未提交批量改图")));
             return;
         }
         if (!prompt) {
@@ -418,11 +419,11 @@ export async function runCanvasBatchImageEdit({
         }
 
         if (unresolvedCount) {
-            message.warning(uiText("批次状态待核查：{value1} 张待查询原任务，不会重复提交。", { value1: unresolvedCount }));
+            message.warning(displayNotice(uiText("批次状态待核查：{value1} 张待查询原任务，不会重复提交。", { value1: unresolvedCount })));
         } else if (failedCount || cancelledCount) {
-            message.warning(uiText("批量改图完成，成功 {value1} 张，失败 {value2} 张，取消 {value3} 张", { value1: selectedResults.length, value2: failedCount, value3: cancelledCount }));
+            message.warning(displayNotice(uiText("批量改图完成，成功 {value1} 张，失败 {value2} 张，取消 {value3} 张", { value1: selectedResults.length, value2: failedCount, value3: cancelledCount })));
         } else {
-            message.success(uiText("批量改图完成：{value1} 张", { value1: selectedResults.length }));
+            message.success(displayNotice(uiText("批量改图完成：{value1} 张", { value1: selectedResults.length })));
         }
 
 }
@@ -437,9 +438,9 @@ export function prepareCanvasBatchFiles(files: File[]) {
 export async function controlCanvasBatch(id: string, action: QueuedBatchAction, message: Runtime["message"]) {
     try {
         const result = await controlQueuedBatch(id, action);
-        message.success(uiText("{value1}成功，影响 {value2} 张图片", { value1: action === "pause" ? uiText("暂停") : action === "resume" ? uiText("恢复") : uiText("取消"), value2: result.changed }));
+        message.success(displayNotice(uiText("{value1}成功，影响 {value2} 张图片", { value1: action === "pause" ? uiText("暂停") : action === "resume" ? uiText("恢复") : uiText("取消"), value2: result.changed })));
     } catch (error) {
-        message.error(error instanceof Error ? error.message : uiText("批量任务操作失败"));
+        message.error(displayNotice(error instanceof Error ? error.message : uiText("批量任务操作失败")));
     }
 }
 

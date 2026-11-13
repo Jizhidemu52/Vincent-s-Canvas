@@ -6,6 +6,7 @@ import { create } from "zustand";
 import ts from "typescript";
 import { UsageSession } from "../src/lib/usage-session";
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 
 function elements(node: unknown): ReactElement<any>[] {
     if (Array.isArray(node)) return node.flatMap(elements);
@@ -22,6 +23,7 @@ function pageHarness(path: string, dependencies: Record<string, unknown>) {
     let cursor = 0;
     const mocks: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
+        "@/hooks/use-display-text": displayHooksHarness,
         "@/lib/login-return": { currentLoginReturn: (fallback = "/") => fallback, safeLoginReturn: (_value: unknown, fallback = "/") => fallback },
         "@/components/layout/inchoice-brand": { InchoiceBrand: () => null },
         "@/components/layout/language-switch": { LanguageSwitch: () => null },

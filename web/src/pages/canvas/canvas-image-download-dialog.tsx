@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Modal, Progress, Radio } from "antd";
@@ -44,7 +45,7 @@ export function CanvasImageDownloadDialog({ node, variants, onClose }: {
             const { downloadCanvasImageVariant } = await loadCanvasExport();
             await downloadCanvasImageVariant(node, option.variant, option.key, {}, { signal: controller.signal, onProgress: update => { if (!controller.signal.aborted) setProgress(update); } });
         } catch (error) {
-            if (!controller.signal.aborted) message.error(error instanceof Error ? error.message : t("图片下载失败"));
+            if (!controller.signal.aborted) message.error(displayNotice(error instanceof Error ? error.message : t("图片下载失败")));
         } finally { if (job.current === controller) { job.current = null; busy.current = false; setDownloading(null); setProgress(null); } }
     };
 
@@ -58,7 +59,7 @@ export function CanvasImageDownloadDialog({ node, variants, onClose }: {
             const { downloadCanvasImage } = await loadCanvasExport();
             await downloadCanvasImage(node, selectedFormat, { signal: controller.signal, onProgress: update => { if (!controller.signal.aborted) setProgress(update); } });
         } catch (error) {
-            if (!controller.signal.aborted) message.error(error instanceof Error ? error.message : t("图片下载失败"));
+            if (!controller.signal.aborted) message.error(displayNotice(error instanceof Error ? error.message : t("图片下载失败")));
         } finally { if (job.current === controller) { job.current = null; busy.current = false; setDownloading(null); setProgress(null); } }
     };
 

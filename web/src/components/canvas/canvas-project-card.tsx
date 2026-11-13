@@ -14,9 +14,11 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasProjectCoverDialog } from "./canvas-project-cover-dialog";
 import { CanvasConflictCompareDialog } from "./canvas-conflict-compare-dialog";
+import { DisplayText, useDisplayText } from "@/hooks/use-display-text";
 
 export const CanvasProjectCard = memo(function CanvasProjectCard({ project }: { project: CanvasProjectSummary }) {
     const t = useUiText();
+    const display = useDisplayText();
     const locale = useUiLocale();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const { message } = App.useApp();
@@ -80,7 +82,7 @@ export const CanvasProjectCard = memo(function CanvasProjectCard({ project }: { 
     return (
         <article data-canvas-project-id={project.id} data-selected={selected ? "true" : "false"} className="wb-surface wb-list-card group flex cursor-pointer flex-col overflow-hidden" style={selected ? { outline: `2px solid ${theme.canvas.selectionStroke}`, outlineOffset: 2 } : undefined} onClick={() => !editing && open()}>
             <div className="flex h-36 items-center justify-center overflow-hidden border-b" style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.muted }}>
-                {cover ? <CanvasPersistedMediaPreview kind="image" storageKey={cover.storageKey} url={cover.content} alt={project.title} className="h-full w-full object-cover" /> : <LayoutGrid size={28} />}
+                {cover ? <CanvasPersistedMediaPreview kind="image" storageKey={cover.storageKey} url={cover.content} alt={display(project.title)} className="h-full w-full object-cover" /> : <LayoutGrid size={28} />}
             </div>
             <div className="p-4">
             <div className="flex items-start gap-3">
@@ -91,7 +93,7 @@ export const CanvasProjectCard = memo(function CanvasProjectCard({ project }: { 
                     onChange={(event) => toggleSelected(project.id, event.target.checked)}
                     className="mt-1 size-4"
                     style={{ accentColor: theme.node.activeStroke }}
-                    aria-label={t("选择 {value1}", { value1: project.title })}
+                    aria-label={t("选择 {value1}", { value1: display(project.title) })}
                 />
                 {editing ? (
                     <Input className="min-w-0" aria-label={t("画布名称")} aria-invalid={Boolean(renameError)} aria-describedby={renameError ? renameErrorId : undefined} status={renameError ? "error" : undefined} disabled={renaming} value={editingTitle} onClick={(event) => event.stopPropagation()} onChange={(event) => { setRenameError(""); setEditingTitle(event.target.value); }} onBlur={() => void saveTitle()} onKeyDown={(event) => {
@@ -107,14 +109,14 @@ export const CanvasProjectCard = memo(function CanvasProjectCard({ project }: { 
                             open();
                         }}
                     >
-                        <h2 className="truncate text-base font-semibold">{project.title}</h2>
+                        <h2 className="truncate text-base font-semibold">{display(project.title)}</h2>
                         {project.persistenceConflict ? <Tag color="warning">{t("冲突副本 · 原版本已保留")}</Tag> : null}
                         <p className="mt-1 text-[13px] leading-6" style={{ color: theme.node.muted }}>
                             {t("{nodes} 个节点 · {connections} 条连线", { nodes: project.nodeCount, connections: project.connectionCount })}</p>
                     </button>
                 )}
             </div>
-            {renameError ? <p id={renameErrorId} role="alert" className="mt-2 text-[13px]" style={{ color: theme.node.danger }}>{renameError}</p> : null}
+            {renameError ? <p id={renameErrorId} role="alert" className="mt-2 text-[13px]" style={{ color: theme.node.danger }}>{display(renameError)}</p> : null}
             {project.persistenceConflict ? <div className="mt-3 flex gap-2" onClick={event => event.stopPropagation()}>
                 <Button size="small" loading={busy} onClick={() => void act(async () => { const copy = await loaded(); const original = copy.persistenceConflict ? await loadCanvasProject(copy.persistenceConflict.projectId) : null; setComparison({ original, copy }); })}>{t("对比版本")}</Button>
                 <Tooltip title={busy ? t("正在处理图片或项目，请稍候…") : undefined}><Button size="small" disabled={busy} onClick={() => void act(keepCopy)}>{t("保留此版本")}</Button></Tooltip>
@@ -138,12 +140,12 @@ export const CanvasProjectCard = memo(function CanvasProjectCard({ project }: { 
                     )}
                 </div>
             </div>
-            {actionError ? <p role="alert" className="mt-2 text-[13px]" style={{ color: theme.node.danger }}>{actionError}</p> : null}
-            {actionNotice ? <p role="status" className="mt-2 text-[13px]" style={{ color: theme.node.muted }}>{actionNotice}</p> : null}
+            {actionError ? <p role="alert" className="mt-2 text-[13px]" style={{ color: theme.node.danger }}>{display(actionError)}</p> : null}
+            {actionNotice ? <p role="status" className="mt-2 text-[13px]" style={{ color: theme.node.muted }}>{display(actionNotice)}</p> : null}
             </div>
             <div onClick={event => event.stopPropagation()}>
                 {coverProject ? <CanvasProjectCoverDialog project={coverProject} onClose={() => setCoverProject(null)} /> : null}
-                {comparison ? <CanvasConflictCompareDialog {...comparison} onClose={() => setComparison(null)} onKeep={async () => { try { await keepCopy(); } catch (error) { message.error(error instanceof Error ? error.message : t("保存失败，请重试")); throw error; } }} /> : null}
+                {comparison ? <CanvasConflictCompareDialog {...comparison} onClose={() => setComparison(null)} onKeep={async () => { try { await keepCopy(); } catch (error) { message.error(<DisplayText text={error instanceof Error ? error.message : t("保存失败，请重试")} />); throw error; } }} /> : null}
             </div>
         </article>
     );

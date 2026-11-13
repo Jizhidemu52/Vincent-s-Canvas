@@ -4,6 +4,9 @@ import React, { type ReactElement } from "react";
 import ts from "typescript";
 import type * as Panel from "../src/pages/admin/components/quick-image-configuration-panel";
 import { classifyTaskRecovery, submissionInvestigationMessage } from "../src/services/api/task-result-reconciliation";
+import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
+import * as staticUiCopy from "../src/lib/static-ui-copy";
 
 const source = readFileSync(new URL("../src/pages/admin/components/quick-image-configuration-panel.tsx", import.meta.url), "utf8");
 const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
@@ -15,6 +18,9 @@ function harness() {
     let cursor = 0, allowed = true;
     class RequestError extends Error { definitive = false; }
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
+        "@/hooks/use-display-text": displayHooksHarness,
+        "@/lib/static-ui-copy": staticUiCopy,
         "react/jsx-runtime": require("react/jsx-runtime"),
         react: { ...React, useState: (initial: unknown) => { const index = cursor++; if (!(index in state)) state[index] = typeof initial === "function" ? initial() : initial; return [state[index], (value: any) => { state[index] = typeof value === "function" ? value(state[index]) : value; }]; }, useRef: (initial: unknown) => { const index = cursor++; return state[index] ||= { current: initial }; }, useEffect: (callback: () => unknown) => { const index = cursor++; if (!(index in state)) { state[index] = true; effects.push(callback); } } },
         antd: Object.fromEntries(["Alert", "Button", "Form", "Image", "Input", "Select", "Tag"].map(name => [name, Object.assign(() => null, { Item: () => null, TextArea: () => null, PreviewGroup: () => null })])),

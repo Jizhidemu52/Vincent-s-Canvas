@@ -31,7 +31,7 @@ export function ImageGenerationSettingsDialog({ open, onClose, config, model, to
     const contentRef = useRef<HTMLDivElement>(null);
     const colors = canvasThemes[useThemeStore(state => state.theme)];
     const profile = useImageModelProfile(model);
-    const capabilities = canvasImageModelDetails(profile, referencePolicyForModel(model, profile));
+    const capabilities = canvasImageModelDetails(profile, referencePolicyForModel(model, profile), uiText);
     const selectModel = (value: string) => {
         const next = adaptImageModelSettings(config, imageModelProfile(value));
         updateConfig("imageModel", value);

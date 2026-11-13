@@ -1,4 +1,5 @@
 import { uiText, useUiText, getUiLocale } from "@/lib/i18n";
+import { DisplayText, useDisplayText } from "@/hooks/use-display-text";
 import { ArrowRight, BookOpen, ImagePlus, Info, LayoutGrid, MessageSquareText, Plus, Video } from "lucide-react";
 import { Popover, Tooltip } from "antd";
 import { WorkbenchImage } from "@/components/workbench-image";
@@ -26,6 +27,7 @@ const entries = [
 
 export default function IndexPage() {
     useUiText();
+    const display = useDisplayText();
     const navigate = useNavigate();
     const hydrated = useCanvasStore(state => state.hydrated);
     const projects = useCanvasStore(state => state.projects);
@@ -64,8 +66,8 @@ export default function IndexPage() {
                         {recent.map(project => {
                             const preview = project.cover;
                             return <Link to={"/canvas/" + project.id} className="wb-surface home-project" key={project.id}>
-                                <div className="home-project-preview">{preview ? <CanvasPersistedMediaPreview kind="image" url={preview.content} storageKey={preview.storageKey} alt={project.title} className="h-full w-full object-cover" /> : <LayoutGrid size={32} strokeWidth={1} />}</div>
-                                <div className="home-project-info"><h3>{project.title || uiText("未命名画布")}</h3><p>{project.nodeCount} {uiText(" 个内容 · ")}{new Date(project.updatedAt).toLocaleDateString(getUiLocale(), { month: "long", day: "numeric" })} {uiText(" 更新")}</p></div>
+                                <div className="home-project-preview">{preview ? <CanvasPersistedMediaPreview kind="image" url={preview.content} storageKey={preview.storageKey} alt={display(project.title)} className="h-full w-full object-cover" /> : <LayoutGrid size={32} strokeWidth={1} />}</div>
+                                <div className="home-project-info"><h3><DisplayText text={project.title || uiText("未命名画布")} /></h3><p>{project.nodeCount} {uiText(" 个内容 · ")}{new Date(project.updatedAt).toLocaleDateString(getUiLocale(), { month: "long", day: "numeric" })} {uiText(" 更新")}</p></div>
                             </Link>;
                         })}
                     </div> : <div className="wb-surface wb-empty"><LayoutGrid size={36} strokeWidth={1.2} /><strong>{uiText("这里将保存你的创作")}</strong><p>{uiText("新建画布后，把图片拖进来，输入你想修改的地方，就可以开始。")}</p><button className="wb-primary-link" onClick={createAndEnter}><Plus size={16} />{uiText("创建第一个画布")}</button></div>}

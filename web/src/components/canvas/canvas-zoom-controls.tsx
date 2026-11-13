@@ -1,12 +1,14 @@
+import { staticUiText } from "@/lib/static-ui-copy";
 import { useUiLocale, useUiText } from "@/lib/i18n";
 import type { CSSProperties } from "react";
-import { Check, ChevronDown, Compass, Focus, HelpCircle, Minus, Plus } from "lucide-react";
+import { Check, ChevronDown, Compass, Focus, HelpCircle, Minus, Network, Plus } from "lucide-react";
 import { lazy, Suspense, memo, useEffect, useRef, useState } from "react";
 import { Popover, Tooltip } from "antd";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { canvasZoomSliderValue, canvasZoomFromSlider, clampCanvasZoom, MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM } from "@/lib/canvas/canvas-zoom";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { canvasActionLabel } from "@/lib/canvas/canvas-actions";
 import "./canvas-toolbar.css";
 
@@ -101,9 +103,9 @@ export const CanvasZoomControls = memo(function CanvasZoomControls({ scale, onSc
                     />
                     <div className="cw-view-presets">{[.25, .5, 1, 2].map(value => <button key={value} type="button" aria-pressed={Math.round(displayedScale * 100) === value * 100} onClick={() => onScaleChange(value)}>{value * 100}%</button>)}</div>
                     <div className="cw-view-separator" />
-                    <button type="button" className="cw-view-action" onClick={() => { onReset(); setViewMenuOpen(false); }}><Focus size={16} strokeWidth={1.5} />{english ? "Show all" : "显示全部"}<kbd className="ml-auto text-xs opacity-60">Shift+1</kbd></button>
-                    {onFitSelection ? <Tooltip title={!hasSelection ? t("请先选择节点") : undefined}><span className="block"><button type="button" className="cw-view-action" style={!hasSelection ? { pointerEvents: "none" } : undefined} disabled={!hasSelection} onClick={() => { onFitSelection(); setViewMenuOpen(false); }}><Focus size={16} strokeWidth={1.5} />{english ? "Zoom to selection" : "缩放到选中"}<kbd className="ml-auto text-xs opacity-60">Shift+2</kbd></button></span></Tooltip> : null}
-                    <button type="button" className="cw-view-action" onClick={() => { onScaleChange(1); setViewMenuOpen(false); }}>{english ? "Actual size (100%)" : "回到 100%"}</button>
+                    <button type="button" className="cw-view-action" onClick={() => { onReset(); setViewMenuOpen(false); }}><Focus size={16} strokeWidth={1.5} />{english ? "Show all" : staticUiText("显示全部")}<kbd className="ml-auto text-xs opacity-60">Shift+1</kbd></button>
+                    {onFitSelection ? <Tooltip title={!hasSelection ? t("请先选择节点") : undefined}><span className="block"><button type="button" className="cw-view-action" style={!hasSelection ? { pointerEvents: "none" } : undefined} disabled={!hasSelection} onClick={() => { onFitSelection(); setViewMenuOpen(false); }}><Focus size={16} strokeWidth={1.5} />{english ? "Zoom to selection" : staticUiText("缩放到选中")}<kbd className="ml-auto text-xs opacity-60">Shift+2</kbd></button></span></Tooltip> : null}
+                    <button type="button" className="cw-view-action" onClick={() => { onScaleChange(1); setViewMenuOpen(false); }}>{english ? "Actual size (100%)" : staticUiText("回到 100%")}</button>
                     <button type="button" className="cw-view-action" aria-pressed={isMiniMapOpen} aria-label={isMiniMapOpen ? t("关闭小地图") : t("打开小地图")} onClick={onToggleMiniMap}><Compass size={16} strokeWidth={1.5} />{canvasActionLabel("minimap", "toolbar")}{isMiniMapOpen ? <Check size={14} /> : null}</button>
                     <div className="cw-view-separator" />
                     <button type="button" className="cw-view-action" onClick={() => { setViewMenuOpen(false); setShortcutsOpen(true); }}><HelpCircle size={16} strokeWidth={1.5} />{canvasActionLabel("shortcuts")}</button>
@@ -114,4 +116,17 @@ export const CanvasZoomControls = memo(function CanvasZoomControls({ scale, onSc
             {shortcutsOpen ? <Suspense fallback={null}><CanvasShortcutsDialog open onClose={() => setShortcutsOpen(false)} /></Suspense> : null}
         </div>
     );
+});
+
+/** Mount beside the dock, not inside its translated positioning container. */
+export const CanvasConnectionVisibilityToggle = memo(function CanvasConnectionVisibilityToggle() {
+    const t = useUiText();
+    const showConnections = useCanvasUiStore(state => state.showConnections);
+    const setShowConnections = useCanvasUiStore(state => state.setShowConnections);
+    const theme = canvasThemes[useThemeStore(state => state.theme)];
+    const label = showConnections ? t("隐藏连接线") : t("显示连接线");
+    return <div className="absolute bottom-16 right-3 z-[50]" data-testid="canvas-connection-visibility-control" data-canvas-shortcuts="ignore" onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
+        <Tooltip title={label} placement="left"><button type="button" className="cw-icon cw-surface !h-10 !w-10" data-usage-control="canvas-tool.connections" aria-pressed={showConnections} aria-label={label}
+            style={{ background: showConnections ? theme.toolbar.itemHover : theme.node.panel, color: showConnections ? theme.node.text : theme.node.muted }} onClick={() => setShowConnections(!showConnections)}><Network size={18} strokeWidth={1.5} /></button></Tooltip>
+    </div>;
 });

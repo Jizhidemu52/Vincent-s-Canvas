@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Tooltip } from "antd";
 import { uiText, useUiText } from "@/lib/i18n";
@@ -46,7 +47,7 @@ export function GenerationTaskCancel({ taskId }: { taskId?: string }) {
             setTask(current);
             if (current.status === "cancelled") message.success(uiText("任务已取消。"));
             else message.warning(uiText("任务状态已变化，未确认取消；请继续查询原任务。"));
-        } catch (error) { setTask(null); message.warning(uiText(generationErrorMessage(error))); }
+        } catch (error) { setTask(null); message.warning(displayNotice(uiText(generationErrorMessage(error)))); }
         finally { working.current = false; setBusy(false); }
     } });
     return <div className="flex flex-wrap items-center justify-center gap-2">

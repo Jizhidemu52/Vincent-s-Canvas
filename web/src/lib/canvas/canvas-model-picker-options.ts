@@ -44,18 +44,22 @@ export function canvasModelPresentation(label: string) {
     return { name, channel, family: match?.[1] || "其他模型", icon: match?.[2] };
 }
 
-export function canvasImageModelDetails(profile: ReturnType<typeof imageModelProfile>, references: { minimum: number; maximum: number; supportsReferences: boolean }) {
-    if (!profile.verified) return ["渠道默认参数"];
+export function canvasImageModelDetails(profile: ReturnType<typeof imageModelProfile>, references: { minimum: number; maximum: number; supportsReferences: boolean }, translate?: (source: string, parameters?: Record<string, string | number>) => string) {
+    if (!profile.verified) return [translate ? translate("渠道默认参数") : "渠道默认参数"];
     const details: string[] = [];
     const resolutions = profile.resolutions.length ? profile.resolutions : profile.qualities.filter(value => /^\d+(?:\.\d+)?k$/i.test(value));
     if (resolutions.length) details.push(resolutions.map(value => value.toUpperCase()).join(" / "));
     if (profile.kind === "mai-image") details.push("图生图约 100 万像素 · PNG");
     if (references.supportsReferences) {
         const count = references.minimum > 0 ? `${references.minimum}–${references.maximum}` : `最多 ${references.maximum}`;
-        details.push(`${count} 张参考图${profile.kind === "resolution-1k" ? "（工作台上限）" : ""}`);
+        const referenceText = translate ? references.minimum > 0
+            ? translate("{minimum}–{maximum} 张参考图", { minimum: references.minimum, maximum: references.maximum })
+            : translate("最多 {count} 张参考图", { count: references.maximum }) : `${count} 张参考图`;
+        const limit = profile.kind === "resolution-1k" ? "（工作台上限）" : "";
+        details.push(`${referenceText}${translate ? translate(limit) : limit}`);
     }
     if (!profile.requiresPrompt) details.push("无需提示词");
-    return details;
+    return translate ? details.map(detail => translate(detail)) : details;
 }
 
 /** Featured membership and order are server-owned; selection never changes their ranking. */

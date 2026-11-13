@@ -6,6 +6,7 @@ import { deploymentFeatures } from "@/lib/deployment-features";
 import { useModuleEnabled } from "@/stores/use-module-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { DesignLibraryShareSource } from "./share-draft";
+import { displayNotice } from "@/hooks/use-display-text";
 
 export function useDesignLibraryShare() {
     const t = useUiText();
@@ -28,10 +29,10 @@ export function useDesignLibraryShare() {
             const { prepareDesignLibraryShareDraft } = await import("./prepare-share");
             const result = await prepareDesignLibraryShareDraft(source, AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]));
             if (controller.signal.aborted || !alive.current) return;
-            if (result.savedPrivateCopy) message.info(t("原图已保存为本人私有素材，请核对草稿后再确认公开"));
+            if (result.savedPrivateCopy) message.info(displayNotice(t("原图已保存为本人私有素材，请核对草稿后再确认公开")));
             navigate("/design-library?publish=1", { state: { designLibraryDraft: result.draft } });
         } catch (error) {
-            if (!controller.signal.aborted && alive.current && useUserStore.getState().user?.id === source.ownerId) message.error(error instanceof Error ? error.message : t("分享草稿准备失败，请重试"));
+            if (!controller.signal.aborted && alive.current && useUserStore.getState().user?.id === source.ownerId) message.error(displayNotice(error instanceof Error ? error.message : t("分享草稿准备失败，请重试")));
         } finally {
             unsubscribe(); if (pending.current === controller) pending.current = null;
             if (alive.current) setBusy(false);

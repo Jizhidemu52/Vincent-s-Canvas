@@ -1,3 +1,4 @@
+import { staticUiText } from "@/lib/static-ui-copy";
 import { useState } from "react";
 import { Globe2 } from "lucide-react";
 import { setUiLocale, useUiLocale, useUiLanguageEnabled } from "@/lib/i18n";
@@ -18,8 +19,8 @@ export function LanguageSwitch({ className, compact = false }: { className?: str
                 setBusy(true); setFailed(false);
                 try { await setUiLocale(english ? "zh-CN" : "en-US"); } catch { setFailed(true); } finally { setBusy(false); }
             }}>
-            <Globe2 className="size-4 shrink-0" aria-hidden="true" /><span>{compact ? english ? "EN" : "中" : english ? "English" : "中文"}</span>
+            <Globe2 className="size-4 shrink-0" aria-hidden="true" /><span>{compact ? english ? "EN" : staticUiText("中") : english ? "English" : staticUiText("中文")}</span>
         </button></span></Tooltip>
-        {failed ? <span role="alert" className="max-w-48 text-xs">{english ? "Language could not load. Please retry." : "语言加载失败，请重试。"}</span> : null}
+        {failed ? <span role="alert" className="max-w-48 text-xs">{english ? "Language could not load. Please retry." : staticUiText("语言加载失败，请重试。")}</span> : null}
     </span>;
 }

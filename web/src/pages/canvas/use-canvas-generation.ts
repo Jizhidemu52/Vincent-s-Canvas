@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText } from "@/lib/i18n";
 import { buildNodeGenerationContext, buildNodeResponseMessages, hydrateNodeGenerationContext } from "@/components/canvas/canvas-node-generation";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
@@ -88,7 +89,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
             setDialogNodeId(restored.id);
             focusCanvasArea(restored.position, restored.width, restored.height);
             message.success(uiText("已新增恢复配置，原图和现有草稿保持不变；尚未生成"));
-        } catch (error) { message.error(error instanceof Error ? error.message : uiText("历史输入恢复失败，画布未改变")); }
+        } catch (error) { message.error(displayNotice(error instanceof Error ? error.message : uiText("历史输入恢复失败，画布未改变"))); }
         finally { restoringGenerationRef.current = false; dismiss(); }
     };
 
@@ -122,7 +123,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
             }
             if (mode === "image" && !shared && sourceNode.metadata?.draftImageReferences === undefined && hasIncompleteCanvasGenerationReferences(sourceNode)) {
                 const error = "旧版记录参考信息不完整，可恢复历史输入";
-                message.warning(uiText(error));
+                message.warning(displayNotice(uiText(error)));
                 reportResult([{ nodeId, status: "failed", error }]);
                 return;
             }
@@ -153,7 +154,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                 finishGenerationRequest(requestKey, runController);
                 if (!shared) setRunningNodeId(null);
                 const detail = error instanceof Error ? error.message : "无法读取输入素材";
-                if (isCurrent()) message.error(detail);
+                if (isCurrent()) message.error(displayNotice(detail));
                 reportResult([{ nodeId, status: "failed", error: detail }]);
                 return;
             }
@@ -196,7 +197,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                     const count = 1;
                     const referenceValidation = validateImageReferences(modelOptionName(generationConfig.model), referenceImages, profile);
                     if (!referenceValidation.valid) {
-                        message.error(referenceValidation.message);
+                        message.error(displayNotice(referenceValidation.message));
                         finishGenerationRequest(requestKey, runController);
                         if (!shared) setRunningNodeId(null);
                         reportResult([{ nodeId, status: "failed", error: referenceValidation.message }]);
@@ -352,7 +353,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                         return;
                     }
                     const failureDetails = imageOutputs.find((output) => output.status === "failed")?.error || "全部图片生成失败";
-                    if (hasFailure) message.error(hasSuccess ? uiText("部分图片生成失败：{value1}", { value1: failureDetails }) : failureDetails);
+                    if (hasFailure) message.error(displayNotice(hasSuccess ? uiText("部分图片生成失败：{value1}", { value1: failureDetails }) : failureDetails));
                     setNodes((prev) =>
                         prev.map((node) =>
                             node.id === rootId && !hasSuccess
@@ -380,7 +381,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                     if (!await waitForWriteAccess() || !isCurrent()) return;
                     const output = await runCanvasMediaGeneration({ nodeId, mode, source: sourceNode, shared: Boolean(shared), config: generationConfig, context: generationContext, origin: generationOrigin,
                         controller: runController, runningId, projectId, nodes: nodesRef, setNodes, setConnections, flushSave: () => projectSaveQueueRef.current?.flush(), isCurrent, waitForWriteAccess, start: startGenerationRequest, finish: finishGenerationRequest });
-                    if (output.status === "failed" && !runController.signal.aborted) message.error(output.error);
+                    if (output.status === "failed" && !runController.signal.aborted) message.error(displayNotice(output.error));
                     reportResult([output]);
                     return;
                 }
@@ -459,7 +460,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                     return;
                 }
                 const errorDetails = error instanceof Error ? error.message : "生成失败";
-                message.error(errorDetails);
+                message.error(displayNotice(errorDetails));
                 setNodes((prev) =>
                     prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails, ...(node.type === CanvasNodeType.Video ? videoTaskErrorMetadata(error) : {}) } }) : node)),
                 );
@@ -501,7 +502,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
             });
         } catch (error) {
             const detail = error instanceof Error ? error.message : "加载失败";
-            message.error(detail);
+            message.error(displayNotice(detail));
             onResult?.({ mode, outputs: [{ nodeId, status: "failed", error: detail }] });
         } finally {
             sequenceSignal?.removeEventListener("abort", abortSequence);
@@ -524,7 +525,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
         try {
             await executeGenerateNode(node.id, "image", record.prompt, undefined, undefined, record, releaseDispatch);
         } catch (error) {
-            if (retryScope.active && designProjectIdRef.current === projectId) message.error(error instanceof Error ? error.message : uiText("重新生成失败"));
+            if (retryScope.active && designProjectIdRef.current === projectId) message.error(displayNotice(error instanceof Error ? error.message : uiText("重新生成失败")));
         } finally { releaseDispatch(); }
     }, [executeGenerateNode, message, projectId, retryScope]);
 
@@ -536,7 +537,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
             const record = createCanvasVariationRecord(node, strength, nanoid());
             await executeGenerateNode(node.id, "image", record.prompt, undefined, undefined, record, releaseDispatch);
         } catch (error) {
-            if (retryScope.active && designProjectIdRef.current === projectId) message.error(error instanceof Error ? error.message : uiText("变体生成失败"));
+            if (retryScope.active && designProjectIdRef.current === projectId) message.error(displayNotice(error instanceof Error ? error.message : uiText("变体生成失败")));
         } finally { releaseDispatch(); }
     }, [executeGenerateNode, message, projectId, retryScope]);
 
@@ -557,7 +558,7 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
                 buildAudioGenerationMetadata, videoMetadata, audioMetadata, videoTaskErrorMetadata, isGenerationCanceled,
             });
         } catch (error) {
-            if (isCurrent()) message.error(error instanceof Error ? error.message : uiText("重试操作加载失败，请重试"));
+            if (isCurrent()) message.error(displayNotice(error instanceof Error ? error.message : uiText("重试操作加载失败，请重试")));
         }
     }, [createOptions, effectiveConfig, finishGenerationRequest, handleGenerateNode, handleRegenerateNode, handleMissingModelConfig, isAiConfigReady, message, modal, projectId, recoverPending, retryScope, startGenerationRequest, waitForWriteAccess, isObservationCurrent]);
 

@@ -8,6 +8,7 @@ import { getGenerationResourceNodes } from "@/lib/canvas/canvas-resource-referen
 import { canvasImageBaseName, canvasImageVersion } from "@/lib/canvas/canvas-image-filename";
 import { videoFileExtension } from "../../../../shared/video-output";
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
+import { isEmptyCanvasDesignTemplateReferenceForConfig } from "@/lib/canvas/canvas-design-template-reference";
 
 export type NodeGenerationContext = {
     prompt: string;
@@ -24,6 +25,8 @@ export type NodeGenerationInput = {
     nodeId: string;
     type: "text" | "image" | "video" | "audio";
     title: string;
+    /** Display-only upload slot; never an image payload or a ready reference. */
+    pendingUpload?: boolean;
     text?: string;
     image?: ReferenceImage;
     video?: ReferenceVideo;
@@ -44,6 +47,8 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
         }
     }
     if (sourceNode?.type === CanvasNodeType.Config && Boolean(sourceNode.metadata?.composerContent?.trim())) {
+        const pendingIds = new Set(inputs.filter(input => input.pendingUpload).map(input => input.nodeId));
+        if ([...prompt.matchAll(/@\[node:([^\]]+)\]/g)].some(match => pendingIds.has(match[1]!))) throw new Error("先设置参考款原图");
         const images = resolveCanvasImageReferences(sourceNode, nodes, connections);
         const excluded = new Set(sourceNode.metadata?.excludedConnectedImageReferenceKeys || []);
         const aliases = [
@@ -153,10 +158,21 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
 }
 
 export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): NodeGenerationInput[] {
-    return getGenerationResourceNodes(nodeId, nodes, connections).flatMap((node) => {
+    const inputs = getGenerationResourceNodes(nodeId, nodes, connections).flatMap((node) => {
         const input = generationInputForNode(node);
         return input ? [input] : [];
     });
+    const config = nodes.find(node => node.id === nodeId);
+    if (config?.type !== CanvasNodeType.Config) return inputs;
+    for (const edge of connections) {
+        if (edge.toNodeId !== nodeId || edge.kind === "config-target") continue;
+        const source = nodes.find(node => node.id === edge.fromNodeId);
+        if (source && isEmptyCanvasDesignTemplateReferenceForConfig(source, config) && !inputs.some(input => input.nodeId === source.id)) {
+            inputs.push({ nodeId: source.id, type: "image", title: source.title, pendingUpload: true });
+        }
+    }
+    const order = new Map(connections.filter(edge => edge.toNodeId === nodeId).map((edge, index) => [edge.fromNodeId, index]));
+    return inputs.sort((first, second) => (order.get(first.nodeId) ?? 0) - (order.get(second.nodeId) ?? 0));
 }
 
 /**
@@ -170,7 +186,7 @@ export function createConfigGenerationInputIndex(nodes: CanvasNodeData[], connec
 
     connections.forEach((connection) => {
         const target = nodeById.get(connection.toNodeId);
-        if (target?.type !== CanvasNodeType.Config) return;
+        if (target?.type !== CanvasNodeType.Config || connection.kind === "config-target") return;
         const sourceIds = sourceIdsByConfigId.get(target.id) || [];
         sourceIds.push(connection.fromNodeId);
         sourceIdsByConfigId.set(target.id, sourceIds);
@@ -183,7 +199,7 @@ export function createConfigGenerationInputIndex(nodes: CanvasNodeData[], connec
             if (configNode?.type !== CanvasNodeType.Config) return [];
             const inputs = (sourceIdsByConfigId.get(configNodeId) || []).flatMap((sourceId) => {
                 const source = nodeById.get(sourceId);
-                const input = source ? generationInputForNode(source) : null;
+                const input = source ? generationInputForNode(source, configNode) : null;
                 return input ? [input] : [];
             });
             if (cached && sameGenerationInputs(cached, inputs)) return cached;
@@ -221,7 +237,8 @@ function readNodeTextInput(node: CanvasNodeData) {
     return node.metadata?.prompt || "";
 }
 
-export function generationInputForNode(node: CanvasNodeData): NodeGenerationInput | null {
+export function generationInputForNode(node: CanvasNodeData, config?: CanvasNodeData): NodeGenerationInput | null {
+    if (config && isEmptyCanvasDesignTemplateReferenceForConfig(node, config)) return { nodeId: node.id, type: "image", title: node.title, pendingUpload: true };
     const image = readReferenceImage(node);
     if (image) return { nodeId: node.id, type: "image", title: node.title, image };
     const video = readReferenceVideo(node);
@@ -241,6 +258,7 @@ function sameGenerationInput(first: NodeGenerationInput, second?: NodeGeneration
         first.nodeId === second?.nodeId &&
         first.type === second.type &&
         first.title === second.title &&
+        first.pendingUpload === second.pendingUpload &&
         first.text === second.text &&
         first.image?.dataUrl === second.image?.dataUrl &&
         first.image?.storageKey === second.image?.storageKey &&

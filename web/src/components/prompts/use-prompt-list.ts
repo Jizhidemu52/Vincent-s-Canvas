@@ -3,6 +3,7 @@ import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ALL_PROMPTS_OPTION, fetchPrompts, type PromptLibraryScope } from "@/services/api/prompts";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { useUiLocale } from "@/lib/i18n";
 import { createPromptActionGuard, promptActionIdentity } from "@/lib/prompt-template-reuse";
 import { subscribeWorkspaceIdentity } from "@/lib/workspace-session-events";
 import { useUserStore } from "@/stores/use-user-store";
@@ -11,6 +12,7 @@ import { generalPromptOptions } from "./prompt-library-data";
 export const PROMPT_PAGE_SIZE = 20;
 
 export function usePromptList({ keyword, tags, category, scope = "all", enabled = true }: { keyword: string; tags: string[]; category: string; scope?: PromptLibraryScope; enabled?: boolean }) {
+    const locale = useUiLocale();
     const identity = useUserStore(promptActionIdentity);
     const user = useUserStore(state => state.user);
     const status = useUserStore(state => state.status);
@@ -42,7 +44,7 @@ export function usePromptList({ keyword, tags, category, scope = "all", enabled 
         refetchOnMount: "always",
     });
     const firstPage = query.data?.pages[0];
-    const general = useMemo(() => scope === "all" || scope === "general" ? generalPromptOptions(keyword, tags, category) : [], [scope, keyword, tags, category]);
+    const general = useMemo(() => scope === "all" || scope === "general" ? generalPromptOptions(keyword, tags, category) : [], [scope, keyword, tags, category, locale]);
     const remote = useMemo(() => authorized && !query.isError && scope !== "general" ? query.data?.pages.flatMap(page => page.items) || [] : [], [authorized, query.data?.pages, query.isError, scope]);
     const items = useMemo(() => [...general, ...remote], [general, remote]);
     return {

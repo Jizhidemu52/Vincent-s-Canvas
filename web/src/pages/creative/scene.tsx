@@ -1,5 +1,6 @@
 import { uiText, useUiText } from "@/lib/i18n";
 import { GenerationAccountHistory } from "@/components/generation-account-history";
+import { DisplayText } from "@/hooks/use-display-text";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { ArrowLeft, ArrowRight, ChevronDown, Download, History, LoaderCircle, Plus, RotateCcw, Sparkles } from "lucide-react";
 import { App, Button, Checkbox, Image, Select, Tooltip } from "antd";
@@ -136,7 +137,7 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
                         <label className="cs-label">{uiText("生成模型")}</label><ModelPicker toolKey={`creative-${preset.id}` as ToolKey} config={ws.config} value={ws.model} onChange={value => ws.updateConfig("imageModel", value)} capability="image" fullWidth disabled={ws.running} />
                         <ImageSettingsPanel config={ws.config} referenceCount={Object.values(ws.images).filter(Boolean).length} onConfigChange={ws.updateConfig} theme={theme} showTitle={false} />
                     </details>
-                    <details className="cs-prompt-preview" open={promptOpen} onToggle={event => setPromptOpen(event.currentTarget.open)}><summary>{ws.selectedPrompt !== null ? uiText("所选结果的原始提示词") : uiText("查看本次设计输入")}<ChevronDown size={12} /></summary>{ws.selectedPrompt !== null ? <pre aria-label={uiText("设计提示词")}>{ws.selectedPrompt}</pre> : <GenerationInputList fields={scenePromptInput(preset.id, ws.form).fields} />}{ws.selectedPrompt !== null && <p className="cs-help">{uiText("仅显示原提示词，未改变当前设计要求、模型或参考图。")}</p>}</details>
+                    <details className="cs-prompt-preview" open={promptOpen} onToggle={event => setPromptOpen(event.currentTarget.open)}><summary>{ws.selectedPrompt !== null ? uiText("所选结果的原始提示词") : uiText("查看本次设计输入")}<ChevronDown size={12} /></summary>{ws.selectedPrompt !== null ? <pre aria-label={uiText("设计提示词")}><DisplayText text={ws.selectedPrompt} /></pre> : <GenerationInputList fields={scenePromptInput(preset.id, ws.form).fields} />}{ws.selectedPrompt !== null && <p className="cs-help">{uiText("仅显示原提示词，未改变当前设计要求、模型或参考图。")}</p>}</details>
                 </fieldset>}
                 <div className="cs-submit-panel">
                     {ws.error && <GenerationDiagnostic error={ws.error} />}
@@ -175,7 +176,7 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
                 </div> : <div className="cs-results">
                     <div className="cs-results-heading"><h2>{ws.isHistoryPreview ? uiText("历史预览") : ws.optimizing ? uiText("正在优化提示词…") : ws.running ? uiText("正在创作") : uiText("设计结果")}</h2>{ws.isHistoryPreview ? <Button size="small" onClick={ws.returnToCurrentTask}>{uiText("返回当前任务")}</Button> : null}{ws.activeLog && <><span>{formatBeijingDateTime(ws.activeLog.createdAt)} {uiText("北京时间")}</span><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || ws.previewing} onClick={() => modal.confirm({ title: uiText("恢复为草稿？"), content: uiText("将替换当前设计要求、模型与参考素材，不会提交生成任务。"), okText: uiText("确认恢复"), cancelText: uiText("保留草稿"), onOk: async () => { await ws.restoreLog(ws.activeLog!); setPromptOpen(true); } })}>{uiText("恢复为草稿继续改")}</button></>}</div>
                     {ws.previewing && <p className="cs-help" role="status">{uiText("正在读取所选结果…")}</p>}
-                    {ws.activeLog?.operation === "recolor" && <p className="cs-help cs-operation-note">{ws.activeLog.prompt}</p>}
+                    {ws.activeLog?.operation === "recolor" && <p className="cs-help cs-operation-note"><DisplayText text={ws.activeLog.prompt} /></p>}
                     {!ws.results.length ? <div className="cs-empty"><Sparkles size={28} /><h3>{uiText("让设计从这里开始")}</h3><p>{uiText("在左侧完成")}{slots.length ? uiText("素材和") : ""}{uiText("设计要求，点击生成。")}</p><button type="button" onClick={() => setView("history")}><RotateCcw size={14} />{uiText("看看实操案例")}</button></div> : <div className="cs-result-grid">{ws.results.map((result, index) => <article key={result.id} className="cs-result-card">
                         {result.status === "success" && result.image ? <><Image src={result.image.dataUrl} alt={uiText("{title}结果 {value2}", { title: uiText(preset.title), value2: index + 1 })} onClick={() => { ws.selectResultPrompt(result); setPromptOpen(true); }} /><div className="cs-result-meta"><span>{uiText("方案 ")}{String(index + 1).padStart(2, "0")}</span><button type="button" onClick={() => { void ws.download(result.image!, index); }}><Download size={14} />{uiText("下载原图")}</button>{traceEnabled && preset.id === "style-to-sketch" && <button type="button" onClick={() => setTraceImage(result.image!)}>{uiText("导出 SVG")}</button>}</div>
                             <div className="cs-result-actions">

@@ -60,6 +60,7 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
     };
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
+        "@/hooks/use-display-text": { useDisplayText: () => (text: string) => text, DisplayText: ({ text }: { text: string }) => text, DisplayTranslationPreview: () => null },
         // Keep this harness inside the default task while exercising the real prompt/history closures.
         "@/components/workbench-tasks": { WorkbenchTasks: ({ children, urlInputKey: nextKey }: any) => { urlInputKey = nextKey ?? null; return children.type(children.props); }, useWorkbenchTask: () => ({ id: "default", active: true, urlInputKey, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus() {} },
         react: { ...React, useState, useCallback: (callback: Function) => callback, useRef: (initial: unknown) => refs[refIndex++] ||= { current: initial }, useMemo: (factory: () => unknown) => factory(),

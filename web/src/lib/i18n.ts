@@ -3,16 +3,15 @@ import { useCallback, useSyncExternalStore } from "react";
 export type UiLocale = "zh-CN" | "en-US";
 export const UI_LOCALE_KEY = "inchoice.ui-locale";
 let locale: UiLocale = "zh-CN";
-let employeeInterface = true;
 let english: Record<string, string> = {};
 let loading: Promise<void> | undefined;
 let selection = 0;
 const listeners = new Set<() => void>();
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
 export const subscribeUiLocale = subscribe;
-export const getUiLocale = (): UiLocale => employeeInterface ? locale : "zh-CN";
+export const getUiLocale = (): UiLocale => locale;
 export function useUiLocale(): UiLocale { return useSyncExternalStore(subscribe, getUiLocale, () => "zh-CN"); }
-export function useUiLanguageEnabled() { return useSyncExternalStore(subscribe, () => employeeInterface, () => true); }
+export function useUiLanguageEnabled() { return true; }
 
 function publishLocale() {
     const current = getUiLocale();
@@ -23,14 +22,9 @@ function publishLocale() {
     for (const listener of listeners) listener();
 }
 
-/** The requested language switch is employee-facing only. Maintenance pages
- * stay Chinese without overwriting the employee's saved language preference. */
-export function setUiPathname(pathname: string): void {
-    const next = !/^\/admin(?:\/|$)/.test(pathname);
-    if (next === employeeInterface) return;
-    employeeInterface = next;
-    publishLocale();
-}
+/** Language is shared by every board, including administration. Kept as a
+ * navigation lifecycle hook; navigation never changes the selected language. */
+export function setUiPathname(_pathname: string): void { /* Language is route-independent. */ }
 
 /** Only call with application UI copy. Never translate user documents, model
  * output, names, prompt values or API identifiers. Parameters remain literal. */

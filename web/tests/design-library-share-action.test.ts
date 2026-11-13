@@ -17,6 +17,7 @@ function harness(options: { oa?: boolean; enabled?: boolean; role?: string; fail
     const entered = Promise.withResolvers<void>(), response = Promise.withResolvers<void>();
     let cursor = 0, mounted = false;
     const dependencies: Record<string, unknown> = {
+        "@/hooks/use-display-text": { displayNotice: (text: unknown) => text },
         "@/lib/i18n": i18nHarness,
         react: {
             useState: (initial: unknown) => { const index = cursor++; if (!(index in values)) values[index] = initial; return [values[index], (next: unknown) => { values[index] = next; }]; },

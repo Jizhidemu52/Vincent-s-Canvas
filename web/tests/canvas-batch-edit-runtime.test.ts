@@ -8,6 +8,7 @@ import { QueuedTaskHttpError, QueuedTaskSubmissionUncertainError } from "@/servi
 import { compiledCanvasGenerationRecord, createCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { defaultConfig } from "@/stores/use-config-store";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 
 test("multi-file selection keeps all supported images in natural filename order", () => {
     const files = ["10.png", "2.png", "1.png"].map(name => new File(["image"], name, { type: "image/png" }));
@@ -41,6 +42,7 @@ test("batch execution rejects stale oversized selections before uploading, queue
     const errors: string[] = [];
     const dependencies = {
         uiText,
+        displayNotice: displayHooksHarness.displayNotice,
         assertCanvasImageUploadSize, modelOptionName: (model: string) => model, deploymentFeatures: { creditsEnabled: false },
         uploadImage: async () => { effects.push("upload"); throw new Error("No upload expected"); },
         requestBatchEdit: async () => { effects.push("submit"); throw new Error("No generation expected"); },
@@ -74,6 +76,7 @@ test("definitive batch rejection clears bindings while uncertain submission reta
         const notices: string[] = [];
         const dependencies = {
             uiText,
+            displayNotice: displayHooksHarness.displayNotice,
             createCanvasGenerationRecord, compiledCanvasGenerationRecord, imageModelProfile, normalizeImageModelSettings,
             assertCanvasImageUploadSize, QueuedTaskHttpError, QueuedTaskSubmissionUncertainError,
             modelOptionName: (model: string) => model, deploymentFeatures: { creditsEnabled: false }, CanvasNodeType: { Image: "image" },
@@ -118,6 +121,7 @@ test("a completed batch archives each original reference and final prompt in one
     let items: any[] = files.map((file, index) => ({ id: String(index), file, relativePath: file.name, status: "waiting" }));
     const dependencies = {
         uiText, createCanvasGenerationRecord, compiledCanvasGenerationRecord, imageModelProfile, normalizeImageModelSettings,
+        displayNotice: displayHooksHarness.displayNotice,
         assertCanvasImageUploadSize, QueuedTaskHttpError, QueuedTaskSubmissionUncertainError,
         modelOptionName: (model: string) => model, deploymentFeatures: { creditsEnabled: false }, CanvasNodeType: { Image: "image" },
         nanoid: () => `id-${++allocation}`, fitNodeSize: () => ({ width: 100, height: 100 }), flushSync: (action: () => void) => action(),

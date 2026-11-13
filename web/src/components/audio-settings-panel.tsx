@@ -1,3 +1,4 @@
+import { staticUiText } from "@/lib/static-ui-copy";
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -52,13 +53,13 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         ))}
                     </div>
                     <div className="flex items-center gap-2 text-xs">
-                        <button type="button" disabled={!sample} onClick={playPreview} className="rounded-lg border px-3 py-2 disabled:cursor-not-allowed disabled:opacity-50" style={{ borderColor: theme.node.stroke }} aria-label={`${preview === "playing" || preview === "loading" ? "停止试听" : "试听 3 秒"} ${audioVoiceLabel(voice)}`}>
-                            {preview === "playing" ? "停止试听" : preview === "loading" ? "正在加载 · 停止" : "试听 3 秒"}
+                        <button type="button" disabled={!sample} onClick={playPreview} className="rounded-lg border px-3 py-2 disabled:cursor-not-allowed disabled:opacity-50" style={{ borderColor: theme.node.stroke }} aria-label={`${preview === "playing" || preview === "loading" ? staticUiText("停止试听") : staticUiText("试听 3 秒")} ${audioVoiceLabel(voice)}`}>
+                            {preview === "playing" ? staticUiText("停止试听") : preview === "loading" ? staticUiText("正在加载 · 停止") : staticUiText("试听 3 秒")}
                         </button>
-                        <span role="status" style={{ color: theme.node.muted }}>{!sample ? "此音色暂无内置样例" : preview === "error" ? "样例加载失败，可重试或打开官方演示" : preview === "playing" ? "3 秒后自动停止" : "官方样例 · 不生成任务"}</span>
+                        <span role="status" style={{ color: theme.node.muted }}>{!sample ? staticUiText("此音色暂无内置样例") : preview === "error" ? staticUiText("样例加载失败，可重试或打开官方演示") : preview === "playing" ? staticUiText("3 秒后自动停止") : staticUiText("官方样例 · 不生成任务")}</span>
                     </div>
-                    <audio ref={audio} preload="none" className="hidden" aria-label="音色官方样例" onPlaying={() => { clearTimeout(timer.current); setPreview("playing"); timer.current = setTimeout(() => { stopPreview(); setPreview("idle"); }, 3000); }} onTimeUpdate={() => { if ((audio.current?.currentTime || 0) >= 3) { stopPreview(); setPreview("idle"); } }} onEnded={() => { stopPreview(); setPreview("idle"); }} onError={() => { if (audio.current?.getAttribute("src")) { stopPreview(); setPreview("error"); } }} />
-                    <p className="text-xs leading-5" style={{ color: theme.node.muted }}>试听为 AI 生成的官方英语样例，不代表当前通道或中文效果；只在点击时加载，不提交本项目任务。中文为音色识别名。<a href="https://www.openai.fm/" target="_blank" rel="noopener noreferrer" className="underline">打开官方音色演示</a></p>
+                    <audio ref={audio} preload="none" className="hidden" aria-label={staticUiText("音色官方样例")} onPlaying={() => { clearTimeout(timer.current); setPreview("playing"); timer.current = setTimeout(() => { stopPreview(); setPreview("idle"); }, 3000); }} onTimeUpdate={() => { if ((audio.current?.currentTime || 0) >= 3) { stopPreview(); setPreview("idle"); } }} onEnded={() => { stopPreview(); setPreview("idle"); }} onError={() => { if (audio.current?.getAttribute("src")) { stopPreview(); setPreview("error"); } }} />
+                    <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{staticUiText("试听为 AI 生成的官方英语样例，不代表当前通道或中文效果；只在点击时加载，不提交本项目任务。中文为音色识别名。")}<a href="https://www.openai.fm/" target="_blank" rel="noopener noreferrer" className="underline">{staticUiText("打开官方音色演示")}</a></p>
                 </SettingGroup>
                 <SettingGroup title={uiText("格式")} color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">

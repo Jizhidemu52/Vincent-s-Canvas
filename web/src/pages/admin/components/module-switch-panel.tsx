@@ -1,3 +1,6 @@
+import { displayNotice, useDisplayConfig  } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { App, Input, Select, Switch, Tag } from "antd";
 import { useEffect, useRef, useState } from "react";
 
@@ -8,6 +11,8 @@ const groups = Array.from(new Set(moduleDefinitions.map((module) => module.group
 const kindLabels = { ai: "AI · 需配置 API", local: "本地工具 · 无需 API", external: "模型本机配置", service: "无需模型 API", group: "总入口" };
 
 export function ModuleSwitchPanel() {
+    const displayConfig = useDisplayConfig();
+    useUiLocale();
     const { message, modal } = App.useApp();
     const flags = useModuleStore((state) => state.flags);
     const refresh = useModuleStore((state) => state.refresh);
@@ -17,20 +22,20 @@ export function ModuleSwitchPanel() {
     const [search, setSearch] = useState("");
     const [kind, setKind] = useState("all");
 
-    useEffect(() => { void refresh().catch((error) => message.error(error instanceof Error ? error.message : "模块状态读取失败")); }, [message, refresh]);
+    useEffect(() => { void refresh().catch((error) => message.error(displayNotice(error instanceof Error ? error.message : staticUiText("模块状态读取失败")))); }, [message, refresh]);
 
     const toggle = async (moduleKey: ModuleKey, enabled: boolean) => {
         if (busy.current) return;
         busy.current = true;
-        const label = moduleDefinitions.find((item) => item.moduleKey === moduleKey)?.label || moduleKey;
+        const label = staticUiText(moduleDefinitions.find((item) => item.moduleKey === moduleKey)?.label || moduleKey);
         setSaving(moduleKey);
         try {
-            if (!await modal.confirm({ title: `确认${enabled ? "开启" : "关闭"}${label}？`, content: `此设置影响所有有权使用本模块的成员。${enabled ? "开启后仍需满足 API 配置与权限要求。" : "关闭后将拦截本模块入口与新操作，不删除已有历史和素材。"}`, okText: `确认${enabled ? "开启" : "关闭"}`, cancelText: "保持不变", okButtonProps: { danger: !enabled } })) return;
+            if (!await modal.confirm({ title: staticUiText("确认{p0}{p1}？", { p0: `${enabled ? staticUiText("开启") : staticUiText("关闭")}`, p1: `${label}` }), content: staticUiText("此设置影响所有有权使用本模块的成员。{p0}", { p0: `${enabled ? staticUiText("开启后仍需满足 API 配置与权限要求。") : staticUiText("关闭后将拦截本模块入口与新操作，不删除已有历史和素材。")}` }), okText: staticUiText("确认{p0}", { p0: `${enabled ? staticUiText("开启") : staticUiText("关闭")}` }), cancelText: staticUiText("保持不变"), okButtonProps: { danger: !enabled } })) return;
             const { module } = await updateModuleFlag(moduleKey, enabled);
             setFlag(module);
-            message.success(`${moduleDefinitions.find((item) => item.moduleKey === moduleKey)?.label}已${enabled ? "开启" : "关闭"}`);
+            message.success(displayNotice(staticUiText("{p0}已{p1}", { p0: `${staticUiText(moduleDefinitions.find((item) => item.moduleKey === moduleKey)?.label)}`, p1: `${enabled ? staticUiText("开启") : staticUiText("关闭")}` })));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "模块状态更新失败");
+            message.error(displayNotice(error instanceof Error ? error.message : staticUiText("模块状态更新失败")));
         } finally { busy.current = false; setSaving(null); }
     };
     const filtered = moduleDefinitions.filter((module) => (kind === "all" || (kind === "ai" ? module.kind === "ai" : module.kind !== "ai"))
@@ -38,27 +43,27 @@ export function ModuleSwitchPanel() {
 
     return <div className="space-y-4">
         <div className="wb-surface px-4 py-3">
-            <h2 className="text-base font-semibold">功能模块开关 · {moduleDefinitions.length} 项正式能力</h2>
-            <p className="mt-1 text-xs text-[var(--muted-foreground)]">{toolDefinitions.length} 项 AI + {nonAiDefinitions.length} 项非 AI。关闭后拦截入口与新操作，不删除历史、素材或后台配置。父级入口关闭时，子模块开关仍保留；重新开启父级即可恢复原设置。</p>
-            <p className="mt-1 text-xs text-[var(--muted-foreground)]">AI 模块还受“板块 API 配置”中的独立开关约束；本地工具无需 API。本机 Agent 的模型在本机配置。尚未接通的画布 AI 超分不在正式清单中。</p>
+            <h2 className="text-base font-semibold">{staticUiText("功能模块开关 · ")}{moduleDefinitions.length}{staticUiText(" 项正式能力")}</h2>
+            <p className="mt-1 text-xs text-[var(--muted-foreground)]">{toolDefinitions.length}{staticUiText(" 项 AI + ")}{nonAiDefinitions.length}{staticUiText(" 项非 AI。关闭后拦截入口与新操作，不删除历史、素材或后台配置。父级入口关闭时，子模块开关仍保留；重新开启父级即可恢复原设置。")}</p>
+            <p className="mt-1 text-xs text-[var(--muted-foreground)]">{staticUiText("AI 模块还受“板块 API 配置”中的独立开关约束；本地工具无需 API。本机 Agent 的模型在本机配置。尚未接通的画布 AI 超分不在正式清单中。")}</p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
-                <Input className="!w-full sm:!w-80" value={search} onChange={(event) => setSearch(event.target.value)} allowClear placeholder="搜索模块名称或功能" aria-label="搜索功能模块" />
-                <Select className="!w-44" value={kind} onChange={setKind} aria-label="模块类型" options={[{ value: "all", label: "全部正式模块" }, { value: "ai", label: `AI 模块（${toolDefinitions.length}）` }, { value: "non-ai", label: `非 AI 模块（${nonAiDefinitions.length}）` }]} />
-                <span className="text-xs text-[var(--muted-foreground)]">显示 {filtered.length} / {moduleDefinitions.length} 项</span>
+                <Input className="!w-full sm:!w-80" value={search} onChange={(event) => setSearch(event.target.value)} allowClear placeholder={staticUiText("搜索模块名称或功能")} aria-label={staticUiText("搜索功能模块")} />
+                <Select className="!w-44" value={kind} onChange={setKind} aria-label={staticUiText("模块类型")} options={displayConfig([{ value: "all", label: staticUiText("全部正式模块") }, { value: "ai", label: staticUiText("AI 模块（{p0}）", { p0: `${toolDefinitions.length}` }) }, { value: "non-ai", label: staticUiText("非 AI 模块（{p0}）", { p0: `${nonAiDefinitions.length}` }) }], "options")} />
+                <span className="text-xs text-[var(--muted-foreground)]">{staticUiText("显示 ")}{filtered.length} / {moduleDefinitions.length}{staticUiText(" 项")}</span>
             </div>
         </div>
         {groups.filter((group) => filtered.some((module) => module.group === group)).map((group) => <section key={group} className="wb-surface overflow-hidden">
-            <h3 className="border-b border-[var(--border)] px-4 py-3 text-sm font-semibold">{group}</h3>
+            <h3 className="border-b border-[var(--border)] px-4 py-3 text-sm font-semibold">{staticUiText(group)}</h3>
             <div className="divide-y divide-[var(--border)]">
                 {filtered.filter((module) => module.group === group).map((module) => <div key={module.moduleKey} className="flex min-h-16 items-center justify-between gap-4 px-4 py-3" data-module-key={module.moduleKey}>
                     <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-[var(--foreground)]">{module.label}<Tag>{kindLabels[module.kind]}</Tag>{module.parent && !flags[module.parent] ? <Tag color="orange">所属总入口已关闭</Tag> : null}</div>
-                        <div className="mt-1 text-xs text-[var(--muted-foreground)]">{module.description}</div>
+                        <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-[var(--foreground)]">{staticUiText(module.label)}<Tag>{staticUiText(kindLabels[module.kind])}</Tag>{module.parent && !flags[module.parent] ? <Tag color="orange">{staticUiText("所属总入口已关闭")}</Tag> : null}</div>
+                        <div className="mt-1 text-xs text-[var(--muted-foreground)]">{staticUiText(module.description)}</div>
                     </div>
-                    <Switch checked={flags[module.moduleKey]} loading={saving === module.moduleKey} disabled={saving !== null && saving !== module.moduleKey} onChange={(enabled) => void toggle(module.moduleKey, enabled)} aria-label={`${module.label}开关`} />
+                    <Switch checked={flags[module.moduleKey]} loading={saving === module.moduleKey} disabled={saving !== null && saving !== module.moduleKey} onChange={(enabled) => void toggle(module.moduleKey, enabled)} aria-label={staticUiText("{p0}开关", { p0: `${staticUiText(module.label)}` })} />
                 </div>)}
             </div>
         </section>)}
-        {!filtered.length ? <p className="py-8 text-center text-sm text-[var(--muted-foreground)]">没有匹配的正式模块</p> : null}
+        {!filtered.length ? <p className="py-8 text-center text-sm text-[var(--muted-foreground)]">{staticUiText("没有匹配的正式模块")}</p> : null}
     </div>;
 }

@@ -1,3 +1,6 @@
+import { DisplayText, useDisplayText, useDisplayConfig } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { Button, Table, Tag, Alert } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { type UsageV2People, type UsageV2PeopleSort, type UsageV2Person, type UsageV2Query } from "@/services/api/usage-analytics-v2";
@@ -30,6 +33,9 @@ export default function People({
     refreshVersion: number;
     disabled: boolean;
 }) {
+    const displayConfig = useDisplayConfig();
+    const display = useDisplayText();
+    useUiLocale();
     const [comparison, setComparison] = useState<{ key: string; data: UsagePeopleComparison } | null>(null);
     const [comparing, setComparing] = useState(false),
         [comparisonError, setComparisonError] = useState("");
@@ -63,12 +69,12 @@ export default function People({
     const sorting = (key: UsageV2PeopleSort) => ({ key, sorter: true, sortOrder: sort === key ? (order === "asc" ? ("ascend" as const) : ("descend" as const)) : null });
     return (
         <div className="space-y-4">
-            <Alert type="info" showIcon title="用记录了解使用方式，不评价个人能力或绩效" description="按服务端全量排序与分页；无记录和未采集指标不会被当作负面表现。可跨页选择 2–5 人，再一次性读取同口径指标；不拼接各页旧数据。" />
+            <Alert type="info" showIcon title={staticUiText("用记录了解使用方式，不评价个人能力或绩效")} description={staticUiText("按服务端全量排序与分页；无记录和未采集指标不会被当作负面表现。可跨页选择 2–5 人，再一次性读取同口径指标；不拼接各页旧数据。")} />
             <MetricCards metrics={data.metrics} keys={["activePeople", "generatedImages", "generationBookedCny", "resultUseRate"]} />
             <section className="wb-surface min-w-0 p-4 sm:p-5">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="font-semibold">人员明细 · 共 {data.pagination.total} 人</h3>
-                    <Tag>点击姓名查看个人画像</Tag>
+                    <h3 className="font-semibold">{staticUiText("人员明细 · 共 ")}{data.pagination.total}{staticUiText(" 人")}</h3>
+                    <Tag>{staticUiText("点击姓名查看个人画像")}</Tag>
                 </div>
                 <Table<UsageV2Person>
                     size="small"
@@ -80,7 +86,7 @@ export default function People({
                         preserveSelectedRowKeys: true,
                         hideSelectAll: true,
                         onChange: (keys) => onSelectionChange(keys.map(String).slice(0, 5)),
-                        getCheckboxProps: (row) => ({ "aria-label": `对比选择 ${row.displayName}`, disabled: disabled || (selectedIds.length >= 5 && !selectedIds.includes(row.userId)) }),
+                        getCheckboxProps: (row) => ({ "aria-label": display(`对比选择 ${row.displayName}`), disabled: disabled || (selectedIds.length >= 5 && !selectedIds.includes(row.userId)) }),
                     }}
                     pagination={{
                         current: data.pagination.page,
@@ -94,59 +100,55 @@ export default function People({
                         const active = Array.isArray(sorter) ? sorter[0] : sorter;
                         onSort((active.columnKey || "lastActivity") as UsageV2PeopleSort, active.order === "ascend" ? "asc" : "desc");
                     }}
-                    columns={[
+                    columns={displayConfig([
                         {
-                            title: "姓名",
+                            title: staticUiText("姓名"),
                             dataIndex: "displayName",
                             width: 130,
                             render: (name, row) => (
                                 <Button type="link" className="!p-0" onClick={() => onProfile(row.userId)}>
-                                    {name}
+                                    <DisplayText text={name} />
                                 </Button>
                             ),
                         },
-                        { title: "当前部门", dataIndex: "departmentName", render: (value) => value || "未分配" },
-                        { title: "活跃天数", ...sorting("activeDays"), render: (_, row) => metricText(row.metrics.activeDays) },
-                        { title: "可见活跃时长", render: (_, row) => metricText(row.metrics.activeSeconds) },
-                        { title: "成功出图", ...sorting("generatedImages"), render: (_, row) => metricText(row.metrics.generatedImages) },
-                        { title: "已记账金额", ...sorting("generationBookedCny"), render: (_, row) => metricText(row.metrics.generationBookedCny) },
-                        { title: "成功率", ...sorting("successRate"), render: (_, row) => metricText(row.metrics.successRate) },
-                        { title: "结果使用率", ...sorting("resultUseRate"), render: (_, row) => metricText(row.metrics.resultUseRate) },
-                        { title: "正式采纳率", render: (_, row) => metricText(row.metrics.formalAdoptionRate) },
-                        { title: "单张已使用图成本", render: (_, row) => metricCoverageText(row.metrics.costPerUsedImage) },
-                        { title: "可验证编辑链长度", render: (_, row) => metricText(row.metrics.revisionRounds) },
+                        { title: staticUiText("当前部门"), dataIndex: "departmentName", render: (value) => value || staticUiText("未分配") },
+                        { title: staticUiText("活跃天数"), ...sorting("activeDays"), render: (_, row) => <DisplayText text={metricText(row.metrics.activeDays)} /> },
+                        { title: staticUiText("可见活跃时长"), render: (_, row) => <DisplayText text={metricText(row.metrics.activeSeconds)} /> },
+                        { title: staticUiText("成功出图"), ...sorting("generatedImages"), render: (_, row) => <DisplayText text={metricText(row.metrics.generatedImages)} /> },
+                        { title: staticUiText("已记账金额"), ...sorting("generationBookedCny"), render: (_, row) => <DisplayText text={metricText(row.metrics.generationBookedCny)} /> },
+                        { title: staticUiText("成功率"), ...sorting("successRate"), render: (_, row) => <DisplayText text={metricText(row.metrics.successRate)} /> },
+                        { title: staticUiText("结果使用率"), ...sorting("resultUseRate"), render: (_, row) => <DisplayText text={metricText(row.metrics.resultUseRate)} /> },
+                        { title: staticUiText("正式采纳率"), render: (_, row) => <DisplayText text={metricText(row.metrics.formalAdoptionRate)} /> },
+                        { title: staticUiText("单张已使用图成本"), render: (_, row) => <DisplayText text={metricCoverageText(row.metrics.costPerUsedImage)} /> },
+                        { title: staticUiText("可验证编辑链长度"), render: (_, row) => <DisplayText text={metricText(row.metrics.revisionRounds)} /> },
                         {
-                            title: "常用板块",
+                            title: staticUiText("常用板块"),
                             width: 180,
                             render: (_, row) =>
-                                row.topBoards
+                                <DisplayText text={row.topBoards
                                     .slice(0, 3)
                                     .map((item) => item.label)
-                                    .join(" / ") || "无记录",
+                                    .join(" / ") || staticUiText("无记录")} />,
                         },
                         {
-                            title: "常用模型",
+                            title: staticUiText("常用模型"),
                             width: 180,
                             render: (_, row) =>
-                                row.topModels
+                                <DisplayText text={row.topModels
                                     .slice(0, 3)
                                     .map((item) => item.label)
-                                    .join(" / ") || "无记录",
+                                    .join(" / ") || staticUiText("无记录")} />,
                         },
-                        { title: "最近记录", ...sorting("lastActivity"), width: 180, render: (_, row) => (row.lastActivityAt ? new Date(row.lastActivityAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false }) : "无记录") },
-                    ]}
+                        { title: staticUiText("最近记录"), ...sorting("lastActivity"), width: 180, render: (_, row) => (row.lastActivityAt ? new Date(row.lastActivityAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false }) : staticUiText("无记录")) },
+                    ], "columns", data.people)}
                 />
-                <p className="mt-3 text-xs text-[var(--muted-foreground)]">时长不是工时；“不可用”表示缺少采集或可靠关联。当前部门用于人员识别，统计归属使用顶部所选口径。</p>
+                <p className="mt-3 text-xs text-[var(--muted-foreground)]">{staticUiText("时长不是工时；“不可用”表示缺少采集或可靠关联。当前部门用于人员识别，统计归属使用顶部所选口径。")}</p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <span>跨页已选 {selectedIds.length} / 5 人</span>
-                    <Button disabled={disabled || selectedIds.length < 2} loading={comparing} onClick={() => void compare()}>
-                        读取所选人员对比
-                    </Button>
-                    <Button disabled={disabled || !selectedIds.length} onClick={() => onSelectionChange([])}>
-                        清空对比选择
-                    </Button>
+                    <span>{staticUiText("跨页已选 ")}{selectedIds.length}{staticUiText(" / 5 人")}</span>
+                    <Button disabled={disabled || selectedIds.length < 2} loading={comparing} onClick={() => void compare()}>{staticUiText("读取所选人员对比")}</Button>
+                    <Button disabled={disabled || !selectedIds.length} onClick={() => onSelectionChange([])}>{staticUiText("清空对比选择")}</Button>
                 </div>
-                {comparisonError ? <Alert className="mt-3" type="warning" title={comparisonError} /> : null}
+                {comparisonError ? <Alert className="mt-3" type="warning" title={display(comparisonError)} /> : null}
             </section>
             {compared ? (
                 <PeopleComparison key={comparisonKey} data={compared} onProfile={onProfile} />

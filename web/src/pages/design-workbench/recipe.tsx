@@ -1,4 +1,5 @@
 import { uiText, useUiText } from "@/lib/i18n";
+import { DisplayText, DisplayTranslationScope, DisplayTranslationPreview } from "@/hooks/use-display-text";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { GenerationInputList } from "@/components/generation-input-list";
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
@@ -64,6 +65,7 @@ export default function RecipePage() {
 
 function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     useUiText();
+    const [openPrompts, setOpenPrompts] = useState<ReadonlySet<string>>(new Set());
     const { draftScope, active: workspaceActive } = useWorkbenchTask();
     const effectiveConfig = useEffectiveConfig("image");
     const user = useUserStore((state) => state.user);
@@ -516,12 +518,15 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                         {project.form.kind === "pattern" && <p className="sr-help">{uiText("未提供图案参考时，只使用底图已有图案及你写明的方向，不注入内置花型。")}</p>}
                         <label className="sr-field">
                             {uiText("系列名称")}<input aria-label={uiText("系列名称")} value={project.form.series} maxLength={80} onChange={(event) => updateForm({ series: event.target.value })} />
+                            <DisplayTranslationPreview text={project.form.series} />
                         </label>
                         <label className="sr-field">
                             {uiText("必须保留")}<textarea aria-label={uiText("必须保留")} value={project.form.constraints} maxLength={2000} rows={3} onChange={(event) => updateForm({ constraints: event.target.value })} />
+                            <DisplayTranslationPreview text={project.form.constraints} />
                         </label>
                         <label className="sr-field">
                             {uiText("设计方向")}<textarea aria-label={uiText("设计方向")} value={project.form.prompt} maxLength={3000} rows={3} onChange={(event) => updateForm({ prompt: event.target.value })} />
+                            <DisplayTranslationPreview text={project.form.prompt} />
                         </label>
                         <p className="sr-help">{project.form.kind === "structure" ? uiText("可配置 1–6 个颜色；每次仅生成当前选中的一色，不会自动生成其他颜色。历史候选保留。") : uiText("每次仅生成 1 个候选；可修改方向后再次发起独立任务。历史候选保留。")}</p>
                         {project.form.kind === "structure" ? (
@@ -653,7 +658,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                         ) : (
                                             <span>
                                                 {branch.status === "running" ? <LoaderCircle size={28} className="animate-spin" /> : <Palette size={28} strokeWidth={1} />}
-                                                {branch.optimizing ? uiText("正在优化提示词…") : recipeStatusLabels[branch.status]}
+                                                {branch.optimizing ? uiText("正在优化提示词…") : uiText(recipeStatusLabels[branch.status])}
                                             </span>
                                         )}
                                     </button>
@@ -662,19 +667,21 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                             <h3>
                                                 {source.form.kind === "structure" && <i style={{ background: source.form.palette[branch.index]!.hex }} />}{uiText("候选 ")}{String(branch.index + 1).padStart(2, "0")}
                                             </h3>
-                                            <span>{branch.optimizing ? uiText("正在优化提示词…") : recipeStatusLabels[branch.status]}</span>
+                                            <span>{branch.optimizing ? uiText("正在优化提示词…") : uiText(recipeStatusLabels[branch.status])}</span>
                                         </div>
-                                        <p>{source.form.kind === "structure" ? `${source.form.palette[branch.index]!.name} · ${source.form.palette[branch.index]!.hex.toUpperCase()}` : source.form.positions[branch.index]}</p>
+                                        <p><DisplayText text={source.form.kind === "structure" ? `${source.form.palette[branch.index]!.name} · ${source.form.palette[branch.index]!.hex.toUpperCase()}` : source.form.positions[branch.index]} /></p>
                                         {source !== run && <small>{uiText("历史候选")}</small>}
                                         {branch.error && <GenerationDiagnostic error={branch.error} details={`requestId: ${branch.requestId || ""}\ntaskIds: ${branch.taskIds.join(", ")}`} />}
                                         <small>
                                             {uiText("已尝试 {count} 次", { count: branch.attempts })}
                                         </small>
-                                        <details>
+                                        <details onToggle={event => { const open = event.currentTarget.open, key = `${source.id}:${branch.id}`; setOpenPrompts(previous => { const next = new Set(previous); if (open) next.add(key); else next.delete(key); return next; }); }}>
                                             <summary>{uiText("查看本候选原始提示词")}</summary>
+                                            <DisplayTranslationScope visible={openPrompts.has(`${source.id}:${branch.id}`)}>
                                             <pre>
-                                                {branch.prompt}
+                                                <DisplayText text={branch.prompt} />
                                             </pre>
+                                            </DisplayTranslationScope>
                                         </details>
                                         <label className="sr-selection">
                                             <input

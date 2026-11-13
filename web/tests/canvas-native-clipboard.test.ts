@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { uiText } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
@@ -101,6 +102,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
     const update = <T>(ref: { current: T }) => (value: T | ((current: T) => T)) => { ref.current = typeof value === "function" ? (value as (current: T) => T)(ref.current) : value; };
     const env = {
         uiText,
+        displayNotice: displayHooksHarness.displayNotice,
         CANVAS_LARGE_IMAGE_NOTICE, isLargeCanvasImage,
         canvasImportGridPosition, placeCanvasImportedNodes, mapCanvasAsyncPool, pastePositionRef: { current: null }, importQueueRef: { current: Promise.resolve() }, setImportPlaceholder: noop, flushEditorDrafts: noop,
         savedProjectIdRef: { current: "clipboard-test" }, hiddenGroupNodeIds: new Set(), isCanvasBatchChildHidden, batchRootsById: new Map(), collapsingBatchIds: new Set(),

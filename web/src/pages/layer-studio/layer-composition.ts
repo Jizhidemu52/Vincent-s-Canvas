@@ -167,7 +167,8 @@ export async function renderLayerStudioComposition(canvas: HTMLCanvasElement, do
         if (layer?.visible === false) continue;
         let source: LayerStudioImage | undefined;
         try {
-            if (item.state !== "saved" || !layer) throw new Error("图层原件或定位尺寸尚未就绪");
+            if (item.state !== "saved") throw new Error("图层原件尚未保存，请查询或恢复原任务保存");
+            if (!layer) throw new Error("图层定位尺寸尚未就绪，请重新读取已保存原件");
             source = await readImage(item, signal);
             signal?.throwIfAborted();
             context.drawImage(source.image, layer.x, layer.y, layer.width, layer.height);

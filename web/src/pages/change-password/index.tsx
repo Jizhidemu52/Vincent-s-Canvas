@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { App, Button, Form, Input } from "antd";
 import { LockKeyhole } from "lucide-react";
@@ -31,7 +32,7 @@ export default function ChangePasswordPage() {
             const destination = currentLoginReturn(isAdminRole(user.role) ? "/admin" : "/");
             if (deploymentFeatures.authenticationEnabled) window.location.assign(destination);
             else navigate(destination, { replace: true });
-        } catch (error) { message.error(error instanceof Error ? error.message : uiText("密码修改失败")); }
+        } catch (error) { message.error(displayNotice(error instanceof Error ? error.message : uiText("密码修改失败"))); }
         finally { setSubmitting(false); }
     };
 

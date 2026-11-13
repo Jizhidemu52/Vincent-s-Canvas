@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Modal, Popover, Progress, Segmented, Slider, Spin, Tooltip } from "antd";
@@ -106,7 +107,7 @@ export function CanvasImageCompareDialog({ nodes, initialIds, onClose, compariso
             if (target !== canvas.current) drawCanvasCompare(target, loaded.before, loaded.after, mode, value, theme.node.fill, theme.node.text, "original");
             const blob = await encodeCanvasComparePng(target, { signal: controller.signal, onProgress: update => { if (!controller.signal.aborted) setProgress(update); } });
             if (!controller.signal.aborted) saveAs(blob, `${canvasImageExportStem(before)}_vs_${canvasImageExportStem(after)}_${{ slider: "滑块", side: "并排", overlay: "叠加", difference: "差异" }[mode]}${resolution === "original" ? "_原分辨率" : ""}.png`);
-        } catch (error) { if (!controller.signal.aborted) message.error(error instanceof Error ? error.message : t("导出失败，请重试")); }
+        } catch (error) { if (!controller.signal.aborted) message.error(displayNotice(error instanceof Error ? error.message : t("导出失败，请重试"))); }
         finally { if (target !== canvas.current) { target.width = 0; target.height = 0; } if (exportJob.current === controller) { exportJob.current = null; setExporting(false); setProgress(null); } }
     };
     return <Modal open centered title={t("改款前后对比")} width={1200} onCancel={close} footer={<div className="flex flex-wrap justify-end gap-2"><Button onClick={() => void exportImage()} disabled={!ready} loading={exporting}>{t("导出预览 PNG")}</Button>{mode !== "difference" ? <Button type="primary" onClick={() => void exportImage("original")} disabled={!ready} loading={exporting}>{t("按原分辨率导出")}</Button> : null}</div>}>

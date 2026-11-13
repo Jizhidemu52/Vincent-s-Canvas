@@ -9,7 +9,8 @@ const path = new URL("../src/pages/video/index.tsx", import.meta.url);
 const requireModule = createRequire(path);
 const code = ts.transpileModule(`${readFileSync(path, "utf8")}\nexports.ResultVideoCard = ResultVideoCard;`, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
 const module = { exports: {} as any };
-new Function("require", "module", "exports", code)((name: string) => name.endsWith(".css") ? {} : name === "@/lib/i18n" ? i18nHarness : requireModule(name), module, module.exports);
+const DisplayText = ({ text }: { text: string }) => text;
+new Function("require", "module", "exports", code)((name: string) => name.endsWith(".css") ? {} : name === "@/lib/i18n" ? i18nHarness : name === "@/hooks/use-display-text" ? { DisplayText } : requireModule(name), module, module.exports);
 function elements(node: unknown): React.ReactElement<any>[] {
     if (Array.isArray(node)) return node.flatMap(elements);
     if (!React.isValidElement<any>(node)) return [];
@@ -18,7 +19,8 @@ function elements(node: unknown): React.ReactElement<any>[] {
 function text(node: unknown): string {
     if (typeof node === "string" || typeof node === "number") return String(node);
     if (Array.isArray(node)) return node.map(text).join("");
-    return React.isValidElement<any>(node) ? text(node.props.children) : "";
+    if (!React.isValidElement<any>(node)) return "";
+    return text(node.type === DisplayText ? DisplayText(node.props) : node.props.children);
 }
 const original = { id: "video", url: "blob:original-hevc", storageKey: "video:original", bytes: 9006734, mimeType: "video/mp4", durationMs: 100000, serverAssetId: "7075c394-1184-44cc-9077-068d78e8b36d" };
 const card = (props = {}) => module.exports.ResultVideoCard({ video: original, onSelect() {}, onDownload() {}, onSaveAsset() {}, ...props });

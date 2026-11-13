@@ -1,3 +1,6 @@
+import { displayNotice, useDisplayConfig  } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useMemo, useState } from "react";
 import { Alert, App, Button, Table, Tag } from "antd";
 import { RefreshCw } from "lucide-react";
@@ -7,13 +10,15 @@ import { getIntegrationStatus, type IntegrationStatus } from "@/services/api/int
 type StatusRow = { key: string; name: string; ready: boolean; detail: string };
 
 export function IntegrationStatusPanel() {
+    const displayConfig = useDisplayConfig();
+    useUiLocale();
     const { message } = App.useApp();
     const [status, setStatus] = useState<IntegrationStatus | null>(null);
     const [loading, setLoading] = useState(true);
     const refresh = async () => {
         setLoading(true);
         try { setStatus(await getIntegrationStatus()); }
-        catch (error) { message.error(error instanceof Error ? error.message : "系统集成状态加载失败"); }
+        catch (error) { message.error(displayNotice(error instanceof Error ? error.message : staticUiText("系统集成状态加载失败"))); }
         finally { setLoading(false); }
     };
     useEffect(() => { void refresh(); }, []);
@@ -37,8 +42,8 @@ export function IntegrationStatusPanel() {
         <div className="space-y-4">
             {status?.taskRuntime.mockMode ? <Alert type="warning" showIcon message="当前仍在模拟任务模式，正式上线前必须关闭 TASK_MOCK_MODE" /> : null}
             <div className="flex items-center justify-between">
-                <div className="text-sm text-[var(--muted-foreground)]">Worker 并发：{status?.taskRuntime.workerConcurrency ?? "-"}</div>
-                <Button icon={<RefreshCw className="size-4" />} loading={loading} onClick={() => void refresh()}>刷新状态</Button>
+                <div className="text-sm text-[var(--muted-foreground)]">{staticUiText("Worker 并发：")}{status?.taskRuntime.workerConcurrency ?? "-"}</div>
+                <Button icon={<RefreshCw className="size-4" />} loading={loading} onClick={() => void refresh()}>{staticUiText("刷新状态")}</Button>
             </div>
             <Table<StatusRow>
                 rowKey="key"
@@ -46,11 +51,11 @@ export function IntegrationStatusPanel() {
                 loading={loading}
                 pagination={false}
                 dataSource={rows}
-                columns={[
-                    { title: "集成", dataIndex: "name", width: 220 },
-                    { title: "状态", width: 120, render: (_, row) => <Tag color={row.ready ? "green" : "orange"}>{row.ready ? "可用" : "待配置"}</Tag> },
-                    { title: "诊断", dataIndex: "detail" },
-                ]}
+                columns={displayConfig([
+                    { title: staticUiText("集成"), dataIndex: "name", width: 220 },
+                    { title: staticUiText("状态"), width: 120, render: (_, row) => <Tag color={row.ready ? "green" : "orange"}>{row.ready ? staticUiText("可用") : staticUiText("待配置")}</Tag> },
+                    { title: staticUiText("诊断"), dataIndex: "detail" },
+                ], "columns", rows)}
             />
         </div>
     );

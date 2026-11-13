@@ -1,4 +1,5 @@
 import { uiText, useUiText } from "@/lib/i18n";
+import { useDisplayText } from "@/hooks/use-display-text";
 import { Button, Modal, Select, Spin, Tooltip } from "antd";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { findStandardColors, loadStandardColorManifest, loadStandardColors, toStandardColorSelection, type StandardColor, type StandardColorSelection } from "@/lib/standard-colors";
@@ -18,6 +19,7 @@ export default function StandardColorDialog({ initialHex, selection, source, slo
     onClose: () => void;
 }) {
     useUiText();
+    const display = useDisplayText();
     const photoColorPickerEnabled = useModuleEnabled("photo-color-picker");
     const [manifest, setManifest] = useState<Awaited<ReturnType<typeof loadStandardColorManifest>> | null>(null);
     const [library, setLibrary] = useState(selection?.library || "PANTONE TCX");
@@ -41,7 +43,7 @@ export default function StandardColorDialog({ initialHex, selection, source, slo
             if (library && !data.libraries.some(item => item.name === library)) { setLibrary(""); return; }
             const loaded = await loadStandardColors(library || undefined);
             if (!cancelled) setColors(loaded);
-        }).catch(caught => { if (!cancelled) setError(caught instanceof Error ? uiText(caught.message) : uiText("色库加载失败，请重试")); })
+        }).catch(caught => { if (!cancelled) setError(caught instanceof Error ? caught.message : "色库加载失败，请重试"); })
             .finally(() => { if (!cancelled) setBusy(false); });
         return () => { cancelled = true; };
     }, [library, retry]);
@@ -58,12 +60,12 @@ export default function StandardColorDialog({ initialHex, selection, source, slo
     const pickHex = (value: string) => { setHex(value); setSort("nearest"); setPage(0); };
 
     return <Modal open modalRender={modal => <div data-usage-board="standard-colors">{modal}</div>} title={uiText("从标准色库选择 · {slotLabel}", { slotLabel: slotLabel })} width={920} onCancel={onClose}
-        footer={<div className="sc-footer"><span>{uiText("仅填写目标色，点击「生成」后才调用 AI。")}</span><div><Button onClick={onClose}>{uiText("取消")}</Button><Button type="primary" disabled={!chosen} onClick={() => { if (chosen) onSelect(chosen); }}>{uiText("应用到")}{slotLabel}</Button></div></div>}>
+        footer={<div className="sc-footer"><span>{uiText("仅填写目标色，点击「生成」后才调用 AI。")}</span><div><Button onClick={onClose}>{uiText("取消")}</Button><Button type="primary" disabled={!chosen} onClick={() => { if (chosen) onSelect(chosen); }}>{uiText("应用到{slotLabel}", { slotLabel })}</Button></div></div>}>
         <div className="sc-dialog">
             <div className="sc-intro"><p>{uiText("搜索色号，或从原图取色寻找相近颜色。")}</p><span>{manifest ? uiText("{value1} 色 · {length} 个色库 / 分组", { value1: manifest.total.toLocaleString(), length: manifest.libraries.length }) : uiText("正在读取色库目录…")}</span></div>
             <div className="sc-filters">
                 <label>{uiText("色库")}<Select aria-label={uiText("色库")} className="w-full" value={library} disabled={!manifest} onChange={value => { setLibrary(value); setPage(0); }}
-                    options={[{ value: "", label: uiText("全部色库") }, ...(manifest?.libraries.map(item => ({ value: item.name, label: `${item.name}（${item.count.toLocaleString()}）` })) || [])]} /></label>
+                    options={[{ value: "", label: uiText("全部色库") }, ...(manifest?.libraries.map(item => ({ value: item.name, label: `${display(item.name)}（${item.count.toLocaleString()}）` })) || [])]} /></label>
                 <label>{uiText("色号 / 名称 / HEX")}<input className="cs-input" type="search" value={query} autoFocus placeholder={uiText("例如：18-1664、RAL 3020、#A5B8C5")} onChange={event => { setQuery(event.target.value); setPage(0); }} /></label>
             </div>
             <div className="sc-match-controls">
@@ -74,14 +76,14 @@ export default function StandardColorDialog({ initialHex, selection, source, slo
             {!validHex && <p className="sc-error" role="status">{uiText("请输入 #RGB 或 #RRGGBB 格式的参考色。")}</p>}
             {photoColorPickerEnabled && source && <details className="sc-photo"><summary>{uiText("从已上传的款式图取色")}</summary><PhotoColorSampler src={source} onPick={pickHex} /></details>}
             <div className="sc-status" aria-live="polite">{updating ? <><Spin size="small" /> {uiText(" 正在加载颜色…")}</> : error ? null : uiText("{value1} 个结果{value2}", { value1: results.total.toLocaleString(), value2: effectiveSort === "nearest" ? uiText(" · 屏幕色值近似匹配") : "" })}</div>
-            {error ? <div className="sc-error" role="alert"><p>{uiText(error || "")}</p><Button onClick={() => setRetry(value => value + 1)}>{uiText("重新加载")}</Button></div> : <>
+            {error ? <div className="sc-error" role="alert"><p>{display(error || "")}</p><Button onClick={() => setRetry(value => value + 1)}>{uiText("重新加载")}</Button></div> : <>
                 <div className="sc-grid" aria-label={uiText("标准色卡")} aria-busy={updating}>
                     {!updating && results.items.map(({ color, deltaE }) => {
                         const selected = chosen?.id === color.id && chosen.library === (library || color.brand);
-                        return <button type="button" className="sc-card" key={color.id} aria-pressed={selected} aria-label={`${color.name} ${color.hex}`} onClick={() => setChosen(toStandardColorSelection(color, library || undefined, manifest?.version))}>
+                        return <button type="button" className="sc-card" key={color.id} aria-pressed={selected} aria-label={`${display(color.name)} ${color.hex}`} onClick={() => setChosen(toStandardColorSelection(color, library || undefined, manifest?.version))}>
                             <span className="sc-swatch" style={{ background: color.hex }} />
-                            <Tooltip title={color.name}><span className="sc-card-name">{color.name}</span></Tooltip>
-                            <Tooltip title={library || color.brand}><span className="sc-card-library">{library || color.brand}</span></Tooltip>
+                            <Tooltip title={display(color.name)}><span className="sc-card-name">{display(color.name)}</span></Tooltip>
+                            <Tooltip title={display(library || color.brand)}><span className="sc-card-library">{display(library || color.brand)}</span></Tooltip>
                             <span className="sc-card-values">{color.hex}{deltaE !== undefined && <span>ΔE {deltaE.toFixed(2)}</span>}</span>
                         </button>;
                     })}
@@ -92,7 +94,7 @@ export default function StandardColorDialog({ initialHex, selection, source, slo
             <div className="sc-selection" aria-live="polite">
                 <span className="sc-comparison" style={{ background: currentHex }} aria-label={uiText("当前色 {initialHex}", { initialHex: initialHex })} />
                 <span>→</span><span className="sc-comparison" style={{ background: chosen?.hex || "transparent" }} />
-                {chosen ? <div><strong>{chosen.name}</strong><span>{chosen.library} · {chosen.hex}</span><a href={chosen.sourceUrl} target="_blank" rel="noreferrer">{uiText("查看色号来源")}</a></div> : <span>{uiText("选择一张色卡，确认后填入")}{slotLabel}。</span>}
+                {chosen ? <div><strong>{display(chosen.name)}</strong><span>{display(chosen.library)} · {chosen.hex}</span><a href={chosen.sourceUrl} target="_blank" rel="noreferrer">{uiText("查看色号来源")}</a></div> : <span>{uiText("选择一张色卡，确认后填入")}{slotLabel}。</span>}
             </div>
             <p className="sc-note">{uiText("色值来自公开色库快照，供屏幕与 AI 配色参考。照片换色将要求保留面料纹理、褶皱和光影，生成结果仍为近似颜色；生产用色请核对实物色卡。")}</p>
         </div>

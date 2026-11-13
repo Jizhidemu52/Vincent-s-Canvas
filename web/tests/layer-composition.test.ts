@@ -71,4 +71,5 @@ test("preview and export share exact transforms and strict export rejects missin
     await assert.rejects(renderLayerStudioComposition(canvas, result, edit, group, async () => { throw new Error("not reached"); }));
     const preview = await renderLayerStudioComposition(canvas, result, edit, group, async item => ({ width: 1, height: 1, image: item.index as unknown as CanvasImageSource, dispose() {} }), { allowPartial: true });
     assert.deepEqual(preview.unavailable.map(item => item.index), [2]);
+    assert.equal(preview.unavailable[0].message, "图层原件尚未保存，请查询或恢复原任务保存");
 });

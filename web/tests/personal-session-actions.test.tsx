@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
 import ts from "typescript";
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 
 const requireModule = createRequire(import.meta.url);
 const code = ts.transpileModule(readFileSync(new URL("../src/components/layout/personal-session-actions.tsx", import.meta.url), "utf8"), {
@@ -36,6 +37,7 @@ function sessionActions() {
     const module = { exports: {} as any };
     const mocks: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
+        "@/hooks/use-display-text": displayHooksHarness,
         react: { ...React, useState(initial: boolean) {
             const currentInstance = instance; const index = cursor++;
             if (!(index in values[currentInstance])) values[currentInstance][index] = initial;

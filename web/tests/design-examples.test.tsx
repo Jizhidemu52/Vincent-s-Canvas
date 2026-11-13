@@ -10,6 +10,7 @@ import { DesignExampleArticle, PracticeExampleRecord } from "@/components/design
 import { designExampleForLocation, designExampleForScene, designExamples } from "@/lib/design-examples";
 import { navigationTools } from "@/constant/navigation-tools";
 import { creativePresets, isStandaloneCreativePreset } from "@/lib/creative-presets";
+import { i18nHarness } from "./helpers/i18n-harness";
 
 describe("concise illustrated design examples", () => {
     test("all 27 module-specific examples use one short sentence for input, action and result", () => {
@@ -131,6 +132,8 @@ function practiceRecord() {
     const location = { pathname: "/image", search: "" };
     const copies: string[] = [];
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
+        "@/hooks/use-display-text": { useDisplayText: () => (text: string) => text },
         react: { ...React, useId: () => "practice-test", useState: () => [expandedId, (value: string | null) => { expandedId = value; }] },
         "react-router-dom": { useLocation: () => location },
         "@/hooks/use-copy-feedback": { useCopyFeedback: () => ({ copied: false, copy: (value: string) => { copies.push(value); return Promise.resolve(true); } }) },

@@ -31,6 +31,7 @@ import {
 import { createWorkflowsRouter } from "./routes/workflows";
 import { ChatProtocolError, createChatRouter } from "./routes/chat";
 import { openProductCandidatesReceiptConnection } from "./product-candidates-redis";
+import { createDisplayTranslationsRouter } from "./routes/display-translations";
 import { requireSameOrigin } from "./http-security";
 import { requireAccountReady, sessionMiddleware } from "./session";
 import { createIntegrationsRouter } from "./routes/integrations";
@@ -95,6 +96,7 @@ app.use(["/api/design-library", "/api/admin/design-library"], designLibraryBound
 app.use("/api/reference-import", express.json({ limit: "16kb" }), referenceImportBodyErrors);
 app.use(["/api/usage", "/api/admin/usage"], express.json({ limit: "128kb" }), usageErrors);
 app.use("/api/chat", express.json({ limit: "12mb" }));
+app.use("/api/display-translations", express.json({ limit: "64kb" }));
 app.use("/api/canvas-documents", express.json({ limit: "20mb" }));
 const canvasBodyError: ErrorRequestHandler = (error, _request, response, next) => {
   if (error?.type === "entity.too.large") { response.status(413).json({ error: "CANVAS_DOCUMENT_TOO_LARGE", message: "画布数据超过 20 MB 限制" }); return; }
@@ -138,6 +140,7 @@ app.use("/api/admin/prompt-recipes", requireAdminSession, requireAccountReady, c
   async (actor, action, key, client) => { await writeAudit(client, { actor, action, targetType: "prompt_recipe", targetId: key, result: "success" }); },
 ));
 const requireUsageSession = sessionMiddleware(db, cache, config, { allowGuest: false, allowAdminSession: true, unauthenticatedStatus: 403 });
+app.use("/api/display-translations", requireUsageSession, requireAccountReady, createDisplayTranslationsRouter(db, config, { cache, openReceiptConnection: () => openProductCandidatesReceiptConnection(cache) }));
 app.use("/api/usage", requireUsageSession, requireAccountReady, createUsageRouter(db, { enabled: features.authenticationEnabled }));
 app.use("/api/admin/usage", requireUsageSession, requireAccountReady, createAdminUsageRouter(db, config, { enabled: features.authenticationEnabled }));
 const designLibrary = new DesignLibraryService(new PostgresDesignLibraryRepository(db), designLibraryObjectStorage(storage));

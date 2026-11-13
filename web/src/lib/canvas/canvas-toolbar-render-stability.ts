@@ -7,6 +7,7 @@ export type CanvasToolbarRenderState = {
     children?: ReactNode;
     viewControls?: ReactNode;
     onOpenTools?: () => void;
+    onOpenTemplate?: () => void;
     selectedCount: number;
     selectedImageCount?: number;
     onDownloadSelection?: () => void;
@@ -45,6 +46,7 @@ export function canvasToolbarPropsEqual(previous: CanvasToolbarRenderState, next
         previous.children === next.children &&
         previous.viewControls === next.viewControls &&
         previous.onOpenTools === next.onOpenTools &&
+        previous.onOpenTemplate === next.onOpenTemplate &&
         previous.selectedCount === next.selectedCount &&
         previous.selectedImageCount === next.selectedImageCount &&
         previous.onDownloadSelection === next.onDownloadSelection &&

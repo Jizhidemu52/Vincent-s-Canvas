@@ -7,6 +7,7 @@ import { compiledCanvasGenerationRecord, createCanvasGenerationRecord } from "@/
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { shouldCancelCanvasGeneration, stopCanvasObservation } from "@/lib/canvas/canvas-project-async-lifecycle";
 import { QueuedTaskHttpError, QueuedTaskSubmissionUncertainError } from "@/services/api/generation-tasks";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 
 type BatchForm = ReturnType<typeof import("@/pages/canvas/use-canvas-batch-edit").useCanvasBatchEdit>;
 type Setter = (update: any) => void;
@@ -62,6 +63,7 @@ export function batchHarness(options: { upload?: (input: File | string) => Promi
     const dependencies: Record<string, unknown> = {
         react, "react-dom": { flushSync: (run: () => void) => run() }, antd: { App: { useApp: () => ({ message }) } },
         nanoid: { nanoid: () => "id-" + ++allocation }, "@/lib/i18n": { uiText },
+        "@/hooks/use-display-text": displayHooksHarness,
         "@/stores/use-user-store": { useUserStore },
         "@/stores/use-config-store": { useEffectiveConfig: () => defaultConfig, modelOptionName: (model: string) => model },
         "@/hooks/use-tool-config": { currentToolConfig: (config: unknown) => config },

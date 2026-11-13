@@ -1,4 +1,5 @@
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { expect, test } from "bun:test";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -6,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import * as React from "react";
 import ts from "typescript";
 import * as beijingTime from "../src/lib/beijing-time";
+import { setUiLocale, uiText } from "../src/lib/i18n";
 
 const source = new URL("../src/pages/admin/components/usage-analytics-panel.tsx", import.meta.url);
 const requireModule = createRequire(source);
@@ -21,7 +23,15 @@ function elements(node: unknown): React.ReactElement<any>[] {
     const element = node as React.ReactElement<any>;
     return [element, ...elements(element.props.children), ...elements(element.props.footer)];
 }
-const text = (node: unknown): string => typeof node === "string" || typeof node === "number" ? String(node) : Array.isArray(node) ? node.map(text).join("") : React.isValidElement(node) ? text((node as React.ReactElement<any>).props.children) : "";
+const text = (node: unknown): string => {
+    if (typeof node === "string" || typeof node === "number") return String(node);
+    if (Array.isArray(node)) return node.map(text).join("");
+    if (!React.isValidElement(node)) return "";
+    const element = node as React.ReactElement<any>;
+    if (element.type === "DisplayText") return element.props.text;
+    if (element.type === "SensitiveDisplayValue") return element.props.format ? element.props.format(element.props.value) : typeof element.props.value === "string" ? element.props.value : JSON.stringify(element.props.value, null, 2) ?? "";
+    return text(element.props.children);
+};
 
 function harness(options: { role?: string; analyze?: (body: unknown, signal: AbortSignal) => Promise<unknown>; preview?: () => Promise<unknown>; list?: (signal: AbortSignal) => Promise<unknown>; models?: (signal: AbortSignal) => Promise<unknown>; detail?: () => Promise<unknown>; export?: () => Promise<unknown> } = {}) {
     const state: any[] = [], effects: Array<{ deps?: React.DependencyList; cleanup?: ReturnType<React.EffectCallback> }> = [], pending: Array<() => void> = [];
@@ -31,8 +41,10 @@ function harness(options: { role?: string; analyze?: (body: unknown, signal: Abo
     const equal = (a?: React.DependencyList, b?: React.DependencyList) => Boolean(a && b && a.length === b.length && a.every((item, index) => Object.is(item, b[index])));
     const dependencies: Record<string, any> = {
         "@/lib/i18n": i18nHarness,
+        "@/hooks/use-display-text": { ...displayHooksHarness, DisplayText: "DisplayText", DisplayTranslationScope: "DisplayTranslationScope", SensitiveDisplayValue: "SensitiveDisplayValue" },
         "@/lib/beijing-time": beijingTime,
         react: { ...React,
+            useMemo: (calculate: () => unknown) => calculate(),
             useState: (initial: any) => { const index = cursor++; if (!(index in state)) state[index] = typeof initial === "function" ? initial() : initial; return [state[index], (next: any) => { state[index] = typeof next === "function" ? next(state[index]) : next; }]; },
             useRef: (initial: any) => { const index = cursor++; return state[index] ||= { current: initial }; },
             useEffect: (effect: React.EffectCallback, deps?: React.DependencyList) => { const index = cursor++; if (!effects[index] || !equal(effects[index].deps, deps)) pending.push(() => { effects[index]?.cleanup?.(); effects[index] = { deps, cleanup: effect() }; }); },
@@ -324,7 +336,7 @@ test("preview is opt-in, defaults to no prompt samples, and sends only the exact
         tree = await panel.settle();
         expect(panel.calls.preview[0].body.includePromptSamples).toBe(false);
         expect(panel.calls.preview[0].body).not.toHaveProperty("userIds");
-        expect(tree.find(element => element.props["data-testid"] === "usage-analysis-preview")?.props.children).toBe(frozenPreview.content);
+        expect(text(tree.find(element => element.props["data-testid"] === "usage-analysis-preview")?.props.children)).toBe(frozenPreview.content);
         const submit = button(tree, "发送已预览汇总 · 手动分析").props.onClick;
         submit(); submit();
         expect(panel.calls.analyze).toHaveLength(1);
@@ -433,4 +445,54 @@ test("incomplete export does not save a file and unmount cancels outstanding aut
     } finally { panel.dispose(); }
     const pending = harness({ list: () => new Promise(() => undefined) });
     await pending.settle(); pending.dispose(); expect(pending.calls.list[0].signal.aborted).toBe(true);
+});
+
+test("daily trend localizes its default title and static headers without changing source rows", async () => {
+    const panel = harness();
+    const daily = [{ ...summary, day: "2026-10-30" }];
+    const original = JSON.stringify(daily);
+    const props = { daily, from: "2026-10-30", to: "2026-10-30" };
+    const headers = ["日期", "生成请求", "文字请求", "成功", "失败 / 取消 / 中断", "未完成", "终态成功率", "实际图片", "访问", "交互"];
+    const renderTrend = () => elements(panel.exports.UsageDailyTrend(props));
+    try {
+        const chinese = renderTrend();
+        expect(chinese[0].props["aria-label"]).toBe("每日趋势");
+        expect(chinese.filter(item => item.type === "th" && item.props.scope === "col").map(item => text(item))).toEqual(headers);
+        await setUiLocale("en-US");
+        const english = renderTrend();
+        expect(english[0].props["aria-label"]).toBe(uiText("每日趋势"));
+        expect(english.find(item => item.type === "h3")?.props.children).toBe(uiText("每日趋势"));
+        expect(english.filter(item => item.type === "th" && item.props.scope === "col").map(item => text(item))).toEqual(headers.map(label => uiText(label)));
+        expect(english.filter(item => item.type === "td").map(item => text(item))).toEqual(chinese.filter(item => item.type === "td").map(item => text(item)));
+        expect(JSON.stringify(daily)).toBe(original);
+        await setUiLocale("zh-CN");
+        expect(text(renderTrend())).toBe(text(chinese));
+    } finally { await setUiLocale("zh-CN"); panel.dispose(); }
+});
+
+test("record kinds and statuses translate only on display and restore without mutating records", async () => {
+    const records = [
+        ["visit", "recorded", "板块访问", "已记录"], ["interaction", "paused", "操作事件", "已暂停"],
+        ["generation", "success", "生成请求", "成功"], ["chat", "processing", "文字调用", "处理中"],
+        ["gap", "failed", "采集缺口", "失败"], ["generation", "unknown-status", "生成请求", "unknown-status"],
+    ].map(([kind, status, kindLabel, statusLabel], index) => ({ id: `record-${index}`, kind, status, kindLabel, statusLabel, occurredAt: "2026-10-30T00:00:00Z", boardLabel: "原始板块", modelName: "原始模型", prompt: "原始提示词", parameters: { caption: "原始参数" }, generatedImages: 1 }));
+    const original = JSON.stringify(records);
+    const panel = harness({ detail: async () => ({ ...people, person, records }) });
+    try {
+        let tree = await panel.settle();
+        tree.find(item => item.type === "Table")!.props.columns.find((column: any) => column.title === "姓名").render(person.displayName, person).props.onClick();
+        tree = await panel.settle();
+        const cards = tree.filter(item => records.some(record => item.props.record === record));
+        const renderCards = () => cards.map(card => elements((card.type as Function)(card.props)));
+        const chinese = renderCards();
+        expect(chinese.map(card => card.filter(item => item.type === "Tag").map(item => text(item)))).toEqual(records.map(record => [record.kindLabel, record.statusLabel]));
+        await setUiLocale("en-US");
+        const english = renderCards();
+        expect(english.map(card => card.filter(item => item.type === "Tag").map(item => text(item)))).toEqual(records.map(record => [uiText(record.kindLabel!), uiText(record.statusLabel!)]));
+        expect(english.filter((_, index) => ["generation", "chat"].includes(records[index].kind!)).every(card => text(card).includes("原始提示词"))).toBe(true);
+        expect(JSON.stringify(records)).toBe(original);
+        expect(panel.calls.analyze).toHaveLength(0);
+        await setUiLocale("zh-CN");
+        expect(renderCards().map(card => text(card))).toEqual(chinese.map(card => text(card)));
+    } finally { await setUiLocale("zh-CN"); panel.dispose(); }
 });

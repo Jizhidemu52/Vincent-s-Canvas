@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { useUiText, uiText } from "@/lib/i18n";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Alert, App, Button, Input, InputNumber, Modal, Select, Slider, Spin, Tooltip } from "antd";
@@ -236,7 +237,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, initialTool 
         if (!uploadedRef.current) uploadedRef.current = await uploadImage(await editorImageBlob(canvasRef.current, committedOperations.some(operation => operation.kind === "erase") ? "image/png" : node.metadata?.mimeType));
         await onConfirm(uploadedRef.current);
         onClose();
-        message.success(t(successMessage));
+        message.success(displayNotice(t(successMessage)));
     });
 
     return <Modal title={t("编辑图片")} open centered width="min(1200px, calc(100vw - 24px))" onCancel={cancel} closable={!saving} keyboard={!saving} mask={{ closable: false }} destroyOnHidden

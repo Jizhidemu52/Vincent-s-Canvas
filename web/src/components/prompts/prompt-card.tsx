@@ -3,15 +3,17 @@ import { Copy } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button, Card, Tag } from "antd";
 import { WorkbenchImage } from "@/components/workbench-image";
+import { useDisplayText } from "@/hooks/use-display-text";
 
 import { formatPromptDate, type Prompt } from "@/services/api/prompts";
 
 function PromptCover({ item }: { item: Prompt }) {
     const t = useUiText();
+    const display = useDisplayText();
     if (!item.coverUrl) {
         return <div className="flex aspect-[4/3] w-full items-center justify-center bg-muted text-[13px] font-medium text-muted-foreground">{t("暂无封面")}</div>;
     }
-    return <WorkbenchImage src={item.coverUrl} alt={item.title} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-contain" />;
+    return <WorkbenchImage src={item.coverUrl} alt={display(item.title)} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-contain" />;
 }
 
 export function PromptCard({
@@ -32,6 +34,7 @@ export function PromptCard({
     extraAction?: ReactNode;
 }) {
     const t = useUiText();
+    const display = useDisplayText();
     return (
         <Card
             hoverable
@@ -46,14 +49,14 @@ export function PromptCard({
             <button type="button" className="block w-full text-left" onClick={onOpen}>
                 <div className="p-4">
                     <div className="flex items-start justify-between gap-3">
-                        <h2 className="line-clamp-1 text-sm font-semibold text-stone-950 dark:text-stone-100">{item.title}</h2>
+                        <h2 className="line-clamp-1 text-sm font-semibold text-stone-950 dark:text-stone-100">{display(item.title)}</h2>
                         <span className="shrink-0 text-xs text-stone-400 dark:text-stone-500">{formatPromptDate(item.updatedAt, getUiLocale())}</span>
                     </div>
-                    <p className="mt-2 line-clamp-3 text-xs leading-5 text-stone-600 dark:text-stone-400">{item.prompt}</p>
+                    <p className="mt-2 line-clamp-3 text-xs leading-5 text-stone-600 dark:text-stone-400">{display(item.prompt)}</p>
                     <div className="mt-3 flex flex-wrap gap-1.5">
                         {item.tags.map((tag) => (
                             <Tag key={tag} className="m-0 text-xs">
-                                {tag}
+                                {display(tag)}
                             </Tag>
                         ))}
                     </div>

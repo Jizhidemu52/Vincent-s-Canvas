@@ -28,6 +28,7 @@ import { createChatStreamBuffer } from "./chat-stream-buffer";
 import { chatSessionStorage } from "./chat-session-storage";
 import { chatMedia } from "./chat-media";
 import { ChatMarkdown } from "./chat-markdown";
+import { DisplayText, DisplayTranslationPreview, DisplayTranslationScope, displayNotice, useDisplayText } from "@/hooks/use-display-text";
 import { ChatImage } from "./chat-image";
 import { chatSourceTurn, createChatBranch } from "./chat-message-actions";
 import { chatFocusImage, chatImageOriginal } from "./chat-image-selection";
@@ -379,7 +380,7 @@ export default function ChatPage() {
 
     const selectImageTarget = (image: ConversationImageItem, mode: "region" | "correction") => {
         if (imageActionsDisabled || !activeSession || !isCurrentScope()) return false;
-        if (image.unavailableReason) { message.warning(uiText(image.unavailableReason)); return false; }
+        if (image.unavailableReason) { message.warning(displayNotice(uiText(image.unavailableReason))); return false; }
         const attachedIds = buildCreativeImageCatalog([], { role: "user", content: "", attachments }).map((item) => item.id);
         if (new Set([...attachedIds, image.id]).size > 5) { message.warning(uiText("编辑目标与参考图片合计最多 5 张，请先移除一张图片")); return false; }
         setImageTarget({ id: image.id, mode, sessionId: activeSession.id });
@@ -405,12 +406,12 @@ export default function ChatPage() {
             const { readCanvasMaskImageSize } = await import("@/components/canvas/canvas-node-mask-edit-dialog");
             const size = await readCanvasMaskImageSize(source.dataUrl); assertCurrent();
             setRegionImage({ ...source, ...size, bytes: 0, mimeType: source.type });
-        } catch (error) { if (isCurrentScope() && activeSessionIdRef.current === sessionId) message.error(error instanceof Error ? error.message : "无法打开修改区域"); }
+        } catch (error) { if (isCurrentScope() && activeSessionIdRef.current === sessionId) message.error(<DisplayText text={error instanceof Error ? error.message : "无法打开修改区域"} />); }
     };
 
     const addImageReference = (image: CreativeImageCatalogEntry) => {
         if (imageActionsDisabled || !isCurrentScope()) return false;
-        if (image.unavailableReason) { message.warning(uiText(image.unavailableReason)); return false; }
+        if (image.unavailableReason) { message.warning(displayNotice(uiText(image.unavailableReason))); return false; }
         const exists = attachments.some((item) => item.id === image.id);
         if (!exists && attachments.length >= 5) { message.warning(uiText("最多添加 5 个附件，请先移除一个附件")); return false; }
         const attachedIds = buildCreativeImageCatalog([], { role: "user", content: "", attachments }).map((item) => item.id);
@@ -429,7 +430,7 @@ export default function ChatPage() {
         if (action === "download") { void imageTools.download(image); return; }
         if (action !== "compare") return;
         const original = chatImageOriginal(composerImageCatalog, image.id);
-        if (!original.image || original.image.id === image.id) { message.warning(uiText(original.reason || "这张图已经是原图")); return; }
+        if (!original.image || original.image.id === image.id) { message.warning(displayNotice(uiText(original.reason || "这张图已经是原图"))); return; }
         imageTools.compare(image, [original.image]);
     };
 
@@ -455,7 +456,7 @@ export default function ChatPage() {
             // older history after it. The normal persistence effect follows commit.
             if (!preparingSendsRef.current.size) { persistence.clear(); await persistSessions(sessionsRef.current); }
         } catch (error) {
-            if (!controller.signal.aborted && isCurrentScope() && activeSessionIdRef.current === sessionId) message.error(error instanceof Error ? error.message : "检查失败，原生成结果已保留。");
+            if (!controller.signal.aborted && isCurrentScope() && activeSessionIdRef.current === sessionId) message.error(<DisplayText text={error instanceof Error ? error.message : "检查失败，原生成结果已保留。"} />);
         } finally {
             if (reviewRequestsRef.current.get(image.id) === controller) reviewRequestsRef.current.delete(image.id);
             if (isCurrentScope() && activeSessionIdRef.current === sessionId) setReviewingImageIds(previous => { const next = new Set(previous); next.delete(image.id); return next; });
@@ -464,7 +465,7 @@ export default function ChatPage() {
 
     const prepareCorrection = (image: ChatGeneratedImage) => {
         if (imageActionsDisabled || !isCurrentScope() || !activeSession) return;
-        if (draft.trim() || attachments.length || referenceImageIds.length || regionSelection) { message.warning("请先发送或清空当前草稿、附件和选区，再准备纠正；已有内容未改动。"); return; }
+        if (draft.trim() || attachments.length || referenceImageIds.length || regionSelection) { message.warning(uiText("请先发送或清空当前草稿、附件和选区，再准备纠正；已有内容未改动。")); return; }
         try {
             const prepared = prepareChatImageCorrection(image, imageCatalog);
             const sourceReply = activeSession.messages.find(item => item.generatedImages?.some(saved => saved.id === image.id));
@@ -475,8 +476,8 @@ export default function ChatPage() {
             setReferenceImageIds(prepared.references.map(reference => reference.id));
             setRegionSelection(sourceRegion?.imageId === prepared.base.id ? sourceRegion : null);
             setDraft(prepared.prompt); composerRef.current?.focus();
-            message.success("已准备纠正草稿；点击发送才会生成新任务。");
-        } catch (error) { message.warning(error instanceof Error ? error.message : "无法准备纠正，原结果未改动。"); }
+            message.success(uiText("已准备纠正草稿；点击发送才会生成新任务。"));
+        } catch (error) { message.warning(<DisplayText text={error instanceof Error ? error.message : "无法准备纠正，原结果未改动。"} />); }
     };
 
     const placeImageOnCanvas = async (image: ChatGeneratedImage) => {
@@ -529,7 +530,7 @@ export default function ChatPage() {
             if (loadedStorageKeyRef.current !== storageKey) return;
             navigate(`/canvas/${project!.id}`);
         } catch (error) {
-            message.error(error instanceof Error ? uiText(error.message) : uiText("添加到画布失败"));
+            message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("添加到画布失败")));
         } finally {
             placingImageRef.current = false;
             setPlacingImage(false);
@@ -554,7 +555,7 @@ export default function ChatPage() {
         let branch: ReturnType<typeof createChatBranch> | undefined;
         if (resend) {
             try { branch = createChatBranch(activeSession, resend.messageId, createClientId(), new Date().toISOString()); }
-            catch (error) { message.warning(error instanceof Error ? uiText(error.message) : uiText("无法重新发送")); return; }
+            catch (error) { message.warning(displayNotice(error instanceof Error ? uiText(error.message) : uiText("无法重新发送"))); return; }
         }
         const requestSession = branch?.session || activeSession;
         const text = (resend ? resend.content ?? branch!.source.content : draft).trim();
@@ -787,7 +788,7 @@ export default function ChatPage() {
             if (!stillCurrent()) break;
             const imageFile = file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(file.name);
             if (file.size > (imageFile ? 5 * 1024 * 1024 : AGENT_DOCUMENT_LIMITS.fileBytes)) {
-                message.warning(`${file.name} 超过 ${imageFile ? "5MB" : "20MB"}，未添加`);
+                message.warning(displayNotice(uiText("{p0} 超过 {p1}，未添加", { p0: file.name, p1: imageFile ? "5MB" : "20MB" })));
                 continue;
             }
             try {
@@ -810,7 +811,7 @@ export default function ChatPage() {
                 next.push(parsed.dataUrl ? await chatMedia.persist(attachment, assertCurrent) : attachment);
                 totalBytes += size;
             } catch (error) {
-                if (stillCurrent()) message.error(error instanceof Error ? uiText(error.message) : uiText("文件读取失败"));
+                if (stillCurrent()) message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("文件读取失败")));
             }
         }
         if (stillCurrent()) {
@@ -828,7 +829,7 @@ export default function ChatPage() {
         if (editing) { message.warning(uiText("编辑历史消息时保留原附件，请取消编辑后再粘贴新图片")); return; }
         if (sendingRef.current) { message.warning(uiText("请等待当前回复结束后再添加图片")); return; }
         if (attachmentReadRef.current || readingAttachments) { message.warning(uiText("正在读取附件，请稍后再粘贴图片")); return; }
-        void files.then(addFiles).catch(error => message.error(error instanceof Error ? uiText(error.message) : uiText("图片复制失败，请重试")));
+        void files.then(addFiles).catch(error => message.error(displayNotice(error instanceof Error ? uiText(error.message) : uiText("图片复制失败，请重试"))));
     };
 
     const imageDrop = useImageDrop({
@@ -876,7 +877,7 @@ export default function ChatPage() {
                         {sessions.map((session) => <div key={session.id} data-chat-session={session.id} className={cn("group relative flex w-full items-center gap-1 rounded-lg pr-1 transition-colors", session.id === activeSession?.id ? "bg-muted text-foreground before:absolute before:left-0 before:top-3 before:bottom-3 before:w-0.5 before:bg-foreground" : "text-muted-foreground hover:bg-muted/70")}>
                             <button type="button" aria-current={session.id === activeSession?.id ? "true" : undefined} disabled={placingImage || readingAttachments} onClick={() => selectSession(session.id)} className="flex min-w-0 flex-1 items-center gap-2 px-3 py-3 text-left disabled:opacity-60">
                                 <span className="grid size-7 shrink-0 place-items-center rounded-lg opacity-75">{[...sendLifetimesRef.current].some(item => item.sessionId === session.id) ? <LoaderCircle aria-label={uiText("正在处理")} className="size-4 animate-spin" /> : <Bot className="size-4" />}</span>
-                                <span className="min-w-0 flex-1"><span className={cn("block truncate text-sm", session.id === activeSession?.id ? "font-semibold" : "font-medium")}>{sessionTitle(session)}{session.branchOf ? uiText(" · 分支") : ""}</span><span className="mt-1 block text-xs opacity-65">{new Date(session.updatedAt).toLocaleDateString(getUiLocale())}</span></span>
+                                <span className="min-w-0 flex-1"><span className={cn("block truncate text-sm", session.id === activeSession?.id ? "font-semibold" : "font-medium")}><DisplayText text={sessionTitle(session)} />{session.branchOf ? uiText(" · 分支") : ""}</span><span className="mt-1 block text-xs opacity-65">{new Date(session.updatedAt).toLocaleDateString(getUiLocale())}</span></span>
                             </button>
                             <Tooltip title={[...sendLifetimesRef.current].some(item => item.sessionId === session.id) ? uiText("这段对话仍在处理，完成后可删除") : uiText("删除会话")}><button type="button" disabled={[...sendLifetimesRef.current].some(item => item.sessionId === session.id) || placingImage} onClick={() => modal.confirm({ title: uiText("删除这段对话？"), content: uiText("会话仅保存在当前浏览器，删除后无法恢复。"), okText: uiText("删除"), cancelText: uiText("保留"), okButtonProps: { danger: true }, onOk: () => removeSession(session.id) })} className="grid size-8 shrink-0 place-items-center rounded-lg opacity-50 transition hover:opacity-100 focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-60" aria-label={uiText("删除会话")}><Trash2 className="size-4" /></button></Tooltip>
                         </div>)}
@@ -924,6 +925,7 @@ export default function ChatPage() {
                                 {composerAttachments.length ? <div className="flex flex-wrap gap-2 pb-3">{composerAttachments.map((item) => <div key={item.id} className="group relative flex h-14 max-w-[180px] items-center gap-2 rounded-xl border border-border bg-card p-2">{item.dataUrl ? <img src={item.dataUrl} alt="" className="size-10 rounded-lg object-cover" /> : <span className="grid size-10 place-items-center rounded-lg bg-muted text-muted-foreground"><FileText className="size-5" /></span>}<span className="min-w-0 flex-1 truncate text-xs font-medium">{!editing && referenceImageIds.includes(item.id) ? uiText("参考 · {value1}", { value1: conversationImageLabel(imageLabels.get(item.id) || "") || item.name }) : item.name}</span>{!editing ? <button type="button" aria-label={uiText("移除 ") + item.name} onClick={() => { setAttachments((current) => current.filter((attachment) => attachment.id !== item.id)); setReferenceImageIds((ids) => ids.filter((id) => id !== item.id)); if (imageTarget?.id === item.id && !imageCatalog.some((image) => image.id === item.id)) setImageTarget(null); }} className="absolute -right-1.5 -top-1.5 grid size-6 place-items-center rounded-full border border-border bg-card text-muted-foreground hover:text-red-600"><X className="size-3.5" /></button> : null}</div>)}</div> : null}
                                 {readingAttachments || imageDrop.reading ? <div role="status" className="mb-2 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{uiText("正在读取附件，请稍候…")}</div> : null}
                                 <textarea ref={composerRef} aria-label={editing ? uiText("编辑消息") : uiText("对话内容")} value={composerText} disabled={!sessionsReady} onChange={event => { if (editing) setEditing({ ...editing, content: event.target.value }); else { setDraft(event.target.value); if (!event.target.value.trim() && imageTarget?.mode === "correction") setImageTarget(null); } }} onPaste={pasteAttachments} onKeyDown={(event) => { if (event.nativeEvent.isComposing || event.keyCode === 229 || event.repeat) return; handleSubmitShortcut(event, sessionsReady && !isSending && !readingAttachments && !hydratingMedia && !!selectedModel, sendComposer); }} placeholder={uiText("直接说怎么改 · Ctrl / ⌘ + Enter 发送")} style={{ outline: "none" }} className="block max-h-44 min-h-14 w-full resize-none overflow-y-auto overscroll-contain bg-transparent px-1 py-1 text-base leading-7 text-foreground placeholder:text-muted-foreground" />
+                                <DisplayTranslationPreview text={composerText} />
                                 {composerText.length > 240 ? <p className="mb-1 text-right text-[12px] text-muted-foreground">{composerText.length} {uiText("字")}</p> : null}
                                 <div className="mt-2 flex items-end justify-between gap-2">
                                     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
@@ -970,6 +972,9 @@ const ChatBubble = memo(function ChatBubble({ message, imageLabels, imageCatalog
 }) {
     useUiText();
     const isUser = message.role === "user";
+    const translate = useDisplayText();
+    const [workNoteExpanded, setWorkNoteExpanded] = useState(false);
+    const [specExpanded, setSpecExpanded] = useState(false);
     const copyText = useCopyText();
     const diagnosticClipboard = useCopyFeedback();
     const [copied, setCopied] = useState(false);
@@ -997,15 +1002,15 @@ const ChatBubble = memo(function ChatBubble({ message, imageLabels, imageCatalog
                     {item.review ? <div data-testid="chat-image-review" className="mt-2 space-y-1 text-xs text-muted-foreground">
                         <p className="font-medium">{uiText("AI 检查建议（非像素级认证）")}</p>
                         {item.review.baseUnavailable ? <p>{uiText("未取得本轮底图，保留项无法进行前后核验。")}</p> : null}
-                        <p>{item.review.report.summary}</p>
-                        <ul className="list-inside list-disc space-y-1">{item.review.report.checks.map((check, index) => <li key={`${index}:${check.criterion}`}><span>{check.result === "pass" ? "观察符合" : check.result === "warning" ? "发现疑点" : "无法核验"} · {check.criterion}</span><p className="pl-3">{check.evidence}</p></li>)}</ul>
+                        <p><DisplayText text={item.review.report.summary} /></p>
+                        <ul className="list-inside list-disc space-y-1">{item.review.report.checks.map((check, index) => <li key={`${index}:${check.criterion}`}><span>{uiText(check.result === "pass" ? "观察符合" : check.result === "warning" ? "发现疑点" : "无法核验")} · <DisplayText text={check.criterion} /></span><p className="pl-3"><DisplayText text={check.evidence} /></p></li>)}</ul>
                         {item.review.report.checks.some(check => check.result !== "pass") ? <Button size="small" disabled={actionsDisabled || item.review.baseUnavailable} onClick={() => onCorrect(item)}>{uiText("准备纠正草稿")}</Button> : null}
                     </div> : null}
                 </div>)}</div> : null}
-                {message.generatedImages?.[0]?.workNote ? <details className="mt-2 text-xs text-muted-foreground"><summary className="w-fit cursor-pointer">{uiText("本次修改与作品说明")}</summary><p className="mt-2 whitespace-pre-wrap">{imageAgentWorkNoteText(message.generatedImages[0].workNote)}</p></details> : null}
+                {message.generatedImages?.[0]?.workNote ? <details className="mt-2 text-xs text-muted-foreground" onToggle={event => setWorkNoteExpanded(event.currentTarget.open)}><summary className="w-fit cursor-pointer">{uiText("本次修改与作品说明")}</summary><DisplayTranslationScope visible={workNoteExpanded}><p className="mt-2 whitespace-pre-wrap"><DisplayText text={imageAgentWorkNoteText(message.generatedImages[0].workNote)} /></p></DisplayTranslationScope></details> : null}
                 {imageWork?.spec ? <div data-testid="chat-image-spec" className="mt-2 text-xs text-muted-foreground">
-                    {imageWork.spec.assumptions?.length ? <p className="whitespace-pre-wrap">{uiText("本轮假设")}：{imageWork.spec.assumptions.join("；")}</p> : null}
-                    <details><summary className="w-fit cursor-pointer">{uiText("本轮改图要求（待核对，不代表验收通过）")}</summary><p className="mt-2 whitespace-pre-wrap">{imageAgentSpecText(imageWork.spec)}</p></details>
+                    {imageWork.spec.assumptions?.length ? <p className="whitespace-pre-wrap">{uiText("本轮假设")}：<DisplayText text={imageWork.spec.assumptions.join("；")} /></p> : null}
+                    <details onToggle={event => setSpecExpanded(event.currentTarget.open)}><summary className="w-fit cursor-pointer">{uiText("本轮改图要求（待核对，不代表验收通过）")}</summary><DisplayTranslationScope visible={specExpanded}><p className="mt-2 whitespace-pre-wrap"><DisplayText text={imageAgentSpecText(imageWork.spec)} /></p></DisplayTranslationScope></details>
                 </div> : null}
                 {message.pendingImageTask ? <div data-testid="chat-pending-image-card" className="mt-3 grid gap-2 rounded-lg bg-muted/60 p-3 text-xs text-muted-foreground">
                     <span role="status">{checkingTask ? uiText("正在等待原任务结果…") : uiText("原图片任务等待核实")}</span>
@@ -1014,7 +1019,7 @@ const ChatBubble = memo(function ChatBubble({ message, imageLabels, imageCatalog
                     {message.pendingImageTask.taskId && message.pendingImageTask.recovery !== "investigate" ? <GenerationTaskCancel taskId={message.pendingImageTask.taskId} /> : null}
                     <details><summary className="w-fit cursor-pointer">{uiText("任务信息")}</summary><Button aria-label={uiText("复制诊断信息")} size="small" type="text" onClick={() => void diagnosticClipboard.copy(JSON.stringify({ requestId: `${message.pendingImageTask!.requestId}:0`, taskId: message.pendingImageTask?.taskId, status: message.pendingImageTask?.taskStatus, recovery: message.pendingImageTask?.recovery }, null, 2))}>{diagnosticClipboard.copied ? uiText("已复制 ✓") : uiText("复制诊断信息")}</Button></details>
                 </div> : null}
-                {message.attachments?.length ? <div className={cn("flex flex-wrap gap-2", message.content && "mt-3")}>{message.attachments.map((item) => item.dataUrl || item.storageKey || item.kind === "image" ? <ChatImage key={item.id} image={item} label={imageLabels.get(item.id) || item.name} {...imageControls(item.id)} /> : <span key={item.id} className={cn("inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs", isUser ? "bg-background/10" : "bg-muted text-muted-foreground")}><FileText className="size-3.5" />{item.name}</span>)}</div> : null}
+                {message.attachments?.length ? <div className={cn("flex flex-wrap gap-2", message.content && "mt-3")}>{message.attachments.map((item) => item.dataUrl || item.storageKey || item.kind === "image" ? <ChatImage key={item.id} image={item} label={imageLabels.get(item.id) || translate(item.name)} {...imageControls(item.id)} /> : <span key={item.id} className={cn("inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs", isUser ? "bg-background/10" : "bg-muted text-muted-foreground")}><FileText className="size-3.5" /><DisplayText text={item.name} /></span>)}</div> : null}
                 <div className="mt-2 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                     {message.content ? <button type="button" aria-label={uiText("复制消息")} onClick={() => void copyMessage()} className="inline-flex min-h-8 items-center gap-1 rounded-lg px-2 hover:bg-current/10"><Copy className="size-3" />{copied ? uiText("已复制 ✓") : uiText("复制")}</button> : null}
                     {isUser ? <button type="button" disabled={actionsDisabled} aria-label={uiText("编辑消息")} onClick={onEdit} className="inline-flex min-h-8 items-center gap-1 rounded px-2 hover:bg-current/10 disabled:opacity-40"><Pencil className="size-3" />{uiText("编辑")}</button> : onRegenerate && !message.pendingImageTask ? <Tooltip title={uiText("按当前配置重新发送到新分支，原会话保留；这会重新调用模型")}><button type="button" disabled={actionsDisabled} aria-label={uiText("重新生成")} onClick={onRegenerate} className="inline-flex min-h-8 items-center gap-1 rounded px-2 hover:bg-current/10 disabled:opacity-40"><RotateCcw className="size-3" />{uiText("重新生成")}</button></Tooltip> : null}

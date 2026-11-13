@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { useUiText, uiText } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, App, Button, Checkbox, Empty, Input, Modal, Progress, Radio, theme, Tooltip } from "antd";
@@ -60,7 +61,7 @@ export function CanvasImagePdfDialog({ nodes, defaultSelectedIds = [], defaultNa
             const result = await createCanvasImagePdfExport({ nodes: chosenIds.map((id) => byId.get(id)!), setName, mode, signal: controller.signal, onProgress: (value) => { if (active.current && !controller.signal.aborted) setProgress(value); } });
             if (!active.current || controller.signal.aborted) return;
             saveAs(result.blob, result.fileName);
-            void message.success(t("已导出 {value1} 张图片：{value2}", { value1: result.imageCount, value2: result.fileName }));
+            void message.success(displayNotice(t("已导出 {value1} 张图片：{value2}", { value1: result.imageCount, value2: result.fileName })));
             onClose();
         } catch (cause) {
             if (active.current && !controller.signal.aborted) setError(cause instanceof Error ? cause.message : "图片集导出失败，请重试");

@@ -41,6 +41,7 @@ function harness(options: {
     const jsx = (type: unknown, props: Record<string, any>) => { const node = { type, props }; nodes.push(node); return node; };
     const Form = { Item: "Form.Item", useForm: () => [form], useWatch: (key: keyof Fields) => values[key] };
     const dependencies: Record<string, unknown> = {
+        "@/hooks/use-display-text": { useDisplayText: () => (text: string) => text, displayNotice: (text: unknown) => text, DisplayTranslationPreview: "DisplayTranslationPreview" },
         "@/lib/i18n": i18nHarness,
         react, "react/jsx-runtime": { jsx, jsxs: jsx },
         antd: {

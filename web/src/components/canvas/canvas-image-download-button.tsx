@@ -1,3 +1,4 @@
+import { staticUiText } from "@/lib/static-ui-copy";
 import { useState } from "react";
 import { Dropdown, Tooltip } from "antd";
 import { Check, ChevronDown, Download, LoaderCircle } from "lucide-react";
@@ -15,14 +16,14 @@ export function CanvasImageDownloadButton({ onDownload, onOptions, showLabel }: 
         try { await onDownload(format); } finally { setBusy(false); }
     };
     return <div className="inline-flex shrink-0 items-center" data-canvas-no-zoom>
-        <Tooltip title={english ? "Download the original file without re-encoding" : "下载原文件，不重新编码"}>
+        <Tooltip title={english ? "Download the original file without re-encoding" : staticUiText("下载原文件，不重新编码")}>
             <button type="button" data-usage-control="canvas-tool.download" className="flex h-8 items-center gap-2 rounded-l-md px-2 hover:bg-[var(--node-tool-hover)] disabled:opacity-40" aria-label={t("下载图片")} disabled={busy} onClick={() => void download("original")}>
-                {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}{showLabel ? <span>{busy ? t("正在准备下载…") : (english ? "Original" : "下载原图")}</span> : null}
+                {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}{showLabel ? <span>{busy ? t("正在准备下载…") : (english ? "Original" : staticUiText("下载原图"))}</span> : null}
             </button>
         </Tooltip>
         <Dropdown trigger={["click"]} placement="bottomRight" autoAdjustOverflow menu={{ items: [
-            ...(["png", "jpg"] as const).map(format => ({ key: format, icon: <Check className={`size-4 ${lastFormat === format ? "" : "invisible"}`} />, label: format === "png" ? (english ? "Save as PNG" : "另存为 PNG") : (english ? "Save as JPG (white background)" : "另存为 JPG（白底）"), onClick: () => void download(format) })),
-            ...(onOptions ? [{ type: "divider" as const }, { key: "options", label: english ? "Source versions and download details" : "原件版本与下载说明", onClick: onOptions }] : []),
-        ] }}><button type="button" className="flex h-8 w-6 items-center justify-center rounded-r-md hover:bg-[var(--node-tool-hover)] disabled:opacity-40" aria-label={english ? "More download formats" : "更多下载格式"} disabled={busy}><ChevronDown className="size-3" /></button></Dropdown>
+            ...(["png", "jpg"] as const).map(format => ({ key: format, icon: <Check className={`size-4 ${lastFormat === format ? "" : "invisible"}`} />, label: format === "png" ? (english ? "Save as PNG" : staticUiText("另存为 PNG")) : (english ? "Save as JPG (white background)" : staticUiText("另存为 JPG（白底）")), onClick: () => void download(format) })),
+            ...(onOptions ? [{ type: "divider" as const }, { key: "options", label: english ? "Source versions and download details" : staticUiText("原件版本与下载说明"), onClick: onOptions }] : []),
+        ] }}><button type="button" className="flex h-8 w-6 items-center justify-center rounded-r-md hover:bg-[var(--node-tool-hover)] disabled:opacity-40" aria-label={english ? "More download formats" : staticUiText("更多下载格式")} disabled={busy}><ChevronDown className="size-3" /></button></Dropdown>
     </div>;
 }

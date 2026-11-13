@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { App, Button, Input, Pagination, Segmented, Skeleton, Tag } from "antd";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
+import { displayNotice, DisplayText, useDisplayText  } from "@/hooks/use-display-text";
 import { BookOpen, Check, Plus, Search, X } from "lucide-react";
 
 import { PromptTemplateCard } from "@/components/prompts/prompt-template-card";
@@ -18,12 +19,12 @@ import {
 } from "@/services/api/prompts";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 import { createPromptListLoader } from "@/lib/prompt-list-loader";
-import { generalPromptTemplates } from "../../../../shared/general-prompt-templates";
 import { GeneralPromptCatalog } from "./general-prompt-catalog";
-import { matchingGeneralPrompts } from "./general-prompts";
+import { getLocalizedGeneralPrompts, matchingGeneralPrompts } from "./general-prompts";
 
 export default function PromptsPage() {
     const t = useUiText();
+    const display = useDisplayText();
     const { message, modal } = App.useApp(); const navigate = useNavigate();
     const { reuse, insertToCanvas, canvasDialog } = usePromptTemplateActions();
     const user = useUserStore((state) => state.user);
@@ -57,15 +58,15 @@ export default function PromptsPage() {
         return () => { window.clearTimeout(timer); loader.invalidate(); };
     }, [load, loader]);
 
-    const savePublic = async (input: PromptSnapshotInput) => { if (editing) await updatePublicPrompt(editing.id, input); else await createPublicPrompt(input); message.success(editing ? t("公共模板已生成新版本") : t("公共模板已发布")); setEditorOpen(false); setEditing(null); await load(); };
+    const savePublic = async (input: PromptSnapshotInput) => { if (editing) await updatePublicPrompt(editing.id, input); else await createPublicPrompt(input); message.success(displayNotice(editing ? t("公共模板已生成新版本") : t("公共模板已发布"))); setEditorOpen(false); setEditing(null); await load(); };
     // Await hook modals so a failed onOk stays open without an unhandled rejection.
     const approve = async (item: PromptSubmission) => await modal.confirm({ title: t("通过并发布到本组？"), content: t("将形成独立团队版本，个人后续修改不会覆盖它。"), okText: t("确认通过"), cancelText: t("取消"), onOk: async () => {
         try { await reviewPromptSubmission(item.id, "approve", t("审核通过")); message.success(t("团队模板已发布")); await load(); }
-        catch (error) { message.error(error instanceof Error ? error.message : t("审核失败，请重试")); throw error; }
+        catch (error) { message.error(<DisplayText text={error instanceof Error ? error.message : t("审核失败，请重试")} />); throw error; }
     } });
     const archive = async (item: PromptTemplate) => await modal.confirm({ title: t("下架这个共享模板？"), okText: t("确认下架"), cancelText: t("取消"), okButtonProps: { danger: true }, onOk: async () => {
         try { await archiveSharedPrompt(item.id); message.success(t("模板已下架")); await load(); }
-        catch (error) { message.error(error instanceof Error ? error.message : t("下架失败，请重试")); throw error; }
+        catch (error) { message.error(<DisplayText text={error instanceof Error ? error.message : t("下架失败，请重试")} />); throw error; }
     } });
     const copy = async (item: PromptTemplate) => {
         await copyPromptTemplate(item.id);
@@ -83,13 +84,13 @@ export default function PromptsPage() {
                 <section className="wb-toolbar mb-6">
                     <div className="max-w-full overflow-x-auto"><Segmented value={scope} onChange={(value) => { setScope(value as "general" | "team" | "public"); setPage(1); }} options={[{ value: "general", label: t("通用提示词") }, ...(canAccessTeam ? [{ value: "team", label: t("团队提示词") }] : []), { value: "public", label: t("公共提示词库") }]} /></div>
                     <Input className="max-w-md" allowClear prefix={<Search className="size-4 text-muted-foreground" />} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={t("搜索标题、完整提示词或分类")} />
-                    <span aria-live="polite" className="ml-auto text-xs text-muted-foreground">{scope !== "general" && loading && items.length ? t("正在更新 · ") : ""}{t("共")} {scope === "general" ? matchingGeneralPrompts(generalPromptTemplates, query).length : total} {scope === "general" ? t("个通用模板") : t("个已发布模板")}</span>
+                    <span aria-live="polite" className="ml-auto text-xs text-muted-foreground">{scope !== "general" && loading && items.length ? t("正在更新 · ") : ""}{t("共")} {scope === "general" ? matchingGeneralPrompts(getLocalizedGeneralPrompts(), query).length : total} {scope === "general" ? t("个通用模板") : t("个已发布模板")}</span>
                 </section>
-                {scope !== "general" && loadError ? <div role="alert" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span>{loadError}</span><Button onClick={() => void load()}>{t("重新加载")}</Button></div> : null}
+                {scope !== "general" && loadError ? <div role="alert" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span>{display(loadError)}</span><Button onClick={() => void load()}>{t("重新加载")}</Button></div> : null}
                 {canReview && scope === "team" && submissions.length ? (
                     <section className="mb-7 border-y border-orange-200 bg-orange-50/70 py-4 dark:border-orange-900 dark:bg-orange-950/20">
                         <div className="mb-3 flex items-center gap-2 px-4"><h2 className="text-sm font-semibold">{t("待审核模板")}</h2><Tag color="orange">{submissions.length}</Tag></div>
-                        <div className="grid gap-3 px-4 md:grid-cols-2">{submissions.map((item) => <div key={item.id} className="rounded-lg border border-orange-200 bg-card p-4 dark:border-orange-900"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold">{item.title}</h3><p className="mt-1 text-xs text-muted-foreground">{t("提交人：")}{item.submitterName}</p></div><div className="flex gap-1"><Button size="small" type="primary" icon={<Check className="size-3.5" />} onClick={() => approve(item)}>{t("通过")}</Button><Button size="small" danger icon={<X className="size-3.5" />} onClick={() => openReject(item, modal, message, load)}>{t("驳回")}</Button></div></div><p className="mt-3 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.prompt}</p></div>)}</div>
+                        <div className="grid gap-3 px-4 md:grid-cols-2">{submissions.map((item) => <div key={item.id} className="rounded-lg border border-orange-200 bg-card p-4 dark:border-orange-900"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold">{display(item.title)}</h3><p className="mt-1 text-xs text-muted-foreground">{t("提交人：")}{display(item.submitterName)}</p></div><div className="flex gap-1"><Button size="small" type="primary" icon={<Check className="size-3.5" />} onClick={() => approve(item)}>{t("通过")}</Button><Button size="small" danger icon={<X className="size-3.5" />} onClick={() => openReject(item, display(item.title), modal, message, load)}>{t("驳回")}</Button></div></div><p className="mt-3 line-clamp-2 text-xs leading-5 text-muted-foreground">{display(item.prompt)}</p></div>)}</div>
                     </section>
                 ) : null}
                 <div className="mb-5 max-w-2xl"><PracticeExampleRecord /></div>
@@ -104,10 +105,10 @@ export default function PromptsPage() {
     );
 }
 
-async function openReject(item: PromptSubmission, modal: ReturnType<typeof App.useApp>["modal"], message: ReturnType<typeof App.useApp>["message"], reload: () => Promise<void>) {
+async function openReject(item: PromptSubmission, displayTitle: string, modal: ReturnType<typeof App.useApp>["modal"], message: ReturnType<typeof App.useApp>["message"], reload: () => Promise<void>) {
     let note = "";
-    await modal.confirm({ title: uiText("驳回“{p0}”", { p0: String(item.title) }), content: <Input.TextArea rows={4} maxLength={1_000} placeholder={uiText("填写修改建议")} onChange={(event) => { note = event.target.value; }} />, okText: uiText("确认驳回"), cancelText: uiText("取消"), okButtonProps: { danger: true }, onOk: async () => {
+    await modal.confirm({ title: uiText("驳回“{p0}”", { p0: displayTitle }), content: <Input.TextArea rows={4} maxLength={1_000} placeholder={uiText("填写修改建议")} onChange={(event) => { note = event.target.value; }} />, okText: uiText("确认驳回"), cancelText: uiText("取消"), okButtonProps: { danger: true }, onOk: async () => {
         try { await reviewPromptSubmission(item.id, "reject", note); message.success(uiText("已驳回并保留审核意见")); await reload(); }
-        catch (error) { message.error(error instanceof Error ? error.message : uiText("驳回失败，请重试")); throw error; }
+        catch (error) { message.error(<DisplayText text={error instanceof Error ? error.message : uiText("驳回失败，请重试")} />); throw error; }
     } });
 }

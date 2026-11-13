@@ -1,4 +1,4 @@
-import { useUiText, uiText } from "@/lib/i18n";
+import { useUiLocale, useUiText, uiText } from "@/lib/i18n";
 import { PracticeExampleRecord } from "@/components/design-examples";
 import { WorkbenchImage } from "@/components/workbench-image";
 import { BookmarkPlus, Check, Copy, Download, Ellipsis, LoaderCircle, PencilLine, Plus, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
@@ -12,6 +12,7 @@ import { useModuleEnabled } from "@/stores/use-module-store";
 import { InfiniteLoadMore } from "@/components/infinite-load-more";
 
 import { useCopyFeedback } from "@/hooks/use-copy-feedback";
+import { displayNotice, DisplayText, DisplayTranslationPreview, useDisplayText  } from "@/hooks/use-display-text";
 import { useVideoPlayback, validVideoPlaybackAssetId } from "@/hooks/use-video-playback";
 import { useImageDrop } from "@/hooks/use-image-drop";
 import { imageModelDisplayName } from "@/lib/model-display";
@@ -84,6 +85,8 @@ const kindOptions = [
 
 export default function AssetsPage() {
     const t = useUiText();
+    const locale = useUiLocale();
+    const display = useDisplayText();
     const { message, modal } = App.useApp();
     const libraryShare = useDesignLibraryShare();
     const queryClient = useQueryClient();
@@ -184,6 +187,8 @@ export default function AssetsPage() {
     const title = Form.useWatch("title", form) || "";
     const tags = Form.useWatch("tags", form) || [];
     const content = Form.useWatch("content", form) || "";
+    const source = Form.useWatch("source", form) || "";
+    const note = Form.useWatch("note", form) || "";
     const refreshServerAssets = async (cursor?: string) => {
         if (!user?.id) return;
         if (cursor) await assetPages.fetchNextPage();
@@ -220,14 +225,14 @@ export default function AssetsPage() {
     [validAssets, serverAssetIds, searchIndex, deferredKeyword, kindFilter, deferredTag, projectFilter, dateRange, sort, t]);
 
     const visibleAssets = filteredAssets;
-    const tagOptions = [...new Set([...validAssets.flatMap(asset => asset.tags || []), ...(tagFilter ? [tagFilter] : [])])].sort().map(value => ({ value, label: value }));
+    const tagOptions = [...new Set([...validAssets.flatMap(asset => asset.tags || []), ...(tagFilter ? [tagFilter] : [])])].sort().map(value => ({ value, label: display(value) }));
 
     const runAssetAction = async (label: string, run: () => Promise<void>) => {
         if (assetActionRef.current) return;
         assetActionRef.current = true;
         setAssetAction(label);
         try { await run(); }
-        catch (error) { message.error(error instanceof Error ? error.message : t("素材操作未完成，请重试")); }
+        catch (error) { message.error(<DisplayText text={error instanceof Error ? error.message : t("素材操作未完成，请重试")} />); }
         finally { assetActionRef.current = false; setAssetAction(""); }
     };
 
@@ -241,7 +246,7 @@ export default function AssetsPage() {
     const openDetail = (asset: Asset) => void runAssetAction(t("正在读取素材详情…"), async () => setPreviewAsset(await readAssetDetail(asset)));
     const toggleSelection = (id: string, shift: boolean) => {
         try { setSelectedIds(selectAssetRange(selectedIds, filteredAssets.map(asset => asset.id), id, selectionAnchor.current, shift)); selectionAnchor.current = id; }
-        catch (error) { message.warning(error instanceof Error ? error.message : t("无法选择素材")); }
+        catch (error) { message.warning(<DisplayText text={error instanceof Error ? error.message : t("无法选择素材")} />); }
     };
     const selectedAssets = validAssets.filter(asset => selectedIds.has(asset.id));
     const executeBatch = async (action: "delete" | "download" | "add-to-canvas" | "move-project") => {
@@ -254,9 +259,9 @@ export default function AssetsPage() {
         if (useUserStore.getState().user?.id !== requestOwnerId) throw new Error(t("账号已切换，已停止后续操作"));
         if (action === "delete") {
             selected.filter(asset => !serverAssetIds.has(asset.id)).forEach(asset => removeAsset(asset.id));
-            setSelectedIds(new Set()); await refreshServerAssets(); message.success(t("已删除 {p0} 个素材", { p0: String(selected.length) }));
+            setSelectedIds(new Set()); await refreshServerAssets(); message.success(displayNotice(t("已删除 {p0} 个素材", { p0: String(selected.length) })));
         } else if (action === "move-project") {
-            setSelectedIds(new Set()); await refreshServerAssets(); setBatchTarget(null); message.success(t("已移动 {p0} 个素材", { p0: String(selected.length) }));
+            setSelectedIds(new Set()); await refreshServerAssets(); setBatchTarget(null); message.success(displayNotice(t("已移动 {p0} 个素材", { p0: String(selected.length) })));
         } else if (action === "download") {
             const files: { name: string; data: Blob }[] = [];
             for (const [index, asset] of selected.entries()) {
@@ -272,7 +277,7 @@ export default function AssetsPage() {
             }
             const zip = await createZip(files);
             if (useUserStore.getState().user?.id !== requestOwnerId) throw new Error(t("账号已切换，下载已停止"));
-            saveAs(zip, t("选中素材.zip")); message.success(t("已打包 {p0} 个原始文件", { p0: String(files.length) }));
+            saveAs(zip, t("选中素材.zip")); message.success(displayNotice(t("已打包 {p0} 个原始文件", { p0: String(files.length) })));
         } else {
             const detailed = selected.map(asset => { const full = result?.assets.find(item => item.id === asset.id); return full ? serverAssetToLocal(full) : asset; });
             const target = targetId && targetId !== "new" ? await loadCanvasProject(targetId) : null;
@@ -351,7 +356,7 @@ export default function AssetsPage() {
             editingAsset ? updateAsset(editingAsset.id, asset) : addAsset(asset);
         }
 
-        message.success(editingAsset ? t("素材已更新") : t("素材已保存"));
+        message.success(displayNotice(editingAsset ? t("素材已更新") : t("素材已保存")));
         setIsAssetOpen(false);
     };
 
@@ -393,7 +398,7 @@ export default function AssetsPage() {
                 }
                 saveAs(source, filename);
             } catch (error) {
-                message.error(error instanceof Error ? error.message : t("素材读取失败，请重试"));
+                message.error(<DisplayText text={error instanceof Error ? error.message : t("素材读取失败，请重试")} />);
             }
             return;
         }
@@ -413,7 +418,7 @@ export default function AssetsPage() {
                 if (useUserStore.getState().user?.id === ownerId) message.warning(t("下载已开始，但下载记录暂未更新；无需重复下载"));
             }
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t("素材下载失败"));
+            message.error(<DisplayText text={error instanceof Error ? error.message : t("素材下载失败")} />);
         }
     };
 
@@ -445,7 +450,7 @@ export default function AssetsPage() {
             if (!response.ok) throw new Error(t("素材原文件不可用，导出已停止"));
             return response.blob();
         } });
-        message.success(t("已导出当前筛选的全部 {p0} 个素材", { p0: allAssets.length }));
+        message.success(displayNotice(t("已导出当前筛选的全部 {p0} 个素材", { p0: allAssets.length })));
         checkOwner();
         const recorded = await Promise.allSettled(
             serverIds.map(id => recordServerAssetEvent(id, "asset.exported", { channel: "asset-package" })),
@@ -466,7 +471,7 @@ export default function AssetsPage() {
                 delete payload.updatedAt;
                 addAsset(payload as Parameters<typeof addAsset>[0]);
             });
-            message.success(t("已导入 {p0} 个素材", { p0: String(importedAssets.length) }));
+            message.success(displayNotice(t("已导入 {p0} 个素材", { p0: String(importedAssets.length) })));
         } catch {
             message.error(t("导入失败，请选择有效的素材压缩包"));
         } finally {
@@ -490,8 +495,8 @@ export default function AssetsPage() {
         if (controller.signal.aborted || useUserStore.getState().user?.id !== ownerId) return;
         setFailedUploads(previous => [...previous.filter(job => !imageFiles.some(attempt => attempt.clientReferenceId === job.clientReferenceId)), ...result.failed]);
         if (result.succeeded) await refreshServerAssets();
-        if (result.failed.length) message.warning(t("已上传 {p0} 张，{p1} 张失败；可重试失败项", { p0: String(result.succeeded), p1: String(result.failed.length) }));
-        else message.success(t("已上传 {p0} 张图片", { p0: String(result.succeeded) }));
+        if (result.failed.length) message.warning(displayNotice(t("已上传 {p0} 张，{p1} 张失败；可重试失败项", { p0: String(result.succeeded), p1: String(result.failed.length) })));
+        else message.success(displayNotice(t("已上传 {p0} 张图片", { p0: String(result.succeeded) })));
     };
 
     const replicateAsset = async (asset: Asset) => {
@@ -508,7 +513,7 @@ export default function AssetsPage() {
             await savePromptFromAsset(asset.id);
             message.success(t("已保存到我的提示词"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t("保存提示词失败"));
+            message.error(<DisplayText text={error instanceof Error ? error.message : t("保存提示词失败")} />);
         }
     };
 
@@ -517,7 +522,7 @@ export default function AssetsPage() {
             await recordServerAssetEvent(asset.id, eventType, { channel: "asset-library" });
             await refreshServerAssets();
             message.success(t("成果状态已更新"));
-        } catch (error) { message.error(error instanceof Error ? error.message : t("成果状态更新失败")); }
+        } catch (error) { message.error(<DisplayText text={error instanceof Error ? error.message : t("成果状态更新失败")} />); }
     };
 
     const shareWithDepartment = async (asset: Asset, remove = false) => {
@@ -527,16 +532,16 @@ export default function AssetsPage() {
             await refreshServerAssets();
             const refreshed = await readAssetDetail(asset);
             setPreviewAsset(current => current?.id === asset.id ? refreshed : current);
-            message.success(remove ? t("已取消部门共享") : t("已共享到部门素材库"));
-        } catch (error) { message.error(error instanceof Error ? error.message : t("共享设置失败")); }
+            message.success(displayNotice(remove ? t("已取消部门共享") : t("已共享到部门素材库")));
+        } catch (error) { message.error(<DisplayText text={error instanceof Error ? error.message : t("共享设置失败")} />); }
     };
 
     const setCompanyVisibility = async (asset: Asset, visibility: "private" | "company") => {
         try {
             await setServerAssetVisibility(asset.id, visibility);
             await refreshServerAssets();
-            message.success(visibility === "company" ? t("已加入公司素材库") : t("已撤出公司素材库"));
-        } catch (error) { message.error(error instanceof Error ? error.message : t("共享设置失败")); }
+            message.success(displayNotice(visibility === "company" ? t("已加入公司素材库") : t("已撤出公司素材库")));
+        } catch (error) { message.error(<DisplayText text={error instanceof Error ? error.message : t("共享设置失败")} />); }
     };
 
     const addToProject = async () => {
@@ -547,7 +552,7 @@ export default function AssetsPage() {
             setProjectAsset(null);
             setSelectedProjectId(undefined);
             message.success(t("已加入正式项目"));
-        } catch (error) { message.error(error instanceof Error ? error.message : t("加入项目失败")); }
+        } catch (error) { message.error(<DisplayText text={error instanceof Error ? error.message : t("加入项目失败")} />); }
     };
 
     const confirmDelete = async () => {
@@ -610,7 +615,7 @@ export default function AssetsPage() {
                         <div><Button aria-expanded={moreFilters} onClick={() => setMoreFilters(value => !value)}>{moreFilters ? t("收起筛选") : t("更多筛选")}{tagFilter || projectFilter || dateRange ? " ·" : ""}</Button>{hasFilters ? <Button type="text" onClick={clearFilters}>{t("清除筛选")}</Button> : null}</div>
                         {moreFilters && <div className="flex flex-wrap items-center gap-2" aria-label={t("素材筛选")}>
                             <Select aria-label={t("按标签筛选")} placeholder={t("选择标签")} allowClear showSearch optionFilterProp="label" value={tagFilter || undefined} onChange={value => setTagFilter(value || "")} options={tagOptions} style={{ width: 180 }} />
-                            <Select aria-label={t("按项目筛选")} placeholder={t("全部项目")} allowClear showSearch optionFilterProp="label" value={projectFilter} onChange={setProjectFilter} options={serverProjects.map(project => ({ value: project.id, label: project.name }))} style={{ minWidth: 180 }} />
+                            <Select aria-label={t("按项目筛选")} placeholder={t("全部项目")} allowClear showSearch optionFilterProp="label" value={projectFilter} onChange={setProjectFilter} options={serverProjects.map(project => ({ value: project.id, label: display(project.name) }))} style={{ minWidth: 180 }} />
                             <DatePicker.RangePicker aria-label={t("按创建日期筛选")} placeholder={[t("创建开始日期"), t("创建结束日期")]} value={dateRange ? [dayjs(dateRange[0]), dayjs(dateRange[1]).subtract(1, 'day')] : null} onChange={range => setDateRange(range?.[0] && range?.[1] ? [range[0].startOf('day').toISOString(), range[1].add(1, 'day').startOf('day').toISOString()] : null)} />
                             <Select aria-label={t("素材排序")} value={sort} onChange={setSort} options={[{ value: "newest", label: libraryView === "trash" ? t("最近删除优先") : t("最新创建优先") }, { value: "oldest", label: libraryView === "trash" ? t("最早删除优先") : t("最早创建优先") }]} style={{ width: 154 }} />
                         </div>}
@@ -645,19 +650,19 @@ export default function AssetsPage() {
                     {assetAction || serverLoading ? <div role="status" className="mt-4 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{assetAction || t("正在同步素材列表…")}</div> : null}
                     {failedUploads.length ? <div role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm dark:border-amber-900 dark:bg-amber-950/30">
                         <div className="flex flex-wrap items-center justify-between gap-2"><strong>{failedUploads.length} {t("张图片上传失败")}</strong><Space><Button disabled={Boolean(assetAction)} onClick={() => void runAssetAction(t("正在重试失败图片…"), () => importImageFiles(failedUploads))}>{t("重试失败项")}</Button><Button disabled={Boolean(assetAction)} onClick={() => setFailedUploads([])}>{t("清除失败记录")}</Button></Space></div>
-                        <ul className="mt-2 max-h-36 overflow-y-auto">{failedUploads.map(job => <li key={job.clientReferenceId}>{job.file.name}：{job.error}</li>)}</ul>
+                        <ul className="mt-2 max-h-36 overflow-y-auto">{failedUploads.map(job => <li key={job.clientReferenceId}>{display(job.file.name)}{t("：")}{display(job.error || "")}</li>)}</ul>
                     </div> : null}
-                    {serverError ? <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span>{serverError}{t("；已保留当前本地素材。")}</span><Button onClick={() => void refreshServerAssets()}>{t("重试加载")}</Button></div> : null}
+                    {serverError ? <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span>{display(serverError)}{t("；已保留当前本地素材。")}</span><Button onClick={() => void refreshServerAssets()}>{t("重试加载")}</Button></div> : null}
                 </div>
 
                 <div className="wb-content flex flex-col gap-5">
                     {libraryView === "active" ? <div className="max-w-2xl"><PracticeExampleRecord /></div> : null}
                     {serverLoading && !serverAssets.length && !visibleAssets.length ? <div role="status" aria-label={t("正在加载素材")} className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{Array.from({ length: 8 }, (_, index) => <div key={index} className="wb-surface p-4"><Skeleton active paragraph={{ rows: 4 }} /></div>)}</div> : null}
                     <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                        {libraryView === "trash" ? serverAssets.map(asset => <Card key={asset.id} className="h-full" title={typeof asset.metadata.title === "string" ? asset.metadata.title : asset.filename}>
+                        {libraryView === "trash" ? serverAssets.map(asset => <Card key={asset.id} className="h-full" title={display(typeof asset.metadata.title === "string" ? asset.metadata.title : asset.filename)}>
                             <div className="flex flex-col gap-3"><div className="flex items-center gap-2 text-muted-foreground"><Trash2 className="size-5" /><span>{t(({ image: "图片", video: "视频", text: "文本", other: "其他" })[asset.kind])} · {formatBytes(asset.byteSize)}</span></div>
                                 <p className="text-sm">{t("删除于")} {formatBeijingDateTime(asset.deletedAt)}<br />{t("可恢复至")} {formatBeijingDateTime(asset.purgeAfter)}</p>
-                                <p className="truncate text-xs text-muted-foreground">{asset.ownerName}{asset.projectName ? ` · ${asset.projectName}` : ""}</p>
+                                <p className="truncate text-xs text-muted-foreground">{display(asset.ownerName || "")}{asset.projectName ? ` · ${display(asset.projectName)}` : ""}</p>
                                 <Button icon={<RotateCcw className="size-4" />} disabled={Boolean(assetAction)} onClick={() => void runAssetAction(t("正在恢复素材…"), async () => {
                                     const ownerId = user?.id; await restoreServerAsset(asset.id);
                                     if (useUserStore.getState().user?.id !== ownerId) return;
@@ -698,7 +703,7 @@ export default function AssetsPage() {
                 <Button danger disabled={Boolean(assetAction)} icon={<Trash2 className="size-4" />} onClick={() => modal.confirm({ title: t("删除选中的 {p0} 个素材？", { p0: String(selectedIds.size) }), content: t("公司素材将移入最近删除，30 天内原始文件仍保留时可恢复；本地素材会从素材库永久移除。任一公司素材无权限时整批不执行。"), okText: t("删除"), cancelText: t("取消"), okButtonProps: { danger: true }, onOk: () => runAssetAction(t("正在批量删除…"), () => executeBatch("delete")) })}>{t("批量删除")}</Button>
             </div> : null}
             <Modal title={batchTarget === "canvas" ? t("批量加入画布") : t("批量移动到项目")} open={Boolean(batchTarget)} confirmLoading={Boolean(assetAction)} okButtonProps={{ disabled: !targetId }} onCancel={() => { if (!assetAction) setBatchTarget(null); }} onOk={() => void runAssetAction(t("正在批量处理…"), () => executeBatch(batchTarget === "canvas" ? "add-to-canvas" : "move-project"))} okText={t("确认")} cancelText={t("取消")}>
-                <Select className="w-full" aria-label={t("批量操作目标")} value={targetId} onChange={setTargetId} options={batchTarget === "canvas" ? [{ value: "new", label: t("创建新画布") }, ...[...canvasProjects, ...unloadedCanvasProjects].map(project => ({ value: project.id, label: project.title }))] : serverProjects.map(project => ({ value: project.id, label: project.name }))} placeholder={t("请选择目标项目")} />
+                <Select className="w-full" aria-label={t("批量操作目标")} value={targetId} onChange={setTargetId} options={batchTarget === "canvas" ? [{ value: "new", label: t("创建新画布") }, ...[...canvasProjects, ...unloadedCanvasProjects].map(project => ({ value: project.id, label: display(project.title) }))] : serverProjects.map(project => ({ value: project.id, label: display(project.name) }))} placeholder={t("请选择目标项目")} />
             </Modal>
 
             <Modal title={editingAsset ? t("编辑素材") : t("新增素材")} open={isAssetOpen} width={980} onCancel={() => { if (!savingAsset) setIsAssetOpen(false); }} onOk={() => void runSave(saveAsset)} confirmLoading={savingAsset} cancelButtonProps={{ disabled: savingAsset }} closable={!savingAsset} keyboard={!savingAsset} maskClosable={!savingAsset} okText={t("保存")} cancelText={t("取消")} destroyOnHidden>
@@ -730,10 +735,10 @@ export default function AssetsPage() {
                             <Select mode="tags" maxCount={20} tokenSeparators={[",", "，"]} placeholder={t("输入标签后回车")} />
                         </Form.Item>
                         <div className="grid gap-4 sm:grid-cols-2">
-                            <Form.Item name="source" label={t("来源")}>
+                            <Form.Item name="source" label={t("来源")} extra={locale === "en-US" && source ? <DisplayTranslationPreview text={source} /> : undefined}>
                                 <Input maxLength={120} placeholder={t("手动添加 / 画布 / 提示词库")} />
                             </Form.Item>
-                            <Form.Item name="note" label={t("备注")}>
+                            <Form.Item name="note" label={t("备注")} extra={locale === "en-US" && note ? <DisplayTranslationPreview text={note} /> : undefined}>
                                 <Input maxLength={2000} placeholder={t("可选")} />
                             </Form.Item>
                         </div>
@@ -766,17 +771,17 @@ export default function AssetsPage() {
                             {coverUrl || imageDraft?.dataUrl ? (
                                 <img src={coverUrl || imageDraft?.dataUrl} alt="" className="aspect-[4/3] w-full object-cover" />
                             ) : (
-                                <div className="flex aspect-[4/3] items-center justify-center bg-muted p-5 text-center text-sm text-muted-foreground">{content || t("暂无封面")}</div>
+                                <div className="flex aspect-[4/3] items-center justify-center bg-muted p-5 text-center text-sm text-muted-foreground">{content ? display(content) : t("暂无封面")}</div>
                             )}
                             <div className="p-4">
                                 <Typography.Text strong ellipsis className="block">
-                                    {title || t("未命名素材")}
+                                    {title ? display(title) : t("未命名素材")}
                                 </Typography.Text>
                                 <div className="mt-2 flex flex-wrap gap-2">
                                     {tags.length ? (
                                         tags.map((tag) => (
                                             <Tag key={tag} className="m-0">
-                                                {tag}
+                                                {display(tag)}
                                             </Tag>
                                         ))
                                     ) : (
@@ -844,7 +849,7 @@ export default function AssetsPage() {
             <input ref={batchImageInputRef} type="file" accept="image/*" multiple className="hidden" disabled={Boolean(assetAction)} onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ""; void runAssetAction(t("正在准备上传…"), () => importImageFiles(files)); }} />
 
             <Modal title={t("删除素材")} open={Boolean(deletingAsset)} onCancel={() => { if (!deleting) setDeletingAsset(null); }} onOk={() => void runDelete(confirmDelete)} confirmLoading={deleting} cancelButtonProps={{ disabled: deleting }} okText={t("删除")} okButtonProps={{ danger: true }} cancelText={t("取消")}>
-                {t("确定删除「")}{deletingAsset?.title}{t("」吗？删除后会从我的素材中移除。")}
+                {t("确定删除「")}{display(deletingAsset?.title || "")}{t("」吗？删除后会从我的素材中移除。")}
                 {deletingAsset && serverAssetIds.has(deletingAsset.id) ? t("公司素材可在最近删除中恢复，期限为 30 天且原始文件须仍保留。") : t("本地素材不会进入最近删除，删除后无法从此处恢复。")}
             </Modal>
             <Modal title={t("加入正式项目")} open={Boolean(projectAsset)} onCancel={() => setProjectAsset(null)} onOk={() => void addToProject()} okText={t("确认加入")} cancelText={t("取消")}>
@@ -852,7 +857,7 @@ export default function AssetsPage() {
                     className="w-full"
                     value={selectedProjectId}
                     placeholder={serverProjects.length ? t("选择项目") : t("暂无可加入项目，请先创建项目")}
-                    options={serverProjects.map((project) => ({ label: project.name, value: project.id }))}
+                    options={serverProjects.map((project) => ({ label: display(project.name), value: project.id }))}
                     onChange={setSelectedProjectId}
                 />
             </Modal>
@@ -890,21 +895,23 @@ function useResolvedAssetMedia(asset: Asset | null) {
 
 function AssetPlaceholder({ asset }: { asset: Asset }) {
     const t = useUiText();
-    return <div className="flex aspect-[4/3] items-center justify-center overflow-hidden bg-muted p-6 text-center text-sm leading-7 text-muted-foreground"><p className="line-clamp-6 break-words">{asset.kind === "text" ? asset.data.content.slice(0, 600) : t("暂无封面")}</p></div>;
+    return <div className="flex aspect-[4/3] items-center justify-center overflow-hidden bg-muted p-6 text-center text-sm leading-7 text-muted-foreground"><p className="line-clamp-6 break-words">{asset.kind === "text" ? <DisplayText text={asset.data.content.slice(0, 600)} /> : t("暂无封面")}</p></div>;
 }
 
 function AssetCover({ asset }: { asset: Asset }) {
+    const display = useDisplayText();
     const source = useResolvedAssetMedia(asset);
     if (!source) return <AssetPlaceholder asset={asset} />;
     if (asset.kind === "video") return <video src={source} muted playsInline preload="metadata" className="aspect-[4/3] w-full object-cover" />;
-    return <WorkbenchImage src={source} alt={asset.title} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-contain" />;
+    return <WorkbenchImage src={source} alt={display(asset.title)} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-contain" />;
 }
 
 function AssetDetailPreview({ asset }: { asset: Asset }) {
+    const display = useDisplayText();
     const source = useResolvedAssetMedia(asset);
     if (!source) return <AssetPlaceholder asset={asset} />;
     if (asset.kind === "video") return <AssetPlaceholder asset={asset} />;
-    return <Image src={metadataString(asset, "previewUrl") || source} preview={{ src: asset.kind === "image" ? asset.data.dataUrl : source }} alt={asset.title} className="rounded-lg" />;
+    return <Image src={metadataString(asset, "previewUrl") || source} preview={{ src: asset.kind === "image" ? asset.data.dataUrl : source }} alt={display(asset.title)} className="rounded-lg" />;
 }
 
 function ResolvedAssetVideo({ asset, className, controls = false }: { asset: Extract<Asset, { kind: "video" }>; className?: string; controls?: boolean }) {
@@ -914,7 +921,7 @@ function ResolvedAssetVideo({ asset, className, controls = false }: { asset: Ext
     return <div>
         {playback.playbackUrl ? <video src={playback.playbackUrl} controls={controls} preload="metadata" className={className} onError={playback.onError} onLoadedMetadata={playback.onLoadedMetadata} /> : null}
         {playback.status === "preparing" ? <p role="status" className="mt-2 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{t("正在准备兼容预览，最多等待 150 秒；下载和导出仍为原件。")}</p> : null}
-        {playback.error ? <div role="alert" className="mt-2 text-sm text-destructive"><p>{t(playback.error)}</p><button type="button" className="mt-1 underline" onClick={playback.retry}>{t("重试预览")}</button></div> : null}
+        {playback.error ? <div role="alert" className="mt-2 text-sm text-destructive"><p><DisplayText text={t(playback.error)} /></p><button type="button" className="mt-1 underline" onClick={playback.retry}>{t("重试预览")}</button></div> : null}
         {playback.status === "local" ? <p className="mt-2 text-xs text-muted-foreground">{t("仅有本地原件，服务端兼容预览不可用；播放能力取决于当前浏览器。")}</p> : null}
         <p className="mt-2 text-xs text-muted-foreground">{playback.width && playback.height ? `${playback.width}x${playback.height}` : t("尺寸未知")}{" · "}{playback.durationMs ? `${(playback.durationMs / 1000).toFixed(2)} ${t("秒")}` : t("视频时长未知")}</p>
     </div>;
@@ -944,6 +951,7 @@ function AssetCard({
     onDelete: () => void;
 }) {
     const t = useUiText();
+    const display = useDisplayText();
     const summary = assetSummary(asset);
     return (
         <Card
@@ -961,21 +969,21 @@ function AssetCard({
             }
         >
             <label className="absolute left-3 top-3 z-10 flex size-7 items-center justify-center rounded bg-background/90" onClick={event => event.stopPropagation()}>
-                <input type="checkbox" aria-label={t("选择{p0}", { p0: String(asset.title) })} checked={selected} onChange={() => undefined} onClick={event => onSelect(event.shiftKey)} className="size-4 cursor-pointer accent-primary" />
+                <input type="checkbox" aria-label={t("选择{p0}", { p0: display(asset.title) })} checked={selected} onChange={() => undefined} onClick={event => onSelect(event.shiftKey)} className="size-4 cursor-pointer accent-primary" />
             </label>
             <button type="button" className="block w-full text-left" onClick={onOpen}>
                 <div className="p-4">
                     <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                            <h2 className="line-clamp-1 text-base font-semibold text-foreground">{assetDisplayTitle(asset)}</h2>
+                            <h2 className="line-clamp-1 text-base font-semibold text-foreground">{display(assetDisplayTitle(asset))}</h2>
                             <Typography.Text type="secondary" className="mt-1 block text-xs">
-                                {assetSourceLabel(asset.source)}
+                                {display(assetSourceLabel(asset.source))}
                             </Typography.Text>
                         </div>
                         <Tag className="m-0 shrink-0 text-xs">{asset.kind === "image" ? t("图片") : asset.kind === "video" ? t("视频") : t("文本")}</Tag>
                     </div>
                     <Typography.Paragraph type="secondary" ellipsis={{ rows: 3 }} className="!mb-0 !mt-3 !text-sm !leading-6">
-                        {summary}
+                        {asset.kind === "text" ? <DisplayText text={summary} /> : summary}
                     </Typography.Paragraph>
                     <div className="mt-3 flex flex-wrap gap-2">
                         {metadataString(asset, "resultStatus") && metadataString(asset, "resultStatus") !== "unused" ? <Tag color="orange" className="m-0 text-xs">{resultStatusLabel(metadataString(asset, "resultStatus"))}</Tag> : null}
@@ -983,7 +991,7 @@ function AssetCard({
                         {metadataNumber(asset, "downloadCount") > 0 ? <Tag className="m-0 text-xs">{t("下载")} {metadataNumber(asset, "downloadCount")}</Tag> : null}
                         {(asset.tags || []).slice(0, 3).map((tag) => (
                             <Tag key={tag} className="m-0 text-xs">
-                                {tag}
+                                {display(tag)}
                             </Tag>
                         ))}
                     </div>
@@ -1048,6 +1056,7 @@ function AssetDrawer({
     sharingDesign?: boolean;
 }) {
     const t = useUiText();
+    const display = useDisplayText();
     const isOwner = asset?.ownerId === currentUserId;
     const isAdmin = currentUserRole === "super_admin" || currentUserRole === "department_admin";
     const visibility = asset ? metadataString(asset, "visibilityScope") : "private";
@@ -1058,11 +1067,11 @@ function AssetDrawer({
                     {asset.kind === "image" ? (
                         <AssetDetailPreview asset={asset} />
                     ) : asset.kind === "video" ? null : (
-                        <div className="rounded-lg border border-border bg-muted p-5 text-sm leading-6 text-muted-foreground">{asset.kind === "text" ? asset.data.content : t("暂无封面")}</div>
+                        <div className="rounded-lg border border-border bg-muted p-5 text-sm leading-6 text-muted-foreground">{asset.kind === "text" ? <DisplayText text={asset.data.content} /> : t("暂无封面")}</div>
                     )}
                     <div>
                         <Typography.Title level={4} className="!mb-2">
-                            {asset.title}
+                            {display(asset.title)}
                         </Typography.Title>
                         <Space size={[4, 4]} wrap>
                             <Tag>{asset.kind === "image" ? t("图片") : asset.kind === "video" ? t("视频") : t("文本")}</Tag>
@@ -1070,7 +1079,7 @@ function AssetDrawer({
                             {isServerAsset ? <Tag>{t("可用性")} {metadataNumber(asset, "usabilityScore")}/100</Tag> : null}
                             {isServerAsset ? <Tag>{t("下载")} {metadataNumber(asset, "downloadCount")} {t("次")}</Tag> : null}
                             {(asset.tags || []).map((tag) => (
-                                <Tag key={tag}>{tag}</Tag>
+                                <Tag key={tag}>{display(tag)}</Tag>
                             ))}
                         </Space>
                     </div>
@@ -1079,7 +1088,7 @@ function AssetDrawer({
                             {t("内容")}
                         </Typography.Text>
                         {asset.kind === "text" ? (
-                            <Typography.Paragraph className="mt-2 whitespace-pre-wrap">{asset.data.content}</Typography.Paragraph>
+                            <Typography.Paragraph className="mt-2 whitespace-pre-wrap"><DisplayText text={asset.data.content} /></Typography.Paragraph>
                         ) : asset.kind === "video" ? (
                             <ResolvedAssetVideo asset={asset} controls className="mt-2 aspect-video w-full rounded-lg bg-black" />
                         ) : (
@@ -1092,7 +1101,7 @@ function AssetDrawer({
                     {asset.note ? (
                         <div>
                             <Typography.Text type="secondary">{t("备注")}</Typography.Text>
-                            <Typography.Paragraph className="mt-1">{asset.note}</Typography.Paragraph>
+                            <Typography.Paragraph className="mt-1"><DisplayText text={asset.note} /></Typography.Paragraph>
                         </div>
                     ) : null}
                     <Space wrap>
@@ -1182,7 +1191,7 @@ function TraceLine({ label, value, multiline }: { label: string; value: string; 
     return (
         <div className={multiline ? "grid gap-1" : "grid grid-cols-[72px_minmax(0,1fr)] gap-2"}>
             <span className="text-xs text-muted-foreground">{label}</span>
-            <span className={multiline ? "whitespace-pre-wrap rounded-md bg-muted p-2 text-foreground" : "truncate text-foreground"}>{value}</span>
+            <span className={multiline ? "whitespace-pre-wrap rounded-md bg-muted p-2 text-foreground" : "truncate text-foreground"}><DisplayText text={value} /></span>
         </div>
     );
 }

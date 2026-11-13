@@ -1,3 +1,4 @@
+import { displayNotice } from "@/hooks/use-display-text";
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { useState } from "react";
 import { App } from "antd";
@@ -18,7 +19,7 @@ export function useAsyncAction(scope: string) {
         catch (error) {
             // Ant Design already shows validation failures beside the fields.
             if (!(error && typeof error === "object" && "errorFields" in error)) {
-                message.error(error instanceof Error ? error.message : uiText("操作失败，请重试"));
+                message.error(displayNotice(error instanceof Error ? error.message : uiText("操作失败，请重试")));
             }
         } finally { release(); setPending(false); }
     };

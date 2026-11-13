@@ -127,6 +127,7 @@ test("an unknown completed duration survives history normalization and is explic
     expect(normalized.durationMs).toBeNull();
     const card = pageFunction("LogCard", {
         React, useUiText() {}, uiText: (value: string) => value,
+        DisplayText: ({ text }: { text: string }) => text,
         Tag: "tag", Checkbox: "input", videoResolutionLabel: (value: string) => value, formatDuration,
     })({ log: normalized, selected: false, active: false, onSelectedChange() {}, onClick() {} });
     expect(treeText(card)).toContain("耗时未知");

@@ -1,3 +1,6 @@
+import { displayNotice, useDisplayUiValue, useDisplayConfig  } from "@/hooks/use-display-text";
+import { staticUiText } from "@/lib/static-ui-copy";
+import { useUiLocale } from "@/lib/i18n";
 import { Alert, App, Button, Form, Input, Modal, Select, Table } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
@@ -9,6 +12,9 @@ type Selection = { kind: "task"; row: UncertainTask } | { kind: "chat"; row: Unc
 type Values = { decision: string; reason: string; evidenceReference: string; upstreamTaskId?: string; assetIds?: string };
 
 export function TaskReconciliationPanel({ active, onResolved }: { active: boolean; onResolved: () => Promise<unknown> }) {
+    const displayUi = useDisplayUiValue();
+    const displayConfig = useDisplayConfig();
+    useUiLocale();
   const { message } = App.useApp();
   const userId = useUserStore(state => state.user?.id);
   const [selected, setSelected] = useState<Selection | null>(null);
@@ -31,43 +37,43 @@ export function TaskReconciliationPanel({ active, onResolved }: { active: boolea
             ? { ...evidence, decision: "confirmed_success", ...(values.assetIds?.trim() ? { resultAssetIds: values.assetIds.trim().split(/[\s,，]+/) } : {}) }
             : { ...evidence, decision: values.decision as "confirmed_failed" | "confirmed_not_submitted" };
         const result = await resolveUncertainTask(selected.row.id, body);
-        if (result.queuePending) message.warning("原上游编号已保存，队列恢复后继续查询；请勿重新生成");
+        if (result.queuePending) message.warning(staticUiText("原上游编号已保存，队列恢复后继续查询；请勿重新生成"));
       }
-      message.success("核查结论已保存并写入审计日志"); setSelected(null);
+      message.success(staticUiText("核查结论已保存并写入审计日志")); setSelected(null);
       await Promise.all([query.refetch(), onResolved()]);
-    } catch (error) { message.error(error instanceof Error ? error.message : "核查未完成"); await query.refetch(); }
+    } catch (error) { message.error(displayNotice(error instanceof Error ? error.message : staticUiText("核查未完成"))); await query.refetch(); }
     finally { submitting.current = false; setSaving(false); }
   }
   const commonColumns = [
     { title: "员工", dataIndex: "displayName", width: 110 }, { title: "模型", dataIndex: "modelName", width: 150 },
     { title: "请求编号", dataIndex: "requestId", ellipsis: true },
   ];
-  return <section className="wb-surface grid min-w-0 gap-3 p-4" aria-label="待核查任务">
-    <div className="flex items-center justify-between gap-3"><h3>待核查任务</h3><Button loading={query.isFetching} onClick={() => void query.refetch()}>刷新核查列表</Button></div>
-    <Alert type="warning" showIcon title="先核实供应商记录，再结案" description={`超时不代表任务失败；状态未知的任务不会自动重新提交。下方包括暂停任务，以及超过 ${query.data?.minimumChatAgeMinutes ?? 30} 分钟仍未确认结果的对话。每类最多展示 100 条。`} />
-    {query.error ? <Alert type="error" title="核查列表未能加载" description={query.error.message} /> : null}
-    <Table<UncertainTask> className="min-w-0 overflow-hidden" size="small" rowKey="id" loading={query.isPending} dataSource={query.data?.tasks ?? []} pagination={false} scroll={{ x: 850 }} columns={[
-      ...commonColumns, { title: "原因", dataIndex: "failureReason", ellipsis: true },
-      { title: "操作", width: 90, render: (_, row) => <Button onClick={() => open({ kind: "task", row })}>核查任务</Button> },
-    ]} />
-    <Table<UncertainChat> className="min-w-0 overflow-hidden" size="small" rowKey="id" dataSource={query.data?.chats ?? []} pagination={false} scroll={{ x: 850 }} columns={[
-      ...commonColumns, { title: "开始时间（北京时间）", dataIndex: "createdAt", width: 200, render: (value: string) => formatBeijingDateTime(value) },
-      { title: "操作", width: 90, render: (_, row) => <Button onClick={() => open({ kind: "chat", row })}>核查对话</Button> },
-    ]} />
-    <Modal open={Boolean(selected)} title="核查原任务并结案" onCancel={() => { if (!saving) setSelected(null); }} onOk={() => form.submit()} confirmLoading={saving} okText="保存核查结论" cancelText="返回" mask={{ closable: false }}>
+  return <section className="wb-surface grid min-w-0 gap-3 p-4" aria-label={staticUiText("待核查任务")}>
+    <div className="flex items-center justify-between gap-3"><h3>{staticUiText("待核查任务")}</h3><Button loading={query.isFetching} onClick={() => void query.refetch()}>{staticUiText("刷新核查列表")}</Button></div>
+    <Alert type="warning" showIcon title={staticUiText("先核实供应商记录，再结案")} description={staticUiText("超时不代表任务失败；状态未知的任务不会自动重新提交。下方包括暂停任务，以及超过 {p0} 分钟仍未确认结果的对话。每类最多展示 100 条。", { p0: `${query.data?.minimumChatAgeMinutes ?? 30}` })} />
+    {query.error ? <Alert type="error" title={staticUiText("核查列表未能加载")} description={displayUi(query.error.message)} /> : null}
+    <Table<UncertainTask> className="min-w-0 overflow-hidden" size="small" rowKey="id" loading={query.isPending} dataSource={query.data?.tasks ?? []} pagination={false} scroll={{ x: 850 }} columns={displayConfig([
+      ...commonColumns, { title: staticUiText("原因"), dataIndex: "failureReason", ellipsis: true },
+      { title: staticUiText("操作"), width: 90, render: (_, row) => <Button onClick={() => open({ kind: "task", row })}>{staticUiText("核查任务")}</Button> },
+    ], "columns", query.data?.tasks ?? [])} />
+    <Table<UncertainChat> className="min-w-0 overflow-hidden" size="small" rowKey="id" dataSource={query.data?.chats ?? []} pagination={false} scroll={{ x: 850 }} columns={displayConfig([
+      ...commonColumns, { title: staticUiText("开始时间（北京时间）"), dataIndex: "createdAt", width: 200, render: (value: string) => formatBeijingDateTime(value) },
+      { title: staticUiText("操作"), width: 90, render: (_, row) => <Button onClick={() => open({ kind: "chat", row })}>{staticUiText("核查对话")}</Button> },
+    ], "columns", query.data?.chats ?? [])} />
+    <Modal open={Boolean(selected)} title={staticUiText("核查原任务并结案")} onCancel={() => { if (!saving) setSelected(null); }} onOk={() => form.submit()} confirmLoading={saving} okText={staticUiText("保存核查结论")} cancelText={staticUiText("返回")} mask={{ closable: false }}>
       <p className="mb-3 break-all text-xs">{selected?.row.requestId}</p>
       <Form form={form} layout="vertical" onFinish={submit} disabled={saving}>
-        <Form.Item name="decision" label="已核实结论" rules={[{ required: true, message: "请选择核实后的结论" }]}><Select options={selected?.kind === "chat" ? [
-          { value: "capture", label: "已确认有效输出" }, { value: "release", label: "已确认失败 / 未提交" },
+        <Form.Item name="decision" label={staticUiText("已核实结论")} rules={[{ required: true, message: staticUiText("请选择核实后的结论") }]}><Select options={displayConfig(selected?.kind === "chat" ? [
+          { value: "capture", label: staticUiText("已确认有效输出") }, { value: "release", label: staticUiText("已确认失败 / 未提交") },
         ] : [
-          { value: "confirmed_failed", label: "供应商已确认失败" }, { value: "confirmed_not_submitted", label: "已确认未提交：取消任务" },
-          { value: "confirmed_success", label: "已确认成功：交付结果" },
-          ...(selected?.kind === "task" && selected.row.canAttachUpstream ? [{ value: "attach_upstream", label: "按原上游编号恢复查询，不重新生成" }] : []),
-        ]} /></Form.Item>
-        {selected?.kind === "task" && decision === "attach_upstream" ? <Form.Item name="upstreamTaskId" label="原上游任务编号" initialValue={selected.row.upstreamTaskId ?? ""} rules={[{ required: true, whitespace: true, max: 500 }]}><Input /></Form.Item> : null}
-        {selected?.kind === "task" && decision === "confirmed_success" ? <Form.Item name="assetIds" label="结果素材 UUID（逗号或换行分隔）" extra="必须属于原员工且媒体类型正确；留空只会使用已有且已验证的任务结果。"><Input.TextArea rows={2} /></Form.Item> : null}
-        <Form.Item name="reason" label="核查理由" rules={[{ required: true, whitespace: true, min: 2, max: 1000 }]}><Input.TextArea rows={3} maxLength={1000} /></Form.Item>
-        <Form.Item name="evidenceReference" label="供应商工单 / 核查记录编号" rules={[{ required: true, whitespace: true, min: 3, max: 1000 }]}><Input maxLength={1000} /></Form.Item>
+          { value: "confirmed_failed", label: staticUiText("供应商已确认失败") }, { value: "confirmed_not_submitted", label: staticUiText("已确认未提交：取消任务") },
+          { value: "confirmed_success", label: staticUiText("已确认成功：交付结果") },
+          ...(selected?.kind === "task" && selected.row.canAttachUpstream ? [{ value: "attach_upstream", label: staticUiText("按原上游编号恢复查询，不重新生成") }] : []),
+        ], "options")} /></Form.Item>
+        {selected?.kind === "task" && decision === "attach_upstream" ? <Form.Item name="upstreamTaskId" label={staticUiText("原上游任务编号")} initialValue={selected.row.upstreamTaskId ?? ""} rules={[{ required: true, whitespace: true, max: 500 }]}><Input /></Form.Item> : null}
+        {selected?.kind === "task" && decision === "confirmed_success" ? <Form.Item name="assetIds" label={staticUiText("结果素材 UUID（逗号或换行分隔）")} extra={staticUiText("必须属于原员工且媒体类型正确；留空只会使用已有且已验证的任务结果。")}><Input.TextArea rows={2} /></Form.Item> : null}
+        <Form.Item name="reason" label={staticUiText("核查理由")} rules={[{ required: true, whitespace: true, min: 2, max: 1000 }]}><Input.TextArea rows={3} maxLength={1000} /></Form.Item>
+        <Form.Item name="evidenceReference" label={staticUiText("供应商工单 / 核查记录编号")} rules={[{ required: true, whitespace: true, min: 3, max: 1000 }]}><Input maxLength={1000} /></Form.Item>
       </Form>
     </Modal>
   </section>;

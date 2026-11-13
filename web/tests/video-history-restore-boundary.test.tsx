@@ -56,6 +56,7 @@ function harness() {
             } },
         antd: { ...antd, App: { useApp: () => ({ message: { error: (text: string) => errors.push(text), warning() {}, success() {}, info() {} }, modal: { confirm: (value: any) => confirmations.push(value) } }) } },
         "@/lib/i18n": i18nHarness,
+        "@/hooks/use-display-text": { useDisplayText: () => (text: string) => text, DisplayText: ({ text }: { text: string }) => text, DisplayTranslationPreview: () => null },
         "@/components/workbench-tasks": { WorkbenchTasks: ({ children }: any) => children.type(children.props), useWorkbenchTask: () => ({ id: "default", active: true, ready: true, creating: false, draftScope: (key: string) => key }), useWorkbenchTaskStatus() {} },
         "@/hooks/use-generation-draft": { useGenerationDraft: (key: string, initial: any) => {
             if (!drafts.has(key)) drafts.set(key, key.endsWith(":settings") ? { ...config } : initial);

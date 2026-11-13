@@ -19,6 +19,7 @@ const test = base.extend<{ studio: Studio }>({ studio: async ({ context, page },
         studio.recoveries++;
         const task = api.tasks.get(id)!;
         task.status = "success"; task.resultDocument.status = "ready";
+        task.resultDocument.items = task.resultDocument.items.map((item: any) => ({ ...item, state: "saved", assetId: id, contentUrl: `/api/assets/${id}/content` }));
         return route.fulfill({ json: { task, recovered: true } });
     });
     await context.route("**/api/layer-studio/estimate", route => {
@@ -197,6 +198,49 @@ test("storage failure before durable identity blocks the model POST", async ({ p
     await expect(pane(page).getByRole("alert")).toContainText("请求记录未能安全保存");
     expect(studio.api.submissions).toHaveLength(0);
     await expect(generate(page)).toBeDisabled();
+});
+
+test("missing layer recovery is actionable in the editor and preserves edits without another generation", async ({ page, studio }, testInfo) => {
+    await page.goto("/layer-studio");
+    await pane(page).getByLabel("上传参考图片", { exact: true }).setInputFiles({ name: "original.png", mimeType: "image/png", buffer: IMAGE });
+    await pane(page).getByRole("button", { name: "开始拆分", exact: true }).click();
+    await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
+    const position = pane(page).getByRole("spinbutton", { name: "X 位置", exact: true });
+    await position.fill("24"); await position.press("Tab");
+    const task = [...studio.api.tasks.values()][0];
+    task.status = "paused"; task.resultDocument.status = "partial"; task.resultDocument.expectedOutputCount = 5;
+    task.resultDocument.items.push(...[1, 2, 3, 4].map(index => ({ index, groupIndex: 0, urlIndex: index, role: "layer", state: "pending", width: 256, height: 256, name: `缺失图层 ${index}`, boundingBox: { absolute: [16 * index, 16, 16 * index + 32, 48] } })));
+    await page.evaluate(async requestId => {
+        const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
+        const store = createWorkspaceStorage("layer_studio_workspaces");
+        const records: Array<[string, any]> = [];
+        await store.iterate((value: any, key) => { if (value.jobs?.some((job: any) => job.requestId === requestId)) records.push([key, value]); });
+        for (const [key, value] of records) { value.jobs[0].phase = "pending"; await store.setItem(key, value); }
+    }, task.requestId);
+    await page.reload();
+    const recovery = pane(page).getByLabel("图层原件恢复", { exact: true });
+    await expect(recovery).toContainText("已保存 1 / 5 份原件");
+    await expect(recovery.getByRole("button", { name: "重新读取已保存原件", exact: true })).toHaveCount(0);
+    await expect(pane(page).getByRole("button", { name: "导出合成 PNG", exact: true })).toBeDisabled();
+    const reads = studio.api.taskReads.length;
+    await recovery.getByRole("button", { name: "查询原任务并更新图层", exact: true }).click();
+    await expect.poll(() => studio.api.taskReads.length).toBeGreaterThan(reads);
+    expect(studio.recoveries).toBe(0); expect(studio.api.submissions).toHaveLength(1);
+    await recovery.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("partial-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const resume = recovery.getByRole("button", { name: "继续保存缺失图层（不重新生成）", exact: true });
+    await resume.scrollIntoViewIfNeeded();
+    await expect(resume).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("partial-mobile.png") });
+    await resume.dblclick();
+    await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
+    await expect(recovery).toHaveCount(0);
+    await expect(pane(page).getByRole("button", { name: "导出合成 PNG", exact: true })).toBeEnabled();
+    await expect(position).toHaveValue("24");
+    expect(studio.recoveries).toBe(1); expect(studio.api.submissions).toHaveLength(1);
+    await expect(pane(page).getByRole("list", { name: "图层列表，最上方在最前景" }).getByRole("listitem")).toHaveCount(5);
 });
 
 test("missing original request stays recoverable after reload and never creates a replacement", async ({ page, context, studio }) => {

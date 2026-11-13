@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
 import ts from "typescript";
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { normalizePageUrl, referenceReturnPath } from "@/pages/reference-import/collect";
 import { decodeReference } from "@/pages/reference-import/protocol";
 import type { ReferenceScan } from "@/services/api/reference-import";
@@ -49,6 +50,7 @@ function component(path: string, mocks: Record<string, unknown>, browser: Record
     const form = { resetFields() {}, setFieldsValue() {} };
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
+        "@/hooks/use-display-text": displayHooksHarness,
         react: { ...React,
             useState(initial: any) { const index = cursor++; if (!(index in values)) values[index] = typeof initial === "function" ? initial() : initial; return [values[index], (value: any) => { values[index] = typeof value === "function" ? value(values[index]) : value; }]; },
             useRef(initial: any) { const index = cursor++; return values[index] ||= { current: initial }; },

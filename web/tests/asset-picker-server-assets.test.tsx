@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { i18nHarness } from "./helpers/i18n-harness";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type DependencyList, type EffectCallback, type ReactElement } from "react";
@@ -84,6 +85,7 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "single-imag
         return active.values[index].value;
     };
     const dependencies: Record<string, any> = {
+        "@/hooks/use-display-text": { ...displayHooksHarness, DisplayText: ({ text }: { text: string }) => text, DisplayTranslationScope: ({ children }: { children: ReactElement<any> }) => children },
         react: { ...React, useState, useMemo, useRef: (value: unknown) => useMemo(() => ({ current: value }), []), useDeferredValue: (value: unknown) => value,
             useEffect: (effect: EffectCallback, dependencies?: DependencyList) => {
                 const owner = active;
@@ -110,7 +112,8 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "single-imag
     );
     const render = () => {
         const modal = pickerModule.exports.AssetPickerModal({ open, selectionMode, onClose() {}, onInsert: (payload: unknown) => inserted.push(payload), onInsertMany: (payloads: any[]) => batches.push(payloads) });
-        const child = modal.props.children as ReactElement<any>;
+        const displayScope = modal.props.children as ReactElement<any>;
+        const child = (displayScope.type as Function)(displayScope.props) as ReactElement<any>;
         if (mounted && child.key !== mountedKey) { cleanup(active); active = frame(); }
         mounted = true;
         mountedKey = child.key;

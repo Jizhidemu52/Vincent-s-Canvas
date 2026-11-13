@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { displayHooksHarness } from "./helpers/display-hooks-harness";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { pastedImageFiles } from "@/lib/clipboard-images";
@@ -34,6 +35,7 @@ function moduleWith<T>(path: string, modules: Record<string, unknown>, globals: 
     const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
     const output = { exports: {} };
     const require = (name: string) => {
+        if (name === "@/hooks/use-display-text") return displayHooksHarness;
         if (!(name in modules)) throw new Error(`Unexpected dependency: ${name}`);
         return modules[name];
     };
@@ -346,6 +348,7 @@ function composer(h: ReturnType<typeof harness>, kind: "chat" | "canvas", blocke
     const warnings: string[] = [];
     const env = {
         pastedConversationImageFiles: h.pastedConversationImageFiles,
+        displayNotice: displayHooksHarness.displayNotice,
         message: { error: (value: string) => errors.push(value), warning: (value: string) => warnings.push(value) },
         t: (value: string) => value, uiText: (value: string) => value,
         editing: null, sendingRef: { current: blocked }, attachmentReadRef: { current: false }, readingAttachments: false,
@@ -417,6 +420,7 @@ function imageTools(h: ReturnType<typeof harness>) {
         "@/stores/use-user-store": { useUserStore: h.store },
         "@/types/canvas": { CanvasNodeType },
     });
+    // biome-ignore lint/correctness/useHookAtTopLevel: Execute the actual hook with the isolated React boundary supplied above.
     return { ...hook.useConversationImageTools(), successes, errors, unmount: () => cleanups.forEach(cleanup => cleanup()) };
 }
 const conversationImage = { id: "result-a", label: "图2", name: "result-original.png", dataUrl: "blob:preview", storageKey: "stored:result-a" };
