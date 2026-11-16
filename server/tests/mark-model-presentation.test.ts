@@ -38,11 +38,16 @@ test("all platform models retain distinct UUIDs, exact display prefixes and expl
       expect(shown.modelId).toBe(row.id);
       if (preset.modelId === "seedream-5-5") {
         expect(preset.defaultEnabled).toBe(false);
-        expect(shown.name).toBe("图层拆分与图片生成");
-        expect(shown.publicDescription).toBe("独立生成、图层拆分与重组");
+        expect(shown.name).toBe("豆包生图");
+        expect(shown.publicDescription).toBe("图片生成、参考图编辑与透明背景；图层拆分使用独立工作区");
         expect(shown.modelIdentityHidden).toBe(true);
-        expect(JSON.stringify(shown)).not.toMatch(/apimart|seedream/i);
-        expect(selectCreativeModels([row])).toEqual([]);
+        expect(shown.imageParameterProfile).toBe("seedream55");
+        expect(shown.imageSupportsMask).toBe(false);
+        expect(shown.imageSupportsOfficialFallback).toBe(false);
+        expect(shown).not.toHaveProperty("providerId");
+        expect(shown).not.toHaveProperty("protocol");
+        expect(shown).not.toHaveProperty("parameterModelId");
+        expect(selectCreativeModels([row])).toEqual([row]);
         continue;
       }
       expect(shown.name).toBe(preset.name);

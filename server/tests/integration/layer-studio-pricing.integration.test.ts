@@ -68,9 +68,11 @@ integration("layer workspace configuration and cost SQL", () => {
     expect((await row("SELECT count(*)::int AS n FROM audit_logs WHERE action='layer_studio.price_updated'")).n).toBe(1);
   });
 
-  test("strict dedicated binding, anonymous read-only quote and invalid options rejection", async () => {
+  test("ordinary binding, strict layer binding, anonymous read-only quote and invalid options rejection", async () => {
     const configuredInput = { modelConfigId: modelId, enabled: true, creditCostOverride: null, rmbCostOverride: null };
-    expect((await request("/admin/tool-configurations/image", "PUT", configuredInput)).status).toBe(400);
+    expect((await request("/admin/tool-configurations/image", "PUT", configuredInput)).status).toBe(200);
+    expect((await request("/admin/tool-configurations/canvas-mask-edit", "PUT", configuredInput)).status).toBe(400);
+    expect((await request("/admin/tool-configurations/midjourney-blend", "PUT", configuredInput)).status).toBe(400);
     expect((await request("/admin/tool-configurations/layer-studio", "PUT", { ...configuredInput, modelConfigId: otherModelId })).status).toBe(400);
     expect((await request("/admin/tool-configurations/layer-studio", "PUT", configuredInput)).status).toBe(200);
     await fixture.db.query("UPDATE module_flags SET enabled=true WHERE module_key='layer-studio'");

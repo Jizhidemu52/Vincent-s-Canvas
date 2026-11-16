@@ -131,11 +131,13 @@ async function runTask(taskId: string) {
   const task = details.rows[0];
   if (!task) return;
   // A durable Seedream receipt remains recoverable even if an administrator
-  // changes the model configuration after the paid request completed.
-  const isSeedream55 = task.tool_key === "layer-studio"
+  // changes the model configuration after the paid request completed. A foreign
+  // image manifest cannot establish completion for a video/audio task.
+  const isSeedream55 = ["image_generation", "inpaint", "upscale", "batch_image", "seamless_stitch"].includes(task.operation_type)
+    && (task.tool_key === "layer-studio"
     || (task.model_id === "seedream-5-5" && task.protocol === "apimart" && !task.workflow_config_id)
     || (task.upstream_result_document?.version === 1 && !("kind" in task.upstream_result_document)
-      && ["generate", "decompose"].includes(task.upstream_result_document.mode));
+      && ["generate", "decompose"].includes(task.upstream_result_document.mode)));
   let modelLease: TaskLease | null = null;
   try {
     modelLease = await acquireModelLease(db, cache, { taskId, executionToken, modelConfigId: task.model_config_id, limit: task.concurrency_limit ?? 5 });

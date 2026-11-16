@@ -178,24 +178,28 @@ integration("Worker completion receipt actual SQL recovery", () => {
     expect(providerQueries).toBe(1); expect(downloads).toBe(2); expect(captures).toBe(1);
   });
 
-  test("unknown completion, a layer manifest and a foreign-identity video receipt all retain the original model slot", async () => {
-    for (const kind of ["unknown", "layer", "foreign"] as const) {
+  test("unknown completion, foreign image manifests and a foreign-identity video receipt all retain the original model slot", async () => {
+    for (const kind of ["unknown", "layer-decompose", "layer-generate", "foreign"] as const) {
       const { taskId, modelId, requestId, state } = await createTask(kind);
-      const original = kind === "unknown" ? null : kind === "layer" ? { version: 1, mode: "decompose", items: [] }
+      const original = kind === "unknown" ? null : kind.startsWith("layer-") ? { version: 1, mode: kind === "layer-decompose" ? "decompose" : "generate", items: [] }
         : receipt({ id: taskId, user_id: randomUUID(), model_config_id: modelId, model_id: "gemini-omni-1.2-flash", upstream_task_id: "original-video" });
       await query("UPDATE tasks SET upstream_result_document=$2::jsonb WHERE id=$1", [taskId, original === null ? null : JSON.stringify(original)]);
-      let queries = 0;
+      let queries = 0, imageStorageCalls = 0, imageSettlementCalls = 0;
       const api = worker({
         db: fixture.db, cache: { eval: async () => 1, zRem: async () => 0 }, randomUUID, TASK_LEASE_SECONDS,
         acquireModelLease, releaseModelLease, startTaskLeaseHeartbeat: () => ({ assertOwned() {}, stop: async () => {} }),
         createGenerationTiming: () => timing, readProviderSubmissionDiagnostics: () => undefined, disposeProviderResults,
         decryptSecret: () => '{"apiKey":"fixture-only"}',
         stepApiMartVideoTask: async () => { queries++; throw new Error("fixture original state unknown"); },
+        storeSeedream55TaskResults: () => { imageStorageCalls++; throw new Error("A video task cannot store a foreign image manifest"); },
+        settleLayerStudioReservation: () => { imageSettlementCalls++; throw new Error("A video task cannot use image settlement"); },
       }, true);
       await api.runTask(taskId);
       const paused = await state();
       expect(paused).toMatchObject({ status: "paused", attempts: 1, receipt: original });
       expect(paused.model_slot_token).not.toBeNull(); expect(paused.model_slot_expires_at).not.toBeNull();
+      expect(imageStorageCalls).toBe(0); expect(imageSettlementCalls).toBe(0);
+      expect(paused.failure_reason).not.toContain("可恢复原任务继续下载和保存");
       expect(queries).toBe(kind === "unknown" ? 1 : 0);
       expect((await query("SELECT status FROM credit_reservations WHERE request_id=$1", [requestId])).rows[0].status).toBe("held");
     }
