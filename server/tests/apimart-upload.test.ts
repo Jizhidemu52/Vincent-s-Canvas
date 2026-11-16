@@ -3,11 +3,22 @@ import { APIMART_VIDEO_IMAGE_MAX_BYTES, uploadApiMartImage } from "../src/apimar
 import { runApiMartImageTask } from "../src/apimart-image";
 import { imageTaskFailureDetail } from "../src/image-task-diagnostics";
 import * as providerTransport from "../src/provider-submission-transport";
+import { AVIF_REFERENCE_UNSUPPORTED_MESSAGE } from "../../shared/generation-error";
 
 const input = { baseUrl: "https://provider.example/v1/", apiKey: "test-secret", bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 describe("APIMart reference image upload", () => {
+  test("AVIF processing explains that project uploads remain supported without contacting the provider", async () => {
+    const bytes = input.bytes.slice();
+    let requests = 0;
+    for (const purpose of ["image", "video"] as const) {
+      await expect(uploadApiMartImage({ ...input, bytes, mimeType: "image/avif", purpose }, { fetch: async () => { requests++; return json({}); } })).rejects.toThrow(AVIF_REFERENCE_UNSUPPORTED_MESSAGE);
+    }
+    expect(requests).toBe(0);
+    expect(bytes).toEqual(input.bytes);
+  });
+
   test("defaults to the native submission transport without falling back to Bun fetch", async () => {
     const plainFetch = spyOn(globalThis, "fetch").mockRejectedValue(new Error("Bun fetch must not upload provider references"));
     const timeout = spyOn(AbortSignal, "timeout");

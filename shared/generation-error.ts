@@ -1,6 +1,8 @@
 /** Employee-facing task failures. Raw provider diagnostics remain in task storage/admin APIs. */
 export const IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX = "渠道原件已保存到素材库，但图片后处理未完成";
 export const IMAGE_RESULT_POSTPROCESS_FAILURE_CODE = "IMAGE_RESULT_PROCESSING_FAILED";
+export const AVIF_REFERENCE_UNSUPPORTED_MESSAGE = "AVIF 文件可以上传到项目，但当前模型接口不支持处理。请转换为 PNG 或 JPG 后再试。";
+const unsupportedReferenceMessage = "文件可以上传到项目，但当前模型接口无法处理该格式。请转换为 PNG 或 JPG 后再试。";
 
 export function publicGenerationFailure(reason: unknown, status?: string): string {
     if (status === "cancelled") return "任务已取消。";
@@ -9,6 +11,8 @@ export function publicGenerationFailure(reason: unknown, status?: string): strin
         return `${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}；请联系管理员检查已保存原件，不要重复生成。`;
     if (status === "paused" || /待核查|勿重复|不要重复|submission.{0,20}(unknown|uncertain)|query.{0,12}paused/i.test(raw))
         return "原任务结果待核查，请查询原任务或联系管理员；不要重复生成。";
+    if (raw === AVIF_REFERENCE_UNSUPPORTED_MESSAGE) return raw;
+    if (["图片参考图仅支持 JPEG、PNG、WebP 或 GIF 格式", "视频参考图仅支持 JPEG、PNG、WebP 或 GIF 格式", unsupportedReferenceMessage].includes(raw)) return unsupportedReferenceMessage;
     // Only the exact upload adapter message proves generation never started.
     // A generic 429 may belong to a submitted task and must keep its old guidance.
     for (const purpose of ["图片", "视频"]) {

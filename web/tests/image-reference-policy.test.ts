@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { createImageReferenceItem, dedupeImageReferences, moveImageReference, validateImageReferences } from "../src/lib/image-reference-policy";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore, type LocalUser } from "@/stores/use-user-store";
+import { AVIF_REFERENCE_UNSUPPORTED_MESSAGE } from "../../shared/generation-error";
 
 const ref = (id: string, origin: "upload" | "canvas" | "asset" = "upload") => ({
     id,
@@ -43,6 +44,17 @@ test("enforces documented GPT, Gemini and Midjourney reference limits", () => {
 test("validates legacy plain reference images used by the canvas generation pipeline", () => {
     const references = [{ id: "legacy", name: "legacy.png", type: "image/png", dataUrl: "data:image/png;base64,AA==" }];
     expect(validateImageReferences("gpt-image-2", references).valid).toBe(true);
+});
+
+test("AVIF references explain upload versus processing without changing the original", () => {
+    const references = [{ ...ref("original"), name: "original.avif", type: "image/avif", dataUrl: "data:image/avif;base64,AAAA" }];
+    const before = structuredClone(references);
+    for (const model of ["gpt-image-2.6-flare", "seedream-5-5", "gpt-image-2", "gemini-3.1-flash-image-preview"]) {
+        expect(validateImageReferences(model, references)).toMatchObject({ valid: false, message: AVIF_REFERENCE_UNSUPPORTED_MESSAGE });
+        expect(validateImageReferences(model, [{ ...references[0]!, type: "" }])).toMatchObject({ valid: false, message: AVIF_REFERENCE_UNSUPPORTED_MESSAGE });
+    }
+    expect(references).toEqual(before);
+    expect(validateImageReferences("gpt-image-2.6-flare", [ref("supported")]).valid).toBe(true);
 });
 
 test("opaque public profiles enforce the original reference limits without revealing brands", () => {

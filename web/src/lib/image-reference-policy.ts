@@ -1,4 +1,6 @@
 import type { ImageReferenceItem, ImageReferenceOrigin, ReferenceImage } from "@/types/image";
+import { AVIF_REFERENCE_UNSUPPORTED_MESSAGE } from "../../../shared/generation-error";
+import { uiText } from "./i18n";
 import { imageModelProfile } from "./image-model-settings";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 
@@ -45,6 +47,7 @@ export function validateImageReferences(modelId: string, references: ReferenceIm
 
 /** Recheck the resolved original File before upload; URL references may lack byte metadata. */
 export function imageReferenceFileError(file: { name?: string; size?: number; type?: string }, profile: Pick<ReturnType<typeof imageModelProfile>, "kind">) {
+    if (file.type?.toLowerCase() === "image/avif") return uiText(AVIF_REFERENCE_UNSUPPORTED_MESSAGE);
     const kind = profile.kind;
     if (kind !== "grok-image" && kind !== "gemini" && kind !== "midjourney-blend" && kind !== "seedream55") return undefined;
     const maximumMiB = kind === "seedream55" ? 30 : kind === "midjourney-blend" ? 12 : 10;

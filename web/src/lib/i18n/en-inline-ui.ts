@@ -1,5 +1,7 @@
 /** English UI copy only. Keys and user/task data remain unchanged. */
 export default {
+    "AVIF 文件可以上传到项目，但当前模型接口不支持处理。请转换为 PNG 或 JPG 后再试。": "AVIF files can be uploaded to the project, but the current model API cannot process them. Convert to PNG or JPG and try again.",
+    "文件可以上传到项目，但当前模型接口无法处理该格式。请转换为 PNG 或 JPG 后再试。": "Files can be uploaded to the project, but the current model API cannot process this format. Convert to PNG or JPG and try again.",
     "显示连接线": "Show connections",
     "隐藏连接线": "Hide connections",
     "正在加载生成配置…": "Loading generation settings…",

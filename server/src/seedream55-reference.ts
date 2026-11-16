@@ -1,4 +1,5 @@
 import { fileTypeFromBuffer } from "file-type";
+import { AVIF_REFERENCE_UNSUPPORTED_MESSAGE } from "../../shared/generation-error";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadView } from "exifreader";
@@ -33,6 +34,7 @@ async function verifyImageDecoding(bytes: Uint8Array, heif: boolean) {
 export async function validateSeedream55Reference(source: { bytes: Uint8Array; mimeType: string }) {
   if (!source.bytes.length || source.bytes.length > LAYER_STUDIO_MAX_REFERENCE_BYTES) throw new Error("参考图必须非空且不超过 30 MiB");
   const detected = await fileTypeFromBuffer(source.bytes).catch(() => undefined);
+  if (detected?.mime === "image/avif" && source.mimeType === detected.mime) throw new Error(AVIF_REFERENCE_UNSUPPORTED_MESSAGE);
   if (!detected || !SEEDREAM55_MIMES.has(detected.mime) || detected.mime !== source.mimeType) throw new Error("参考图真实格式与声明不一致或不受支持（不支持 AVIF/JP2）");
   let dimensions: { width?: number; height?: number };
   if (detected.mime === "image/heic" || detected.mime === "image/heif") {

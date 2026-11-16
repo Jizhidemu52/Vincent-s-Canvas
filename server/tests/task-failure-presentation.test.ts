@@ -1,8 +1,24 @@
 import { expect, test } from "bun:test";
 import express from "express";
-import { IMAGE_RESULT_POSTPROCESS_FAILURE_CODE, IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX, publicGenerationFailure, publicTaskFailurePayload } from "../../shared/generation-error";
+import { AVIF_REFERENCE_UNSUPPORTED_MESSAGE, IMAGE_RESULT_POSTPROCESS_FAILURE_CODE, IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX, publicGenerationFailure, publicTaskFailurePayload } from "../../shared/generation-error";
 import { createTasksRouter, createAdminTasksRouter } from "../src/routes/tasks";
 import type { Database, Cache } from "../src/db";
+
+test("unsupported reference formats distinguish project upload from processing in safe task failures", () => {
+    expect(publicGenerationFailure(AVIF_REFERENCE_UNSUPPORTED_MESSAGE)).toBe(AVIF_REFERENCE_UNSUPPORTED_MESSAGE);
+    for (const raw of ["图片参考图仅支持 JPEG、PNG、WebP 或 GIF 格式", "视频参考图仅支持 JPEG、PNG、WebP 或 GIF 格式"]) {
+        const message = publicGenerationFailure(raw);
+        expect(message).toContain("文件可以上传到项目，但当前模型接口无法处理该格式");
+        expect(message).not.toContain("AVIF");
+        expect(publicGenerationFailure(message)).toBe(message);
+        const original = { task: { status: "failed", failureReason: raw }, message: raw };
+        expect(publicTaskFailurePayload(original)).toEqual({ task: { status: "failed", failureReason: message }, message });
+        expect(original.task.failureReason).toBe(raw);
+    }
+    expect(publicGenerationFailure(AVIF_REFERENCE_UNSUPPORTED_MESSAGE, "paused")).toContain("不要重复生成");
+    expect(publicGenerationFailure(AVIF_REFERENCE_UNSUPPORTED_MESSAGE, "cancelled")).toBe("任务已取消。");
+    expect(publicGenerationFailure(`${AVIF_REFERENCE_UNSUPPORTED_MESSAGE} key=private`)).not.toContain("private");
+});
 
 test("provider failures have safe Chinese actions without exposing diagnostics or guessing uncertain outcomes", () => {
     for (const [raw, expected] of [["Midjourney Blend requires 2 to 4 reference images", "参数或参考素材"], ["output_compression 必须为 0-100", "参数或参考素材"], ["HTTP 502: upstream host=private-api key=secret", "连接异常"], ["content_policy_violation", "内容未通过审核"], ["insufficient balance", "额度不足"], ["429 overload", "服务繁忙"], ["request timed out", "响应超时"], ["invalid_api_key sk-private", "服务配置"], ["unknown raw exception", "生成未完成"]]) {

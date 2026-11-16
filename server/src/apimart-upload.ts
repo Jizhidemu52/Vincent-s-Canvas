@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { AVIF_REFERENCE_UNSUPPORTED_MESSAGE } from "../../shared/generation-error";
 import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "./provider-submission-transport";
 
 export const APIMART_VIDEO_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
@@ -21,11 +22,13 @@ export function isApiMartImageMimeType(mimeType: string) {
 }
 
 export function validateApiMartVideoImage(source: { bytes: Uint8Array; mimeType: string }) {
+  if (source.mimeType === "image/avif") throw new Error(AVIF_REFERENCE_UNSUPPORTED_MESSAGE);
   if (!isApiMartImageMimeType(source.mimeType)) throw new Error("视频参考图仅支持 JPEG、PNG、WebP 或 GIF 格式");
   if (!source.bytes.byteLength || source.bytes.byteLength > APIMART_VIDEO_IMAGE_MAX_BYTES) throw new Error("视频参考图必须非空且不超过 10MB");
 }
 
 export function validateApiMartGenerationImage(source: { bytes: Uint8Array; mimeType: string }) {
+  if (source.mimeType === "image/avif") throw new Error(AVIF_REFERENCE_UNSUPPORTED_MESSAGE);
   if (!isApiMartImageMimeType(source.mimeType)) throw new Error("图片参考图仅支持 JPEG、PNG、WebP 或 GIF 格式");
   if (!source.bytes.byteLength || source.bytes.byteLength > APIMART_IMAGE_MAX_BYTES) throw new Error("图片参考图必须非空且不超过 20MB");
 }
