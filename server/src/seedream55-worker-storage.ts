@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { recordAssetEvent } from "./asset-events";
 import { scheduleAssetThumbnails } from "./asset-thumbnails";
 
-type Task = { id: string; user_id: string; department_id: string | null; project_id: string; model_config_id: string | null; prompt: string; execution_token: string; parameters: Record<string, unknown> };
+type Task = { id: string; user_id: string; department_id: string | null; project_id: string; model_config_id: string | null; prompt: string; execution_token: string; parameters: Record<string, unknown>; operation_type?: string };
 type StoredOriginal = { id: string; mime_type: string; byte_size: number; content_sha256: string; metadata: { layerStudio?: { index: number; width: number; height: number; sha256: string } } };
 
 export async function storeSeedream55TaskResults(db: Database, storage: ObjectStorage, task: Task, manifest: Seedream55Manifest, document?: LayerStudioResultDocument | null, runtime: { download?: typeof downloadLayerOriginal } = {}) {
@@ -33,7 +33,7 @@ export async function storeSeedream55TaskResults(db: Database, storage: ObjectSt
       const object = await readSourceAssetObject(storage, key(index));
       const bytes = await readBoundedImage(object.Body!.transformToWebStream(), 64 * 1024 * 1024, found.byte_size);
       if (hashLayerOriginal(bytes) !== found.content_sha256) throw new Error("已保存图层 hash 不一致，拒绝复用");
-      await recordAssetEvent(db, { assetId: found.id, actor: null, eventType: "asset.generated", idempotencyKey: `task:${task.id}:asset:${found.id}:generated`, metadata: { resultIndex: index, operationType: "image_generation" } });
+      await recordAssetEvent(db, { assetId: found.id, actor: null, eventType: "asset.generated", idempotencyKey: `task:${task.id}:asset:${found.id}:generated`, metadata: { resultIndex: index, operationType: task.operation_type ?? "image_generation" } });
       return { assetId: found.id, contentUrl: `/api/assets/${found.id}/content`, bytes, mimeType: found.mime_type, sha256: found.content_sha256, width: metadata.width, height: metadata.height };
     },
     download: runtime.download ?? downloadLayerOriginal,
@@ -52,12 +52,12 @@ export async function storeSeedream55TaskResults(db: Database, storage: ObjectSt
       const id = randomUUID();
       const metadata = { layerStudio: { ...item, width: original.width, height: original.height, sha256: original.sha256 }, originalPreserved: true };
       const inserted = await db.query<{ id: string }>(`INSERT INTO assets(id,owner_user_id,department_id,project_external_id,task_id,object_key,filename,mime_type,byte_size,kind,source,operation_type,prompt,model_config_id,status,content_sha256,metadata)
-        SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,'image','generation','image_generation',$10,$11,'ready',$12,$13::jsonb
+        SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,'image','generation',operation_type,$10,$11,'ready',$12,$13::jsonb
         FROM tasks WHERE id=$5 AND user_id=$2 AND execution_token=$14 AND status='processing' AND lease_expires_at>now()
         ON CONFLICT(object_key) DO NOTHING RETURNING id`,
         [id, task.user_id, task.department_id, task.project_id, task.id, key(index), `layer-${index + 1}.${original.mimeType === "image/jpeg" ? "jpg" : "png"}`, original.mimeType, original.bytes.length, task.prompt, task.model_config_id, original.sha256, JSON.stringify(metadata), task.execution_token]);
       if (!inserted.rows.length) throw new TaskExecutionLost("图层原件记录未写入；保留已保存原件等待恢复核对");
-      await recordAssetEvent(db, { assetId: id, actor: null, eventType: "asset.generated", idempotencyKey: `task:${task.id}:asset:${id}:generated`, metadata: { resultIndex: index, operationType: "image_generation" } });
+      await recordAssetEvent(db, { assetId: id, actor: null, eventType: "asset.generated", idempotencyKey: `task:${task.id}:asset:${id}:generated`, metadata: { resultIndex: index, operationType: task.operation_type ?? "image_generation" } });
       scheduleAssetThumbnails(db, storage, id);
       return { assetId: id, contentUrl: `/api/assets/${id}/content` };
     },

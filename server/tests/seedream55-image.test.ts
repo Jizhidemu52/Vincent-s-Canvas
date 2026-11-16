@@ -82,3 +82,12 @@ test("single submit intent precedes POST; subsequent polls keep original ID and 
   await expect(stepApiMartImageTask({ ...base, submissionStarted: true }, { fetch: async () => { replay++; return Response.json({}); } })).rejects.toThrow();
   expect(replay).toBe(0);
 });
+
+test("ordinary Seedream calls accept scoped internal metadata but never send it upstream or permit decomposition", () => {
+  const payload = buildApiMartImageRequest({ ...input, parameters: { tool: "canvas-image", n: 1, count: 1, size: "16:9", resolution: "1.5K" }, sourceImages: Array(10).fill(image) }).payload;
+  expect(payload).toMatchObject({ model: "seedream-5-5", n: 1, size: "16:9", resolution: "1.5K" });
+  expect(payload).not.toHaveProperty("tool"); expect(payload).not.toHaveProperty("count");
+  expect(payload.image_urls).toHaveLength(10);
+  expect(() => buildApiMartImageRequest({ ...input, parameters: { tool: "image-edit", layer_decomposition: true }, sourceImages: [image] })).toThrow();
+  expect(() => buildApiMartImageRequest({ ...input, parameters: { tool: "image", size: "4K" } })).toThrow();
+});

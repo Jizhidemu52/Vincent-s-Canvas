@@ -3,6 +3,7 @@ import { layerStudioCostEstimate, settleLayerStudioCost } from "../src/layer-stu
 import { layerStudioBindingValid } from "../src/layer-studio-policy";
 import { isFeaturedModelCandidate, presentAdminModel, presentPublicModel, selectCreativeModels } from "../src/model-presentation";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
+import { toolDefinitions } from "../../shared/feature-catalog";
 
 const rates = { inputRmb: 0.01, lowOutputRmb: 0.1, highOutputRmb: 0.2, version: 7 };
 describe("dedicated layer cost accounting", () => {
@@ -42,17 +43,21 @@ describe("layer model boundaries", () => {
   const model = { id: "11111111-1111-4111-8111-111111111111", modelId: "seedream-5-5", providerId: MARK_IMAGE_PROVIDER_ID,
     name: "Secret Model", providerName: "Secret Provider", protocol: "apimart", workflowConfigId: null,
     capabilities: ["generate", "edit"], publicNumber: 15, creditCost: 3, rmbCost: 0 };
-  test.each(["designer", "department_admin", "super_admin"])("creation projection stays anonymous for %s", role => {
+  test.each(["designer", "department_admin", "super_admin"])("ordinary creation uses Doubao label without provider identity for %s", role => {
     const projection = presentPublicModel(model, role);
-    expect(projection).toMatchObject({ name: "图层拆分与图片生成", modelId: model.id, modelIdentityHidden: true });
-    expect(JSON.stringify(projection)).not.toMatch(/seedream|apimart|Secret Model|Secret Provider/i);
+    expect(projection).toMatchObject({ name: "豆包生图", publicName: "豆包生图", modelId: model.id, modelIdentityHidden: true, imageParameterProfile: "seedream55", imageSupportsMask: false, imageSupportsOfficialFallback: false });
+    expect(JSON.stringify(projection)).not.toMatch(/seedream-5-5|apimart|Secret Model|Secret Provider/i);
   });
-  test("admin configuration may identify it, but ordinary selectors and featured models cannot", () => {
+  test("ordinary selectors include it without changing featured defaults or layer-specific binding", () => {
     expect(presentAdminModel(model)).toMatchObject({ modelId: "seedream-5-5" });
-    expect(selectCreativeModels([model])).toEqual([]);
+    expect(selectCreativeModels([model])).toEqual([model]);
     expect(isFeaturedModelCandidate(model)).toBe(false);
     expect(layerStudioBindingValid("layer-studio", model)).toBe(true);
-    expect(layerStudioBindingValid("image", model)).toBe(false);
+    for (const tool of toolDefinitions) {
+      const ordinaryImage = tool.operations.some(operation => ["image_generation", "inpaint", "batch_image", "upscale", "seamless_stitch"].includes(operation));
+      expect(layerStudioBindingValid(tool.toolKey, model)).toBe(ordinaryImage && tool.toolKey !== "canvas-mask-edit" && tool.toolKey !== "midjourney-blend");
+    }
+    expect(selectCreativeModels([{ ...model, protocol: "openai" }, { ...model, workflowConfigId: "workflow" }])).toEqual([]);
     expect(layerStudioBindingValid("layer-studio", { ...model, workflowConfigId: "workflow" })).toBe(false);
     expect(layerStudioBindingValid("layer-studio", { ...model, protocol: "openai" })).toBe(false);
     expect(layerStudioBindingValid("layer-studio", { ...model, modelId: "other" })).toBe(false);

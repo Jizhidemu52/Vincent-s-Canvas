@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { PoolClient } from "pg";
 import { writeAudit } from "./audit";
-import { settleReservation } from "./billing";
+import { settleReservation, type PriceSnapshot } from "./billing";
 import type { Cache, Database } from "./db";
 import { withTransaction } from "./db-transaction";
 import { removeQueuedTask, scheduleQueuedTask } from "./task-queue";
@@ -33,10 +33,10 @@ type AuditActor = { actor: SessionUser; ip?: string };
 type TaskRow = {
     id: string; request_id: string; user_id: string; department_id: string | null;
     batch_id: string | null; status: string; priority: TaskPriority; operation_type: string;
-    model_config_id: string | null; protocol: string | null; workflow_config_id: string | null;
+    model_config_id: string | null; model_id?: string | null; protocol: string | null; workflow_config_id: string | null;
     upstream_task_id: string | null; model_slot_token: string | null; queued_at: string;
     result_urls: unknown; execution_active: boolean;
-    tool_key?: string; result_document?: LayerStudioResultDocument | null;
+    tool_key?: string; result_document?: LayerStudioResultDocument | null; seedream_pricing?: boolean;
 };
 
 export class ReconciliationError extends Error {
@@ -47,6 +47,9 @@ function requireSuperAdmin(actor: SessionUser) {
 }
 const desiredTaskStatus = (decision: TaskDecision["decision"]) => decision === "confirmed_success" ? "success"
     : decision === "confirmed_not_submitted" ? "cancelled" : decision === "confirmed_failed" ? "failed" : "processing";
+const hasSeedreamResult = (task: TaskRow) => task.tool_key === "layer-studio"
+    || task.seedream_pricing === true
+    || (task.model_id === "seedream-5-5" && task.protocol === "apimart" && !task.workflow_config_id);
 
 export async function listTaskReconciliation(db: Database, actor: SessionUser, limit = 100) {
     requireSuperAdmin(actor);
@@ -86,9 +89,10 @@ async function checkedResultUrls(client: PoolClient, task: TaskRow, provided?: s
     });
     if (!ids.length) throw new ReconciliationError("TASK_RESULT_REQUIRED", "成功结案必须有可交付结果素材");
     if (ids.length > (task.tool_key === "layer-studio" ? 100 : 20)) throw new ReconciliationError("INVALID_TASK_RESULT", "结果素材数量超过该工具上限");
-    if (task.tool_key === "layer-studio") {
+    if (hasSeedreamResult(task)) {
         const document = task.result_document;
         if (!document || document.status !== "ready" || document.taskId !== task.id || document.expectedOutputCount !== ids.length || document.items.length !== ids.length
+            || (task.tool_key !== "layer-studio" && (document.mode !== "generate" || ids.length !== 1))
             || document.items.some((item, index) => item.index !== index || item.state !== "saved" || item.assetId !== ids[index] || !item.sha256 || !item.width || !item.height)) {
             throw new ReconciliationError("INCOMPLETE_LAYER_RESULT", "图层原件未完整保存，必须先恢复原任务，不能提前结算");
         }
@@ -104,7 +108,7 @@ async function checkedResultUrls(client: PoolClient, task: TaskRow, provided?: s
         || asset.kind !== (expected === "audio" ? "other" : expected) || !asset.mime_type.startsWith(`${expected}/`))) {
         throw new ReconciliationError("INVALID_TASK_RESULT", "结果素材必须属于原员工、已就绪且媒体类型与任务一致");
     }
-    if (task.tool_key === "layer-studio" && result.rows.some(asset => {
+    if (hasSeedreamResult(task) && result.rows.some(asset => {
         const index = ids.indexOf(asset.id), item = task.result_document!.items[index]!, layer = asset.metadata.layerStudio;
         return asset.task_id !== task.id || asset.content_sha256 !== item.sha256 || !layer || layer.index !== index
             || layer.sha256 !== item.sha256 || layer.width !== item.width || layer.height !== item.height || asset.mime_type !== item.mimeType;
@@ -127,7 +131,7 @@ export async function reconcileTask(db: Database, cache: Cache, taskId: string, 
         // Never acquire the model admission advisory lock after this task lock.
         const selected = await client.query<TaskRow>(
             `SELECT t.id,t.request_id,t.user_id,t.department_id,t.batch_id,t.status,t.priority,t.operation_type,
-                    t.model_config_id,p.protocol,m.workflow_config_id,t.upstream_task_id,t.model_slot_token,t.queued_at,t.result_urls,t.tool_key,t.result_document,
+                    t.model_config_id,m.model_id,p.protocol,m.workflow_config_id,t.upstream_task_id,t.model_slot_token,t.queued_at,t.result_urls,t.tool_key,t.result_document,
                     COALESCE(t.lease_expires_at>now(),false) AS execution_active
                FROM tasks t LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id
               WHERE t.id=$1 FOR UPDATE OF t`, [taskId],
@@ -147,10 +151,12 @@ export async function reconcileTask(db: Database, cache: Cache, taskId: string, 
         // status='paused' fences Worker writes. An expired stale token is safe to
         // clear under this row lock; a still-live lease is never reconciled.
         if (task.status !== "paused" || task.execution_active) throw new ReconciliationError("TASK_NOT_RECONCILABLE", "仅能核查已暂停且没有活跃执行租约的任务");
-        const reservation = await client.query<{ status: string; user_id: string }>(
-            "SELECT status,user_id FROM credit_reservations WHERE request_id=$1 FOR UPDATE", [task.request_id],
+        const reservation = await client.query<{ status: string; user_id: string; price_snapshot: PriceSnapshot }>(
+            "SELECT status,user_id,price_snapshot FROM credit_reservations WHERE request_id=$1 FOR UPDATE", [task.request_id],
         );
         if (!reservation.rows[0] || reservation.rows[0].user_id !== task.user_id) throw new ReconciliationError("TASK_RESERVATION_MISMATCH", "任务预占记录缺失或归属不一致，不能自动结案");
+        // Changing today's model configuration must not change the original settlement contract.
+        task.seedream_pricing = Boolean(reservation.rows[0].price_snapshot?.layerStudioCost);
         let resultUrls = Array.isArray(task.result_urls) ? task.result_urls as string[] : [];
         if (decision.decision === "attach_upstream") {
             if (task.protocol !== "apimart" || task.workflow_config_id || !recoverableOperations.includes(task.operation_type)) {
@@ -173,7 +179,7 @@ export async function reconcileTask(db: Database, cache: Cache, taskId: string, 
             }
             if (decision.decision === "confirmed_success") resultUrls = await checkedResultUrls(client, task, decision.resultAssetIds);
             else resultUrls = [];
-            if (outcome === "capture" && task.tool_key === "layer-studio") await settleLayerStudioReservation(db, task.request_id, task.result_document!.items.map(item => ({ width: item.width!, height: item.height! })), client);
+            if (outcome === "capture" && hasSeedreamResult(task)) await settleLayerStudioReservation(db, task.request_id, task.result_document!.items.map(item => ({ width: item.width!, height: item.height! })), client);
             else await settleReservation(db, task.request_id, outcome, input.actor.id, client, outcome === "capture" ? resultUrls.length : undefined);
             await client.query(
                 `UPDATE tasks SET status=$2,result_urls=$3,failure_reason=$4,execution_token=NULL,lease_expires_at=NULL,

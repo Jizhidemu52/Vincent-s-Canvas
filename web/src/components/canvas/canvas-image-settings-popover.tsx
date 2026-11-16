@@ -9,6 +9,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import { imageReferenceSizeIsAutomatic, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
+import { normalizeImageOptions, readImageOptions } from "@/lib/image-advanced-settings";
 
 type CanvasImageSettingsPopoverProps = {
     config: AiConfig;
@@ -33,6 +34,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
     const profile = useImageModelProfile(config.model || config.imageModel);
     const { quality, size: activeSize } = normalizeImageModelSettings(config, profile);
+    const seedreamResolution = profile.kind === "seedream55" ? readImageOptions(normalizeImageOptions(config.imageOptions, profile)).resolution?.toUpperCase() : undefined;
     const updateOpen = (nextOpen: boolean) => {
         setOpen(nextOpen);
         onOpenChange?.(nextOpen);
@@ -68,7 +70,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
             <span ref={buttonRef} className="inline-flex min-w-0">
                 <Button size="small" type="text" className={buttonClassName || "!h-8 !max-w-[180px] !justify-start !rounded-full !px-3"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => updateOpen(!open)}>
                     <span className="truncate">
-                        {imageReferenceSizeIsAutomatic(profile, referenceCount) ? t("模型决定尺寸 · 约 100 万像素") : <>{profile.kind === "mai-image" ? "PNG" : profile.kind === "grok-image" && referenceCount > 0 ? t("参考图模式") : imageQualityLabel(quality)} · {imageSizeLabel(activeSize)}</>} · {t("{count} 个任务", { count: taskCount })}</span>
+                        {imageReferenceSizeIsAutomatic(profile, referenceCount) ? t("模型决定尺寸 · 约 100 万像素") : <>{seedreamResolution || (profile.kind === "mai-image" ? "PNG" : profile.kind === "grok-image" && referenceCount > 0 ? t("参考图模式") : imageQualityLabel(quality))} · {imageSizeLabel(activeSize)}</>} · {t("{count} 个任务", { count: taskCount })}</span>
                 </Button>
             </span>
             {panel}

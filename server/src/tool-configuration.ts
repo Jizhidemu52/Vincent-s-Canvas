@@ -81,7 +81,7 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
       WHERE m.id::text=$1 OR m.model_id=$1 ORDER BY (m.id::text=$1) DESC LIMIT 1`, [selected]);
   const model = result.rows[0];
   if (!model || !model.enabled || !model.providerEnabled) throw new ToolConfigurationError("MODEL_DISABLED", "模型或 Provider 不存在或未启用");
-  if (!layerStudioBindingValid(toolKey, model)) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "该模型仅可用于已配置的图层工作区");
+  if (!layerStudioBindingValid(toolKey, model)) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "该图片模型与当前工具不兼容，请检查模型配置或蒙版要求");
   if (toolKey === LAYER_STUDIO_TOOL && requested && requested !== model.id) throw new ToolConfigurationError("TOOL_MODEL_CHANGED", "图层工作区配置已变化，请刷新后重试", 409);
   if (model.workflowConfigId && !model.workflowEnabled) throw new ToolConfigurationError("WORKFLOW_DISABLED", "模型工作流未启用");
   if (isQuickImage && (model.modelId !== quickSnapshot!.modelId || model.protocol !== "apimart" || model.workflowConfigId || !model.capabilities.includes("edit"))) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "一键图片模型已变化，请重新提交");

@@ -72,7 +72,7 @@ describe("formal admin catalog and isolated board saves", () => {
             .toMatchObject({ enabled: true, modelConfigId: "explicit", creditCostOverride: 0 });
     });
 
-    test("layer studio binding matches exact dedicated provider/model and excludes it from every other board", () => {
+    test("layer studio keeps its exact binding while Doubao is available to compatible image boards", () => {
         const studio = completeToolConfigurations([]).find(item => item.toolKey === "layer-studio")!;
         const apimart: ServerProvider = { ...provider, id: "apimart", protocol: "apimart" };
         const dedicated: ServerModel = { ...model, id: "dedicated", providerId: apimart.id, modelId: "seedream-5-5" };
@@ -84,7 +84,9 @@ describe("formal admin catalog and isolated board saves", () => {
         expect(compatibleToolModels(studio, [dedicated], [{ ...apimart, hasCredentials: false }], [])).toEqual([]);
         expect(compatibleToolModels(studio, [dedicated], [{ ...apimart, enabled: false }], [])).toEqual([]);
         for (const other of completeToolConfigurations([]).filter(item => item.toolKey !== "layer-studio")) {
-            expect(compatibleToolModels({ ...other, capabilities: ["generate"] }, models, providers, []).some(item => item.modelId === "seedream-5-5")).toBe(false);
+            const candidates = compatibleToolModels(other, models, providers, []);
+            expect(candidates.some(item => item.id === "dedicated")).toBe(!["midjourney-blend", "canvas-mask-edit"].includes(other.toolKey) && other.capabilities.some(capability => dedicated.capabilities.includes(capability)));
+            expect(candidates.some(item => ["wrong-protocol", "workflow", "disabled"].includes(item.id))).toBe(false);
         }
         expect(toolConfigurationState({ ...studio, enabled: true, modelConfigId: model.id }, compatibleToolModels(studio, models, providers, []))).toMatchObject({ ready: false, label: "绑定不可用" });
         expect(toolConfigurationState({ ...studio, enabled: true, modelConfigId: dedicated.id }, compatibleToolModels(studio, models, providers, []))).toMatchObject({ ready: true, label: "已绑定" });

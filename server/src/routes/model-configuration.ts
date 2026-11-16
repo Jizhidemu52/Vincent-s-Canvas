@@ -182,7 +182,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig, 
                 const model = await db.query<{ modelId: string; capabilities: string[]; protocol: string; workflowConfigId: string | null }>(`SELECT m.model_id AS "modelId",m.capabilities,p.protocol,m.workflow_config_id AS "workflowConfigId" FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [input.modelConfigId]);
                 if (!model.rows[0]) { response.status(400).json({ error: "MODEL_NOT_FOUND", message: "所选模型不存在" }); return; }
                 if (!layerStudioBindingValid(selectedTool, model.rows[0])) {
-                    response.status(400).json({ error: "TOOL_MODEL_MISMATCH", message: "图层工作区须使用其专属直接图像模型，其他板块不能绑定该模型" }); return;
+                    response.status(400).json({ error: "TOOL_MODEL_MISMATCH", message: "所选模型不支持当前工具；图层须绑定直接图像模型，豆包生图不支持蒙版" }); return;
                 }
                 if (selectedTool === "midjourney-blend" && model.rows[0].modelId !== "midjourney-blend") {
                     response.status(400).json({ error: "TOOL_MODEL_MISMATCH", message: "MJ 多图融合板块仅支持 Midjourney Blend 模型" }); return;
@@ -264,7 +264,7 @@ export function createPublicModelRouter(db: Database, creditPolicy: boolean | ((
         try {
             const creditsEnabled = typeof creditPolicy === "function" ? await creditPolicy() : creditPolicy;
             const [models, prices, tools, featuredIds] = await Promise.all([
-                db.query(`SELECT m.id,m.public_number AS "publicNumber",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",p.id AS "providerId",p.protocol,p.name AS "providerName",p.base_url AS "providerBaseUrl" FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.enabled=true AND p.enabled=true AND (m.workflow_config_id IS NULL OR w.enabled=true) ORDER BY m.public_number NULLS LAST,m.name`),
+                db.query(`SELECT m.id,m.public_number AS "publicNumber",m.name,m.model_id AS "modelId",m.workflow_config_id AS "workflowConfigId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",p.id AS "providerId",p.protocol,p.name AS "providerName",p.base_url AS "providerBaseUrl" FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.enabled=true AND p.enabled=true AND (m.workflow_config_id IS NULL OR w.enabled=true) ORDER BY m.public_number NULLS LAST,m.name`),
                 db.query(`SELECT operation_type AS "operationType",label,credits,rmb_cost::float8 AS "rmbCost",version FROM pricing_rule_versions WHERE status='published' ORDER BY operation_type`),
                 db.query(`SELECT t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.enabled,
                     t.credit_cost_override AS "creditCostOverride",t.rmb_cost_override::float8 AS "rmbCostOverride",t.configuration_version AS "configurationVersion",t.allow_raw_prompt AS "allowRawPrompt"

@@ -13,13 +13,14 @@ function workerFunction(name: string, dependencies: Record<string, unknown>) {
 }
 const manifest = parseSeedream55Manifest({ data: { result: { images: [{ url: ["https://cdn.example.com/base.png", "https://cdn.example.com/layer.png"] }] } } }, true);
 const task = () => ({ id: "task-one", request_id: "request-one", user_id: "alice", tool_key: "layer-studio", model_id: "seedream-5-5", model_config_id: "model-one", base_url: "https://example.com/v1",
-  operation_type: "image_generation", prompt: "", parameters: { layer_decomposition: true, n: 1 }, source_urls: ["/api/assets/input/content"], execution_token: "execution-one",
+  operation_type: "image_generation", prompt: "", parameters: { layer_decomposition: true, n: 1 } as Record<string, unknown>, source_urls: ["/api/assets/input/content"], execution_token: "execution-one",
   upstream_task_id: "upstream-one", upstream_submission_started_at: "started", poll_deadline_at: new Date(Date.now() + 60_000).toISOString(), attempts: 1,
   upstream_result_document: null as typeof manifest | null, result_document: null as ReturnType<typeof seedream55PublicDocument> | null });
 class TaskExecutionLost extends Error {}
 
-test("actual Worker adapter checkpoints private and public manifests before any output download", async () => {
+test.each(["layer-studio", "image", "image-edit", "canvas-image"])("actual Worker adapter %s checkpoints private and public manifests before any output download", async toolKey => {
   const current = task();
+  current.tool_key = toolKey;
   const calls: string[] = [];
   const execute = workerFunction("executeApiMartImage", {
     loadSourceAssets: () => { throw new Error("must not reload a submitted task"); },
@@ -37,9 +38,12 @@ test("actual Worker adapter checkpoints private and public manifests before any 
   expect(current.result_document?.status).toBe("persisting");
 });
 
-function resumeHarness(failure?: Error) {
-  const current = task(); current.upstream_result_document = manifest;
-  const document = seedream55PublicDocument(current.id, manifest);
+function resumeHarness(failure?: Error, toolKey = "layer-studio") {
+  const current = task(); current.tool_key = toolKey;
+  const receipt = toolKey === "layer-studio" ? manifest : parseSeedream55Manifest({ data: { result: { images: [{ url: ["https://cdn.example.com/ordinary.png"] }] } } }, false);
+  if (toolKey !== "layer-studio") current.parameters = { tool: toolKey, n: 1 } as typeof current.parameters;
+  current.upstream_result_document = receipt;
+  const document = seedream55PublicDocument(current.id, receipt);
   document.status = "ready";
   document.items = document.items.map((item, index) => ({ ...item, state: "saved", contentUrl: `/api/assets/saved-${index}/content`, width: index ? 256 : 1200, height: index ? 128 : 900 }));
   const events: string[] = [];
@@ -58,11 +62,11 @@ function resumeHarness(failure?: Error) {
     config: { TASK_MOCK_MODE: "false" }, assertTaskExecution: async () => {},
     executeProvider: () => { throw new Error("must not query or submit when durable manifest exists"); },
     storeSeedream55TaskResults: async (_db: unknown, _storage: unknown, storedTask: typeof current, storedManifest: typeof manifest) => {
-      expect(storedTask.id).toBe(current.id); expect(storedManifest).toBe(manifest); events.push("save"); if (failure) throw failure; return document;
+      expect(storedTask.id).toBe(current.id); expect(storedManifest).toBe(receipt); events.push("save"); if (failure) throw failure; return document;
     },
     withTransaction: async (_db: unknown, action: (client: typeof db) => Promise<unknown>) => action(db),
     settleLayerStudioReservation: async (_db: unknown, requestId: string, outputs: unknown) => {
-      expect(requestId).toBe(current.request_id); expect(outputs).toEqual([{ width: 1200, height: 900 }, { width: 256, height: 128 }]); events.push("settle");
+      expect(requestId).toBe(current.request_id); expect(outputs).toEqual(document.items.map(item => ({ width: item.width, height: item.height }))); events.push("settle");
     },
     disposeProviderResults: async () => [], releaseModelLease: async () => {}, TaskExecutionLost, Seedream55OutputLimitExceeded,
     VideoTaskPending: class extends Error {}, WorkflowTaskPending: class extends Error {}, VideoSubmissionClaimLost: class extends Error {}, ApiMartImageTaskPending,
@@ -74,6 +78,19 @@ function resumeHarness(failure?: Error) {
 test("actual Worker resumes saved manifest without provider/credentials and settles only saved actual dimensions", async () => {
   const { run, current, events } = resumeHarness();
   await run(current.id); expect(events).toEqual(["save", "settle", "success"]);
+});
+
+test.each(["image", "image-edit", "canvas-image", "creative-text-to-style"])("ordinary Worker %s resumes the persisted receipt without provider replay and settles actual dimensions", async toolKey => {
+  const { run, current, events } = resumeHarness(undefined, toolKey);
+  // Recovery relies on the stored receipt, not today's mutable model identity.
+  current.model_id = "changed-admin-model";
+  await run(current.id); expect(events).toEqual(["save", "settle", "success"]);
+});
+
+test("ordinary Worker interruption remains recoverable on the original receipt with no settlement", async () => {
+  const { run, current, events, failures } = resumeHarness(new Error("interrupted original download"), "image-edit");
+  await run(current.id); expect(events).toEqual(["save", "paused"]);
+  expect(failures[0]).toContain("图片原件尚未保存"); expect(failures[0]).toContain("不会重新生成");
 });
 
 test("actual Worker pauses an interrupted original save without replay, charge or release", async () => {

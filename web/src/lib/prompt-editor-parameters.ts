@@ -15,6 +15,7 @@ export function mergePromptEditorParameters(original: Record<string, unknown> | 
         const supported = new Set(imageOptionFields(profile).map(field => field.key));
         const options = Object.fromEntries(Object.entries(readImageOptions(values.imageOptions)).filter(([key]) => supported.has(key)));
         if (profile.resolutions.length && !options.resolution) options.resolution = "1k";
+        if (profile.kind === "seedream55" && options.background === "transparent") options.output_format = "png";
         parameters.imageOptions = JSON.stringify(options);
         // These image controls are represented by the profile-aware editor; never retain an old model's values.
         for (const key of ["resolution", "background", "output_format", "output_compression"]) delete parameters[key];
@@ -23,6 +24,10 @@ export function mergePromptEditorParameters(original: Record<string, unknown> | 
             parameters.resolution = values.quality || "1k";
             delete parameters.quality;
         }
+    }
+    if (profile?.kind === "seedream55") {
+        for (const key of ["quality", "width", "height", "layer_decomposition", "layer_decomposition_options", "midjourneyQuality", "midjourneySpeed"]) delete parameters[key];
+        parameters.n = 1;
     }
     if (profile?.kind === "mai-image") {
         delete parameters.quality;

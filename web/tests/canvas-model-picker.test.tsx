@@ -56,6 +56,15 @@ function picker(models: PublicModel[], props: Record<string, unknown> = {}, bind
 }
 
 describe("canvas model presentation", () => {
+    test("Doubao appears for normal canvas image tasks but not the mask-only picker", () => {
+        const doubao = imageModel("opaque-doubao", "豆包生图", "seedream55");
+        const mask = { ...imageModel("mask-model", "Mask model", "standard-flex"), imageSupportsMask: true };
+        const options = picker([doubao, mask], { variant: "canvas" }).root.props.options;
+        expect(options.map((option: CanvasModelOption) => option.name)).toContain("豆包生图");
+        expect(options.find((option: CanvasModelOption) => option.value === doubao.id).details).toContain("最多 10 张参考图");
+        const restricted = picker([doubao, mask], { variant: "canvas", toolKey: "canvas-mask-edit" }).root.props.options;
+        expect(restricted.map((option: CanvasModelOption) => option.value)).toEqual([mask.id]);
+    });
     test("2.6 choices retain the distinct usage note without changing request identity", () => {
         for (const [variant, description] of [["flare", "速度优先，适合快速迭代"], ["sunburst", "细节与编辑一致性优先"]] as const) {
             const model = { ...imageModel(`opaque-2.6-${variant}`, `aplmart-gpt2.6-${variant}`), publicDescription: description };

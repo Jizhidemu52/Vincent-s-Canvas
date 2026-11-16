@@ -167,6 +167,7 @@ export function imageTaskParameters(config: AiConfig, profile = imageModelProfil
     // only an explicit UI model change may adapt invalid old selections.
     if (automaticReferenceSize) for (const key of ["size", "resolution", "width", "height"]) delete optionValues[key];
     const advanced = imageAdvancedParameters(JSON.stringify(optionValues), profile);
+    if (profile.kind === "seedream55") return { size, resolution: "1k", n: 1, ...advanced };
     if (profile.kind === "mai-image") {
         if (automaticReferenceSize) {
             delete advanced.resolution;

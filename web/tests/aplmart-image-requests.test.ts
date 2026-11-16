@@ -6,6 +6,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import type { PublicModel } from "@/services/api/business-config";
 
 const models: PublicModel[] = [
+    { id: "doubao", modelId: "doubao", name: "豆包生图", publicName: "豆包生图", imageParameterProfile: "seedream55", imageSupportsMask: false, capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
     { id: "blend", modelId: "blend", name: "aplmart-mj-blend", imageParameterProfile: "midjourney-blend", imageSupportsMask: false, capabilities: ["generate"], creditCost: 0, rmbCost: 0 },
     { id: "grok", modelId: "grok", name: "aplmart-grok2", imageParameterProfile: "grok-image", imageSupportsMask: false, capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
     { id: "gpt2", modelId: "gpt2", name: "aplmart-gpt2", imageParameterProfile: "gpt", imageSupportsMask: false, capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
@@ -64,6 +65,29 @@ beforeEach(() => {
 });
 afterEach(() => { globalThis.fetch = originalFetch; globals.window = originalWindow; useUserStore.setState(originalUser); useBusinessConfigStore.setState(originalBusiness); });
 const posts = () => requests.filter(item => item.path === "/api/tasks" && item.body);
+
+test.each(["image", "canvas-image", "gpt-chat-image", "creative-text-to-style"])("Doubao %s generation uses the public config identity and safe one-image parameters", async tool => {
+    const draft = { ...defaultConfig, model: "doubao", size: "16:9", quality: "high", count: "8", systemPrompt: "", imageOptions: '{"resolution":"1.5k","output_format":"jpeg","background":"transparent","layer_decomposition":"true","midjourneyQuality":"2","complexity":"high"}' };
+    const before = structuredClone(draft);
+    await requestGeneration(draft, "蓝色花瓶", { tool });
+    expect(posts()).toHaveLength(1);
+    const payload = posts()[0]!.body!;
+    expect(payload).toMatchObject({ modelConfigId: "doubao", toolKey: tool, operationType: "image_generation", parameters: { size: "16:9", resolution: "1.5k", output_format: "png", background: "transparent", count: 1, n: 1 } });
+    for (const key of ["quality", "layer_decomposition", "midjourneyQuality", "complexity"]) expect(payload.parameters).not.toHaveProperty(key);
+    expect(draft).toEqual(before);
+});
+
+test("Doubao ten-reference edit reaches one task; eleven references and masks reject before uploads", async () => {
+    const config = { ...defaultConfig, model: "doubao", size: "auto", quality: "auto", imageOptions: '{"resolution":"2k"}' };
+    await requestEdit(config, "改为蓝色", references(10), undefined, { tool: "canvas-edit" });
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0]!.body).toMatchObject({ modelConfigId: "doubao", sourceUrls: Array(10).fill("/api/assets/reference/content"), parameters: { size: "auto", resolution: "2k", n: 1, count: 1 } });
+    for (const [refs, mask] of [[references(11), undefined], [references(1), references(1)[0]]] as const) {
+        requests = [];
+        await expect(requestEdit(config, "edit", [...refs], mask, { tool: "canvas-edit" })).rejects.toThrow();
+        expect(requests.map(item => item.path)).toEqual(["/api/models"]);
+    }
+});
 
 test.each(["pattern-extract", "pattern-colorway"] as const)("%s leaves alpha inference to the server instead of contradicting scene fields", async scene => {
     const promptInput = { scene, fields: { extractBackground: "白底" }, userText: "按表单处理图案", mode: "edit" as const };

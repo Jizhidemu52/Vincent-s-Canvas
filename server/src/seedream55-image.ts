@@ -1,5 +1,6 @@
 import type { LayerStudioBoundingBox, LayerStudioBox, LayerStudioItem, LayerStudioOcr, LayerStudioResultDocument } from "../../shared/layer-studio";
 import { layerStudioTaskOptions } from "../../shared/layer-studio-options";
+import { seedream55TaskOptions } from "../../shared/seedream55-options";
 import type { ApiMartImageInput, ApiMartImageRequest } from "./apimart-image";
 import { isPublicHttpUrl } from "./apimart-upload";
 
@@ -24,7 +25,7 @@ export function assertSeedream55ManifestLimit(manifest: Seedream55Manifest, para
 export function buildSeedream55Request(input: ApiMartImageInput, encode = true): ApiMartImageRequest {
   if (input.maskImage || input.maskDataUrl || input.markupImage) throw new Error("图层工具不接收独立蒙版或标注层");
   const sources = input.sourceImages ?? input.sourceDataUrls ?? [];
-  const options = layerStudioTaskOptions(input.parameters, input.prompt, sources.length);
+  const options = (input.parameters.tool === undefined || input.parameters.tool === "layer-studio" ? layerStudioTaskOptions : seedream55TaskOptions)(input.parameters, input.prompt, sources.length);
   const payload: Record<string, unknown> = { model: "seedream-5-5", ...options, n: 1 };
   if (input.prompt.trim()) payload.prompt = input.prompt;
   if (options.layer_decomposition) {

@@ -130,6 +130,12 @@ async function runTask(taskId: string) {
   );
   const task = details.rows[0];
   if (!task) return;
+  // A durable Seedream receipt remains recoverable even if an administrator
+  // changes the model configuration after the paid request completed.
+  const isSeedream55 = task.tool_key === "layer-studio"
+    || (task.model_id === "seedream-5-5" && task.protocol === "apimart" && !task.workflow_config_id)
+    || (task.upstream_result_document?.version === 1 && !("kind" in task.upstream_result_document)
+      && ["generate", "decompose"].includes(task.upstream_result_document.mode));
   let modelLease: TaskLease | null = null;
   try {
     modelLease = await acquireModelLease(db, cache, { taskId, executionToken, modelConfigId: task.model_config_id, limit: task.concurrency_limit ?? 5 });
@@ -159,7 +165,7 @@ async function runTask(taskId: string) {
     if (config.TASK_MOCK_MODE === "true" && (task.operation_type === "video_generation" || task.operation_type === "audio_generation"))
       throw new Error("模拟模式不提供真实视频或音频，请配置真实服务后生成");
     heartbeat.assertOwned();
-    providerResults = task.tool_key === "layer-studio" && task.upstream_result_document ? [] :
+    providerResults = isSeedream55 && task.upstream_result_document ? [] :
       config.TASK_MOCK_MODE === "true"
         ? [{ bytes: Buffer.from(mockSvg(task.id)), mimeType: "image/svg+xml" }]
         : await timing.measure("provider_execution", () => executeProvider(task, timing));
@@ -167,7 +173,7 @@ async function runTask(taskId: string) {
     heartbeat.assertOwned();
     await assertTaskExecution(task);
     const resultUrls = await timing.measure("result_store", async () => {
-      if (task.tool_key !== "layer-studio") return storeResults(task, providerResults);
+      if (!isSeedream55) return storeResults(task, providerResults);
       const manifest = task.upstream_result_document;
       if (!manifest) throw new Error("图层任务缺少已持久化结果清单");
       if ("kind" in manifest || manifest.version !== 1 || (manifest.mode !== "generate" && manifest.mode !== "decompose") || !Array.isArray(manifest.items))
@@ -179,7 +185,7 @@ async function runTask(taskId: string) {
       await withTransaction(db, async client => {
         const owned = await client.query("SELECT id FROM tasks WHERE id=$1 AND execution_token=$2 AND status='processing' FOR UPDATE", [task.id, executionToken]);
         if (!owned.rows[0]) throw new TaskExecutionLost("任务执行权已改变，不能重复结算");
-        if (task.tool_key === "layer-studio") await settleLayerStudioReservation(db, task.request_id, task.result_document!.items.map(item => ({ width: item.width!, height: item.height! })), client);
+        if (isSeedream55) await settleLayerStudioReservation(db, task.request_id, task.result_document!.items.map(item => ({ width: item.width!, height: item.height! })), client);
         else await settleReservation(db, task.request_id, "capture", undefined, client, resultUrls.length);
         await client.query(
           "UPDATE tasks SET status='success',result_urls=$1,lease_expires_at=NULL,completed_at=now(),updated_at=now() WHERE id=$2",
@@ -209,7 +215,7 @@ async function runTask(taskId: string) {
       keepModelSlot = true; outcome = "paused"; return;
     }
     const transportDiagnostics = readProviderSubmissionDiagnostics(error);
-    const layerOutputLimitFailure = task.tool_key === "layer-studio" && error instanceof Seedream55OutputLimitExceeded;
+    const layerOutputLimitFailure = isSeedream55 && error instanceof Seedream55OutputLimitExceeded;
     const reason = layerOutputLimitFailure ? error.message : task.tool_key === "layer-studio" ? "图层任务暂未完成；请恢复原任务或联系管理员核查，未自动重新生成"
       // Keep the local persistence category for safe recovery fencing; provider
       // messages and lookalike error codes still follow image-agent redaction.
@@ -220,8 +226,8 @@ async function runTask(taskId: string) {
       // Local processing/storage failures must not replay paid work or claim it never happened.
       await db.query(
         "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND execution_token=$3 AND status='processing'",
-        [layerOutputLimitFailure ? reason : task.tool_key === "layer-studio" && task.upstream_result_document
-          ? "部分图层原件尚未保存；可恢复原任务继续保存，不会重新生成，请勿重复提交"
+        [layerOutputLimitFailure ? reason : isSeedream55 && task.upstream_result_document
+          ? `${task.tool_key === "layer-studio" ? "部分图层" : "图片"}原件尚未保存；可恢复原任务继续保存，不会重新生成，请勿重复提交`
           : task.operation_type === "video_generation" && task.upstream_result_document
             ? `${reason}；视频上游结果已保存，可恢复原任务继续下载和保存，不会重新生成。`
           : `${reason}；上游已返回结果，不能直接恢复或重新生成，请先检查已保存素材。`, task.id, executionToken],
@@ -447,6 +453,7 @@ async function executeApiMartImage(
   providerPrompt: string,
 ) {
   const isLayerStudio = task.tool_key === "layer-studio";
+  const isSeedream55 = isLayerStudio || (task.model_id === "seedream-5-5" && !task.workflow_config_id);
   if (isLayerStudio && task.model_id !== "seedream-5-5") throw new Error("图层工具原模型配置已改变，不能重新提交");
   if (task.upstream_task_id) {
     // Backfill deadlines for image tasks submitted by the old blocking worker.
@@ -463,9 +470,9 @@ async function executeApiMartImage(
       throw new Error("图片状态查询超时；可恢复查询原任务，不会重新生成");
     }
   }
-  const sourceAssets = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadSourceAssets(task.source_urls, task.user_id, isLayerStudio ? 1 : 4, isLayerStudio ? 30 * 1024 * 1024 : undefined);
-  if (isLayerStudio) for (const source of sourceAssets) await validateSeedream55Reference(source);
-  const editInput = !isLayerStudio && sourceAssets.length ? await prepareImageEditInput(sourceAssets, task.parameters, {
+  const sourceAssets = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadSourceAssets(task.source_urls, task.user_id, isSeedream55 ? 1 : 4, isSeedream55 ? 30 * 1024 * 1024 : undefined);
+  if (isSeedream55) for (const source of sourceAssets) await validateSeedream55Reference(source);
+  const editInput = !isSeedream55 && sourceAssets.length ? await prepareImageEditInput(sourceAssets, task.parameters, {
     protocol: "apimart", modelId: task.model_id!, operationType: task.operation_type,
   }) : { references: sourceAssets };
   if (!task.upstream_task_id && !task.upstream_submission_started_at && task.parameters.quickImageAction) await validateQuickImageSource(editInput.references[0], task.parameters);
@@ -521,7 +528,7 @@ async function executeApiMartImage(
     throw new ApiMartImageTaskPending(Math.min(error.nextPollMs, remaining), { code: error.code, httpStatus: error.httpStatus });
   }
   if (result.status === "pending") throw new ApiMartImageTaskPending(result.nextPollMs);
-  if (isLayerStudio) {
+  if (isSeedream55) {
     if (!result.manifest) throw new Error("图层任务缺少结果清单");
     const document = seedream55PublicDocument(task.id, result.manifest);
     const persisted = await db.query(`UPDATE tasks SET upstream_result_document=$1::jsonb,result_document=$2::jsonb,updated_at=now()

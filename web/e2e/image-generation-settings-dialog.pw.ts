@@ -24,6 +24,56 @@ async function openDialog(page: Page, query = "") {
     return { dialog, opener, picker: dialog.getByRole("combobox", { name: "生成图片模型", exact: true }) };
 }
 
+for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+    test(`Doubao model settings at ${viewport.width}px preserve one-image parameters and transparent PNG`, async ({ page }) => {
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.setViewportSize(viewport);
+        const { dialog, picker, opener } = await openDialog(page, viewport.width === 390 ? "?theme=dark" : "");
+        await expect(picker).toContainText("GPT Image 2.6 Flare");
+        await picker.click();
+        await page.getByRole("option", { name: /豆包生图/ }).click();
+        await expect(picker).toContainText("豆包生图");
+        await expect(dialog.getByLabel("模型支持")).toContainText("最多 10 张参考图");
+        await expect(dialog.getByRole("combobox", { name: "图片质量", exact: true })).toHaveCount(0);
+        await chooseAntSelect(dialog.getByRole("combobox", { name: "宽高比", exact: true }), "16:9");
+        await chooseAntSelect(dialog.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }), "1.5K");
+        await dialog.locator("summary", { hasText: "高级参数" }).click();
+        await chooseAntSelect(dialog.getByRole("combobox", { name: "输出格式", exact: true }), "JPEG");
+        await chooseAntSelect(dialog.getByRole("combobox", { name: "背景", exact: true }), "透明");
+        await expect(antSelect(dialog.getByRole("combobox", { name: "输出格式", exact: true }))).toHaveText("PNG");
+        await expect(page.locator(".ant-select-dropdown:visible")).toHaveCount(0);
+        for (const label of ["背景", "输出格式"]) {
+            const control = dialog.getByRole("combobox", { name: label, exact: true });
+            const layout = await antSelect(control).evaluate(root => {
+                const box = root.getBoundingClientRect();
+                const content = root.querySelector(".ant-select-content")!;
+                const range = document.createRange();
+                range.selectNodeContents(content);
+                const text = range.getBoundingClientRect();
+                const inputStyle = getComputedStyle(root.querySelector("input")!);
+                return { boxTop: box.top, boxBottom: box.bottom, boxHeight: box.height, textTop: text.top, textBottom: text.bottom, inputPadding: inputStyle.padding };
+            });
+            expect(layout.inputPadding).toBe("0px");
+            expect(layout.boxHeight).toBeGreaterThanOrEqual(viewport.width === 390 ? 44 : 36);
+            expect(layout.textTop).toBeGreaterThanOrEqual(layout.boxTop);
+            expect(layout.textBottom).toBeLessThanOrEqual(layout.boxBottom);
+        }
+        const config = JSON.parse(await page.getByTestId("settings-state").textContent() || "{}");
+        expect(config).toMatchObject({ imageModel: "7bf4a4e1-7202-49dd-bf16-363d01971350", size: "16:9", quality: "auto", count: "1" });
+        expect(JSON.parse(config.imageOptions)).toEqual({ resolution: "1.5k", output_format: "png", background: "transparent" });
+        const bounds = await dialog.boundingBox();
+        expect(bounds!.x).toBeGreaterThanOrEqual(0);
+        expect(bounds!.width).toBeLessThanOrEqual(viewport.width);
+        await page.screenshot({ path: resolve(output, `doubao-${viewport.width}.png`) });
+        await dialog.getByRole("button", { name: /^完\s*成$/ }).click();
+        await opener.click();
+        await expect(picker).toContainText("豆包生图");
+        expect(JSON.parse(await page.getByTestId("settings-state").textContent() || "{}")).toEqual(config);
+        expect(errors).toEqual([]);
+    });
+}
+
 test("desktop model selection and parameters are retained after closing, with focus restored", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));

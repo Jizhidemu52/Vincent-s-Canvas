@@ -4,10 +4,11 @@ import { loadConfig } from "./config";
 import { readSourceAssetObject } from "./asset-object-error";
 import { readBoundedImage, validateSeedream55Reference } from "./seedream55-reference";
 import { layerStudioTaskOptions, LAYER_STUDIO_MAX_REFERENCE_BYTES } from "../../shared/layer-studio-options";
+import { seedream55TaskOptions } from "../../shared/seedream55-options";
 import { ToolConfigurationError } from "./tool-configuration";
 import { hashAssetContent } from "./asset-content-hash";
 
-type Input = { userId: string; prompt: string; parameters?: Record<string, unknown>; sourceUrls: string[] };
+type Input = { userId: string; toolKey?: string; prompt: string; parameters?: Record<string, unknown>; sourceUrls: string[] };
 export type LayerSourceSnapshot = { id: string; objectKey: string; mimeType: string; byteSize: number; sha256: string | null };
 async function snapshots(db: Pick<Database, "query">, input: Input) {
   const result: LayerSourceSnapshot[] = [];
@@ -24,7 +25,8 @@ async function snapshots(db: Pick<Database, "query">, input: Input) {
 export async function preflightStoredSeedream55Task(db: Pick<Database, "query">, input: Input, runtime: {
   readSource?: (source: LayerSourceSnapshot) => Promise<Uint8Array>; validate?: typeof validateSeedream55Reference;
 } = {}) {
-  layerStudioTaskOptions(input.parameters ?? {}, input.prompt, input.sourceUrls.length);
+  const tool = input.toolKey ?? input.parameters?.tool;
+  (tool === undefined || tool === "layer-studio" ? layerStudioTaskOptions : seedream55TaskOptions)(input.parameters ?? {}, input.prompt, input.sourceUrls.length);
   const sources = await snapshots(db, input);
   for (const source of sources) {
     const bytes = runtime.readSource ? await runtime.readSource(source) : await (async () => {

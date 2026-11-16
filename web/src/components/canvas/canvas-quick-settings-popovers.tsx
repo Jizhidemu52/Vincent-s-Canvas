@@ -67,7 +67,7 @@ export function CanvasQuickQualityOptions({ config, profile, referenceCount, onC
             </div>
             {exactPixels ? <p role="status">{t("精确像素 {size} 优先于分辨率档位；改选宽高比或自动后启用。", { size: settings.size.replace("x", " × ") })}</p> : null}
         </section> : null}
-        {profile.kind === "mai-image" ? null : referenceQualityDisabled ? <p role="status">{t("参考图模式不提交图片质量；移除全部参考图后恢复设置。")}</p> : <section>
+        {profile.kind === "mai-image" || profile.kind === "seedream55" ? null : referenceQualityDisabled ? <p role="status">{t("参考图模式不提交图片质量；移除全部参考图后恢复设置。")}</p> : <section>
             <h4>{t(profile.qualityLabel)}</h4>
             <div className="cw-parameter-choices" role="group" aria-label={t(profile.qualityLabel)}>
                 {profile.qualities.map(value => <button key={value} type="button" aria-pressed={settings.quality === value}
@@ -106,6 +106,7 @@ function AdvancedSettingsDialog({ active, onActiveChange, disabled, disabledReas
     id: "advanced"; active: Parameter | null; onActiveChange: (value: Parameter | null) => void; style: CSSProperties;
 }) {
     const t = useUiText();
+    const summary = profile.kind === "seedream55" ? readImageOptions(normalizeImageOptions(config.imageOptions, profile)).resolution?.toUpperCase() : profile.kind === "mai-image" ? "PNG" : qualityLabel(config.quality);
     return <Dialog.Root open={!disabled && active === "advanced"} onOpenChange={open => onActiveChange(open ? "advanced" : null)}>
         <Tooltip title={disabled ? disabledReason : undefined}><span className="cw-parameter-anchor cw-parameter-anchor-advanced"><Dialog.Trigger asChild><button type="button" className="cw-parameter-trigger cw-parameter-trigger-advanced" aria-label={t("更多设置")} aria-description={disabled ? disabledReason : undefined} style={disabled ? { pointerEvents: "none" } : undefined} disabled={disabled}><SlidersHorizontal size={18} /><span>{t("更多设置")}</span></button></Dialog.Trigger></span></Tooltip>
         <Dialog.Portal>
@@ -117,7 +118,7 @@ function AdvancedSettingsDialog({ active, onActiveChange, disabled, disabledReas
                     <Dialog.Close asChild><button type="button" className="cw-settings-close" aria-label={t("返回创建面板")}><X size={22} /></button></Dialog.Close>
                 </header>
                 <div className="cw-settings-dialog-body">
-                    <div className="cw-settings-overview"><span>{t("当前输出")}</span><strong>{imageReferenceSizeIsAutomatic(profile, referenceCount) ? t("模型决定尺寸") : sizeLabel(config.size)}</strong><span>{profile.kind === "mai-image" ? "PNG" : qualityLabel(config.quality)}</span><span>{t("每次 1 张")}</span></div>
+                    <div className="cw-settings-overview"><span>{t("当前输出")}</span><strong>{imageReferenceSizeIsAutomatic(profile, referenceCount) ? t("模型决定尺寸") : sizeLabel(config.size)}</strong><span>{summary}</span><span>{t("每次 1 张")}</span></div>
                     <fieldset disabled={disabled} className="cw-advanced-fields"><ImageSettingsPanel spacious compact showTitle={false} config={config} profile={profile} referenceCount={referenceCount} uploadContextKey={uploadContextKey}
                         theme={theme} onConfigChange={onConfigChange} onConfigNormalize={onConfigNormalize} /></fieldset>
                 </div>
@@ -141,7 +142,7 @@ export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceC
     const automaticReferenceSize = imageReferenceSizeIsAutomatic(profile, referenceCount);
     const exactPixels = profile.resolutions.length > 0 && /^[1-9]\d*x[1-9]\d*$/.test(settings.size);
     const qualitySummary = gif ? qualityLabel(settings.quality) : automaticReferenceSize ? t("约 100 万像素") : !profile.verified ? t("默认") : profile.resolutions.length
-        ? `${exactPixels ? t("像素") : resolution.toUpperCase()}${referenceQualityDisabled || profile.kind === "mai-image" ? "" : ` · ${qualityLabel(settings.quality)}`}` : qualityLabel(settings.quality);
+        ? `${exactPixels ? t("像素") : resolution.toUpperCase()}${referenceQualityDisabled || profile.kind === "mai-image" || profile.kind === "seedream55" ? "" : ` · ${qualityLabel(settings.quality)}`}` : qualityLabel(settings.quality);
     const hasAdvanced = profile.customSize || profile.customAspect || imageOptionFields(profile).some(field => field.key !== "resolution");
     const style = { "--cw-parameter-text": theme.node.text, "--cw-parameter-muted": theme.node.muted, "--cw-parameter-border": theme.node.stroke,
         "--cw-parameter-soft": theme.toolbar.itemHover, "--cw-parameter-panel": theme.node.panel } as CSSProperties;
@@ -157,7 +158,7 @@ export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceC
                 onAdvanced={profile.customSize || profile.customAspect ? () => setActive("advanced") : undefined} />
             {gif ? <p role="status">{t(gifSizeNotice)}</p> : null}
         </ParameterPopover>
-        <ParameterPopover {...common} anchor={parameterRow} id="quality" label={profile.kind === "mai-image" ? t("清晰度 / 分辨率") : !gif && profile.resolutions.length ? t("分辨率与质量") : t(profile.qualityLabel)} summary={qualitySummary} disabled={disabled || !profile.verified || automaticReferenceSize} disabledReason={parameterDisabledReason}>
+        <ParameterPopover {...common} anchor={parameterRow} id="quality" label={profile.kind === "mai-image" || profile.kind === "seedream55" ? t("清晰度 / 分辨率") : !gif && profile.resolutions.length ? t("分辨率与质量") : t(profile.qualityLabel)} summary={qualitySummary} disabled={disabled || !profile.verified || automaticReferenceSize} disabledReason={parameterDisabledReason}>
             <CanvasQuickQualityOptions config={config} profile={profile} referenceCount={referenceCount} onConfigChange={onConfigChange} />
         </ParameterPopover>
         <AdvancedSettingsDialog {...common} id="advanced" config={config} profile={profile} theme={theme} referenceCount={referenceCount} uploadContextKey={uploadContextKey} onConfigChange={onConfigChange} onConfigNormalize={onConfigNormalize} disabled={disabled || !hasAdvanced} disabledReason={disabled ? disabledReason : t("当前模型没有可调整的高级设置。")} />

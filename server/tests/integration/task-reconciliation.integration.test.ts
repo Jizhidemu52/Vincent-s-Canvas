@@ -11,6 +11,8 @@ import { reserveCredits } from "../../src/billing";
 import type { Cache, Database } from "../../src/db";
 import { createTaskReconciliationRouter } from "../../src/routes/task-reconciliation";
 import { queueScore, restoreWaitingTasksToQueue } from "../../src/tasks";
+import { layerStudioCostEstimate } from "../../src/layer-studio-billing";
+import { parseSeedream55Manifest, seedream55PublicDocument } from "../../src/seedream55-image";
 
 const runtime = process.env.PGLITE_RUNTIME_PATH;
 const integration = runtime ? describe : describe.skip;
@@ -189,6 +191,91 @@ integration("auditable administrator reconciliation using isolated PostgreSQL an
         const existing = await task("video_generation"); const video = await asset(existing.userId, "video");
         await db.query("UPDATE tasks SET result_urls=$2 WHERE id=$1", [existing.id, JSON.stringify([`/api/assets/${video}/content`])]);
         expect((await taskResolve(existing.id, "confirmed_success")).status).toBe(200);
+    });
+
+    test("ordinary Seedream inpaint preserves its frozen single-image contract after model changes and captures actual-pixel cost only once", async () => {
+        const item = await task("inpaint"), seedreamModelId = randomUUID();
+        await db.query("INSERT INTO model_configs(id,provider_id,name,model_id,capabilities) VALUES($1,$2,'Offline Seedream edit','seedream-5-5',ARRAY['generate','edit'])", [seedreamModelId, providerId]);
+        // Today's rates deliberately differ from the rates held for this task.
+        await db.query("INSERT INTO layer_studio_prices(model_config_id,input_rmb,low_output_rmb,high_output_rmb,source_note) VALUES($1,8,9,10,'offline changed rates')", [seedreamModelId]);
+        const frozenCost = layerStudioCostEstimate({ tool: "image-edit", size: "2K" }, 1,
+            { inputRmb: 0.1, lowOutputRmb: 0.2, highOutputRmb: 0.3, version: 1 });
+        expect(frozenCost.estimatedPrecharge).toBe(0.4);
+        const originalPrice = (await row("SELECT price_snapshot FROM credit_reservations WHERE request_id=$1", [item.requestId])).price_snapshot;
+        await db.query("UPDATE credit_reservations SET model_config_id=$2,rmb_cost=$3,price_snapshot=$4 WHERE request_id=$1",
+            [item.requestId, seedreamModelId, frozenCost.estimatedPrecharge,
+                { ...originalPrice, modelId: seedreamModelId, toolKey: "image-edit", totalRmb: frozenCost.estimatedPrecharge, layerStudioCost: frozenCost }]);
+        const id = await asset(item.userId), sha256 = "a".repeat(64);
+        const manifest = parseSeedream55Manifest({ data: { result: { images: [{ url: ["https://results.invalid/seedream-original.png"] }] } } }, false);
+        const document = seedream55PublicDocument(item.id, manifest);
+        document.status = "ready";
+        document.items = document.items.map(value => ({ ...value, state: "saved", assetId: id, contentUrl: `/api/assets/${id}/content`,
+            mimeType: "image/png", width: 1000, height: 1000, sha256 }));
+        const metadata = { layerStudio: { index: 0, width: 1000, height: 1000, sha256 }, originalPreserved: true };
+        await db.query("UPDATE assets SET task_id=$2,content_sha256=$3,metadata=$4 WHERE id=$1", [id, item.id, sha256, metadata]);
+        await db.query("UPDATE tasks SET model_config_id=$2,tool_key='image-edit',parameters=$3,rmb_cost=$4,upstream_task_id='original-seedream-edit',upstream_result_document=$5,result_urls=$6 WHERE id=$1",
+            [item.id, seedreamModelId, { tool: "image-edit", n: 1, count: 1, size: "2K" }, frozenCost.estimatedPrecharge, manifest, [`/api/assets/${id}/content`]]);
+        const stillHeld = async () => {
+            expect(await balance(item.userId)).toBe(93);
+            expect(await row("SELECT status,rmb_cost::float8 cost FROM credit_reservations WHERE request_id=$1", [item.requestId])).toEqual({ status: "held", cost: 0.4 });
+            expect((await row("SELECT status FROM tasks WHERE id=$1", [item.id])).status).toBe("paused");
+            expect((await row("SELECT count(*)::int n FROM credit_ledger WHERE reference_id=$1 AND entry_type='capture'", [item.requestId])).n).toBe(0);
+            expect((await row("SELECT count(*)::int n FROM generation_history WHERE task_id=$1", [item.id])).n).toBe(0);
+        };
+        for (const incomplete of [null, { ...document, status: "partial" }, { ...document, items: [{ ...document.items[0]!, state: "failed" }] }]) {
+            await db.query("UPDATE tasks SET result_document=$2 WHERE id=$1", [item.id, incomplete]);
+            const response = await taskResolve(item.id, "confirmed_success", { resultAssetIds: [id] });
+            expect(response.status).toBe(409); expect((await response.json()).code).toBe("INCOMPLETE_LAYER_RESULT");
+            await stillHeld();
+        }
+        // Administration may repurpose today's model entry after the original
+        // paid response. The frozen contract must still govern this old task.
+        await db.query("UPDATE model_configs SET model_id='replacement-model-after-submission' WHERE id=$1", [seedreamModelId]);
+        expect((await row("SELECT model_id FROM model_configs WHERE id=$1", [seedreamModelId])).model_id).toBe("replacement-model-after-submission");
+        const secondId = await asset(item.userId);
+        await db.query("UPDATE assets SET task_id=$2,content_sha256=$3,metadata=$4 WHERE id=$1",
+            [secondId, item.id, sha256, { ...metadata, layerStudio: { ...metadata.layerStudio, index: 1 } }]);
+        const multiDocument = { ...document, expectedOutputCount: 2,
+            items: [document.items[0]!, { ...document.items[0]!, index: 1, assetId: secondId, contentUrl: `/api/assets/${secondId}/content` }] };
+        for (const malformed of [
+            { document: { ...document, mode: "decompose" }, ids: [id] },
+            { document: multiDocument, ids: [id, secondId] },
+        ]) {
+            await db.query("UPDATE tasks SET result_document=$2 WHERE id=$1", [item.id, malformed.document]);
+            const response = await taskResolve(item.id, "confirmed_success", { resultAssetIds: malformed.ids });
+            expect(response.status).toBe(409); expect((await response.json()).code).toBe("INCOMPLETE_LAYER_RESULT");
+            await stillHeld();
+        }
+        await db.query("UPDATE tasks SET result_document=$2 WHERE id=$1", [item.id, document]);
+        for (const changes of [
+            { hash: "b".repeat(64), metadata, status: "ready" },
+            { hash: sha256, metadata: { ...metadata, layerStudio: { ...metadata.layerStudio, sha256: "b".repeat(64) } }, status: "ready" },
+            { hash: sha256, metadata: { ...metadata, layerStudio: { ...metadata.layerStudio, width: 999 } }, status: "ready" },
+            { hash: sha256, metadata, status: "pending" },
+        ]) {
+            await db.query("UPDATE assets SET content_sha256=$2,metadata=$3,status=$4 WHERE id=$1", [id, changes.hash, changes.metadata, changes.status]);
+            const response = await taskResolve(item.id, "confirmed_success", { resultAssetIds: [id] });
+            expect(response.status).toBe(409); expect((await response.json()).code).toBe("INVALID_TASK_RESULT");
+            await stillHeld();
+        }
+        await db.query("UPDATE assets SET content_sha256=$2,metadata=$3,status='ready' WHERE id=$1", [id, sha256, metadata]);
+        const response = await taskResolve(item.id, "confirmed_success", { resultAssetIds: [id] });
+        expect(response.status).toBe(200);
+        expect((await response.json()).data).toMatchObject({ status: "success", duplicate: false, resultUrls: [`/api/assets/${id}/content`] });
+        expect(await balance(item.userId)).toBe(93);
+        const settled = await row("SELECT status,rmb_cost::float8 cost,price_snapshot FROM credit_reservations WHERE request_id=$1", [item.requestId]);
+        expect(settled).toMatchObject({ status: "captured", cost: 0.3, price_snapshot: { operationType: "inpaint", toolKey: "image-edit", settledQuantity: 1,
+            settledTotalRmb: 0.3, layerStudioCost: { inputRmb: 0.1, lowOutputRmb: 0.2, highOutputRmb: 0.3, actualOutputPixels: [1000000], settledEstimate: 0.3 } } });
+        expect(await row("SELECT operation_type,status,rmb_cost::float8 cost,credits FROM generation_history WHERE task_id=$1", [item.id]))
+            .toEqual({ operation_type: "inpaint", status: "success", cost: 0.3, credits: 7 });
+        for (let repeat = 0; repeat < 2; repeat++) {
+            const duplicate = await taskResolve(item.id, "confirmed_success", { resultAssetIds: [id] });
+            expect(duplicate.status).toBe(200); expect((await duplicate.json()).data.duplicate).toBe(true);
+        }
+        expect(await balance(item.userId)).toBe(93);
+        expect((await row("SELECT count(*)::int n FROM credit_ledger WHERE reference_id=$1 AND entry_type='capture'", [item.requestId])).n).toBe(1);
+        expect((await row("SELECT count(*)::int n FROM audit_logs WHERE action='task.reconciled' AND target_id=$1", [item.id])).n).toBe(1);
+        expect((await row("SELECT count(*)::int n FROM generation_history WHERE task_id=$1", [item.id])).n).toBe(1);
     });
 
     test.each(["image_generation", "video_generation"])("attach_upstream %s preserves identity, original order and slot without submitting work", async operation => {

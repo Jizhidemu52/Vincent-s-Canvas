@@ -14,7 +14,8 @@ import { prepareConfiguredQuickImageTask } from "./quick-image-configuration";
 import { preflightStoredQuickImageTask, validateStoredQuickImageSnapshot } from "./stored-quick-image-preflight";
 import { preflightStoredSeedream55Task, validateStoredSeedream55Snapshot } from "./stored-seedream55-preflight";
 import { layerStudioTaskOptions } from "../../shared/layer-studio-options";
-import { loadLayerStudioPriceSnapshot } from "./layer-studio-billing";
+import { seedream55TaskOptions } from "../../shared/seedream55-options";
+import { layerStudioCostEstimate, loadLayerStudioPriceSnapshot } from "./layer-studio-billing";
 
 export type TaskPriority = "normal" | "priority" | "urgent";
 export type QueueTaskAction = "pause" | "resume" | "cancel";
@@ -33,6 +34,8 @@ export type TaskInput = {
   toolConfiguration?: ToolConfiguration & { modelConfigId: string };
   /** Trusted source preflight completed before prompt compilation; never accepted from HTTP. */
   videoPreflightResult?: Awaited<ReturnType<typeof preflightStoredVideoTask>>;
+  /** Trusted original-byte preflight before prompt compilation; never accepted from HTTP. */
+  seedreamPreflightResult?: Awaited<ReturnType<typeof preflightStoredSeedream55Task>>;
   priceSnapshot?: PriceSnapshot;
   modelConfigId?: string | null;
   prompt: string;
@@ -119,7 +122,8 @@ export async function enqueueTask(
   input = await prepareConfiguredQuickImageTask(db, input);
   input.parameters = singleImageTaskParameters(input.operationType, input.parameters);
   let preparedQuickImage: Awaited<ReturnType<typeof preflightStoredQuickImageTask>> | undefined;
-  let preparedLayer: Awaited<ReturnType<typeof preflightStoredSeedream55Task>> | undefined;
+  let preparedLayer = input.seedreamPreflightResult;
+  let seedreamExecution: (ToolConfiguration & { modelConfigId: string }) | undefined;
   const taskId = randomUUID();
   let preparedVideo: { execution: ToolConfiguration & { modelConfigId: string }; checked: Awaited<ReturnType<typeof preflightStoredVideoTask>> } | undefined = input.videoPreflightResult && input.toolConfiguration
     ? { execution: input.toolConfiguration, checked: input.videoPreflightResult } : undefined;
@@ -164,7 +168,24 @@ export async function enqueueTask(
     // The second transaction repeats those checks before atomic insert + hold.
     if (input.operationType === "video_generation" && !preparedVideo) return null;
     if (input[QUICK_IMAGE_SNAPSHOT] && !preparedQuickImage) return null;
-    if (isLayerStudio && !preparedLayer) return null;
+    const execution = input.toolConfiguration ?? await resolveToolExecution(client, input);
+    const model = (await client.query<{ modelId: string; protocol: string; workflowConfigId: string | null }>(
+      `SELECT m.model_id AS "modelId",p.protocol,m.workflow_config_id AS "workflowConfigId"
+        FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [execution.modelConfigId])).rows[0];
+    const isSeedream55 = model?.modelId === "seedream-5-5" && model.protocol === "apimart" && !model.workflowConfigId;
+    if (seedreamExecution && (!isSeedream55 || seedreamExecution.modelConfigId !== execution.modelConfigId)) {
+      throw new BillingError("TOOL_MODEL_CHANGED", "图片模型已变化，请重新提交；尚未扣费");
+    }
+    if (isLayerStudio && (!isSeedream55 || execution.toolKey !== "layer-studio")) throw new BillingError("INVALID_LAYER_TASK", "图层工具配置不匹配");
+    if (isSeedream55) {
+      if (!isLayerStudio) {
+        if (!["image_generation", "inpaint", "upscale", "batch_image", "seamless_stitch"].includes(input.operationType)) throw new BillingError("INVALID_IMAGE_TASK", "豆包生图仅支持图片生成或编辑任务");
+        try { seedream55TaskOptions({ ...input.parameters, tool: execution.toolKey }, input.prompt, input.sourceUrls.length); }
+        catch (error) { throw new BillingError("INVALID_IMAGE_PARAMETERS", error instanceof Error ? error.message : "图片参数无效"); }
+      }
+      seedreamExecution = execution;
+      if (!preparedLayer) return null;
+    }
     const inserted = await client.query<{ id: string; queuedAt: string; availableAt: string }>(
       `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,credits,rmb_cost,user_input,prompt_compilation_id,prompt_optimized)
            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,0,0,$13,$14,$15)
@@ -193,11 +214,21 @@ export async function enqueueTask(
       if (!duplicate) throw new BillingError("DUPLICATE_REQUEST", "请求编号已被其他账号占用");
       return duplicate;
     }
-    const execution = input.toolConfiguration ?? await resolveToolExecution(client, input);
-    if (isLayerStudio) {
-      if (!preparedLayer || execution.toolKey !== "layer-studio") throw new BillingError("INVALID_LAYER_TASK", "图层工具配置不匹配");
+    if (isSeedream55) {
+      if (!preparedLayer) throw new BillingError("INVALID_IMAGE_TASK", "图片原件预检状态丢失");
       await validateStoredSeedream55Snapshot(client, input, preparedLayer);
-      input.priceSnapshot = await loadLayerStudioPriceSnapshot(client, { modelConfigId: execution.modelConfigId, toolConfiguration: execution, parameters: input.parameters ?? {}, sourceCount: input.sourceUrls.length, creditsEnabled: input.creditsEnabled });
+      const originalPrice = input.batchId ? input.priceSnapshot : undefined;
+      if (originalPrice?.layerStudioCost) {
+        if (originalPrice.modelId !== execution.modelConfigId || originalPrice.operationType !== input.operationType || originalPrice.toolKey !== execution.toolKey) {
+          throw new BillingError("PRICE_SNAPSHOT_MISMATCH", "批次原始模型或操作费用快照不匹配，尚未扣费");
+        }
+        // The batch owns immutable rates, but each item has its own reference
+        // count and size. Never reuse the first item's estimated total blindly.
+        const cost = layerStudioCostEstimate({ ...input.parameters, tool: execution.toolKey }, input.sourceUrls.length, originalPrice.layerStudioCost);
+        input.priceSnapshot = { ...originalPrice, imageCost: undefined, layerStudioCost: cost, totalRmb: cost.estimatedPrecharge };
+      } else {
+        input.priceSnapshot = await loadLayerStudioPriceSnapshot(client, { operationType: input.operationType, modelConfigId: execution.modelConfigId, toolConfiguration: execution, parameters: input.parameters ?? {}, sourceCount: input.sourceUrls.length, creditsEnabled: input.creditsEnabled });
+      }
     }
     if (preparedQuickImage) await validateStoredQuickImageSnapshot(client, input, preparedQuickImage);
     input.modelConfigId = execution.modelConfigId;
@@ -241,14 +272,14 @@ export async function enqueueTask(
     };
   });
   let task = await admit();
-  if (!task && isLayerStudio) {
-    // Original-byte ownership/format/pixel validation is outside the wallet lock
-    // and finishes before the first reservation or provider request.
-    preparedLayer = await layerStudioPreflight(db, input);
-    task = await admit();
-  }
   if (!task && input[QUICK_IMAGE_SNAPSHOT]) {
     preparedQuickImage = await quickImagePreflight(db, input);
+    task = await admit();
+  }
+  if (!task && seedreamExecution) {
+    // Original-byte ownership/format/pixel validation is outside the wallet lock
+    // and finishes before the first reservation or provider request.
+    preparedLayer = await layerStudioPreflight(db, { ...input, toolKey: seedreamExecution.toolKey, parameters: { ...input.parameters, tool: seedreamExecution.toolKey } });
     task = await admit();
   }
   if (!task) {

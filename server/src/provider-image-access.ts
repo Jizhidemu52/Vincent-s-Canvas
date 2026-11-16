@@ -22,12 +22,12 @@ const grantSchema = z.object({
 });
 type Grant = z.infer<typeof grantSchema>;
 type Binding = { taskId: string; userId: string; assetId: string; objectKey: string };
-type BoundAsset = { object_key: string; mime_type: string; filename: string; byte_size: string | number;
+type BoundAsset = { object_key: string; mime_type: string; filename: string; byte_size: string | number; workflow_config_id?: string | null;
   tool_key?: string | null; model_id?: string | null; protocol?: string | null; operation_type?: string; kind?: string };
 
 // Expanded formats belong to this persisted task route, never to a caller's policy flag.
 function isSeedream55Task(asset: BoundAsset) {
-  return asset.tool_key === "layer-studio" && asset.model_id === "seedream-5-5" && asset.protocol === "apimart";
+  return asset.model_id === "seedream-5-5" && asset.protocol === "apimart" && !asset.workflow_config_id;
 }
 
 function assertBoundReferencePolicy(asset: BoundAsset, mimeType: string, length: number) {
@@ -77,7 +77,7 @@ export class ProviderImageAccess {
     // issuance requires that lease; every read still requires a live task and
     // exactly the same employee, source membership and ready original object.
     const result = await this.db.query<BoundAsset>(
-      `SELECT a.object_key,a.mime_type,a.filename,a.byte_size,a.kind,t.operation_type,t.tool_key,m.model_id,p.protocol FROM assets a JOIN tasks t ON t.id=$1
+      `SELECT a.object_key,a.mime_type,a.filename,a.byte_size,a.kind,t.operation_type,t.tool_key,m.model_id,m.workflow_config_id,p.protocol FROM assets a JOIN tasks t ON t.id=$1
        JOIN users u ON u.id=t.user_id
        LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id
        WHERE a.id=$3 AND a.owner_user_id=$2 AND a.object_key=$4

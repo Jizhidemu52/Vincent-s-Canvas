@@ -9,6 +9,11 @@ const fallback = boolean("official_fallback", "允许官方渠道回退", "由�
 
 /** Only documented fields for the selected adapter are exposed or submitted. */
 function nativeImageOptionFields(profile: Profile): ImageOptionField[] {
+    if (profile.kind === "seedream55") return [
+        { key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "1.5k", "2k"] },
+        { key: "background", label: "背景", options: ["auto", "opaque", "transparent"] },
+        { key: "output_format", label: "输出格式", options: ["png", "jpeg"], tip: "透明背景固定输出 PNG；不改变已上传的原图。" },
+    ];
     if (profile.kind === "mai-image") return [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k"] }, boolean("web_grounding", "联网参考", "默认关闭；开启后模型可使用联网信息辅助生成。")];
     if (profile.kind === "grok-image") return [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k"] }, moderation];
     if (profile.kind === "standard" || profile.kind === "quality-resolution") return profile.outputFormats?.length ? [
@@ -87,6 +92,7 @@ export function normalizeImageOptions(value: string | undefined, profile: Profil
     }
     const resolution = fields.find(field => field.key === "resolution");
     if (resolution && !normalized.resolution) normalized.resolution = resolution.options![0]!;
+    if (profile.kind === "seedream55" && normalized.background === "transparent") normalized.output_format = "png";
     return JSON.stringify(normalized);
 }
 
@@ -118,5 +124,6 @@ export function imageAdvancedParameters(value: string | undefined, profile: Prof
         } else parameters[key] = raw;
     }
     if (parameters.google_image_search === true) parameters.google_search = true;
+    if (profile.kind === "seedream55" && parameters.background === "transparent") parameters.output_format = "png";
     return parameters;
 }

@@ -9,6 +9,8 @@ import { openAiImageParameters } from "../src/openai-image-parameters";
 import { assertWorkflowTaskContext, workflowTaskContext, WorkflowTaskPending, type WorkflowTaskContext } from "../src/workflow-task-context";
 import { normalizeWorkflowOutputs, parsePromptVariables, readPath, renderTemplate } from "../src/workflow-runtime";
 import { toolDefinitions } from "../../shared/feature-catalog";
+import { validateSeedream55Reference } from "../src/seedream55-reference";
+import { seedream55PublicDocument } from "../src/seedream55-image";
 
 const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAFUlEQVR4nGP8////fwYGBgYWEAHCAD4KBAICIHhuAAAAAElFTkSuQmCC", "base64");
 const origin = "http://ai.in-choice.com.cn";
@@ -71,7 +73,7 @@ function harness(options: { origin?: string; failIssue?: boolean; realCacheFailu
     if (url.endsWith("/uploads/images")) return Response.json({ url: `https://provider.invalid/upload-${calls.length}.png` });
     if (method === "POST" && url.endsWith("/images/generations")) return Response.json({ data: [{ task_id: "upstream-owned" }] });
     if (method === "POST" && url.endsWith("/midjourney/generations/blend")) return Response.json({ data: [{ task_id: "upstream-owned" }] });
-    if (method === "GET" && url.endsWith("/tasks/upstream-owned")) return Response.json({ data: { status: "completed", result: { images: [{ url: "http://provider.invalid/result.png" }] } } });
+    if (method === "GET" && url.endsWith("/tasks/upstream-owned")) return Response.json({ data: { status: "completed", result: { images: [{ url: calls.some(call => call.payload?.model === "seedream-5-5") ? ["http://provider.invalid/result.png"] : "http://provider.invalid/result.png" }] } } });
     if (method === "POST" && url.endsWith("/workflow/run")) return Response.json({ outputs: ["https://provider.invalid/workflow-result.png"] });
     if (method === "POST" && url.endsWith("/images/edits")) return Response.json({ data: [{ url: "https://provider.invalid/openai-result.png" }] });
     if (method === "POST" && url.endsWith("/custom/image")) return Response.json({ resultUrls: ["https://provider.invalid/custom-result.png"] });
@@ -91,7 +93,8 @@ function harness(options: { origin?: string; failIssue?: boolean; realCacheFailu
     validateQuickImageSource: async (...args: Parameters<typeof validateQuickImageSource>) => {
       events.push("validate-quick"); if (options.failQuickValidation) throw new Error("Quick source invalid"); return validateQuickImageSource(...args);
     },
-    VideoSubmissionClaimLost: class extends Error {}, ApiMartImageTaskPending, ApiMartImageQueryRetryable, preflightApiMartImageRequest,
+    VideoSubmissionClaimLost: class extends Error {}, TaskExecutionLost: class extends Error {}, ApiMartImageTaskPending, ApiMartImageQueryRetryable, preflightApiMartImageRequest,
+    validateSeedream55Reference, seedream55PublicDocument,
     stepApiMartImageTask: (input: ApiMartImageTaskInput) => stepApiMartImageTask(input, { fetch: fakeFetch, sleep: async () => { throw new Error("No polling sleep expected"); } }),
     fetchProviderResult: async () => { downloads++; return { bytes, mimeType: "image/png" }; },
   };
@@ -113,6 +116,21 @@ test("fresh Flare uses ordered HTTP references through the real provider adapter
   expect(h.events).toEqual(["load", "prepare", "grant", "grant", "grant", "persist", "fetch", "persist"]);
   expect(task.upstream_task_id).toBe("upstream-owned");
   expect(h.downloads()).toBe(0);
+});
+
+test.each(["image", "image-edit", "canvas-image", "canvas-batch", "creative-text-to-style"])("ordinary Seedream %s submits once using ten owned originals and checkpoints its result before downloading", async toolKey => {
+  const ten = Array.from({ length: 10 }, (_, index) => ({ ...sources[0]!, assetId: `10000000-0000-4000-8000-${String(index).padStart(12, "0")}` }));
+  const h = harness({ sourceAssets: ten });
+  const task = { ...providerTask(), tool_key: toolKey, model_id: "seedream-5-5", parameters: { tool: toolKey, size: "1K", n: 1, count: 1 }, source_urls: ten.map(source => `/api/assets/${source.assetId}/content`) };
+  await expect(h.dispatch(task)).rejects.toBeInstanceOf(ApiMartImageTaskPending);
+  expect(h.calls).toHaveLength(1); expect(h.calls[0]!.payload).toMatchObject({ model: "seedream-5-5", size: "1K", n: 1 });
+  expect(h.calls[0]!.payload).not.toHaveProperty("tool"); expect(h.calls[0]!.payload).not.toHaveProperty("count");
+  expect(h.calls[0]!.payload!.image_urls).toHaveLength(10); expect(h.grants).toHaveLength(10);
+  task.poll_deadline_at = new Date(Date.now() + 60_000).toISOString();
+  expect(await h.dispatch(task)).toEqual([]);
+  expect(h.calls.map(call => call.method)).toEqual(["POST", "GET"]);
+  expect(h.loaded()).toBe(1); expect(h.downloads()).toBe(0);
+  expect(h.queries.some(sql => sql.includes("upstream_result_document=$1::jsonb"))).toBe(true);
 });
 
 test.each(["mask", "markup"] as const)("Flare %s layer remains validated original PNG data and only references become HTTP URLs", async layer => {

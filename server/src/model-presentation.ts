@@ -1,8 +1,7 @@
 import { imageParameterProfile } from "./image-parameter-profile";
 import { MARK_PLATFORM_MODELS, MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { getApimartImageCost } from "../../shared/apimart-image-costs";
-import { LAYER_STUDIO_MODEL_ID } from "./layer-studio-policy";
-import { LAYER_STUDIO_LABEL } from "../../shared/layer-studio";
+import { isLayerStudioModel, LAYER_STUDIO_MODEL_ID } from "./layer-studio-policy";
 
 const imageCapabilities = ["generate", "edit", "upscale", "remove_background", "batch"];
 
@@ -94,7 +93,7 @@ export function canSeeModelIdentity(role: unknown) {
 
 /** Curate creation choices only; retained configurations and history are not deleted. */
 export function isSelectableCreativeModel(model: Record<string, unknown>) {
-  if (model.modelId === LAYER_STUDIO_MODEL_ID) return false;
+  if (model.modelId === LAYER_STUDIO_MODEL_ID) return isLayerStudioModel(model) && isImageModel(model) && Boolean(markImageLabel(model));
   if (Array.isArray(model.capabilities) && model.capabilities.includes("chat")) {
     if (model.providerId === MARK_IMAGE_PROVIDER_ID) {
       return model.protocol === "apimart" && ["claude-sonnet-5-5", "gpt-6-astra", "gemini-4-carbon"].includes(String(model.modelId));
@@ -122,7 +121,7 @@ export function selectCreativeModels<T extends Record<string, unknown>>(models: 
 }
 
 export function publicModelName(model: Record<string, unknown>) {
-  if (model.modelId === LAYER_STUDIO_MODEL_ID) return LAYER_STUDIO_LABEL;
+  if (model.modelId === LAYER_STUDIO_MODEL_ID) return "豆包生图";
   if (!isImageModel(model)) return String(model.name || "");
   const featureName = creativeImageLabel(model)?.name;
   if (featureName) return featureName;
@@ -138,6 +137,7 @@ const anonymousProfiles = {
   "quality-resolution-v2": "quality-resolution-v2",
   "grok-image": "grok-image",
   "mai-image": "mai-image",
+  seedream55: "seedream55",
 } as const;
 
 /** Explicit allowlist: never expose extra provider/configuration fields from a row. */
@@ -147,7 +147,7 @@ export function presentPublicModel(model: Record<string, unknown>, role: unknown
   const hidden = image && (studio || !canSeeModelIdentity(role));
   const profile = imageParameterProfile(model.protocol, model.modelId, model.providerId);
   const mark = markPlatformLabel(model);
-  const label = studio ? { name: LAYER_STUDIO_LABEL, description: "独立生成、图层拆分与重组" } : image ? creativeImageLabel(model) : mark;
+  const label = studio ? { name: "豆包生图", description: "图片生成、参考图编辑与透明背景；图层拆分使用独立工作区" } : image ? creativeImageLabel(model) : mark;
   const imageCost = getApimartImageCost(model.providerId, model.modelId);
   return {
     id: model.id,
@@ -165,7 +165,7 @@ export function presentPublicModel(model: Record<string, unknown>, role: unknown
       ? model.displayOrder : 1000 + defaultModelOrder(model),
     imageParameterProfile: hidden ? anonymousProfiles[profile] : profile,
     ...(image && mark ? { imageSupportsMask: /^gpt-image-2\.[56]-(?:flare|sunburst)$/.test(mark.modelId) } : {}),
-    ...(mark?.modelId === "gemini-3.1-flash-image-preview-official" ? { imageSupportsOfficialFallback: false } : {}),
+    ...(studio || mark?.modelId === "gemini-3.1-flash-image-preview-official" ? { imageSupportsOfficialFallback: false } : {}),
     ...(image ? { publicName: publicModelName(model), modelIdentityHidden: hidden } : {}),
     ...(label ? { publicDescription: label.description } : {}),
   };

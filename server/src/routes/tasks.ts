@@ -39,6 +39,10 @@ import type { preflightStoredQuickImageTask } from "../stored-quick-image-prefli
 import { prepareFixedToolPrompt, type FixedToolPromptTarget } from "../fixed-tool-prompt";
 import { publicPromptTaskPreview } from "../prompt-task-preview";
 import { layerStudioTaskOptions } from "../../../shared/layer-studio-options";
+import { seedream55TaskOptions } from "../../../shared/seedream55-options";
+import { isLayerStudioModel } from "../layer-studio-policy";
+import { preflightStoredSeedream55Task } from "../stored-seedream55-preflight";
+import { loadLayerStudioPriceSnapshot } from "../layer-studio-billing";
 import { safeTaskHistoryValue, taskHistoryScope } from "../task-history";
 
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
@@ -118,7 +122,18 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
       const prepared = await preparePromptTaskInput(options.promptCompiler, actor, { ...input, parameters: { ...input.parameters, ...checked.normalized }, modelConfigId: execution.modelConfigId, toolKey: execution.toolKey, toolConfiguration: execution }, { videoSourceMimeTypes: checked.snapshot.assets.map(asset => asset.mimeType) });
       return { ...prepared, videoPreflightResult: checked };
     }
-    return finish(await preparePromptTaskInput(options.promptCompiler, actor, { ...input, modelConfigId: execution.modelConfigId, toolKey: execution.toolKey, toolConfiguration: execution }));
+    const target = (await db.query<{ modelId: string; protocol: string; workflowConfigId: string | null }>(`SELECT m.model_id AS "modelId",p.protocol,m.workflow_config_id AS "workflowConfigId" FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [execution.modelConfigId])).rows[0];
+    let seedreamPreflightResult: Awaited<ReturnType<typeof preflightStoredSeedream55Task>> | undefined;
+    if (target && isLayerStudioModel(target)) {
+      if (input.promptInput?.hasMask || input.promptInput?.maskReferenceIndex !== undefined) throw new BillingError("INVALID_IMAGE_PARAMETERS", "豆包生图不支持独立蒙版");
+      const provisional = applyImagePromptExclusions({ ...input, prompt: input.prompt || input.promptInput?.userText || "参数预检", parameters: { ...input.parameters, tool: execution.toolKey } }, target);
+      try { seedream55TaskOptions(provisional.parameters, provisional.prompt, input.sourceUrls.length); }
+      catch (error) { throw new BillingError("INVALID_IMAGE_PARAMETERS", error instanceof Error ? error.message : "图片参数无效"); }
+      // Reject unsupported parameters and unauthorized/invalid originals before any paid prompt compilation.
+      seedreamPreflightResult = await preflightStoredSeedream55Task(db, { ...provisional, toolKey: execution.toolKey, userId: actor.id });
+    }
+    const prepared = await finish(await preparePromptTaskInput(options.promptCompiler, actor, { ...input, modelConfigId: execution.modelConfigId, toolKey: execution.toolKey, toolConfiguration: execution }));
+    return { ...prepared, ...(seedreamPreflightResult ? { seedreamPreflightResult } : {}) };
   };
   const existingBatchResult = async (requestId: string, userId: string) => {
     const batch = await readBatchAdmission(db, requestId, userId);
@@ -264,7 +279,10 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
       input.toolKey = execution.toolKey;
       input.modelConfigId = execution.modelConfigId;
       input.parameters = { ...input.parameters, tool: execution.toolKey };
-      const priceSnapshot = await loadTaskPriceSnapshot(db, { ...input, toolConfiguration: execution, quantity: 1, creditsEnabled });
+      const target = (await db.query<{ modelId: string; protocol: string; workflowConfigId: string | null }>(`SELECT m.model_id AS "modelId",p.protocol,m.workflow_config_id AS "workflowConfigId" FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [execution.modelConfigId])).rows[0];
+      const priceSnapshot = target && isLayerStudioModel(target)
+        ? await loadLayerStudioPriceSnapshot(db, { ...applyImagePromptExclusions(input, target), toolConfiguration: execution, modelConfigId: execution.modelConfigId, sourceCount: input.items[0]!.sourceUrls.length, creditsEnabled })
+        : await loadTaskPriceSnapshot(db, { ...input, toolConfiguration: execution, quantity: 1, creditsEnabled });
       // One representative input, one compilation. All items receive the same trusted result.
       const prepared = await prepare(actor, { ...input, sourceUrls: input.items[0]!.sourceUrls });
       input.prompt = prepared.prompt;
@@ -277,6 +295,8 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
         try {
           await enqueueTask(db, cache, {
             ...prepared,
+            // Each batch item owns different originals; never reuse the representative source snapshot.
+            seedreamPreflightResult: undefined,
             toolConfiguration: execution,
             priceSnapshot,
             creditsEnabled,

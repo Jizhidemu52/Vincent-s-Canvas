@@ -29,6 +29,6 @@ export const MARK_PLATFORM_MODELS = [
   { modelId: "claude-sonnet-5-5", name: "aplmart-claude-sonnet-5-5", description: "文字对话与图文理解", defaultEnabled: true, capabilities: ["chat", "vision", "tools"] as const },
   ...MARK_GPT26_IMAGE_MODELS.map(model => ({ ...model, capabilities: ["generate", "edit", "batch"] as const })),
   { modelId: "mai-image-2.6-flash", name: "aplmart-mai2.6-flash", description: "快速出图与参考图编辑；编辑约 1MP，不支持 4K", defaultEnabled: true, capabilities: ["generate", "edit", "batch"] as const },
-  { modelId: "seedream-5-5", name: "APIMart Seedream 5.5", description: "独立图层工作区：图片生成、编辑、透明背景与图层拆分", defaultEnabled: false, capabilities: ["generate", "edit"] as const },
+  { modelId: "seedream-5-5", name: "豆包生图", description: "图片生成、参考图编辑与透明背景；图层拆分使用独立工作区", defaultEnabled: false, capabilities: ["generate", "edit"] as const },
   { modelId: "gemini-4-carbon", name: "aplmart-gemini-4-carbon", description: "文字对话、图文理解与工具调用", defaultEnabled: true, capabilities: ["chat", "vision", "tools"] as const },
 ] as const;

@@ -57,6 +57,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const serverModels = useMemo(() => usesServerModels && businessConfigStatus === "ready" ? filterServerModelsByCapability(businessModels, capability)
         .filter(item => !binding?.modelConfigId || item.id === binding.modelConfigId)
         .filter(item => !toolKey || !getToolDefinition(toolKey)?.capabilities.length || getToolDefinition(toolKey)!.capabilities.some(capability => item.capabilities.includes(capability)))
+        .filter(item => toolKey !== "canvas-mask-edit" || imageModelProfile(item.modelId, businessModels).supportsMask)
         .filter(item => toolKey !== "midjourney-blend" || item.imageParameterProfile === "blend" || item.imageParameterProfile === "midjourney-blend" || item.modelId === "midjourney-blend") : [], [businessConfigStatus, businessModels, capability, usesServerModels, binding?.modelConfigId, toolKey]);
     useEffect(() => {
         if (!shouldRefreshModelPickerConfig(capability, businessConfigStatus, source)) return;

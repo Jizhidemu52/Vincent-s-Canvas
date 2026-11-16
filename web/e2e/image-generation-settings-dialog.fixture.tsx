@@ -15,6 +15,7 @@ const models: PublicModel[] = [
     { id: "7bf4a4e1-7202-49dd-bf16-363d01971347", modelId: "7bf4a4e1-7202-49dd-bf16-363d01971347", name: "aplmart-gpt2.6-sunburst", publicName: "aplmart-gpt2.6-sunburst", publicDescription: "细节优先，适合复杂版式与产品呈现", imageParameterProfile: "quality-resolution-v2", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
     { id: "7bf4a4e1-7202-49dd-bf16-363d01971348", modelId: "7bf4a4e1-7202-49dd-bf16-363d01971348", name: "aplmart-nano2.1", publicName: "aplmart-nano2.1", publicDescription: "参考图改款，适合多轮调整", imageParameterProfile: "resolution", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
     { id: "7bf4a4e1-7202-49dd-bf16-363d01971349", modelId: "7bf4a4e1-7202-49dd-bf16-363d01971349", name: "团队专用模型", publicName: "团队专用 · 服装与软配饰长名称示例模型", publicDescription: "根据既有产品结构和细节进行调整，保留参考图中的面料、工艺与版型关系。", imageParameterProfile: "quality-resolution-v2", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
+    { id: "7bf4a4e1-7202-49dd-bf16-363d01971350", modelId: "7bf4a4e1-7202-49dd-bf16-363d01971350", name: "豆包生图", publicName: "豆包生图", publicDescription: "图片生成与参考图编辑", imageParameterProfile: "seedream55", imageSupportsMask: false, capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
 ];
 const params = new URLSearchParams(location.search);
 const dark = params.get("theme") === "dark";

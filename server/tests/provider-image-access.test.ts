@@ -46,7 +46,7 @@ function fixture() {
   const state = {
     owner: userId, user: userId, userStatus: "active", userDeleted: false, assetStatus: "ready", deleted: false, kind: "image", status: "processing",
     objectKey: "private/employee/original.png", mimeType: "image/png", byteSize: png.length,
-    toolKey: null as string | null, modelId: null as string | null, protocol: null as string | null, operationType: "inpaint",
+    toolKey: null as string | null, modelId: null as string | null, protocol: null as string | null, workflowConfigId: null as string | null, operationType: "inpaint",
     sourceUrls: [`/api/assets/${assetId}/content`], executionToken: "current-worker", leaseValid: true,
     etag: '"original-etag"', bytes: Buffer.from(png), cacheFailure: false, dbFailure: false, storageFailure: false,
   };
@@ -66,7 +66,7 @@ function fixture() {
       && state.status === "processing" && JSON.parse(String(sources)).every((url: string) => state.sourceUrls.includes(url))
       && (executionToken === undefined || state.executionToken === executionToken && state.leaseValid);
     return { rows: eligible ? [{ object_key: state.objectKey, mime_type: state.mimeType, filename: "员工原件.png", byte_size: state.byteSize,
-      tool_key: state.toolKey, model_id: state.modelId, protocol: state.protocol, operation_type: state.operationType, kind: state.kind }] : [] };
+      tool_key: state.toolKey, model_id: state.modelId, workflow_config_id: state.workflowConfigId, protocol: state.protocol, operation_type: state.operationType, kind: state.kind }] : [] };
   } } as unknown as Pick<Database, "query">;
   const cache: Pick<Cache, "get" | "set"> = {
     get: async key => { if (state.cacheFailure) throw new Error("sensitive redis detail"); return records.get(key) ?? null; },
@@ -308,7 +308,7 @@ test.each([...standardMimes, ...extendedMimes])("only the persisted Seedream 5.5
   const f = fixture(), bytes = await imageReference(mimeType);
   Object.assign(f.state, seedreamRoute); setReference(f, bytes, mimeType);
   const path = pathOf(await f.access.issue(f.input));
-  expect(f.queries[0]).toContain("t.tool_key,m.model_id,p.protocol");
+  expect(f.queries[0]).toContain("t.tool_key,m.model_id,m.workflow_config_id,p.protocol");
   expect(f.queries[0]).toContain("LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id");
   expect(JSON.parse(f.writes[0]!.value)).toMatchObject({ mimeType, length: bytes.length });
   expect(f.writes[0]!.options).toEqual({ EX: 1800 });
@@ -338,9 +338,9 @@ test.each(extendedMimes)("ordinary tasks reject %s despite caller-supplied Seedr
   expect(f.writes).toHaveLength(0);
 });
 
-test("all three persisted task route fields are required; route changes revoke extended grants", async () => {
+test("persisted model identity and native protocol are required; model changes revoke extended grants", async () => {
   const bytes = await imageReference("image/bmp");
-  for (const route of [{ toolKey: "image-edit" }, { toolKey: null }, { modelId: "seedream-5-0" }, { modelId: null }, { protocol: "openai" }, { protocol: null }]) {
+  for (const route of [{ workflowConfigId: "configured-workflow" }, { modelId: "seedream-5-0" }, { modelId: null }, { protocol: "openai" }, { protocol: null }]) {
     const f = fixture(); Object.assign(f.state, seedreamRoute); setReference(f, bytes, "image/bmp");
     const token = tokenOf(await f.access.issue(f.input));
     Object.assign(f.state, route);
@@ -350,6 +350,14 @@ test("all three persisted task route fields are required; route changes revoke e
   }
 });
 
+test.each(["image", "image-edit", "canvas-image", "creative-text-to-style"])("ordinary Seedream tool %s uses verified extended originals", async toolKey => {
+  const f = fixture(), bytes = await imageReference("image/bmp");
+  Object.assign(f.state, seedreamRoute, { toolKey }); setReference(f, bytes, "image/bmp");
+  const token = tokenOf(await f.access.issue(f.input));
+  expect((await f.access.resolve(token)).asset.mime_type).toBe("image/bmp");
+  expect(JSON.parse(f.writes[0]!.value).length).toBe(bytes.length);
+});
+
 test("Seedream keeps the 30 MiB limit while the same original PNG exceeds ordinary 20 MiB policy", async () => {
   const { stdout: bytes } = await exec(process.env.FFMPEG_PATH || "ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=3000x3000", "-frames:v", "1", "-c:v", "png", "-compression_level", "0", "-threads", "1", "-f", "image2pipe", "pipe:1"],
     { encoding: "buffer", windowsHide: true, timeout: 20_000, maxBuffer: LAYER_STUDIO_MAX_REFERENCE_BYTES });
@@ -357,7 +365,7 @@ test("Seedream keeps the 30 MiB limit while the same original PNG exceeds ordina
   const f = fixture(); Object.assign(f.state, seedreamRoute); setReference(f, bytes, "image/png");
   const token = tokenOf(await f.access.issue(f.input));
   expect((await f.access.resolve(token)).expectedObject.length).toBe(bytes.length);
-  f.state.toolKey = "image-edit";
+  f.state.modelId = "gpt-image-2";
   await expect(f.access.resolve(token)).rejects.toMatchObject({ status: 404 });
   await expect(f.access.issue(f.input)).rejects.toThrow("20MB");
   Object.assign(f.state, seedreamRoute); setReference(f, Buffer.alloc(LAYER_STUDIO_MAX_REFERENCE_BYTES + 1), "image/png");
@@ -420,7 +428,7 @@ test("expanded grants preserve lease, owner, TTL, live-task and ETag revocation 
 
 test("issuance rechecks the persisted route and lease after original-byte verification", async () => {
   const bytes = await imageReference("image/bmp");
-  for (const change of [{ toolKey: "image-edit" }, { modelId: "seedream-5-0" }, { protocol: "openai" }, { leaseValid: false }]) {
+  for (const change of [{ workflowConfigId: "configured-workflow" }, { modelId: "seedream-5-0" }, { protocol: "openai" }, { leaseValid: false }]) {
     const f = fixture(); Object.assign(f.state, seedreamRoute); setReference(f, bytes, "image/bmp"); f.input.source.etag = undefined;
     f.onGet(() => { Object.assign(f.state, change); });
     await expect(f.access.issue(f.input)).rejects.toMatchObject({ status: 404 }); expect(f.writes).toHaveLength(0);

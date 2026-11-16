@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { layerStudioTaskOptions, LAYER_STUDIO_RATIOS } from "../../shared/layer-studio-options";
+import { seedream55TaskOptions } from "../../shared/seedream55-options";
 import { BillingError, loadTaskPriceSnapshot, settleReservation, type PriceSnapshot } from "./billing";
 import type { Database } from "./db";
 import { withTransaction } from "./db-transaction";
@@ -21,13 +22,14 @@ export type LayerStudioCostSnapshot = LayerStudioRates & {
 };
 const money = (value: number) => Math.round(value * 1_000_000) / 1_000_000;
 export function layerStudioCostEstimate(parameters: Record<string, unknown>, sourceCount: number, rates: LayerStudioRates): LayerStudioCostSnapshot {
+  const label = parameters.tool && parameters.tool !== "layer-studio" ? "豆包生图" : "图层工作区";
   let options: ReturnType<typeof layerStudioTaskOptions>;
-  try { options = layerStudioTaskOptions(parameters, "cost preflight", sourceCount); }
-  catch { throw new BillingError("INVALID_LAYER_PARAMETERS", "图层工作区参数或参考图数量不符合要求"); }
+  try { options = (parameters.tool === undefined || parameters.tool === "layer-studio" ? layerStudioTaskOptions : seedream55TaskOptions)(parameters, "cost preflight", sourceCount); }
+  catch { throw new BillingError("INVALID_LAYER_PARAMETERS", `${label}参数或参考图数量不符合要求`); }
   if (!Number.isInteger(rates.version) || rates.version < 1 || !Number.isFinite(rates.inputRmb) || rates.inputRmb < 0
     || !Number.isFinite(rates.lowOutputRmb) || rates.lowOutputRmb <= 0 || !Number.isFinite(rates.highOutputRmb)
     || rates.highOutputRmb < rates.lowOutputRmb || Math.max(rates.inputRmb, rates.highOutputRmb) > 1000) {
-    throw new BillingError("PRICE_NOT_CONFIGURED", "图层工作区费用尚未完整配置");
+    throw new BillingError("PRICE_NOT_CONFIGURED", `${label}费用尚未完整配置`);
   }
   const layers = options.layer_decomposition === true;
   const size = options.size ?? (layers ? options.resolution ?? "auto" : "2K");
@@ -54,7 +56,7 @@ export function settleLayerStudioCost(snapshot: LayerStudioCostSnapshot, outputs
 }
 
 export async function loadLayerStudioPriceSnapshot(client: Pick<Database, "query">, input: {
-  modelConfigId: string; toolConfiguration: ToolConfiguration; parameters: Record<string, unknown>; sourceCount: number; creditsEnabled?: boolean;
+  modelConfigId: string; toolConfiguration: ToolConfiguration; parameters: Record<string, unknown>; sourceCount: number; creditsEnabled?: boolean; operationType?: string;
 }): Promise<PriceSnapshot> {
   const result = await client.query<LayerStudioRates>(
     `SELECT p.input_rmb::float8 AS "inputRmb",p.low_output_rmb::float8 AS "lowOutputRmb",
@@ -62,9 +64,9 @@ export async function loadLayerStudioPriceSnapshot(client: Pick<Database, "query
        FROM layer_studio_prices p JOIN model_configs m ON m.id=p.model_config_id JOIN providers v ON v.id=m.provider_id
        WHERE p.model_config_id=$1 AND m.model_id=$2 AND m.workflow_config_id IS NULL AND v.protocol='apimart'`,
     [input.modelConfigId, LAYER_STUDIO_MODEL_ID]);
-  if (!result.rows[0]) throw new BillingError("PRICE_NOT_CONFIGURED", "图层工作区费用尚未配置；需同时确认输入图及两档输出单价");
-  const layerStudioCost = layerStudioCostEstimate(input.parameters, input.sourceCount, result.rows[0]);
-  const base = await loadTaskPriceSnapshot(client, { operationType: "image_generation", modelConfigId: input.modelConfigId,
+  if (!result.rows[0]) throw new BillingError("PRICE_NOT_CONFIGURED", `${input.toolConfiguration.toolKey === "layer-studio" ? "图层工作区" : "豆包生图"}费用尚未配置；需同时确认输入图及两档输出单价`);
+  const layerStudioCost = layerStudioCostEstimate({ ...input.parameters, tool: input.toolConfiguration.toolKey }, input.sourceCount, result.rows[0]);
+  const base = await loadTaskPriceSnapshot(client, { operationType: input.operationType ?? "image_generation", modelConfigId: input.modelConfigId,
     toolConfiguration: input.toolConfiguration, quantity: 1, creditsEnabled: input.creditsEnabled });
   // Employee credits remain the configured once-per-task price. This estimate is
   // provider cost accounting, not proof that the provider charged/refunded money.
