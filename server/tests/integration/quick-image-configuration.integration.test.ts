@@ -24,7 +24,7 @@ integration("administrator quick image configuration through real SQL and queue 
   const realFetch = globalThis.fetch.bind(globalThis);
   const identities = new Map<string, SessionUser>(), objects = new Map<string, Uint8Array>(), queued = new Set<string>();
   const admin = randomUUID(), designer = randomUUID(), department = randomUUID(), departmentId = randomUUID(), other = randomUUID();
-  const provider = randomUUID(), nano = randomUUID(), mai = randomUUID(), flare = randomUUID(), alternative = randomUUID(), ordinary = randomUUID(), mj = randomUUID(), disabled = randomUUID();
+  const provider = randomUUID(), nano = randomUUID(), mai = randomUUID(), flare = randomUUID(), alternative = "cdde1928-29cb-4e18-adc5-3f9399991f3c", ordinary = randomUUID(), mj = randomUUID(), disabled = randomUUID();
   const query = (sql: string, values: unknown[] = []) => fixture.db.query<Record<string, any>>(sql, values);
   const cache = { eval: async (_script: string, options: { arguments: string[] }) => { queued.add(options.arguments[0]!); return 1; } } as unknown as Cache;
   const preflight: typeof preflightStoredQuickImageTask = (db, input) => preflightStoredQuickImageTask(db, input, { readSource: async key => {
@@ -131,7 +131,10 @@ integration("administrator quick image configuration through real SQL and queue 
     const response = await request(designer, "/api/tasks", "POST", input), body = await response.json();
     expect({ status: response.status, body }).toMatchObject({ status: 201, body: { task: { modelConfigId: alternative, prompt: "VERSION_ONE", parameters: { n: 1, resolution: "2k", quickImage: { configurationVersion: 1 } } } } });
     const stored = (await query("SELECT model_config_id,prompt,parameters FROM tasks WHERE id=$1", [body.task.id])).rows[0]!;
-    expect(stored).toMatchObject({ model_config_id: alternative, prompt: "VERSION_ONE", parameters: { resolution: "2k" } }); expect(JSON.stringify(stored)).not.toMatch(/FORGED|mask_url|999/);
+    expect(stored).toEqual({ model_config_id: alternative, prompt: "VERSION_ONE", parameters: {
+      n: 1, count: 1, size: "auto", tool: quickImageTaskTarget(action).toolKey, resolution: "2k", quickImageAction: action,
+      quickImage: { action, recipeVersion: 1, configurationVersion: 1 },
+    } });
     const repeat = await request(designer, "/api/tasks", "POST", input); expect(repeat.status).toBe(200); expect((await repeat.json()).task.id).toBe(body.task.id);
     const prepared = await prepareConfiguredQuickImageTask(fixture.db, { ...ordinaryRequest(action, src), prompt: "" });
     expect(Object.isFrozen(prepared[QUICK_IMAGE_SNAPSHOT])).toBe(true); expect(Object.isFrozen(prepared[QUICK_IMAGE_SNAPSHOT]!.parameters)).toBe(true);
