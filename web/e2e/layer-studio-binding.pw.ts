@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { MockCanvasApi } from "./fixtures";
 
-test("layer studio binding stays explicit and exclusive without financial controls", async ({ page }) => {
+test("layer studio binding stays explicit without financial controls while ordinary images accept compatible Seedream", async ({ page }) => {
     const api = new MockCanvasApi(test.info().project.use.baseURL); api.role = "super_admin";
     await api.attach(page.context());
     const root = "/api/admin/model-configuration";
@@ -69,8 +69,10 @@ test("layer studio binding stays explicit and exclusive without financial contro
     await page.locator('[data-tool-key="image"]').getByRole("button", { name: "配置本板块", exact: true }).click();
     const imageDialog = page.getByRole("dialog", { name: "配置文生图", exact: true });
     await imageDialog.getByRole("combobox", { name: "本板块模型绑定", exact: true }).click();
-    await expect(page.getByRole("option")).toHaveCount(1);
-    await expect(page.getByRole("option")).toHaveAccessibleName("普通图片模型 · 隔离专用服务 · ordinary-image");
+    await expect(page.getByRole("option")).toHaveCount(2);
+    await expect(page.getByRole("option", { name: "专用图层模型 · 隔离专用服务 · seedream-5-5", exact: true })).toHaveCount(1);
+    await expect(page.getByRole("option", { name: "普通图片模型 · 隔离专用服务 · ordinary-image", exact: true })).toHaveCount(1);
+    await page.screenshot({ path: test.info().outputPath("ordinary-seedream-binding.png"), fullPage: true, animations: "disabled" });
     expect(writes).toHaveLength(1);
     expect(api.pageErrors).toEqual([]); expect(api.unexpected).toEqual([]); expect(api.blocked).toEqual([]);
 });
