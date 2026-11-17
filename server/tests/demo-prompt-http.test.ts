@@ -21,12 +21,13 @@ test("real Demo HTTP with an explicit legacy Sonnet fixture compiles once, keeps
   const chatRules = (await db.store.active("canvas-assistant")).version.systemPrompt;
   db.close();
   const optimizerCalls: Record<string, any>[] = [], imageCalls: Array<Record<string, unknown>> = [], chatCalls: Record<string, any>[] = [];
-  let output: "good" | "invalid" | "leak" = "good";
+  let output: "good" | "invalid" | "leak" | "unavailable" = "good";
   const provider = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     const path = new URL(request.url).pathname;
     if (path === "/mark/v1/messages") {
       expect(request.headers.get("authorization")).toBe("Bearer isolated-prompt-fixture");
       const body = await request.json() as Record<string, any>;
+      if (output === "unavailable") return Response.json({ error: { message: "private-provider-header-do-not-display" } }, { status: 503 });
       const isChat = Array.isArray(body.tools) && body.tools.length > 0;
       (isChat ? chatCalls : optimizerCalls).push(body);
       await Bun.sleep(20);
@@ -203,6 +204,13 @@ test("real Demo HTTP with an explicit legacy Sonnet fixture compiles once, keeps
     const repeated = await (await request("/api/tasks", "POST", agentInput)).json();
     expect(repeated.task.id).toBe(agent.task.id); expect(imageCalls).toHaveLength(7);
     expect((await request("/api/tasks", "POST", { ...agentInput, requestId: crypto.randomUUID(), operationType: "video_generation" })).status).toBe(400);
+    output = "unavailable";
+    const unavailable = await request("/api/chat/responses", "POST", chatInput);
+    expect(unavailable.status).toBe(502);
+    const diagnostic = await unavailable.json();
+    expect(diagnostic).toMatchObject({ error: "UPSTREAM_REQUEST_FAILED", upstreamStatus: 503, upstreamReason: "service_unavailable" });
+    expect(diagnostic.message).toContain("暂时不可用");
+    expect(JSON.stringify(diagnostic)).not.toContain("private-provider-header-do-not-display");
   } finally {
     child.kill(); await child.exited; provider.stop(true); rmSync(directory, { recursive: true, force: true });
   }

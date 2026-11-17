@@ -19,6 +19,7 @@ describe("video model parameter contract", () => {
         const cases = [
             ["MiniMax-H3", [4, 15], ["768P", "2K"], "2K", "16:9", 9, false],
             ["doubao-seedance-2.5", [4, 30], ["480p", "720p", "1080p"], "720p", "adaptive", 30, true],
+            ["seedance-2-5-flash", [4, 30], ["480p", "720p"], "720p", "adaptive", 10, true],
             ["wan2.7", [2, 15], ["720P", "1080P"], "1080P", "16:9", 2, false],
             ["happyhorse-1.1", [3, 15], ["720P", "1080P"], "1080P", "16:9", 9, false],
         ] as const;

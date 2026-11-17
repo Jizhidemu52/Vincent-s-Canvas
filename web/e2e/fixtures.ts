@@ -156,10 +156,10 @@ export class MockCanvasApi {
         if (path === "/api/assets/upload-request") {
             const input = request.postDataJSON(), id = randomUUID();
             this.assets.set(id, { ...input, id, ownerUserId: OWNER, status: "ready", contentUrl: `/api/assets/${id}/content` });
-            return json({ assetId: id, uploadUrl: `/api/e2e-upload/${id}` });
+            return json({ assetId: id, uploadUrl: `/api/assets/${id}/upload` });
         }
-        if (path.startsWith("/api/e2e-upload/")) {
-            this.assetBytes.set(path.split("/").at(-1)!, request.postDataBuffer()!);
+        if (/^\/api\/assets\/[^/]+\/upload$/.test(path) && method === "PUT") {
+            this.assetBytes.set(path.split("/")[3]!, request.postDataBuffer()!);
             return json({});
         }
         if (/^\/api\/assets\/[^/]+\/(content|thumb)$/.test(path)) return route.fulfill({ status: 200, contentType: "image/png", body: this.assetBytes.get(path.split("/")[3]) || IMAGE });

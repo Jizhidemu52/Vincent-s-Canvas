@@ -1,5 +1,6 @@
 import type { PromptInputData } from "../../../../shared/prompt-contracts";
 import { normalizeVideoMotionSettings, type VideoMotionSettings } from "../../../../shared/video-motion-options";
+import { isSeedanceVideoModel } from "../../../../shared/video-model-identity";
 import { getVideoModelParameterSpec, normalizeVideoModelConfig, resolveVideoMode, videoParameterModelId } from "@/lib/video-model-parameters";
 import type { AiConfig } from "@/stores/use-config-store";
 
@@ -7,7 +8,7 @@ import type { AiConfig } from "@/stores/use-config-store";
 export function motionVideoConfig(config: AiConfig, settings: VideoMotionSettings, counts: { images: number; videos: number; audios: number }, planning: boolean): AiConfig {
     const next = { ...config };
     if (planning) {
-        if (videoParameterModelId(next) === "doubao-seedance-2.5" && (!next.videoMode || next.videoMode === "auto") && !counts.videos && !counts.audios) {
+        if (isSeedanceVideoModel(videoParameterModelId(next)) && (!next.videoMode || next.videoMode === "auto") && !counts.videos && !counts.audios) {
             next.videoMode = counts.images === 1 ? "first-frame" : counts.images === 2 ? "first-last-frame" : counts.images ? "reference" : "text";
         }
         if (getVideoModelParameterSpec(next)?.supportsAudio) next.videoGenerateAudio = settings.audio === "none" ? "false" : "true";

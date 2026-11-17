@@ -171,6 +171,7 @@ const CanvasPerformancePanel = lazy(() => import("@/components/canvas/canvas-per
 const CanvasConflictNotice = lazy(() => import("@/components/canvas/canvas-conflict-notice").then(module => ({ default: module.CanvasConflictNotice })));
 const Minimap = lazy(() => import("@/components/canvas/canvas-mini-map").then(module => ({ default: module.Minimap })));
 const CanvasLocalAgentPanel = lazy(loadCanvasLocalAgentPanel);
+const CanvasDesignDiscussion = lazy(() => import("@/components/canvas/design-discussion/CanvasDesignDiscussion.jsx").then(module => ({ default: module.CanvasDesignDiscussion })));
 
 import { createCanvasConfigRenderCache, type CanvasConfigRenderSnapshot } from "@/lib/canvas/canvas-config-render-cache";
 import type { CanvasConfigContentActions } from "./canvas-config-node-content";
@@ -3129,6 +3130,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                     onToggleAgent={toggleAgentFromTopBar}
                 />
                 {!isCanvasDesktopLayout ? quickGeneratePanel : null}
+                {projectLoaded ? <Suspense fallback={null}><CanvasDesignDiscussion key={projectId} projectId={projectId} writable={writable} getCanvasCenter={getCanvasCenter} onBeforeChange={flushPendingHistory} onLocate={locateNodes} /></Suspense> : null}
 
                 <WirelessCanvas
                     ref={wirelessCanvasRef}

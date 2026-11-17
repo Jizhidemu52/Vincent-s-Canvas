@@ -19,7 +19,7 @@ import {
   type TaskPriority,
 } from "../tasks";
 import type { AuthenticatedRequest } from "../types";
-import { resolveToolExecution } from "../tool-configuration";
+import { resolveToolExecution, ToolConfigurationError } from "../tool-configuration";
 import { loadTaskPriceSnapshot } from "../billing";
 import { preflightStoredVideoTask } from "../stored-video-preflight";
 import { readTaskProgress } from "../task-progress";
@@ -47,6 +47,18 @@ import { safeTaskHistoryValue, taskHistoryScope } from "../task-history";
 
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 
+function rejectUnconfiguredImagePipeline(input: { operationType: string; parameters: Record<string, unknown> }) {
+  if (!Object.hasOwn(input.parameters, "pipeline")) return;
+  const pipeline = input.parameters.pipeline;
+  if (typeof pipeline !== "string" || !["fast", "refined", "refined_ultra"].includes(pipeline)) {
+    throw new ToolConfigurationError("INVALID_IMAGE_PIPELINE", "未知图片流程，请刷新后重新选择");
+  }
+  if (!isImagePromptOperation(input.operationType) && input.operationType !== "seamless_stitch") {
+    throw new ToolConfigurationError("IMAGE_PIPELINE_OPERATION_UNSUPPORTED", "图片流程不能用于当前任务类型");
+  }
+  throw new ToolConfigurationError("IMAGE_PIPELINE_NOT_CONFIGURED", "该图片流程尚未配置，未提交生成");
+}
+
 // Derive a safe public category from the exact local persistence error. This also
 // classifies already-paused tasks without changing their stored diagnostics.
 const postprocessFailureCondition = `t.status='paused' AND t.failure_reason LIKE '${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：%'`;
@@ -73,6 +85,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
     next();
   });
   const prepare = async <T extends ReturnType<typeof singleSchema.parse>>(actor: AuthenticatedRequest["auth"], input: T) => {
+    rejectUnconfiguredImagePipeline(input);
     if ((input.toolKey ?? input.parameters.tool) === "layer-studio") {
       if (input.operationType !== "image_generation" || input.promptInput) throw new BillingError("INVALID_LAYER_TASK", "图层工具仅支持独立图片任务和原始提示词");
       let parameters: ReturnType<typeof layerStudioTaskOptions>;
@@ -168,6 +181,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
   router.post("/preflight", async (request, response, next) => {
     try {
       const input = singleSchema.parse(request.body);
+      rejectUnconfiguredImagePipeline(input);
       if (input.operationType !== "video_generation") {
         response.status(400).json({ error: "UNSUPPORTED_OPERATION", message: "此预检入口仅支持视频任务" });
         return;
@@ -261,6 +275,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
     try {
       const creditsEnabled = typeof creditPolicy === "function" ? await creditPolicy() : creditPolicy;
       const input = batchSchema.parse(request.body);
+      rejectUnconfiguredImagePipeline(input);
       if ((input.toolKey ?? input.parameters.tool) === "layer-studio") throw new BillingError("INVALID_LAYER_TASK", "图层工具不接受批量任务；图层数量请在单次任务中设置");
       const actor = (request as unknown as AuthenticatedRequest).auth;
       if (input.priority !== "normal" && actor.role === "designer") {

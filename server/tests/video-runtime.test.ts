@@ -6,7 +6,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 describe("APIMart video runtime safety", () => {
   test("all APIMart video models preserve owned public references without provider uploads", async () => {
-    for (const modelId of ["MiniMax-H3", "doubao-seedance-2.5", "gemini-omni-1.2-flash", "wan2.7", "happyhorse-1.1"]) {
+    for (const modelId of ["MiniMax-H3", "doubao-seedance-2.5", "seedance-2-5-flash", "gemini-omni-1.2-flash", "wan2.7", "happyhorse-1.1"]) {
       const events: string[] = [];
       const result = await runApiMartVideoTask({ ...baseInput, modelId,
         sources: [{ mimeType: "image/png", bytes: new Uint8Array([1, 2, 3]), publicUrl: "http://owned.example/api/provider-images/fixture" }],

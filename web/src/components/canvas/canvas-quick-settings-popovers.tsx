@@ -118,7 +118,7 @@ function AdvancedSettingsDialog({ active, onActiveChange, disabled, disabledReas
                     <Dialog.Close asChild><button type="button" className="cw-settings-close" aria-label={t("返回创建面板")}><X size={22} /></button></Dialog.Close>
                 </header>
                 <div className="cw-settings-dialog-body">
-                    <div className="cw-settings-overview"><span>{t("当前输出")}</span><strong>{imageReferenceSizeIsAutomatic(profile, referenceCount) ? t("模型决定尺寸") : sizeLabel(config.size)}</strong><span>{summary}</span><span>{t("每次 1 张")}</span></div>
+                    <div className="cw-settings-overview"><span>{t("当前输出")}</span><strong>{imageReferenceSizeIsAutomatic(profile, referenceCount) ? t("模型决定尺寸") : sizeLabel(config.size)}</strong><span>{summary}</span><span>{t("每个任务 1 张")}</span></div>
                     <fieldset disabled={disabled} className="cw-advanced-fields"><ImageSettingsPanel spacious compact showTitle={false} config={config} profile={profile} referenceCount={referenceCount} uploadContextKey={uploadContextKey}
                         theme={theme} onConfigChange={onConfigChange} onConfigNormalize={onConfigNormalize} /></fieldset>
                 </div>

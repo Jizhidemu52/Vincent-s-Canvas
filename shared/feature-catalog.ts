@@ -26,6 +26,7 @@ export const toolDefinitions = [
   { toolKey: "canvas-angle", label: "画布角度编辑", group: "自由画布", operationType: "inpaint", operations: ["inpaint"], capabilities: ["edit"], parent: "canvas" },
   { toolKey: "canvas-batch", label: "画布批量改图", group: "自由画布", operationType: "batch_image", operations: ["batch_image"], capabilities: ["batch", "edit"], parent: "canvas" },
   { toolKey: "canvas-chat", label: "画布 Agent / 文字与反推", group: "自由画布", operationType: "chat", operations: ["chat"], capabilities: ["chat"], parent: "canvas" },
+  { toolKey: "canvas-design-chat", label: "自由画布设计讨论", group: "自由画布", operationType: "chat", operations: ["chat"], capabilities: ["chat"], parent: "canvas" },
   { toolKey: "canvas-video", label: "画布视频生成", group: "自由画布", operationType: "video_generation", operations: ["video_generation"], capabilities: ["video"], parent: "canvas" },
   { toolKey: "canvas-audio", label: "画布音频生成", group: "自由画布", operationType: "audio_generation", operations: ["audio_generation"], capabilities: ["audio"], parent: "canvas" },
   { toolKey: "gpt-chat", label: "对话改图", group: "对话", operationType: "chat", operations: ["chat"], capabilities: ["chat"], parent: null },
@@ -55,7 +56,7 @@ export const nonAiDefinitions = [
 
 export const moduleDefinitions = [
   ...nonAiDefinitions,
-  ...toolDefinitions.map((tool) => ({ moduleKey: tool.toolKey, label: tool.label, group: tool.group, kind: "ai" as const, parent: tool.parent, description: tool.operationType === "chat" ? "模型由后台“对话改图”统一指定；本板块开关与费用独立，积分总开关关闭时不扣分" : "独立模型绑定与开关；可设置本板块费用覆盖，积分总开关关闭时不扣分" })),
+  ...toolDefinitions.map((tool) => ({ moduleKey: tool.toolKey, label: tool.label, group: tool.group, kind: "ai" as const, parent: tool.parent, description: tool.toolKey === "canvas-design-chat" ? "设计讨论模型由后台独立指定，不影响其他对话；前台不展示模型名称或选择器" : tool.operationType === "chat" ? "模型由后台“对话改图”统一指定；本板块开关与费用独立，积分总开关关闭时不扣分" : "独立模型绑定与开关；可设置本板块费用覆盖，积分总开关关闭时不扣分" })),
 ];
 export type ModuleKey = (typeof moduleDefinitions)[number]["moduleKey"];
 export const moduleKeys = moduleDefinitions.map((item) => item.moduleKey) as [ModuleKey, ...ModuleKey[]];

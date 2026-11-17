@@ -15,6 +15,20 @@ test.beforeEach(async ({ page }) => {
     await expect(page.getByTestId("canvas-agent-image-result")).toBeVisible();
 });
 
+test("integrated chat entry motion respects reduced motion and keeps result controls available", async ({ page }, info) => {
+    const message = page.locator('[data-message-role="assistant"]');
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await expect(message).toHaveCSS("animation-name", "enter");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect(message).toHaveCSS("animation-name", "none");
+    await page.getByRole("button", { name: "narrow", exact: true }).click();
+    await page.getByRole("button", { name: "theme", exact: true }).click();
+    await page.getByTestId("canvas-agent-image-result").hover();
+    await expect(page.getByRole("button", { name: "圈选修改", exact: true })).toBeEnabled();
+    expect(await message.evaluate(element => element.scrollWidth <= element.clientWidth + 2)).toBe(true);
+    await page.screenshot({ path: info.outputPath("integrated-chat-reduced-motion.png"), animations: "disabled" });
+});
+
 test("desktop result actions reveal on hover and keyboard focus without base or current-version controls", async ({ page }) => {
     const result = page.getByTestId("canvas-agent-image-result"), actions = page.getByTestId("canvas-agent-image-actions");
     await expect(actions).toHaveCSS("opacity", "0");

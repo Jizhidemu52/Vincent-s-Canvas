@@ -34,6 +34,22 @@ API 默认命令仅 `bun src/index.ts`，Worker 默认仅 `bun src/worker.ts`。
 
 旧 fingerprinted 静态资源从同一已核验 Web 容器的 `/usr/share/nginx/html/assets` 与其已有只读兼容挂载合并到新审计目录，连续发布继续保留旧页依赖，不扫描任意历史宿主目录。同名同字节去重，异字节拒绝；拒绝 symlink、HTML、JSON、map、env 和未带 hash 的文件。仅这些公开副本显式设为 `0644`、叶资源目录为 `0755`，避免私有审计的 `umask 077` 使 Nginx 无法读取；私有祖先目录和源文件权限不变，新 Web 仍只读挂载兼容目录。其他旧源码挂载只删除实例明确列出的只读代码挂载；未知或可写代码挂载直接拒绝。
 
+## 053 自由画布设计讨论的独立准备
+
+`canvas-design-chat-053.py` 只适用于已登记至 052、统计处理仍停用的实例。它精确扩展两个工具键 CHECK，新增 `canvas-design-chat` 模块与独立工具记录，并绑定当前指定 APIMart Provider 下已启用、具备服务端凭据、无工作流且支持 chat 的 `gemini-4-carbon`。模型 UUID 来自目标当前只读快照，不使用 Demo UUID；缺失、禁用或未配置时预检拒绝，不创建/启用 Provider，不修改旧 `gpt-chat`/`canvas-chat`、模型、价格或积分。
+
+```sh
+python3 -B /absolute/package/ops/release/canvas-design-chat-053.py preflight /absolute/instance.json /absolute/package
+python3 -B /absolute/package/ops/release/canvas-design-chat-053.py migrate /absolute/instance.json /absolute/package /absolute/053-preflight-audit
+# 原容器及正常入口恢复后，重新取得零变更发布预检。
+bash /absolute/package/ops/deploy.sh preflight /absolute/instance.json /absolute/package
+bash /absolute/package/ops/deploy.sh apply /absolute/instance.json /absolute/package /absolute/new-deploy-preflight-audit
+```
+
+预检绑定同一实例、已验证包、固定 SQL、catalog 与运行工具哈希，有效期 15 分钟。使用既有部署锁、维护门、排空、原容器停止/恢复和备份；单事务锁定全表、复查停机基线，只接受两个 CHECK、两个精确初始记录与一条迁移登记。所有旧业务/配置行、序列、Provider 凭据和统计停用状态保持不变。原应用容器 ID 恢复、健康与全库结果再次核验后才打开入口，镜像切换仍由正常零数据库变更发布器独立执行。
+
+已执行 053、预先存在新键或部分升级状态均拒绝重跑，不覆写管理员后续选择/清空。异常或断线先查询私有审计阶段、053 登记和原容器状态，不自动重试、restore 或重新 bootstrap。正式发布须取得同一冻结 commit 的 PostgreSQL 17 事务/回滚和维护生命周期用例；本地 PGlite 不代替目标 PostgreSQL 或宝塔验收。Seedance Flash 的正式模型记录及费率属于另行精确业务配置，不由 053 或正常发布器创建。
+
 ## 052 图层工作区的独立准备
 
 `layer-studio-052.py` 仅适用于已登记至 051、统计处理仍停用的实例。它只扩展两个工具键 CHECK，为旧任务增加两个初始为空的结果清单列，新增空的专用价格表，以及默认关闭、未绑定模型的模块／工具配置；不创建模型、不填写费率、不开放功能，也不改变已有员工积分政策。

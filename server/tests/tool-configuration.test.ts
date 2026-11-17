@@ -242,12 +242,38 @@ describe("formal catalog configuration", () => {
     expect(refreshed.tools.find((item: any) => item.toolKey === "canvas-chat")).toMatchObject({ modelConfigId: secondModelId, enabled: false, creditCostOverride: 9 });
   });
 
-  test.each(["designer", "department_admin"])("%s cannot mutate the shared chat default", async role => {
+  test.each(["designer", "department_admin"])("%s cannot mutate managed chat bindings", async role => {
     const state = fixture();
     const { url } = await serve(state, role);
-    const response = await post(`${url}/admin/tool-configurations/gpt-chat`, { modelConfigId: modelId, enabled: true, creditCostOverride: 0, rmbCostOverride: 0 }, "PUT");
-    expect(response.status).toBe(403);
+    for (const key of ["gpt-chat", "canvas-design-chat"]) {
+      const response = await post(`${url}/admin/tool-configurations/${key}`, { modelConfigId: modelId, enabled: true, creditCostOverride: 0, rmbCostOverride: 0 }, "PUT");
+      expect(response.status).toBe(403);
+    }
     expect(state.configurations.size).toBe(0);
+  });
+
+  test("design discussion saves independently and public catalog never inherits its model from shared chat", async () => {
+    const state = fixture();
+    state.bind("gpt-chat");
+    const { url } = await serve(state);
+    const saved = await post(`${url}/admin/tool-configurations/canvas-design-chat`, { modelConfigId: secondModelId, enabled: true, creditCostOverride: 3, rmbCostOverride: 0 }, "PUT");
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).tool).toMatchObject({ modelConfigId: secondModelId, creditCostOverride: 3 });
+    expect(state.configurations.get("gpt-chat")?.modelConfigId).toBe(modelId);
+    for (const path of ["/models", "/admin/tool-configurations"]) {
+      const { tools } = await (await fetch(url + path)).json();
+      expect(tools.find((tool: any) => tool.toolKey === "canvas-design-chat")).toMatchObject({ modelConfigId: secondModelId, label: "自由画布设计讨论" });
+      expect(tools.find((tool: any) => tool.toolKey === "canvas-chat").modelConfigId).toBe(modelId);
+    }
+    for (const requested of [undefined, modelId, "forged-model"]) {
+      expect((await resolveToolExecution(state.db, { operationType: "chat", toolKey: "canvas-design-chat", modelId: requested }, { allowModelOverride: true })).modelConfigId).toBe(secondModelId);
+    }
+    state.bind("canvas-design-chat", { modelConfigId: null });
+    await expect(resolveToolExecution(state.db, { operationType: "chat", toolKey: "canvas-design-chat", modelConfigId: modelId })).rejects.toMatchObject({ code: "CHAT_MODEL_NOT_CONFIGURED", status: 503, message: "管理员尚未配置自由画布设计讨论模型" });
+    state.bind("canvas-design-chat", { enabled: false });
+    await expect(resolveToolExecution(state.db, { operationType: "chat", toolKey: "canvas-design-chat" })).rejects.toMatchObject({ code: "TOOL_DISABLED" });
+    state.bind("canvas-design-chat"); state.flags.set("canvas", false);
+    await expect(resolveToolExecution(state.db, { operationType: "chat", toolKey: "canvas-design-chat" })).rejects.toMatchObject({ code: "MODULE_DISABLED" });
   });
 
   test("Blend binding accepts only the Blend model while canvas-image keeps that choice", async () => {
@@ -308,18 +334,22 @@ describe("formal catalog configuration", () => {
     const migration = readFileSync(new URL("../src/migrations/027_midjourney_blend_module.sql", import.meta.url), "utf8");
     const creative = readFileSync(new URL("../src/migrations/051_new_creative_scenes.sql", import.meta.url), "utf8");
     const layers = readFileSync(new URL("../src/migrations/052_layer_studio.sql", import.meta.url), "utf8");
+    const design = readFileSync(new URL("../src/migrations/053_canvas_design_chat.sql", import.meta.url), "utf8");
     const creativeKeys = ["creative-virtual-try-on", "creative-sketch-to-photo"];
     const keys = (value: string) => [...value.matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
     const toolCheck = (value: string) => keys(/CHECK \(tool_key IN \(([\s\S]*?)\)\)/.exec(value)![1]!);
     const moduleCheck = (value: string) => keys(/CHECK \(module_key IN \(([\s\S]*?)\)\)/.exec(value)![1]!);
     const allTools = toolDefinitions.map(tool => tool.toolKey).sort();
     const allModules = [...moduleKeys].sort();
-    const beforeLayers = (key: string) => key !== "layer-studio";
+    const beforeDesign = (key: string) => key !== "canvas-design-chat";
+    const beforeLayers = (key: string) => beforeDesign(key) && key !== "layer-studio";
     const beforeCreative = (key: string) => beforeLayers(key) && !creativeKeys.includes(key);
     const beforeBlend = (key: string) => beforeCreative(key) && key !== "midjourney-blend";
     const arrays = [...original.matchAll(/unnest\(ARRAY\[([\s\S]*?)\]\)/g)];
-    expect(toolCheck(layers)).toEqual(allTools);
-    expect(moduleCheck(layers)).toEqual(allModules);
+    expect(toolCheck(design)).toEqual(allTools);
+    expect(moduleCheck(design)).toEqual(allModules);
+    expect(toolCheck(layers)).toEqual(allTools.filter(beforeDesign));
+    expect(moduleCheck(layers)).toEqual(allModules.filter(beforeDesign));
     expect(toolCheck(creative)).toEqual(allTools.filter(beforeLayers));
     expect(moduleCheck(creative)).toEqual(allModules.filter(beforeLayers));
     expect(toolCheck(migration)).toEqual(allTools.filter(beforeCreative));
@@ -327,7 +357,7 @@ describe("formal catalog configuration", () => {
     expect(keys(arrays[0]![1]!)).toEqual(allModules.filter(beforeBlend));
     expect(keys(arrays[1]![1]!)).toEqual(allTools.filter(beforeBlend));
     expect(keys(/unnest\(ARRAY\[([\s\S]*?)\]\)/.exec(creative)![1]!)).toEqual([...creativeKeys].sort());
-    for (const value of [migration, creative, layers]) {
+    for (const value of [migration, creative, layers, design]) {
       expect(value).toContain("ON CONFLICT(module_key) DO NOTHING");
       expect(value).toContain("ON CONFLICT(tool_key) DO NOTHING");
     }

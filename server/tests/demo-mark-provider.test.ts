@@ -71,6 +71,16 @@ function harness(failure?: "prepare" | "preflight" | "submission" | "polling" | 
 }
 
 describe("read-only demo Mark catalog", () => {
+  test("explicit local Seedream opt-in exposes generate and edit without enabling other disabled models or bypassing credentials", () => {
+    const mark = createDemoMarkProvider({ apiKey: "fake-local-key", enableSeedream55: true });
+    expect(listAvailableDemoModels(mark.models, [mark.provider]).find(model => model.modelId === "seedream-5-5"))
+      .toMatchObject({ id: "d5000000-0000-4000-8000-000000000014", enabled: true, capabilities: ["generate", "edit"] });
+    expect(mark.models.find(model => model.modelId === "grok-imagine-image-2.0")?.enabled).toBe(false);
+    expect(MARK_PLATFORM_MODELS.find(model => model.modelId === "seedream-5-5")?.defaultEnabled).toBe(false);
+    const unconfigured = createDemoMarkProvider({ enableSeedream55: true });
+    expect(listAvailableDemoModels(unconfigured.models, [unconfigured.provider])).toEqual([]);
+  });
+
   test("uses the shared identity and stable preset UUIDs without exposing credentials in catalog rows", () => {
     const mark = createDemoMarkProvider({ apiKey: " fake-mark-key " });
     expect(mark.apiKey).toBe("fake-mark-key");

@@ -35,7 +35,7 @@ class ArtifactContracts(unittest.TestCase):
         self.assertIn("ops/release/deploy.py", artifact.PACKAGE_FILES)
         self.assertIn("ops/baota/gate.py", artifact.PACKAGE_FILES)
         self.assertFalse(any(".env" in path or "output" in path or "recipe" in path for path in artifact.PACKAGE_FILES))
-        self.assertEqual([path for path in artifact.PACKAGE_FILES if path.startswith("server/src/migrations/")], ["server/src/migrations/048_usage_daily_facts.sql", "server/src/migrations/049_quick_image_configurations.sql", "server/src/migrations/050_quick_image_item_extract.sql", "server/src/migrations/051_new_creative_scenes.sql", "server/src/migrations/052_layer_studio.sql"])
+        self.assertEqual([path for path in artifact.PACKAGE_FILES if path.startswith("server/src/migrations/")], ["server/src/migrations/048_usage_daily_facts.sql", "server/src/migrations/049_quick_image_configurations.sql", "server/src/migrations/050_quick_image_item_extract.sql", "server/src/migrations/051_new_creative_scenes.sql", "server/src/migrations/052_layer_studio.sql", "server/src/migrations/053_canvas_design_chat.sql"])
         self.assertNotIn(creative_seed.SOURCE_PATH, artifact.PACKAGE_FILES)
         self.assertNotIn(creative_seed.SEED_PATH, artifact.PACKAGE_FILES)  # generated, not copied from a mutable seed file
         for name in ["usage-048.py", "usage-048-state.sql", "usage-048-catalog.json"]:
@@ -43,6 +43,8 @@ class ArtifactContracts(unittest.TestCase):
         for name in ["quick-image-049.py", "quick-image-049-catalog.json"]:
             self.assertIn("ops/release/" + name, artifact.PACKAGE_FILES)
         for name in ["layer-studio-052.py", "layer-studio-052-catalog.json", "layer-studio-052-state.sql"]:
+            self.assertIn("ops/release/" + name, artifact.PACKAGE_FILES)
+        for name in ["canvas-design-chat-053.py", "canvas-design-chat-053-catalog.json", "canvas-design-chat-053-state.sql"]:
             self.assertIn("ops/release/" + name, artifact.PACKAGE_FILES)
 
     def test_049_payload_only_accepts_exact_reviewed_final_migration_and_hash(self):
@@ -78,10 +80,10 @@ class ArtifactContracts(unittest.TestCase):
             with self.assertRaisesRegex(Rejected, "FIXED_048_MIGRATION_REQUIRED"):
                 artifact.verify_048_payload(root, later)
 
-    def test_tail_support_is_exactly_reviewed_048_through_052_not_an_open_ended_relaxation(self):
-        names = ["048_usage_daily_facts.sql", "049_quick_image_configurations.sql", *creative_seed.MIGRATIONS, "052_layer_studio.sql"]
+    def test_tail_support_is_exactly_reviewed_048_through_053_not_an_open_ended_relaxation(self):
+        names = ["048_usage_daily_facts.sql", "049_quick_image_configurations.sql", *creative_seed.MIGRATIONS, "052_layer_studio.sql", "053_canvas_design_chat.sql"]
         self.assertTrue(artifact.fixed_migration_tail({"migrations": [{"name": name} for name in names]}, names[0]))
-        for changed in [names + ["052_future.sql"], [names[0], *names[2:]], names[:-1] + ["051_other.sql"], names + [names[-1]]]:
+        for changed in [names + ["054_future.sql"], [names[0], *names[2:]], names[:-1] + ["053_other.sql"], names + [names[-1]]]:
             with self.subTest(changed=changed):
                 self.assertFalse(artifact.fixed_migration_tail({"migrations": [{"name": name} for name in changed]}, names[0]))
 
@@ -100,6 +102,29 @@ class ArtifactContracts(unittest.TestCase):
             with self.assertRaisesRegex(Rejected, "052_SQL_MIGRATION_HASH_MISMATCH"):
                 artifact.verify_052_payload(root, {"migrations": rows})
 
+    def test_053_payload_requires_exact_hash_and_rejects_duplicates_missing_and_future_migrations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "server/src/migrations/053_canvas_design_chat.sql"
+            path.parent.mkdir(parents=True); path.write_bytes(b"reviewed 053 SQL")
+            rows = [{"name": path.name, "sha256": digest(path.read_bytes())}]
+            artifact.verify_053_payload(root, {"migrations": rows})
+            for changed in [[], rows * 2, rows + [{"name": "054_future.sql", "sha256": "0" * 64}]]:
+                with self.assertRaisesRegex(Rejected, "FIXED_053_MIGRATION_REQUIRED"):
+                    artifact.verify_053_payload(root, {"migrations": changed})
+            path.write_bytes(b"changed")
+            with self.assertRaisesRegex(Rejected, "053_SQL_MIGRATION_HASH_MISMATCH"):
+                artifact.verify_053_payload(root, {"migrations": rows})
+
+    def test_creative_payload_accepts_only_reviewed_extension_through_053(self):
+        root = Path(__file__).resolve().parents[2]
+        value = {"migrations": artifact.migrations(root)}
+        with patch.object(creative_seed, "read_json", return_value={}), patch.object(creative_seed, "validate_seed", return_value={}):
+            creative_seed.verify_payload(root, value)
+            for tail in [[{"name": "054_future.sql"}], [{"name": "053_canvas_design_chat.sql"}]]:
+                with self.assertRaisesRegex(Rejected, "FIXED_050_051_MIGRATIONS_REQUIRED"):
+                    creative_seed.verify_payload(root, {"migrations": value["migrations"] + tail})
+
     def test_complete_package_seals_only_two_generated_public_recipes_and_rejects_tamper(self):
         root = Path(__file__).resolve().parents[2]
         candidate = manifest(); candidate["migrations"] = artifact.migrations(root)
@@ -111,6 +136,10 @@ class ArtifactContracts(unittest.TestCase):
                 result = artifact.package(root, candidate, candidate["verification"], images, destination)
             self.assertFalse(result["imagesRebuilt"])
             release = verify_package(destination)
+            from test_canvas_design_chat_053 import operator as design_chat_operator
+            verified_release, catalog = design_chat_operator.verify_053_package(destination)
+            self.assertEqual(verified_release, release)
+            design_chat_operator.validate_catalog(catalog)
             seed = creative_seed.verify_payload(destination, release)
             self.assertEqual([row["key"] for row in seed["recipes"]], list(creative_seed.RECIPE_NAMES))
             self.assertEqual({row["path"] for row in release["files"]}, set(artifact.PACKAGE_FILES) | {"images.tar.gz", creative_seed.SEED_PATH})

@@ -40,11 +40,12 @@ describe("demo formal tool configuration", () => {
     expect(() => resolveDemoToolConfiguration({ operationType: "chat", toolKey: "canvas-chat", modelConfigId: "chat-b" }, configured, chats, chatProviders, flags)).toThrow("未启用");
   });
   test("catalog includes formal AI slots, promoted design tools and no unfinished placeholders", () => {
-    expect(toolDefinitions).toHaveLength(30);
-    expect(toolDefinitions.filter(tool => tool.toolKey !== "layer-studio")).toHaveLength(29);
+    expect(toolDefinitions).toHaveLength(31);
+    expect(toolDefinitions.filter(tool => tool.toolKey !== "layer-studio")).toHaveLength(30);
     expect(toolDefinitions.find(tool => tool.toolKey === "layer-studio")).toEqual({ toolKey: "layer-studio", label: "图层拆分与图片生成", group: "AI 工作台", operationType: "image_generation", operations: ["image_generation"], capabilities: ["generate"], parent: null });
-    expect(moduleKeys).toHaveLength(47);
-    expect(new Set(moduleKeys).size).toBe(47);
+    expect(moduleKeys).toHaveLength(48);
+    expect(new Set(moduleKeys).size).toBe(48);
+    expect(moduleKeys).toContain("canvas-design-chat");
     expect(moduleKeys).toContain("layer-studio");
     expect(moduleKeys).toContain("creative-virtual-try-on");
     expect(moduleKeys).toContain("creative-sketch-to-photo");
@@ -55,6 +56,17 @@ describe("demo formal tool configuration", () => {
   test("configured model is resolved and unknown keys cannot fall back", () => {
     expect(resolveDemoToolConfiguration({ operationType: "inpaint", toolKey: binding.toolKey, modelConfigId: "image-a" }, [binding], models, providers, flags)).toEqual({ toolKey: binding.toolKey, modelConfigId: "model-a", allowRawPrompt: false });
     expect(() => resolveDemoToolConfiguration({ operationType: "inpaint", toolKey: "creative-typo", modelConfigId: "model-a" }, [], models, providers, flags)).toThrow("板块标识无效");
+  });
+  test("design discussion has its own mandatory binding and ignores client and shared chat models", () => {
+    const chats = ["chat-a", "chat-b"].map(id => ({ id, modelId: id, providerId: "provider", enabled: true, capabilities: ["chat"] }));
+    const configured = [{ toolKey: "gpt-chat", modelConfigId: "chat-a", enabled: true }, { toolKey: "canvas-design-chat", modelConfigId: "chat-b", enabled: true }];
+    const input = { operationType: "chat", toolKey: "canvas-design-chat", modelConfigId: "chat-a" };
+    expect(resolveDemoToolConfiguration(input, configured, chats, providers, flags).modelConfigId).toBe("chat-b");
+    expect(resolveDemoToolConfiguration({ ...input, toolKey: "canvas-chat" }, configured, chats, providers, flags).modelConfigId).toBe("chat-a");
+    expect(() => resolveDemoToolConfiguration(input, configured.slice(0, 1), chats, providers, flags)).toThrow("尚未配置自由画布设计讨论模型");
+    expect(() => resolveDemoToolConfiguration(input, configured, chats, providers, { ...flags, canvas: false })).toThrow("关闭");
+    chats[1]!.enabled = false;
+    expect(() => resolveDemoToolConfiguration(input, configured, chats, providers, flags)).toThrow("未启用");
   });
   test("changed binding, disabled slot and parent reject before provider submission", () => {
     const input = { operationType: "inpaint", toolKey: binding.toolKey, modelConfigId: "model-b" };

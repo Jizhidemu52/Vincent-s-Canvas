@@ -17,14 +17,15 @@ async function fixture(role = "super_admin", encryptionKey: string | undefined =
   let provider: Record<string, any> | null = null;
   let models: Record<string, any>[] = [];
   let chatBinding = { modelConfigId: null as string | null, configurationVersion: 1, updatedBy: null as string | null };
-  let snapshot: { provider: Record<string, any> | null; models: Record<string, any>[]; chatBinding: typeof chatBinding } | null = null;
+  let designBinding = { ...chatBinding };
+  let snapshot: { provider: Record<string, any> | null; models: Record<string, any>[]; chatBinding: typeof chatBinding; designBinding: typeof designBinding } | null = null;
   const audit: unknown[] = [], statements: string[] = [];
   let failAtModel = "";
   const query = async (sql: string, values: any[] = []) => {
     statements.push(sql);
-    if (sql === "BEGIN") { snapshot = structuredClone({ provider, models, chatBinding }); return { rows: [] }; }
+    if (sql === "BEGIN") { snapshot = structuredClone({ provider, models, chatBinding, designBinding }); return { rows: [] }; }
     if (sql === "COMMIT") { snapshot = null; return { rows: [] }; }
-    if (sql === "ROLLBACK") { if (snapshot) { provider = snapshot.provider; models = snapshot.models; chatBinding = snapshot.chatBinding; } snapshot = null; return { rows: [] }; }
+    if (sql === "ROLLBACK") { if (snapshot) { provider = snapshot.provider; models = snapshot.models; chatBinding = snapshot.chatBinding; designBinding = snapshot.designBinding; } snapshot = null; return { rows: [] }; }
     if (sql.includes("pg_advisory_xact_lock")) return { rows: [] };
     if (sql.startsWith("SELECT") && sql.includes("FROM providers")) {
       expect(values[0]).toBe(MARK_IMAGE_PROVIDER_ID);
@@ -54,13 +55,17 @@ async function fixture(role = "super_admin", encryptionKey: string | undefined =
       return { rows: [] };
     }
     if (sql.startsWith("INSERT INTO tool_api_configurations")) {
-      expect(values).toEqual([MARK_IMAGE_PROVIDER_ID, "gemini-4-carbon"]);
+      const design = values[0] === "canvas-design-chat";
+      expect(values).toEqual(design ? ["canvas-design-chat", MARK_IMAGE_PROVIDER_ID, "gemini-4-carbon"] : [MARK_IMAGE_PROVIDER_ID, "gemini-4-carbon"]);
       expect(sql).toContain("tool_api_configurations.model_config_id IS NULL");
       expect(sql).toContain("tool_api_configurations.updated_by IS NULL");
       expect(sql).toContain("tool_api_configurations.configuration_version=1");
-      const selected = models.find(model => model.providerId === values[0] && model.modelId === values[1]);
-      if (selected && !chatBinding.modelConfigId && !chatBinding.updatedBy && chatBinding.configurationVersion === 1) {
-        chatBinding = { ...chatBinding, modelConfigId: selected.id, configurationVersion: 2 };
+      const selected = models.find(model => model.providerId === values[design ? 1 : 0] && model.modelId === values[design ? 2 : 1]);
+      const binding = design ? designBinding : chatBinding;
+      if (selected && !binding.modelConfigId && !binding.updatedBy && binding.configurationVersion === 1) {
+        const initialized = { ...binding, modelConfigId: selected.id, configurationVersion: 2 };
+        if (design) designBinding = initialized;
+        else chatBinding = initialized;
       }
       return { rows: [] };
     }
@@ -77,7 +82,7 @@ async function fixture(role = "super_admin", encryptionKey: string | undefined =
   await new Promise<void>(resolve => server.once("listening", resolve));
   const address = server.address() as { port: number };
   const url = `http://127.0.0.1:${address.port}/mark/mark-images`;
-  return { url, state: () => ({ provider, models, chatBinding }), setChatBinding: (value: typeof chatBinding) => { chatBinding = value; }, audit, statements, fail: (modelId: string) => { failAtModel = modelId; } };
+  return { url, state: () => ({ provider, models, chatBinding, designBinding }), setChatBinding: (value: typeof chatBinding) => { chatBinding = value; }, audit, statements, fail: (modelId: string) => { failAtModel = modelId; } };
 }
 const input = () => ({ baseUrl: MARK_IMAGE_BASE_URL, enabled: true, apiKey: "fixture-mark-key", models: MARK_PLATFORM_MODELS.map(model => ({ modelId: model.modelId, enabled: true, creditCost: 8, rmbCost: 0, concurrencyLimit: 2 })) });
 const save = (url: string, body: unknown) => fetch(url, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -175,7 +180,7 @@ test("model insertion failure rolls back provider and model changes together", a
   const f = await fixture();
   f.fail(MARK_PLATFORM_MODELS[4].modelId);
   expect((await save(f.url, input())).status).toBe(500);
-  expect(f.state()).toEqual({ provider: null, models: [], chatBinding: { modelConfigId: null, configurationVersion: 1, updatedBy: null } });
+  expect(f.state()).toEqual({ provider: null, models: [], chatBinding: { modelConfigId: null, configurationVersion: 1, updatedBy: null }, designBinding: { modelConfigId: null, configurationVersion: 1, updatedBy: null } });
   expect(f.statements).toContain("ROLLBACK");
   expect(f.audit).toHaveLength(0);
 });

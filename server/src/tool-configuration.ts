@@ -2,7 +2,7 @@ import { getToolDefinition, resolveToolKey, type ToolKey } from "../../shared/fe
 import type { Database } from "./db";
 import { modelSupportsOperation } from "./billing";
 import { assertModuleEnabled } from "./module-flags";
-import { DEFAULT_CHAT_MODEL_TOOL_KEY } from "./chat-model-policy";
+import { chatModelBindingKey, missingChatModelMessage } from "./chat-model-policy";
 import { isQuickImageAction, matchesQuickImageTaskTarget } from "../../shared/quick-image-tools";
 import { QUICK_IMAGE_SNAPSHOT, type QuickImageSnapshot } from "./quick-image-tools";
 import { layerStudioBindingValid } from "./layer-studio-policy";
@@ -42,7 +42,6 @@ export async function readToolConfiguration(db: Pick<Database, "query">, toolKey
   return result.rows[0] ?? { toolKey, modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0, allowRawPrompt: false };
 }
 
-/** Chat always uses the administrator's shared model; image bindings still reject stale parameters. */
 export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   operationType: string; toolKey?: string | null; parameters?: Record<string, unknown>;
   modelConfigId?: string | null; modelId?: string | null;
@@ -62,14 +61,14 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   }
   const requested = input.modelConfigId ?? input.modelId;
   const isChat = input.operationType === "chat";
-  const modelConfiguration = isChat && toolKey !== DEFAULT_CHAT_MODEL_TOOL_KEY
-    ? await readToolConfiguration(db, DEFAULT_CHAT_MODEL_TOOL_KEY) : configuration;
+  const modelConfiguration = isChat && toolKey !== chatModelBindingKey(toolKey)
+    ? await readToolConfiguration(db, chatModelBindingKey(toolKey)) : configuration;
   const isQuickImage = isQuickImageAction(quickAction);
   const quickSnapshot = input[QUICK_IMAGE_SNAPSHOT];
   if (isQuickImage && (!quickSnapshot || quickSnapshot.action !== quickAction)) throw new ToolConfigurationError("QUICK_IMAGE_CONFIGURATION_REQUIRED", "一键工具缺少服务端配置快照");
   if (toolKey === LAYER_STUDIO_TOOL && !configuration.modelConfigId) throw new ToolConfigurationError("MODEL_NOT_CONFIGURED", "管理员尚未配置图层工作区", 503);
   const selected = toolKey === LAYER_STUDIO_TOOL ? configuration.modelConfigId : isQuickImage ? quickSnapshot!.modelConfigId : isChat ? modelConfiguration.modelConfigId : options.allowModelOverride && requested ? requested : configuration.modelConfigId ?? requested;
-  if (isChat && !selected) throw new ToolConfigurationError("CHAT_MODEL_NOT_CONFIGURED", "管理员尚未配置统一对话模型", 503);
+  if (isChat && !selected) throw new ToolConfigurationError("CHAT_MODEL_NOT_CONFIGURED", missingChatModelMessage(toolKey), 503);
   if (!selected) throw new ToolConfigurationError("MODEL_REQUIRED", "请先选择一个已启用的模型");
   const result = await db.query<{
     id: string; modelId: string; enabled: boolean; providerEnabled: boolean; protocol: string;

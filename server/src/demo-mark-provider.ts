@@ -1,7 +1,7 @@
 import { MARK_IMAGE_BASE_URL, MARK_PLATFORM_MODELS, MARK_IMAGE_PROVIDER_ID, MARK_IMAGE_PROVIDER_NAME } from "../../shared/mark-image-models";
 
 /** Demo credentials are server-only and read-only; admin writes stay in the formal API. */
-export function createDemoMarkProvider(input: { apiKey?: string; baseUrl?: string }) {
+export function createDemoMarkProvider(input: { apiKey?: string; baseUrl?: string; enableSeedream55?: boolean }) {
   const apiKey = input.apiKey?.trim() || "";
   const baseUrl = (input.baseUrl?.trim() || MARK_IMAGE_BASE_URL).replace(/\/+$/, "");
   const timestamp = new Date().toISOString();
@@ -17,7 +17,8 @@ export function createDemoMarkProvider(input: { apiKey?: string; baseUrl?: strin
       providerId: MARK_IMAGE_PROVIDER_ID, providerName: MARK_IMAGE_PROVIDER_NAME, protocol: "apimart",
       workflowConfigId: null, workflowName: null, replacementModelConfigId: null,
       name: model.name, modelId: model.modelId, capabilities: [...model.capabilities],
-      creditCost: 0, rmbCost: 0, concurrencyLimit: 2, enabled: model.defaultEnabled,
+      creditCost: 0, rmbCost: 0, concurrencyLimit: 2,
+      enabled: model.defaultEnabled || (model.modelId === "seedream-5-5" && input.enableSeedream55 === true),
     })),
   };
 }

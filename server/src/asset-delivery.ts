@@ -128,7 +128,7 @@ function matchesIfRange(value: string | undefined, etag?: string, modified?: Dat
   return Boolean(modified && Date.parse(value) === Math.floor(modified.getTime() / 1000) * 1000);
 }
 
-function assetRange(request: Request, size: number, etag?: string, modified?: Date) {
+export function assetRange(request: Request, size: number, etag?: string, modified?: Date) {
   const header = request.get("range");
   // S3 does not implement multipart ranges. Ignore those and unknown units.
   if (request.method !== "GET" || !header || !/^bytes=/i.test(header) || header.includes(",")

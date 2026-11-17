@@ -8,6 +8,7 @@ import {
 } from "./image-agent-profile";
 import type { ChatCompletionInput, ChatCompletionResult, ResponseInput, ResponseTool } from "./routes/chat";
 import type { AgentDocumentCatalogEntry } from "../../shared/image-agent-documents";
+import { CANVAS_DESIGN_CHAT_TOOL_KEY } from "./chat-model-policy";
 
 export const chatPromptProfiles = IMAGE_AGENT_PROFILES;
 export type ChatPromptProfile = ImageAgentProfile;
@@ -60,7 +61,7 @@ export async function prepareChatProfileInput<T extends ProfileInput>(request: T
     if (!request.profile) return { input: request, privateRules: [] };
     if (!(chatPromptProfiles as readonly string[]).includes(request.profile)) invalidProfile();
     const canvas = request.profile === "canvas-assistant";
-    if (request.toolKey !== (canvas ? "canvas-chat" : "gpt-chat")) invalidProfile("聊天规则与当前板块不匹配，未发送模型请求。");
+    if (canvas ? request.toolKey !== "canvas-chat" : !["gpt-chat", CANVAS_DESIGN_CHAT_TOOL_KEY].includes(request.toolKey || "")) invalidProfile("聊天规则与当前板块不匹配，未发送模型请求。");
     if (!request.profileContext || JSON.stringify(request.profileContext).length > 60_000) invalidProfile();
     const parsed = imageAgentContextSchema.safeParse(request.profileContext);
     if (!parsed.success) invalidProfile();

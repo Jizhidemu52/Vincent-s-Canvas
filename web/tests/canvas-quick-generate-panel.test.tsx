@@ -42,7 +42,7 @@ test("uploading and submitting locks reference changes and duplicate submission"
     expect(remove).toContain('disabled=""');
     expect(remove).toContain('pointer-events:none');
     expect(generateButton(markup)).toContain(' disabled=""');
-    expect(markup).toContain("提交中…");
+    expect(markup).toContain("生成中…");
 });
 
 test("an administratively disabled canvas tool keeps inputs visible but disables submission", () => {

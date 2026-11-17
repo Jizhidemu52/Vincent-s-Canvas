@@ -1,0 +1,47 @@
+.canvas-design-discussion { --panel-width: 430px; --surface: var(--cw-panel); --text: var(--cw-text); --muted: var(--cw-muted); --border: var(--cw-border); --canvas: var(--cw-soft); --soft: var(--cw-soft); --accent: var(--cw-active); --selection: var(--cw-active); position: absolute; inset: 0; z-index: 74; pointer-events: none; color: var(--cw-text); font-size: 13px; }
+.canvas-design-discussion button, .canvas-design-discussion input, .canvas-design-discussion select, .canvas-design-discussion textarea { font: inherit; }
+.canvas-design-discussion button { cursor: pointer; }
+.canvas-design-discussion button:disabled { cursor: not-allowed; opacity: .5; }
+.canvas-design-discussion button:focus-visible, .canvas-design-discussion textarea:focus-visible, .canvas-design-discussion select:focus-visible { outline: 2px solid var(--cw-active); outline-offset: 3px; }
+.canvas-design-discussion .studio-panel { pointer-events: auto; top: 64px; right: 12px; bottom: 12px; border: 1px solid var(--cw-border); border-radius: 14px; overflow: hidden; z-index: 5; box-shadow: 0 12px 40px #0001; }
+.canvas-design-discussion .studio-composer-tools { flex-wrap: wrap; gap: 8px 12px; }
+.canvas-design-discussion .studio-composer-tools select { max-width: 180px; }
+.canvas-design-discussion .studio-composer-tools label { min-width: 60px; }
+.canvas-design-discussion .studio-help { font-size: 10px; line-height: 1.5; }
+.canvas-design-discussion .studio-connection-status { padding: 0 20px; color: var(--cw-muted); font-size: 11px; line-height: 1.6; }
+.canvas-design-discussion .studio-panel button, .canvas-design-discussion .proposal-dialog button { flex-shrink: 0; }
+.canvas-design-discussion .proposal-dialog, .canvas-design-discussion .reference-picker { pointer-events: auto; }
+.canvas-design-discussion .proposal-dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
+.canvas-design-discussion .proposal-dialog > header, .canvas-design-discussion .proposal-dialog > footer, .canvas-design-discussion .proposal-dialog > .studio-error, .canvas-design-discussion .proposal-intro { flex-shrink: 0; }
+.canvas-design-discussion .proposal-options { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.canvas-design-discussion .proposal-dialog > footer > div:first-child { display: flex; gap: 14px; text-align: left; }
+.canvas-design-discussion .proposal-dialog > footer label { min-width: 110px; }
+.dd-island { position: absolute; top: 12px; left: 60%; transform: translateX(-50%); width: 278px; pointer-events: auto; z-index: 8; }
+.dd-pill { display: flex; height: 44px; border-radius: 26px; border: 1px solid var(--cw-border); background: var(--cw-text); color: var(--cw-panel); box-shadow: 0 3px 12px #0001; }
+.dd-pill button { display: flex; align-items: center; justify-content: center; border: 0; background: none; color: inherit; padding: 0 14px; }
+.dd-pill .dd-launch { flex: 1; gap: 12px; font-size: 12px; padding-left: 19px; }
+.dd-pill > button:last-child { width: 37px; padding: 0 11px 0 0; }
+.dd-tasks { width: 380px; max-width: calc(100vw - 32px); margin: 7px 0 0 50%; transform: translateX(-50%); max-height: min(580px,70dvh); overflow-y: auto; padding: 17px; border: 1px solid var(--cw-border); border-radius: 16px; background: var(--cw-panel); box-shadow: 0 15px 40px #0002; }
+.dd-tasks header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.dd-tasks small, .dd-tasks p { color: var(--cw-muted); font-size: 10px; }
+.dd-tasks p { line-height: 1.7; overflow-wrap: anywhere; }
+.dd-tasks article { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0; border-top: 1px solid var(--cw-border); }
+.dd-tasks article > div:first-child { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.dd-tasks article strong { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-tasks article > button { border: 0; background: none; color: var(--cw-text); }
+.dd-tasks details { width: 100%; font-size: 10px; }
+.dd-tasks details button, .dd-connect button { border: 1px solid var(--cw-border); border-radius: 5px; background: var(--cw-soft); padding: 5px 8px; color: var(--cw-text); }
+.dd-task-refs { display: flex; gap: 5px; }
+.dd-task-refs img { width: 36px; height: 42px; object-fit: contain; background: var(--cw-soft); border-radius: 3px; }
+.dd-notice { pointer-events: auto; position: absolute; top: 65px; left: 50%; transform: translateX(-50%); max-width: min(500px,calc(100% - 24px)); display: flex; align-items: center; gap: 12px; z-index: 9; padding: 10px 14px; border: 1px solid var(--cw-border); border-radius: 8px; background: var(--cw-panel); color: var(--cw-text); font-size: 11px; }
+.dd-notice button { border: none; background: none; color: inherit; }
+.dd-connect { position: absolute; right: 28px; top: 74px; pointer-events: auto; z-index: 7; display: flex; gap: 12px; padding: 10px; background: var(--cw-panel); font-size: 11px; }
+.canvas-design-proposal { position: absolute; top: calc(100% + 10px); left: 0; width: 100%; max-height: 148px; overflow-y: auto; padding: 10px 12px; border: 1px solid var(--cw-border); border-radius: 7px; color: var(--cw-text); background: var(--cw-panel); font-size: 11px; line-height: 1.5; }
+.canvas-design-proposal p { margin: 0 0 5px; }
+.canvas-design-proposal > div { display: flex; gap: 5px; flex-wrap: wrap; }
+.canvas-design-proposal figure { margin: 0; width: 40px; }
+.canvas-design-proposal img { width: 36px; height: 36px; object-fit: contain; background: var(--cw-soft); }
+.canvas-design-proposal figcaption { font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--cw-muted); }
+@media (max-width: 760px) { .canvas-design-discussion { --panel-width: calc(100% - 16px); } .canvas-design-discussion .studio-panel { top: 108px; right: 8px; bottom: 8px; } .dd-island { top: 57px; left: 50%; width: 246px; } .dd-pill { height: 40px; } .dd-notice { top: 107px; } .dd-connect { top: 119px; } .canvas-design-discussion .studio-panel-heading { padding: 10px 15px; } .canvas-design-discussion .studio-modes { margin-bottom: 9px; } .canvas-design-discussion .studio-context-heading { padding-inline: 15px; } .canvas-design-discussion .studio-composer-tools { gap: 6px 8px; } .canvas-design-discussion .studio-composer-tools select { max-width: 160px; } }
+@media (prefers-reduced-motion: reduce) { .canvas-design-discussion * { scroll-behavior: auto !important; } }
+@media (max-width: 760px) { .canvas-design-discussion .proposal-dialog > footer { gap: 7px; padding-top: 10px; } .canvas-design-discussion .proposal-dialog > footer > div:first-child { display: grid; grid-template-columns: 1fr 1fr; } .canvas-design-discussion .proposal-dialog > footer > div:last-child { display: flex; align-items: center; gap: 10px; } .canvas-design-discussion .proposal-dialog > footer p { flex: 1; } .canvas-design-discussion .proposal-options { margin: 12px 0; } }

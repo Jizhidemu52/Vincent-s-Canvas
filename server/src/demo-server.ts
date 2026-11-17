@@ -30,10 +30,12 @@ import { DEMO_STREAM_IDLE_TIMEOUT_SECONDS } from "./demo-server-config";
 import { resolveDemoHost } from "./demo-network-config";
 import { isOpenTokenImageModel, runOpenTokenImage, type OpenTokenImageModel } from "./opentoken-image";
 import { createGenerationTiming } from "./generation-timing";
-import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, chatFunctionToolsSchema, imageAgentModelInput, isClaudeMessagesModel, readClaudeResponse, readGeminiResponse, requestChatCompletion, requestClaudeStream } from "./routes/chat";
-import { fetchProviderSubmission } from "./provider-submission-transport";
+import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, ChatProtocolError, chatFunctionToolsSchema, imageAgentModelInput, isClaudeMessagesModel, readClaudeResponse, readGeminiResponse, requestChatCompletion, requestClaudeStream } from "./routes/chat";
+import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "./provider-submission-transport";
+import { chatUpstreamFailureMessage } from "./chat-upstream-failure";
 import { normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
 import { createDemoProviderVideoSources, resolveOwnedDemoVideoSources } from "./demo-video-sources";
+import { createDemoVideoPlayback } from "./demo-video-playback";
 import { decodeInlineImageResult } from "./demo-task-result-assets";
 import { ImageResultPersistenceError, imageResultExtension, storeImageResult } from "./image-result-storage";
 import { DemoQuickImageConfigurationStore } from "./demo-quick-image-configuration";
@@ -62,7 +64,7 @@ import { verifyOaToken, OaError, OA_SESSION_TTL_SECONDS } from "./oa";
 import { readReferenceImportBody, referenceImportFailure, runReferenceImportAction } from "./routes/reference-import";
 import { moduleKeys, moduleIsEnabled, toolDefinitions, type ToolKey } from "../../shared/feature-catalog";
 import { DemoToolConfigurationError, resolveDemoToolConfiguration } from "./demo-tool-configuration";
-import { applyDefaultChatModel, INITIAL_CHAT_MODEL_ID } from "./chat-model-policy";
+import { applyDefaultChatModel, CANVAS_DESIGN_CHAT_TOOL_KEY, INITIAL_CANVAS_DESIGN_CHAT_MODEL_ID, INITIAL_CHAT_MODEL_ID } from "./chat-model-policy";
 import { sqlitePromptRecipeStore } from "./demo-prompt-recipes";
 import { createDemoPromptCompiler, handleDemoPromptRecipes } from "./demo-prompt-runtime";
 import { DemoAdmissionGate, DemoPromptBatchStore } from "./demo-prompt-batches";
@@ -91,7 +93,7 @@ const gptImage2ProviderId = "30000000-0000-4000-8000-000000000002";
 const openTokenProviderId = "30000000-0000-4000-8000-000000000005";
 const openTokenBaseUrl = (process.env.OPENTOKEN_BASE_URL || "https://cn2.gw.opentoken.io/v1").replace(/\/$/, "");
 let openTokenApiKey = process.env.OPENTOKEN_API_KEY?.trim() || "";
-const markImageProvider = createDemoMarkProvider({ apiKey: process.env.MARK_IMAGE_API_KEY, baseUrl: process.env.MARK_IMAGE_BASE_URL });
+const markImageProvider = createDemoMarkProvider({ apiKey: process.env.MARK_IMAGE_API_KEY, baseUrl: process.env.MARK_IMAGE_BASE_URL, enableSeedream55: process.env.DEMO_SEEDREAM55_ENABLED === "true" });
 const demoProviderApiKeys = new Map<string, string>();
 const externalProviders = resolveDemoExternalProviders({ openTokenApiKey, apiMartApiKey });
 const { hasOpenToken, hasApiMart, openTokenGptImage2ModelId, openTokenGptImage2ApiModelId, openTokenGptImage2DisplayName, openTokenGptImage25Models, openTokenGptChatModel, openTokenClaudeModel, officialNanoBanana2ModelId, openTokenGeminiDisplayName, officialNanoBanana2Capabilities, apiMartGptImage2ModelId, apiMartGptImage2PublicModelId, claudeModelIds } = externalProviders;
@@ -399,8 +401,9 @@ const demoPrices: Array<Record<string, unknown>> = Array.from(
 }));
 const demoToolConfigurations: Array<{ toolKey: ToolKey; modelConfigId: string | null; enabled: boolean; creditCostOverride: number | null; rmbCostOverride: number | null; configurationVersion: number; allowRawPrompt: boolean }> = toolDefinitions.map((tool) => ({
   toolKey: tool.toolKey,
-  // Chat has a shared default; the two new creative boards start with Flare 2.6.
-  modelConfigId: tool.toolKey === "gpt-chat"
+  modelConfigId: tool.toolKey === CANVAS_DESIGN_CHAT_TOOL_KEY
+    ? markImageProvider.models.find(model => model.modelId === INITIAL_CANVAS_DESIGN_CHAT_MODEL_ID)?.id ?? null
+    : tool.toolKey === "gpt-chat"
     ? String(markImageProvider.models.find(model => model.modelId === INITIAL_CHAT_MODEL_ID)!.id)
     : ["creative-virtual-try-on", "creative-sketch-to-photo"].includes(tool.toolKey)
       ? String(markImageProvider.models.find(model => model.modelId === "gpt-image-2.6-flare")!.id)
@@ -468,6 +471,7 @@ type DemoInternalAiConfig = {
   updatedAt: string | null;
 };
 const demoAssets = new Map<string, DemoAsset>();
+const demoVideoPlayback = createDemoVideoPlayback();
 const demoDeletedAssets = new Map<string, DemoAsset>();
 const features = deploymentFeatures({ OA_LOGIN_ENABLED: process.env.OA_LOGIN_ENABLED === "true" ? "true" : "false" });
 const standaloneDemoUser = resolveStandaloneDemoUser(!features.authenticationEnabled);
@@ -1077,7 +1081,13 @@ Bun.serve({
           return json(payload, 200, { "cache-control": "no-store" });
         } catch (error) {
           if (error instanceof PromptOptimizationError) throw error;
-          return json({ error: "UPSTREAM_REQUEST_FAILED", message: "对话服务未完成此请求；不会自动重新提交。" }, 502, { "cache-control": "no-store" });
+          const transport = readProviderSubmissionDiagnostics(error);
+          const code = error instanceof ChatProtocolError ? error.code : transport?.code || "UPSTREAM_REQUEST_FAILED";
+          const upstream = error instanceof ChatProtocolError && error.upstreamStatus && error.upstreamReason
+            ? { upstreamStatus: error.upstreamStatus, upstreamReason: error.upstreamReason } : undefined;
+          const message = upstream ? chatUpstreamFailureMessage("对话模型服务", upstream.upstreamStatus, upstream.upstreamReason)
+            : `对话服务未完成此请求（${code}）；没有提交图片生成，不会自动重新提交。`;
+          return json({ error: code, message, ...upstream, ...(transport ? { phase: transport.phase } : {}) }, 502, { "cache-control": "no-store" });
         }
       }
       // Select by the resolved configuration UUID: Mark and OpenToken share upstream model IDs.
@@ -1240,6 +1250,13 @@ Bun.serve({
           404,
         );
       return publicDemoAssetResponse(asset, request);
+    }
+    if (/^\/api\/assets\/[^/]+\/playback$/.test(path) && ["GET", "HEAD"].includes(request.method)) {
+      const id = path.split("/")[3]!;
+      return demoVideoPlayback.respond(id, request, () => {
+        const asset = demoState.getAsset(id);
+        return asset && !asset.deletedAt && (asset.ownerUserId === user.id || canManageDemoOwner(user, asset.ownerUserId)) ? asset : undefined;
+      });
     }
     if (/^\/api\/assets\/[^/]+\/thumb$/.test(path) && request.method === 'GET') {
       const width = url.searchParams.get('w') || '256';
@@ -1493,11 +1510,12 @@ Bun.serve({
         let editInput: ImageEditInput<DemoAsset>;
         try {
           editInput = await prepareImageEditInput(sources, input.parameters || {}, { protocol: model.providerId === openTokenProviderId ? "openai" : "apimart", modelId: imageModelId, operationType: input.operationType! });
-          if (input.parameters.quickImageAction) preflightApiMartImageRequest({ modelId: imageModelId, prompt: input.prompt, parameters: input.parameters, sourceImages: editInput.references });
+          if (input.parameters.quickImageAction || imageModelId === "seedream-5-5") preflightApiMartImageRequest({ modelId: imageModelId, prompt: input.prompt, parameters: input.parameters, sourceImages: editInput.references });
           await validateQuickImageSource(editInput.references[0], input.parameters || {});
         } catch (error) {
           if (error instanceof ImageEditInputError || error instanceof ImageResultProcessingError) return json({ error: error.code, message: error.message }, 400);
           if (input.parameters.quickImageAction) return json({ error: "QUICK_IMAGE_SOURCE_INVALID", message: error instanceof Error ? error.message : "参考图片或参数无效" }, 400);
+          if (imageModelId === "seedream-5-5") return json({ error: "SEEDREAM_INPUT_INVALID", message: error instanceof Error ? error.message : "豆包参考图片或参数无效" }, 400);
           throw error;
         }
         if ((imageModelId === "midjourney" || imageModelId === "midjourney-blend") && input.operationType !== "image_generation")
@@ -1505,6 +1523,7 @@ Bun.serve({
         const apiMartModel = model.providerId === openTokenProviderId ? null : apiMartImageModel(imageModelId);
         const isGptImage2 = imageModelId.startsWith("gpt-image-2") || apiMartModel === "gpt-image-2";
         const maximumReferences = imageModelId === "midjourney-blend" ? 4
+          : imageModelId === "seedream-5-5" ? 10
           : imageModelId === "mai-image-2.6-flash" ? 5
           : imageModelId === "grok-imagine-image-2.0" ? 3
           : apiMartModel === "gpt-image-2" ? 15
@@ -2403,7 +2422,7 @@ async function callApiMartImage(
     modelId,
     prompt,
     parameters,
-    sourceDataUrls: references.map(toDataUrl),
+    ...(modelId === "seedream-5-5" ? { sourceImages: references.map(source => ({ mimeType: source.mimeType, bytes: source.bytes })) } : { sourceDataUrls: references.map(toDataUrl) }),
     ...(isMarkImage && preparedInput?.mask ? { maskDataUrl: toDataUrl(preparedInput.mask) } : {}),
     ...(isMarkImage && preparedInput?.markup ? { markupImage: preparedInput.markup } : {}),
     ...(isMarkImage && task ? {
@@ -2417,6 +2436,7 @@ async function callApiMartImage(
       },
     } : {}),
   });
+  if (modelId === "seedream-5-5" && urls.length !== 1) throw Object.assign(new Error("豆包返回数量与单图任务不符，已保留原任务，不会重复生成"), { code: "PROVIDER_OUTPUT_COUNT_INVALID" });
   const first = urls[0];
   if (!first) throw new Error("APIMart 图片任务完成但没有结果图片");
   if (isMarkImage && !isPublicHttpUrl(first)) throw Object.assign(new Error("原图片结果地址无效，不能恢复下载"), { code: "PROVIDER_RESULT_URL_INVALID" });

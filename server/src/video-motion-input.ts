@@ -1,4 +1,5 @@
 import { normalizeVideoMotionSettings } from "../../shared/video-motion-options";
+import { isSeedanceVideoModel } from "../../shared/video-model-identity";
 import type { PromptInput } from "../../shared/prompt-contracts";
 import { PromptOptimizationError } from "./prompt-safety";
 import type { PromptRecipeStore } from "./prompt-recipe-store";
@@ -23,7 +24,7 @@ export function videoMotionParameters(parameters: Record<string, unknown>, promp
   const automatic = explicit === undefined || explicit === "auto";
   // Seedance motion planning prefers frame pairs; other models retain their own auto semantics.
   const videoMode = automatic && imagesOnly && mimeTypes.length >= 1 && mimeTypes.length <= 2
-    ? model === "doubao-seedance-2.5"
+    ? isSeedanceVideoModel(model)
       ? mimeTypes.length === 1 ? "first-frame" : "first-last-frame"
       : resolveVideoMode(model, parameters, mimeTypes.map(mimeType => ({ mimeType, bytes: new Uint8Array() })))
     : undefined;

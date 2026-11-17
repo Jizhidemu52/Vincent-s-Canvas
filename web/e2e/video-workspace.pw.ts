@@ -94,7 +94,7 @@ test("视频模型不可用时明确提示且不静默切换 HappyHorse", async 
     expect(api.submissions).toHaveLength(0);
 });
 
-for (const parameterModelId of ["happyhorse-1.1", "wan2.7", "MiniMax-H3", "doubao-seedance-2.5"] as SupportedVideoModelId[]) {
+for (const parameterModelId of ["happyhorse-1.1", "wan2.7", "MiniMax-H3", "doubao-seedance-2.5", "seedance-2-5-flash"] as SupportedVideoModelId[]) {
     test(`图生视频真实页面→预检→协议适配：${parameterModelId}`, async ({ page, context, api }) => {
         const aliasModel = { ...model, modelId: model.id, parameterModelId };
         const resultId = "80000000-0000-4000-8000-000000000099";
@@ -162,7 +162,11 @@ for (const parameterModelId of ["happyhorse-1.1", "wan2.7", "MiniMax-H3", "douba
         expect(providerBodies).toHaveLength(1);
         expect(providerBodies[0]).toMatchObject(["happyhorse-1.1", "MiniMax-H3"].includes(parameterModelId)
             ? { first_frame_image: ownedSourceUrl }
-            : parameterModelId === "doubao-seedance-2.5" ? { image_with_roles: [{ url: ownedSourceUrl, role: "first_frame" }] } : { image_urls: [ownedSourceUrl] });
+            : ["doubao-seedance-2.5", "seedance-2-5-flash"].includes(parameterModelId) ? { image_with_roles: [{ url: ownedSourceUrl, role: "first_frame" }] } : { image_urls: [ownedSourceUrl] });
+        if (parameterModelId === "seedance-2-5-flash") {
+            expect(providerBodies[0]).toMatchObject({ model: "seedance-2-5-flash", resolution: "720p", size: "adaptive" });
+            await page.screenshot({ path: test.info().outputPath("seedance-flash-result.png"), fullPage: true });
+        }
         expect(JSON.stringify(providerBodies)).not.toMatch(/\/api\/assets|base64/);
     });
 }

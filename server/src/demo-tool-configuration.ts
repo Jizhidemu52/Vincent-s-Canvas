@@ -1,5 +1,5 @@
 import { getToolDefinition, moduleIsEnabled, resolveToolKey, type ModuleKey } from "../../shared/feature-catalog";
-import { DEFAULT_CHAT_MODEL_TOOL_KEY } from "./chat-model-policy";
+import { chatModelBindingKey, missingChatModelMessage } from "./chat-model-policy";
 import { isQuickImageAction, matchesQuickImageTaskTarget } from "../../shared/quick-image-tools";
 import { QUICK_IMAGE_SNAPSHOT, type QuickImageSnapshot } from "./quick-image-tools";
 
@@ -31,8 +31,8 @@ export function resolveDemoToolConfiguration(
   const isQuickImage = isQuickImageAction(quickAction);
   const snapshot = input[QUICK_IMAGE_SNAPSHOT];
   if (isQuickImage && (!snapshot || snapshot.action !== quickAction)) throw new DemoToolConfigurationError("QUICK_IMAGE_CONFIGURATION_REQUIRED", "一键工具缺少服务端配置快照");
-  const modelBinding = isChat ? bindings.find(item => item.toolKey === DEFAULT_CHAT_MODEL_TOOL_KEY) : binding;
-  if (isChat && !modelBinding?.modelConfigId) throw new DemoToolConfigurationError("CHAT_MODEL_NOT_CONFIGURED", "管理员尚未配置统一对话模型", 503);
+  const modelBinding = isChat ? bindings.find(item => item.toolKey === chatModelBindingKey(toolKey)) : binding;
+  if (isChat && !modelBinding?.modelConfigId) throw new DemoToolConfigurationError("CHAT_MODEL_NOT_CONFIGURED", missingChatModelMessage(toolKey), 503);
   if (!isQuickImage && !isChat && binding?.modelConfigId && input.modelConfigId && requested?.id !== binding.modelConfigId) throw new DemoToolConfigurationError("TOOL_MODEL_CHANGED", "板块模型配置已更新，请刷新后重试");
   const model = isQuickImage ? models.find(item => item.id === snapshot!.modelConfigId)
     : modelBinding?.modelConfigId ? models.find(item => item.id === modelBinding.modelConfigId) : requested;

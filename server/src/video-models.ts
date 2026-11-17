@@ -1,9 +1,11 @@
 import { isApiMartImageMimeType, isPublicHttpUrl } from "./apimart-upload";
 import { parseVideoSeed } from "../../shared/video-output";
+import { isSeedanceVideoModel } from "../../shared/video-model-identity";
 
 export const supportedVideoModelIds = [
   "MiniMax-H3",
   "doubao-seedance-2.5",
+  "seedance-2-5-flash",
   "gemini-omni-1.2-flash",
   "wan2.7",
   "happyhorse-1.1",
@@ -96,6 +98,17 @@ export const videoModelCapabilities: Record<SupportedVideoModelId, VideoModelCap
     supportsAudio: false,
     supportsWatermark: false,
   },
+  "seedance-2-5-flash": {
+    model: "seedance-2-5-flash",
+    seconds: [4, 30],
+    resolutions: ["480p", "720p"],
+    sizes: seedanceRatios,
+    minImages: 0,
+    maxImages: 10,
+    firstFrameRequired: false,
+    supportsAudio: true,
+    supportsWatermark: true,
+  },
   "wan2.7": {
     model: "wan2.7",
     seconds: [2, 15],
@@ -145,6 +158,7 @@ export function resolveVideoMode(model: SupportedVideoModelId, parameters: Video
   const allowed: Record<SupportedVideoModelId, VideoMode[]> = {
     "MiniMax-H3": ["auto", "text", "first-frame", "last-frame", "first-last-frame", "reference"],
     "doubao-seedance-2.5": ["auto", "text", "first-frame", "first-last-frame", "reference", "edit", "extend"],
+    "seedance-2-5-flash": ["auto", "text", "first-frame", "first-last-frame", "reference", "edit", "extend"],
     "gemini-omni-1.2-flash": ["auto", "text", "first-frame", "first-last-frame", "reference", "edit", "extend"],
     "wan2.7": ["auto", "text", "first-frame", "first-last-frame", "extend"],
     "happyhorse-1.1": ["auto", "text", "first-frame", "reference"],
@@ -155,7 +169,7 @@ export function resolveVideoMode(model: SupportedVideoModelId, parameters: Video
   const video = sources.some((s) => s.mimeType.startsWith("video/"));
   const audio = sources.some((s) => s.mimeType.startsWith("audio/"));
   if (model === "wan2.7") return video ? "extend" : images === 2 ? "first-last-frame" : images ? "first-frame" : "text";
-  if (model === "doubao-seedance-2.5") return sources.length ? "reference" : "text";
+  if (isSeedanceVideoModel(model)) return sources.length ? "reference" : "text";
   if (model === "gemini-omni-1.2-flash" && video) return "edit";
   return video || audio || images > 1 ? "reference" : images === 1 ? "first-frame" : "text";
 }
@@ -170,8 +184,8 @@ export function validateVideoSources(model: SupportedVideoModelId, parameters: V
   const capability = getVideoModelCapability(model);
   const omni = model === "gemini-omni-1.2-flash";
   if (images.length > capability.maxImages) throw new Error(model === "wan2.7" ? "wan2.7 accepts one first frame or a first and last frame" : `${model} accepts up to ${capability.maxImages} image references`);
-  const videoLimit = model === "MiniMax-H3" ? 3 : model === "doubao-seedance-2.5" ? 10 : model === "wan2.7" || omni ? 1 : 0;
-  const audioLimit = model === "MiniMax-H3" ? 3 : model === "doubao-seedance-2.5" ? 10 : model === "wan2.7" ? 1 : 0;
+  const videoLimit = model === "MiniMax-H3" ? 3 : model === "seedance-2-5-flash" ? 5 : model === "doubao-seedance-2.5" ? 10 : model === "wan2.7" || omni ? 1 : 0;
+  const audioLimit = model === "MiniMax-H3" ? 3 : model === "seedance-2-5-flash" ? 5 : model === "doubao-seedance-2.5" ? 10 : model === "wan2.7" ? 1 : 0;
   if (videos.length > videoLimit || audios.length > audioLimit) throw new Error(`${model} 最多支持 ${videoLimit} 个视频和 ${audioLimit} 个音频素材`);
   if (mode === "text" && (images.length || videos.length || (audios.length && model !== "wan2.7"))) throw new Error(`${model} text mode does not accept images or reference media`);
   const frame = ["first-frame", "last-frame", "first-last-frame"].includes(mode);
@@ -209,12 +223,12 @@ export function validateVideoSources(model: SupportedVideoModelId, parameters: V
     if (image && model === "happyhorse-1.1" && mode === "first-frame" && width !== undefined && height !== undefined && (Math.min(width, height) < 300 || width / height < 0.4 || width / height > 2.5)) throw new Error("HappyHorse 首帧短边至少 300px，宽高比需在 0.4–2.5 之间");
     if (image && model === "happyhorse-1.1" && mode === "reference" && width !== undefined && height !== undefined && (width / height < 0.4 || width / height > 2.5)) throw new Error("HappyHorse 参考图宽高比需在 0.4–2.5 之间");
     if (video && model !== "wan2.7" && !omni && source.fps !== undefined && (source.fps < (model === "MiniMax-H3" ? 23.976 : 24) || source.fps > 60)) throw new Error(`${model} 视频帧率不符合要求`);
-    if (!omni && (video || (image && ["MiniMax-H3", "doubao-seedance-2.5"].includes(model)))) {
+    if (!omni && (video || (image && (model === "MiniMax-H3" || isSeedanceVideoModel(model))))) {
       const [min, max, minRatio, maxRatio] = model === "MiniMax-H3" ? [256, 5760, 0.4, 2.5] : model === "wan2.7" ? [240, 4096, 0.125, 8] : [300, 6000, 0.4, 2.5];
       if ([width, height].some((edge) => edge !== undefined && (edge < min! || edge > max!))) throw new Error(`${model} 素材尺寸或宽高比超出范围`);
       if (width === undefined || height === undefined) continue;
       if (width / height < minRatio! || width / height > maxRatio!) throw new Error(`${model} 素材尺寸或宽高比超出范围`);
-      if (video && model === "doubao-seedance-2.5" && (width * height < 409600 || width * height > 8295044)) throw new Error("Seedance 视频总像素必须在 409600–8295044 之间");
+      if (video && isSeedanceVideoModel(model) && (width * height < 409600 || width * height > 8295044)) throw new Error("Seedance 视频总像素必须在 409600–8295044 之间");
     }
   }
   for (const group of [videos, audios]) {
@@ -269,17 +283,19 @@ function buildVideoRequest(
   const maximumPrompt = model === "MiniMax-H3" ? 7000 : model === "wan2.7" ? 5000 : model === "happyhorse-1.1" ? 2500 : 20000;
   if (prompt.length > maximumPrompt) throw new Error(`${model} prompt must be ${maximumPrompt} characters or fewer`);
   const capability = getVideoModelCapability(model);
-  const duration = model === "doubao-seedance-2.5" && (mode === "edit" || Number(parameters.seconds) === -1) ? -1 : clampDuration(parameters.seconds, 5, ...capability.seconds);
-  const resolution = normalizeResolution(parameters.resolution, capability.resolutions, model === "MiniMax-H3" ? "2K" : model === "doubao-seedance-2.5" ? "720p" : "1080P");
-  const adaptive = frame || (model === "doubao-seedance-2.5" && ["edit", "extend"].includes(mode)) || (model === "wan2.7" && videos.length > 0);
-  const size = adaptive ? "adaptive" : normalizeChoice(parameters.size === "auto" ? "adaptive" : parameters.size, capability.sizes, model === "doubao-seedance-2.5" ? "adaptive" : "16:9");
+  const seedance = isSeedanceVideoModel(model);
+  const duration = seedance && (mode === "edit" || Number(parameters.seconds) === -1) ? -1 : clampDuration(parameters.seconds, 5, ...capability.seconds);
+  if (model === "seedance-2-5-flash" && parameters.resolution !== undefined && !capability.resolutions.includes(String(parameters.resolution).toLowerCase())) throw new Error("Seedance 2.5 Flash 分辨率仅支持 480p 或 720p");
+  const resolution = normalizeResolution(parameters.resolution, capability.resolutions, model === "MiniMax-H3" ? "2K" : seedance ? "720p" : "1080P");
+  const adaptive = frame || (seedance && ["edit", "extend"].includes(mode)) || (model === "wan2.7" && videos.length > 0);
+  const size = adaptive ? "adaptive" : normalizeChoice(parameters.size === "auto" ? "adaptive" : parameters.size, capability.sizes, seedance ? "adaptive" : "16:9");
   const body: Record<string, unknown> = { model: model === "doubao-seedance-2.5" ? "seedance-2.5" : model, prompt, duration, resolution, watermark: parameters.watermark === true };
-  if (["doubao-seedance-2.5", "happyhorse-1.1"].includes(model)) {
+  if (seedance || model === "happyhorse-1.1") {
     const seed = parseVideoSeed(parameters.seed, model === "happyhorse-1.1" ? 2147483647 : undefined);
     if (seed !== undefined) body.seed = seed;
   }
   if (parameters.outputFormat !== undefined && parameters.outputFormat !== "") {
-    if (model !== "doubao-seedance-2.5" || !["mp4", "mov"].includes(String(parameters.outputFormat))) throw new Error("当前视频模型不支持此输出格式");
+    if (!seedance || !["mp4", "mov"].includes(String(parameters.outputFormat))) throw new Error("当前视频模型不支持此输出格式");
     body.output_format = parameters.outputFormat;
   }
   if (model === "MiniMax-H3") {
@@ -289,7 +305,7 @@ function buildVideoRequest(
     if (!frame && images.length) body.image_urls = imageUrls;
     if (videos.length) body.video_urls = videoUrls;
     if (audios.length) body.audio_urls = audioUrls;
-  } else if (model === "doubao-seedance-2.5") {
+  } else if (seedance) {
     body.size = size;
     body.generate_audio = parameters.generateAudio !== false;
     if (frame) body.image_with_roles = imageUrls.map((url, index) => ({ url, role: index ? "last_frame" : "first_frame" }));
@@ -332,7 +348,7 @@ export function preflightVideoProviderRequest(
       size: request.size,
       referenceCount: sources.length,
       videoMode: request.mode,
-      upstreamBillingSeconds: omni ? request.duration : (request.duration === -1 ? 30 : request.duration) + (model === "doubao-seedance-2.5" ? sources.filter((source) => source.mimeType.startsWith("video/")).reduce((total, source) => total + (source.durationMs || 0) / 1000, 0) : 0),
+      upstreamBillingSeconds: omni ? request.duration : (request.duration === -1 ? 30 : request.duration) + (isSeedanceVideoModel(model) ? sources.filter((source) => source.mimeType.startsWith("video/")).reduce((total, source) => total + (source.durationMs || 0) / 1000, 0) : 0),
       ...(omni ? { upstreamDepositSeconds: hasVideo ? 15 : Math.max(10, request.duration) } : {}),
     },
   };

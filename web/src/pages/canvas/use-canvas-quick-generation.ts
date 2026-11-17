@@ -26,7 +26,7 @@ import { nanoid } from "nanoid";
 import type { Dispatch, ChangeEvent as ReactChangeEvent, RefObject, SetStateAction } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { buildImageGenerationMetadata, isGenerationCanceled } from "./canvas-project-utils";
+import { buildImageGenerationMetadata, getGenerationCount, isGenerationCanceled } from "./canvas-project-utils";
 import { useCanvasBatchEdit } from "./use-canvas-batch-edit";
 import { useCanvasGenerationRuntime } from "./use-canvas-generation-runtime";
 type CanvasQuickGenerationOptions = {
@@ -112,7 +112,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
     const [quickGenerateModel, setQuickGenerateModelState] = useState(effectiveConfig.imageModel || effectiveConfig.model);
     const [quickGenerateSize, setQuickGenerateSizeState] = useState(effectiveConfig.size || defaultConfig.size);
     const [quickGenerateQuality, setQuickGenerateQualityState] = useState(effectiveConfig.quality || defaultConfig.quality);
-    const [quickGenerateCount, setQuickGenerateCountState] = useState(2);
+    const [quickGenerateCount, setQuickGenerateCountState] = useState(1);
     const [quickGenerateImageOptions, setQuickGenerateImageOptionsState] = useState(effectiveConfig.imageOptions || "");
     const [quickGenerateReferences, setQuickGenerateReferencesState] = useState<CanvasSelectionReference[]>([]);
     const quickReferencesRef = useRef(quickGenerateReferences);
@@ -289,7 +289,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         const profile = imageModelProfile(model);
         const prompt = profile.requiresPrompt ? quickGeneratePromptRef.current.trim() : "";
         const settings = normalizeImageModelSettings({ size: quickGenerateSize, quality: quickGenerateQuality, count: String(quickGenerateCount) }, profile);
-        const count = Number(settings.count);
+        const count = getGenerationCount(String(quickGenerateCount));
         const references = structuredClone(quickGenerateReferences);
         // Select the compilation before any async preparation. Later edits or
         // optimization results belong to the next run, never this batch.
@@ -311,7 +311,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
             ...settings,
             imageOptions: quickGenerateImageOptions,
             count: "1",
-            canvasImageCount: String(count),
+            canvasImageCount: "1",
         };
         const usage = estimateUsage({ operationType, toolKey, modelId, quantity: count });
 
@@ -364,7 +364,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
             metadata: {
                 prompt,
                 status: NODE_STATUS_LOADING,
-                ...buildImageGenerationMetadata(generationType, generationConfig, count, references),
+                ...buildImageGenerationMetadata(generationType, generationConfig, 1, references),
                 generationRecord: createCanvasGenerationRecord({ id: `${runId}:${index}`, sourceNodeId: sourceNode?.id || sourceNodes[0]?.id || "", prompt, inputPrompt: prompt, references, nodes: nodesRef.current, config: generationConfig, generationType, promptInput }),
                 ...(sourceNode ? { generationOrigin: { sourceNodeId: sourceNode.id, runId, mode: "image" as const } } : {}),
             },
@@ -398,7 +398,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         await Promise.all(
             targetIds.map(async (targetId, index) => {
                 try {
-                    const options = await createOptions(targetId, controller, () => finishSubmission(targetId), toolKey);
+                    const options = await createOptions(targetId, controller, undefined, toolKey);
                     const { metadata, uploaded } = await options.generate(generationConfig, prompt, references, undefined, operationType === "inpaint", promptInput);
                     if (!await waitForWriteAccess()) return;
                     const resultSize = fitNodeSize(uploaded.width, uploaded.height, nodeSize.width, nodeSize.height);

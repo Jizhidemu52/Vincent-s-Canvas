@@ -8,6 +8,7 @@ import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import type { ReferenceImage } from "@/types/image";
 import type { PromptInputData } from "../../shared/prompt-contracts";
 import { i18nHarness } from "./helpers/i18n-harness";
+import { createImageTaskRequests } from "@/services/api/generation-tasks";
 
 type Hook = typeof import("@/pages/canvas/use-canvas-quick-generation").useCanvasQuickGeneration;
 const url = new URL("../src/pages/canvas/use-canvas-quick-generation.ts", import.meta.url);
@@ -25,10 +26,11 @@ const image = (id: string): CanvasNodeData => ({ id, type: CanvasNodeType.Image,
 
 // Run the real hook with persistent hook slots and inert external boundaries.
 // Deferred createOptions exercises the actual asynchronous submission window.
-function harness(prepare: () => Promise<void> = async () => undefined) {
+function harness(prepare: () => Promise<void> = async () => undefined, generate: (index: number) => Promise<void> = async () => undefined) {
     const nodes = { current: [image("a"), image("b")] };
     const slots: any[] = [], feedback: string[] = [];
     const submissions: Array<{ config: AiConfig; prompt: string; references: ReferenceImage[]; promptInput?: PromptInputData }> = [];
+    const requests: ReturnType<typeof createImageTaskRequests> = [];
     let cursor = 0, serial = 0, projectId = "project-a", boundModel: string | undefined;
     let account = { status: "authenticated", user: { id: "employee-a", status: "active", creditBalance: 100 } };
     let effects: Array<() => void> = [];
@@ -61,10 +63,14 @@ function harness(prepare: () => Promise<void> = async () => undefined) {
     };
     const runtime = {
         waitForWriteAccess: async () => true, isObservationCurrent: () => true,
-        async createOptions() {
+        async createOptions(nodeId: string, _controller: AbortController, onSubmitted?: () => void) {
             await prepare();
             return { async generate(config: AiConfig, prompt: string, references: ReferenceImage[], _mask: unknown, _edit: boolean, promptInput?: PromptInputData) {
+                const index = submissions.length;
                 submissions.push(structuredClone({ config, prompt, references, promptInput }));
+                requests.push(...createImageTaskRequests({ requestId: nodeId, projectId, operationType: "image_generation", modelConfigId: config.model, prompt, sourceUrls: [], count: Number(config.count), parameters: { count: Number(config.count) } }));
+                onSubmitted?.();
+                await generate(index);
                 return { metadata: { status: "success", content: "blob:result" }, uploaded: { url: "blob:result", storageKey: "image:result", width: 320, height: 320, bytes: 10, mimeType: "image/png" } };
             } };
         },
@@ -73,7 +79,7 @@ function harness(prepare: () => Promise<void> = async () => undefined) {
     const module = { exports: {} as { useCanvasQuickGeneration: Hook } };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name] || requireModule(name), module, module.exports);
     return {
-        nodes, submissions, feedback,
+        nodes, submissions, requests, feedback,
         bindModel: (model: string) => { boundModel = model; },
         switchAccount: () => { account = { ...account, user: { ...account.user, id: "employee-b" } }; },
         switchProject: () => { projectId = "project-b"; },
@@ -200,4 +206,56 @@ test("a generation started after a model switch cannot acquire a later optimizat
     expect(h.submissions).toHaveLength(1);
     expect(h.submissions[0]!.promptInput).toBeUndefined();
     expect(h.nodes.current.find(node => node.id.startsWith("quick-image-"))!.metadata!.generationRecord!.promptInput).toBeUndefined();
+});
+
+test.each([1, 3, 6])("the creation count %s becomes independent one-image tasks and single-image records", async count => {
+    const h = harness(), form = optimizedCreation(h);
+    form.setQuickGenerateCount(count);
+    await h.render().runQuickCanvasGeneration();
+    expect(h.requests).toHaveLength(count);
+    expect(new Set(h.requests.map(request => request.requestId)).size).toBe(count);
+    expect(h.requests.every(request => request.parameters.count === 1 && request.parameters.n === 1)).toBe(true);
+    expect(h.submissions.every(submission => submission.config.count === "1" && submission.config.canvasImageCount === "1")).toBe(true);
+    const outputs = h.nodes.current.filter(node => node.id.startsWith("quick-image-"));
+    expect(outputs).toHaveLength(count);
+    expect(outputs.every(node => node.metadata?.status === "success" && node.metadata.count === 1 && node.metadata.generationRecord?.parameters.count === 1)).toBe(true);
+});
+
+test("double clicks cannot repeat a creation batch before preparation or after backend admission", async () => {
+    const preparation = Promise.withResolvers<void>(), result = Promise.withResolvers<void>();
+    const h = harness(() => preparation.promise, () => result.promise), form = optimizedCreation(h);
+    form.setQuickGenerateCount(3);
+    const ready = h.render(), first = ready.runQuickCanvasGeneration();
+    await ready.runQuickCanvasGeneration();
+    expect(h.nodes.current.filter(node => node.id.startsWith("quick-image-"))).toHaveLength(3);
+    expect(h.requests).toHaveLength(0);
+    preparation.resolve();
+    for (let index = 0; index < 8; index++) await Promise.resolve();
+    expect(h.requests).toHaveLength(3);
+    const admitted = h.render();
+    expect(admitted.quickGenerateRunning).toBe(true);
+    await admitted.runQuickCanvasGeneration();
+    expect(h.requests).toHaveLength(3);
+    result.resolve(); await first;
+    expect(h.render().quickGenerateRunning).toBe(false);
+});
+
+test("partial failure retains each result and never replays successful or pending siblings", async () => {
+    const results = Array.from({ length: 3 }, () => Promise.withResolvers<void>());
+    const h = harness(undefined, index => results[index]!.promise), form = optimizedCreation(h);
+    form.setQuickGenerateCount(3);
+    const running = h.render().runQuickCanvasGeneration();
+    for (let index = 0; index < 8; index++) await Promise.resolve();
+    results[0]!.resolve(); results[1]!.reject(new Error("第二张失败"));
+    for (let index = 0; index < 8; index++) await Promise.resolve();
+    expect(h.nodes.current.filter(node => node.id.startsWith("quick-image-")).map(node => node.metadata?.status)).toEqual(["success", "error", "loading"]);
+    await h.render().runQuickCanvasGeneration();
+    expect(h.requests).toHaveLength(3);
+    results[2]!.resolve(); await running;
+    const outputs = h.nodes.current.filter(node => node.id.startsWith("quick-image-"));
+    expect(outputs.map(node => node.metadata?.status)).toEqual(["success", "error", "success"]);
+    expect(outputs[1]!.metadata?.errorDetails).toBe("第二张失败");
+    expect(h.requests).toHaveLength(3);
+    expect(h.feedback).toContain("画布生图完成，成功 2 张，失败 1 张");
+    expect(h.render().quickGenerateRunning).toBe(false);
 });

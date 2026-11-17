@@ -1,7 +1,7 @@
 import { loadConfig } from "./config";
 import { createDatabase } from "./db";
 import { hashPassword } from "./security";
-import { initializeDefaultChatModel } from "./chat-model-policy";
+import { initializeCanvasDesignChatModel, initializeDefaultChatModel } from "./chat-model-policy";
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
@@ -23,4 +23,5 @@ if (exists.rowCount) {
     console.log(`Created super administrator ${result.rows[0].username} (${result.rows[0].id}).`);
 }
 await initializeDefaultChatModel(db);
+await initializeCanvasDesignChatModel(db);
 await db.end();

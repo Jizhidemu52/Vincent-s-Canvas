@@ -206,6 +206,13 @@ describe("formal tool model consumption", () => {
         await expect(requestImageQuestion({ ...defaultConfig, model: text.modelId }, [{ role: "user", content: "hello" }], () => undefined, { tool: "canvas-chat" })).rejects.toThrow("统一配置");
         expect(requests.map(item => item.path)).toEqual(["/api/models"]);
     });
+    test("design discussion resolves only its independent backend binding", () => {
+        const fixture = business(binding("gpt-chat", image.id), binding("canvas-design-chat", text.id));
+        expect(resolveConfiguredToolModel(fixture, "canvas-design-chat", image.modelId)).toBe(text);
+        expect(() => resolveConfiguredToolModel(business(binding("gpt-chat", text.id)), "canvas-design-chat", text.modelId)).toThrow("本板块配置");
+        expect(() => resolveConfiguredToolModel(business(binding("gpt-chat", text.id), binding("canvas-design-chat", null)), "canvas-design-chat", text.modelId)).toThrow("本板块配置");
+        expect(() => resolveConfiguredToolModel(business(binding("canvas-design-chat", text.id, false)), "canvas-design-chat", text.modelId)).toThrow("已停用");
+    });
 
     test("batch images carry the independent canvas batch binding and metadata", async () => {
         const requests = mockServer(business(binding("canvas-batch", image.id)));

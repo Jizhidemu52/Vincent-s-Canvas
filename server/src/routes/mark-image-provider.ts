@@ -8,7 +8,7 @@ import type { AppConfig } from "../config";
 import type { Database } from "../db";
 import { encryptSecret } from "../security";
 import type { AuthenticatedRequest } from "../types";
-import { initializeDefaultChatModel } from "../chat-model-policy";
+import { initializeCanvasDesignChatModel, initializeDefaultChatModel } from "../chat-model-policy";
 import { getApimartImageCost } from "../../../shared/apimart-image-costs";
 
 const modelInput = z.object({
@@ -87,6 +87,7 @@ export function createMarkImageProviderRouter(db: Database, config: AppConfig) {
           getApimartImageCost(MARK_IMAGE_PROVIDER_ID, preset.modelId)?.rmbPerImage ?? model.rmbCost, model.concurrencyLimit, model.enabled, actor.id]);
       }
       await initializeDefaultChatModel(client);
+      await initializeCanvasDesignChatModel(client);
       await writeAudit(client, { actor, action: "mark_platform.configured", targetType: "provider", targetId: MARK_IMAGE_PROVIDER_ID,
         result: "success", detail: { enabled: input.enabled, credentialsChanged: Boolean(input.apiKey), modelIds: input.models.map(model => model.modelId) }, ip: request.ip });
       const result = await readConfiguration(client);

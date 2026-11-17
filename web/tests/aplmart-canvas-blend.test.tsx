@@ -34,10 +34,10 @@ test.each([0, 1, 2, 4, 5])("Blend quick canvas with %i references hides old prom
     const html = renderToStaticMarkup(<CanvasQuickGeneratePanel embedded open promptRef={{ current: "OLD_DRAFT_MUST_NOT_SHOW" }} promptRevision={0} model={model.id} size="3:2" quality="turbo" count={9} imageOptions="" running={false} config={defaultConfig} estimateCredits={0} estimateRmb={0} references={references(count)} onClose={noop} onModelChange={noop} onSizeChange={noop} onQualityChange={noop} onCountChange={noop} onImageOptionsChange={noop} onPickReferences={noop} onRemoveReference={noop} onClearReferences={noop} onMoveReference={noop} onMissingConfig={noop} onGenerate={noop} />);
     expect(html).not.toContain("<textarea");
     expect(html).not.toContain("OLD_DRAFT_MUST_NOT_SHOW");
-    expect(html).not.toContain('aria-label="生成张数"');
+    expect(html).toContain('aria-label="生成张数"');
     const action = actionButton(html, "开始融合");
-    expect(action).toContain('aria-label="每次生成 1 张"');
-    expect(action).toContain("×1</span>");
+    expect(action).toContain('aria-label="本次生成 9 张"');
+    expect(action).toContain("×9</span>");
     expect(normalizeImageModelSettings({ size: "3:2", quality: "turbo", count: "9" }, imageModelProfile(model.id, [model])).count).toBe("1");
     expect(action.includes('disabled=""')).toBe(count < 2 || count > 4);
 }));

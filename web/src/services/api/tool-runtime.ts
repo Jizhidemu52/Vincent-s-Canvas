@@ -23,7 +23,7 @@ export function resolveConfiguredToolModel(business: BusinessConfig, toolKey: To
     if (binding?.enabled === false || parentBinding?.enabled === false) throw new Error("当前板块或所属入口已停用，请联系管理员。");
     if (getToolDefinition(toolKey)?.operationType === "chat") {
         const managed = resolveToolModel(business, toolKey);
-        if (!managed) throw new Error("对话服务尚未就绪，请联系管理员检查统一配置。");
+        if (!managed) throw new Error(toolKey === "canvas-design-chat" ? "设计讨论服务尚未就绪，请联系管理员检查本板块配置。" : "对话服务尚未就绪，请联系管理员检查统一配置。");
         return managed;
     }
     const requested = binding?.modelConfigId || requestedModel;

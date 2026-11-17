@@ -10,7 +10,9 @@ describe("formal feature visibility", () => {
         expect(toolDefinitions.filter(item => item.toolKey.startsWith("creative-"))).toHaveLength(11);
         expect(moduleKeys).toContain("creative-virtual-try-on");
         expect(moduleKeys).toContain("creative-sketch-to-photo");
-        expect(toolDefinitions.filter(item => item.toolKey.startsWith("canvas-"))).toHaveLength(8);
+        expect(toolDefinitions.filter(item => item.toolKey.startsWith("canvas-")).map(item => item.toolKey)).toEqual(expect.arrayContaining(["canvas-chat", "canvas-design-chat", "canvas-image", "canvas-video"]));
+        expect(toolDefinitions.filter(item => item.toolKey.startsWith("canvas-"))).toHaveLength(9);
+        expect(moduleKeys).toContain("canvas-design-chat");
         expect(moduleKeys).toContain("pattern-placement");
         expect(moduleKeys).toContain("pattern-repeat");
         expect(moduleKeys).toContain("series-recipe");

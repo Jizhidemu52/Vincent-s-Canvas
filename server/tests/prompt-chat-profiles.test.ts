@@ -13,6 +13,15 @@ const canvas = (text = "改成粉色", stage: "plan" | "continue" = "plan") => (
 const system = (input: ResponseInput[]) => String((input[0] as { content: string }).content);
 
 describe("shared image-agent planning", () => {
+    test("design discussion uses creative rules without borrowing the canvas agent profile", async () => {
+        const request = { ...creative(), toolKey: "canvas-design-chat" };
+        const result = await prepareChatProfileInput(request);
+        expect(result.input.toolKey).toBe("canvas-design-chat");
+        expect(system(result.input.input)).toContain(CREATIVE_CHAT_SYSTEM_PROMPT);
+        expect(result.input.tools.some(tool => tool.name === "edit_image")).toBe(true);
+        expect(result.input.tools.some(tool => tool.name.startsWith("canvas_"))).toBe(false);
+        await expect(prepareChatProfileInput({ ...request, profile: "canvas-assistant" })).rejects.toMatchObject({ code: "CHAT_PROFILE_INVALID" });
+    });
     test("ordinary chat is untouched", async () => {
         const request = { input: [{ role: "system" as const, content: "ordinary configuration" }], tools: [] };
         const result = await prepareChatProfileInput(request, async () => { throw new Error("must not load"); });

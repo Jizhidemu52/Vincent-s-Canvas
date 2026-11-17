@@ -3,6 +3,7 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { parseVideoSeed } from "../../../shared/video-output";
+import { isSeedanceVideoModel } from "../../../shared/video-model-identity";
 
 export type VideoMode = "auto" | "text" | "first-frame" | "last-frame" | "first-last-frame" | "reference" | "edit" | "extend";
 export const videoModeLabels: Record<VideoMode, string> = { auto: "自动判断", text: "文生视频", "first-frame": "首帧", "last-frame": "尾帧", "first-last-frame": "首尾帧", reference: "多素材参考", edit: "视频编辑", extend: "视频延长 / 续写" };
@@ -81,6 +82,17 @@ const specifications: Record<string, VideoModelParameterSpec> = {
         ratioHint: "仅支持横屏或竖屏；首尾帧应使用相同比例，并与所选画面比例一致。",
         resolutionHint: "1080p 与 4K 为上采样输出。",
         audioHint: "原生输出 24fps 视频并带音频；不提供静音开关。声音与不希望出现的内容可写进提示词，不保证无声。输出含 SynthID 不可见水印。",
+    },
+    "seedance-2-5-flash": {
+        supportsSeed: true, outputFormats: ["mp4", "mov"],
+        seconds: [4, 30], resolutions: ["480p", "720p"], sizes: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+        supportsAudio: true, supportsWatermark: true, supportsAutoDuration: true,
+        defaultResolution: "720p", defaultSize: "adaptive",
+        modes: ["auto", "text", "first-frame", "first-last-frame", "reference", "edit", "extend"],
+        maxVideos: 5, maxAudios: 5, videoMaxMB: 200, videoDuration: [2, 30], videoTotalSeconds: 30, audioDuration: [2, 30], audioTotalSeconds: 30,
+        maxImages: 10, imageInputHint: "最多 10 张参考图；首尾帧模式按图片顺序排列，使用自适应比例，不混用视频/音频。",
+        mediaHint: "最多 5 段视频（单个 ≤200MB）及 5 段音频（单个 ≤15MB），每段 2–30 秒，各类合计 ≤30 秒。支持纯音频参考。真人素材需先完成渠道素材库审核。",
+        resolutionHint: "Flash 仅支持 480p / 720p，不支持 1080p 或样片模式。",
     },
     "wan2.7": {
         seconds: [2, 15], resolutions: ["720P", "1080P"], sizes: standardRatios,
@@ -196,7 +208,7 @@ export function videoModelRequestParameters(config: VideoConfig, freshParameterM
 }
 
 export function videoModeLocksRatio(config: Pick<AiConfig, "model" | "videoModel" | "videoMode">, freshParameterModelId?: string | null) {
-    return videoParameterModelId(config, freshParameterModelId) === "doubao-seedance-2.5" && ["first-frame", "last-frame", "first-last-frame", "edit", "extend"].includes(config.videoMode);
+    return isSeedanceVideoModel(videoParameterModelId(config, freshParameterModelId)) && ["first-frame", "last-frame", "first-last-frame", "edit", "extend"].includes(config.videoMode);
 }
 
 export function resolveVideoMode(config: Pick<AiConfig, "model" | "videoModel" | "videoMode">, images = 0, videos = 0, audios = 0, legacyMode?: string, freshParameterModelId?: string | null): VideoMode {
@@ -205,7 +217,7 @@ export function resolveVideoMode(config: Pick<AiConfig, "model" | "videoModel" |
     if (requested !== "auto") return requested as VideoMode;
     if (model === "wan2.7") return videos ? "extend" : images > 1 ? "first-last-frame" : images ? "first-frame" : "text";
     if (model === "gemini-omni-1.2-flash") return videos ? "edit" : images > 1 ? "reference" : images ? "first-frame" : "text";
-    if (model === "doubao-seedance-2.5") return images || videos || audios ? "reference" : "text";
+    if (isSeedanceVideoModel(model)) return images || videos || audios ? "reference" : "text";
     return videos || audios || images > 1 ? "reference" : images ? "first-frame" : "text";
 }
 
@@ -236,11 +248,11 @@ export function videoReferenceError(config: Pick<AiConfig, "model" | "videoModel
     const requestedSeconds = Number(config.videoSeconds);
     const outputSeconds = Number.isInteger(requestedSeconds) && requestedSeconds >= spec.seconds[0] && requestedSeconds <= spec.seconds[1] ? requestedSeconds : 5;
     if (model === "wan2.7" && mode === "extend" && videos.some((video) => video.durationMs !== undefined && video.durationMs >= outputSeconds * 1000)) return "Wan 续写的输出总时长必须大于源视频时长，请增加生成时长";
-    const sizeBounds = model === "doubao-seedance-2.5" ? [300, 6000, 0.4, 2.5] : model === "MiniMax-H3" ? [256, 5760, 0.4, 2.5] : [240, 4096, 0.125, 8];
+    const sizeBounds = isSeedanceVideoModel(model) ? [300, 6000, 0.4, 2.5] : model === "MiniMax-H3" ? [256, 5760, 0.4, 2.5] : [240, 4096, 0.125, 8];
     for (const [index, image] of images.entries()) {
         if (image.type && !["image/jpeg", "image/png", "image/webp"].includes(image.type)) return `图片${index + 1} 仅支持 JPEG/PNG/WebP`;
         if (image.bytes !== undefined && (image.bytes <= 0 || image.bytes > 10 * 1024 * 1024)) return `图片${index + 1} 需为非空文件且不超过当前上传入口的 10MB 限制`;
-        if (["MiniMax-H3", "doubao-seedance-2.5"].includes(model) && image.width && image.height && !validDimensions(image.width, image.height, sizeBounds)) return `图片${index + 1} 的宽高或比例不符合模型要求（边长 ${sizeBounds[0]}–${sizeBounds[1]}px，比例 ${sizeBounds[2]}–${sizeBounds[3]}）`;
+        if ((model === "MiniMax-H3" || isSeedanceVideoModel(model)) && image.width && image.height && !validDimensions(image.width, image.height, sizeBounds)) return `图片${index + 1} 的宽高或比例不符合模型要求（边长 ${sizeBounds[0]}–${sizeBounds[1]}px，比例 ${sizeBounds[2]}–${sizeBounds[3]}）`;
         if (model === "happyhorse-1.1" && mode === "first-frame" && image.width && image.height && (Math.min(image.width, image.height) < 300 || image.width / image.height < 0.4 || image.width / image.height > 2.5)) return "HappyHorse 首帧短边至少 300px，宽高比需在 0.4–2.5 之间";
         if (model === "happyhorse-1.1" && mode === "reference" && image.width && image.height && (image.width / image.height < 0.4 || image.width / image.height > 2.5)) return "HappyHorse 参考图宽高比需在 0.4–2.5 之间";
     }
@@ -261,7 +273,7 @@ export function videoReferenceError(config: Pick<AiConfig, "model" | "videoModel
                 const video = item as ReferenceVideo;
                 if (!omni && video.width && video.height) {
                     if (!validDimensions(video.width, video.height, sizeBounds)) return `${label} 宽高或比例不符合模型要求（边长 ${sizeBounds[0]}–${sizeBounds[1]}px，比例 ${sizeBounds[2]}–${sizeBounds[3]}）`;
-                    if (model === "doubao-seedance-2.5" && (video.width * video.height < 409600 || video.width * video.height > 8295044)) return `${label} 像素总量需在 409600–8295044 之间`;
+                    if (isSeedanceVideoModel(model) && (video.width * video.height < 409600 || video.width * video.height > 8295044)) return `${label} 像素总量需在 409600–8295044 之间`;
                 }
                 const minFps = model === "MiniMax-H3" ? 23.976 : 24;
                 if (!omni && model !== "wan2.7" && video.fps !== undefined && (video.fps < minFps || video.fps > 60)) return `${label} 帧率需在 ${minFps}–60 FPS 之间`;

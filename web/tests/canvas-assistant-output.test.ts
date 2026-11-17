@@ -104,3 +104,9 @@ test("both and a pair of sleeves preserve the explicit content quantity two", ()
     expect(() => assertImagePromptInvariantCoverage(source, "Recolor the body, collar, a pair of long sleeves and cuffs light rose pink.")).not.toThrow();
     expect(() => assertImagePromptInvariantCoverage(source, "Recolor the body, collar, one sleeve and cuffs light rose pink.")).toThrow("数量");
 });
+
+test("a qualified vertical line preserves one column without dropping explicit button counts", () => {
+    expect(() => assertImagePromptInvariantCoverage("6颗纽扣排成一列", "6 buttons arranged in a neat, evenly spaced vertical line")).not.toThrow();
+    expect(() => assertImagePromptInvariantCoverage("6颗纽扣排成一列", "5 buttons arranged in a vertical line")).toThrow("数量");
+    expect(() => assertImagePromptInvariantCoverage("6颗纽扣排成两列", "6 buttons arranged in a vertical line")).toThrow("数量");
+});

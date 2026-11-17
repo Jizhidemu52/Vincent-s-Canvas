@@ -524,6 +524,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 </div>
 
                 {!useOverview && showImageInfo && hasImageContent ? <ImageInfoBar node={data} theme={theme} /> : null}
+                {!useOverview && !showPanel && data.metadata?.designProposal ? <aside className="canvas-design-proposal" data-canvas-no-zoom aria-label="设计方案特色与参考图" onPointerDown={event => event.stopPropagation()}><p>{data.metadata.designProposal.features.join(" · ")}</p><div>{data.metadata.designProposal.references.map((reference, index) => <figure key={reference.image}><img src={reference.image} alt={reference.title} /><figcaption>图{index + 1} · {reference.title}</figcaption></figure>)}</div></aside> : null}
                 {!useOverview && data.type === CanvasNodeType.Image && data.metadata?.imageAgent && Number.isInteger(data.metadata.imageAgent.version) && data.metadata.imageAgent.version > 0 ? <span data-testid="canvas-node-agent-version" className="pointer-events-none absolute left-2 top-2 z-30 rounded px-1.5 py-0.5 text-xs font-medium" style={{ color: theme.node.text, background: theme.node.panel }}>V{data.metadata.imageAgent.version}</span> : null}
                 {!useOverview && showResourceLabel && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} theme={theme} /> : null}
 

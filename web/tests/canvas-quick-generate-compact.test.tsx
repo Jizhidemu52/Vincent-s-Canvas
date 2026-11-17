@@ -57,10 +57,11 @@ test("initial composer has three closed parameter popovers without an inline set
     expect(html).toContain("出图模型");
     expect(html).not.toContain("gpt-image-2");
     expect(html.indexOf('class="cw-add-reference"')).toBeGreaterThan(html.indexOf("</textarea>"));
-    expect(html).toContain('aria-label="每次生成 1 张">×1</span>');
+    expect(html).toContain('aria-label="本次生成 1 张">×1</span>');
+    expect(html).toContain('aria-label="生成张数"');
 });
 
-test("parameter buttons reflect normalized sizes and model-specific quality while count stays fixed", () => {
+test("parameter buttons normalize model settings without losing the independent task count", () => {
     const cases: { patch: Partial<Props>; size: string; quality: string }[] = [
         { patch: {}, size: "3:2", quality: "高" },
         { patch: { size: "auto", quality: "auto", count: 1 }, size: "自动", quality: "自动" },
@@ -73,7 +74,7 @@ test("parameter buttons reflect normalized sizes and model-specific quality whil
         const html = markup(patch);
         expect(parameterButton(html, "宽高比")).toContain(size);
         expect(html).toContain(`>${quality}</span>`);
-        expect(html).toContain('aria-label="每次生成 1 张">×1</span>');
+        expect(html).toContain(`aria-label="本次生成 ${patch.count || 1} 张">×${patch.count || 1}</span>`);
     }
 });
 
@@ -204,7 +205,7 @@ test("a populated draft retains model and parameters until its replacement is ex
     expect(changes).toEqual([]);
     expect(normalized).toEqual([]);
     render({ model: "gpt-image-2" });
-    expect(normalized).toContainEqual({ size: "1024x1024", quality: "auto", count: 1 });
+    expect(normalized).toContainEqual({ size: "1024x1024", quality: "auto" });
 });
 
 test("an empty new draft may adopt an available model without inventing prompt or references", () => {
@@ -236,6 +237,20 @@ test("generation in progress locks all parameter popovers and submission", () =>
     const opened = render();
     expect(opened.settings.props.disabled).toBe(true);
     expect(opened.tree.find(element => element.props.className === "cw-generate-button")!.props.disabled).toBe(true);
+    expect(opened.tree.find(element => element.type === "select" && element.props["aria-label"] === "生成张数")!.props.disabled).toBe(true);
+});
+
+test("task count selection does not generate or modify the model's one-image settings", () => {
+    const changes: unknown[] = [], normalized: unknown[] = [];
+    const render = controls({ count: 6, onCountChange: value => changes.push(value), onGenerate: () => changes.push("generated"), onSettingsNormalize: value => normalized.push(value) });
+    const opened = render(), select = opened.tree.find(element => element.type === "select" && element.props["aria-label"] === "生成张数")!;
+    expect(select.props.value).toBe(6);
+    expect(elements(select.props.children).map(option => option.props.value)).toEqual(Array.from({ length: 15 }, (_, index) => index + 1));
+    select.props.onChange({ target: { value: "3" } });
+    expect(changes).toEqual([3]);
+    expect(opened.settings.props.config.count).toBe("1");
+    opened.settings.props.onConfigNormalize("count", "1");
+    expect(normalized.every(value => !Object.hasOwn(value as object, "count"))).toBe(true);
 });
 
 test("selected advanced settings override global defaults and editing only updates the local composer", () => {

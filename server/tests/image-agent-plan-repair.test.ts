@@ -40,6 +40,18 @@ test("privacy and undeclared tools are not made repairable, and error-code spoof
     expect(imageAgentRepairMetadata({ code: "IMAGE_AGENT_ARGUMENTS_INVALID", repairable: true, submitted: false })).toEqual({});
 });
 
+test.each([{ note_update: "private-design-note" }, { keep: ["private-design-note"] }, { note_update: "private-design-note", keep: ["private-design-note"] }])("misnested state stays rejected and repair feedback identifies the layer without exposing its value: %j", async nested => {
+    const prepared = await profile();
+    const invalid = result(JSON.stringify({ prompt: "改成6颗纽扣", edit_spec: { changes: ["调整纽扣数量"], ...nested } }));
+    let rejected: unknown;
+    try { validateChatProfileOutput(invalid, prepared.privateRules); } catch (error) { rejected = error; }
+    expect(rejected).toBeInstanceOf(ImageAgentArgumentsError);
+    expect((rejected as Error).message).toContain("note_update 和 keep 必须位于最外层");
+    expect((rejected as Error).message).not.toContain("private-design-note");
+    expect(imageAgentRepairMetadata(rejected)).toEqual({ repairable: true, submitted: false });
+    expect(() => validateChatProfileOutput(result(JSON.stringify({ prompt: "改成6颗纽扣", note_update: "已整理数量要求", edit_spec: { changes: ["调整纽扣数量"] } })), prepared.privateRules)).not.toThrow();
+});
+
 test.each(['{"prompt":', '{"prompt":"改袖口","prompt":"换背景"}', '{"prompt":""}'])
 ("SSE completed tool arguments reject safely without success or execution: %s", async argumentsText => {
     const prepared = await profile(); let validated = 0;

@@ -11,6 +11,7 @@ const sources = (count: number): ProviderVideoSource[] => Array.from({ length: c
 }));
 const modelModes: Array<[SupportedVideoModelId, Exclude<VideoMode, "auto">, Exclude<VideoMode, "auto">]> = [
   ["doubao-seedance-2.5", "first-frame", "first-last-frame"],
+  ["seedance-2-5-flash", "first-frame", "first-last-frame"],
   ["MiniMax-H3", "first-frame", "reference"],
   ["wan2.7", "first-frame", "first-last-frame"],
   ["happyhorse-1.1", "first-frame", "reference"],

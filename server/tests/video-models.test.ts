@@ -51,6 +51,7 @@ describe("APIMart video model requests", () => {
     expect(supportedVideoModelIds).toEqual([
       "MiniMax-H3",
       "doubao-seedance-2.5",
+      "seedance-2-5-flash",
       "gemini-omni-1.2-flash",
       "wan2.7",
       "happyhorse-1.1",

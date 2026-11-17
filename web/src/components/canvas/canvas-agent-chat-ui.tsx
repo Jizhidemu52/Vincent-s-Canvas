@@ -40,7 +40,7 @@ export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, us
     const color = item.role === "error" ? theme.node.danger : item.role === "tool" ? theme.canvas.selectionStroke : theme.node.text;
     if (isSystem) {
         return (
-            <div className="flex justify-center text-xs">
+            <div className="flex justify-center text-xs motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200">
                 <div className="max-w-[88%] px-3 py-2 text-center" style={{ color: theme.node.muted }}>
                     <DisplayText text={item.text} />
                     {item.meta ? <span className="ml-2 opacity-60">{maskImageModelText(item.meta)}</span> : null}
@@ -51,14 +51,14 @@ export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, us
     if (item.role === "tool") {
         if (["pending", "running"].includes(String(objectField(item.detail, "status")))) return <AgentPendingToolCard summary={item.text} detail={item.detail} theme={theme} onReject={() => onRejectTool?.(item.id)} onApprove={() => onApproveTool?.(item.id)} />;
         return (
-            <div className="flex items-start gap-3">
+            <div className="flex items-start gap-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-200">
                 <AgentAvatar theme={theme} />
                 <AgentToolCard title={item.title || t("工具调用")} text={item.text} detail={item.detail} theme={theme} />
             </div>
         );
     }
     return (
-        <div data-message-role={item.role} className={`flex min-w-0 items-start gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
+        <div data-message-role={item.role} className={`flex min-w-0 items-start gap-2 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-200 ${isUser ? "justify-end" : "justify-start"}`}>
             <div className={`min-w-0 text-sm leading-7 [overflow-wrap:anywhere] ${isUser ? "max-w-[88%] rounded-2xl px-3 py-3 text-right" : "w-full text-left"}`} style={{ color, background: isUser ? theme.node.fill : undefined }}>
                 <div className="break-words text-left">{isUser ? <div className="whitespace-pre-wrap"><DisplayText text={item.text} /></div> : <ChatMarkdown>{item.text}</ChatMarkdown>}</div>
                 {item.attachments?.length ? <AgentMessageAttachments messageId={item.id} attachments={item.attachments} theme={theme} onUseImageForVideo={onUseImageForVideo} imageControls={imageControls} activeImageId={activeImageId} disabled={imageActionsDisabled} onImageAction={onImageAction} onMaskImage={onMaskImage} conversationOnlyImages={conversationOnlyImages} /> : null}
@@ -90,7 +90,7 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
             <AgentAvatar theme={theme} />
             <div className="min-w-0 flex-1 rounded-xl border p-4" style={{ borderColor: theme.node.stroke, background: "transparent", color: theme.node.text }}>
                 <Container>
-                    <Summary className={showDetails ? "cursor-pointer list-none" : undefined}>
+                    <Summary className={showDetails ? "cursor-pointer list-none transition-opacity hover:opacity-90 motion-reduce:transition-none" : undefined}>
                         <div className="flex items-start gap-3">
                             <span className="mt-1 grid size-8 shrink-0 place-items-center rounded-lg border" style={{ borderColor: `${theme.node.warning}40`, color: theme.node.warning, background: `${theme.node.warning}0a` }}>
                                 {running ? <LoaderCircle className="size-4 animate-spin" /> : <CircleAlert className="size-4" />}
@@ -114,7 +114,7 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
                             </div>
                         </div>
                     </Summary>
-                    {showDetails ? <AgentDetailBlock detail={detail} theme={theme} /> : null}
+                    {showDetails ? <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-200"><AgentDetailBlock detail={detail} theme={theme} /></div> : null}
                 </Container>
                 {onReject || onApprove ? (
                     <div className="mt-4 grid grid-cols-2 gap-2">
@@ -138,7 +138,7 @@ export function AgentToolCard({ title, text, detail, theme }: { title: string; t
     const state = toolCardState(detail, theme);
     return (
         <Container className="min-w-0 flex-1 rounded-xl border px-4 py-4 text-left" style={{ borderColor: theme.node.stroke, background: "transparent", color: theme.node.text }}>
-            <Summary className={showDetails ? "cursor-pointer list-none" : undefined}>
+            <Summary className={showDetails ? "cursor-pointer list-none transition-opacity hover:opacity-90 motion-reduce:transition-none" : undefined}>
                 <div className="flex items-start gap-3">
                     <span className="mt-1 grid size-8 shrink-0 place-items-center rounded-lg border" style={{ borderColor: state.softBorder, color: state.color, background: state.softBg }}>
                         {state.icon}
@@ -157,7 +157,7 @@ export function AgentToolCard({ title, text, detail, theme }: { title: string; t
                     </div>
                 </div>
             </Summary>
-            {showDetails ? <AgentDetailBlock detail={detail} theme={theme} /> : null}
+            {showDetails ? <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-200"><AgentDetailBlock detail={detail} theme={theme} /></div> : null}
         </Container>
     );
 }
@@ -171,11 +171,12 @@ export function AgentWorkingMessage({ theme }: { theme: (typeof canvasThemes)[ke
         return () => window.clearInterval(timer);
     }, [setLength, workingText]);
     return (
-        <div className="flex items-start gap-3">
+        <div className="flex items-start gap-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-200">
             <AgentAvatar theme={theme} />
             <div className="min-w-0 max-w-[82%]">
-                <div className="font-mono text-sm" style={{ color: theme.node.muted }} aria-label={t(WORKING_TEXT)}>
+                <div className="flex items-center gap-2 font-mono text-sm" style={{ color: theme.node.muted }} aria-label={t(WORKING_TEXT)}>
                     <span className="inline-block min-w-[76px]">{workingText.slice(0, Math.min(length, workingText.length))}</span>
+                    <span aria-hidden="true" className="motion-safe:animate-pulse">|</span>
                 </div>
             </div>
         </div>
@@ -240,12 +241,12 @@ export function AgentChatComposer({
             <div className="min-w-0 rounded-3xl border px-3 pb-2 pt-3 shadow-sm focus-within:outline focus-within:outline-1 focus-within:outline-[var(--composer-focus)]" style={{ background: theme.node.panel, borderColor: theme.node.stroke, "--composer-focus": theme.node.muted } as CSSProperties}>
                 {imageTarget}
                 {attachmentPreview ?? (attachments.length ? (
-                    <div className="thin-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">
+                    <div className="thin-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200">
                         {attachments.map((item) => (
                             <Tooltip title={item.name} key={item.id}><div className="group relative size-14 shrink-0 overflow-hidden rounded-xl border" style={{ borderColor: theme.node.stroke }}>
                                 <img src={item.url} alt={item.name} className="size-full object-cover" />
                                 {onRemoveAttachment ? (
-                                    <button type="button" className="absolute right-1 top-1 grid size-5 place-items-center rounded-full border opacity-0 shadow-sm transition group-hover:opacity-100" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke, color: theme.node.text }} onClick={() => onRemoveAttachment(item.id)} aria-label={t("移除图片")}>
+                                    <button type="button" className="absolute right-1 top-1 grid size-5 place-items-center rounded-full border opacity-0 shadow-sm transition group-hover:opacity-100 focus-visible:opacity-100 motion-safe:hover:scale-110 motion-reduce:transition-none" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke, color: theme.node.text }} onClick={() => onRemoveAttachment(item.id)} aria-label={t("移除图片")}>
                                         <X className="size-3" />
                                     </button>
                                 ) : null}

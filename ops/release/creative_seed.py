@@ -56,7 +56,7 @@ def build_source_seed(root):
 def verify_payload(root, manifest):
     names = [row["name"] for row in manifest["migrations"]]
     tail = [name for name in names if name >= "050"]
-    require(tail in (list(MIGRATIONS), [*MIGRATIONS, "052_layer_studio.sql"])
+    require(tail in (list(MIGRATIONS), [*MIGRATIONS, "052_layer_studio.sql"], [*MIGRATIONS, "052_layer_studio.sql", "053_canvas_design_chat.sql"])
             and all(names.count(name) == 1 for name in MIGRATIONS), "FIXED_050_051_MIGRATIONS_REQUIRED")
     for name in MIGRATIONS:
         path = root / "server/src/migrations" / name

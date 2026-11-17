@@ -8,6 +8,7 @@ test("every video model has a distinct stable demo configuration ID", () => {
   for (const model of supportedVideoModelIds) expect(videoModelConfigIds[model]).toMatch(/^[0-9a-f-]{36}$/);
   expect(videoModelConfigIds["doubao-seedance-2.5"]).toBe("40000000-0000-4000-8000-000000000111");
   expect(videoModelConfigIds["gemini-omni-1.2-flash"]).not.toBe(videoModelConfigIds["doubao-seedance-2.5"]);
+  expect(videoModelConfigIds["seedance-2-5-flash"]).toBe("40000000-0000-4000-8000-000000000115");
 });
 
 test("local demo enables OpenToken and APIMart together when both credentials are present", () => {

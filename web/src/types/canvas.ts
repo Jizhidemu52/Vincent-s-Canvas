@@ -69,6 +69,7 @@ export type CanvasGenerationRecord = {
 };
 
 export type CanvasNodeMetadata = {
+    designProposal?: { title: string; features: string[]; rationale: string; references: Array<{ title: string; image: string }> };
     quickImageAction?: "remove-background" | "hd-upscale" | "item-extract";
     locked?: boolean;
     imageAgent?: { parentNodeId?: string; workId: string; version: number; note: import("@/lib/image-agent/work-note").ImageAgentWorkNote; spec?: import("../../../shared/image-agent-iteration").ImageAgentEditSpec };

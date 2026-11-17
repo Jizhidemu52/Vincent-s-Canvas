@@ -122,4 +122,14 @@ describe("formal admin catalog and isolated board saves", () => {
         expect(buildToolConfigurationInput(chat, { modelConfigId: "sonnet", enabled: true }).modelConfigId).toBe("sonnet");
         expect(chat.label).toBe("对话改图");
     });
+    test("design discussion is independently configurable and never presented as shared or user-selected", () => {
+        const discussion = completeToolConfigurations([]).find(item => item.toolKey === "canvas-design-chat")!;
+        const textModel: ServerModel = { ...model, id: "carbon-config", modelId: "gemini-4-carbon", capabilities: ["chat", "vision", "tools"] };
+        expect(discussion.label).toBe("自由画布设计讨论");
+        expect(toolConfigurationState(discussion, [textModel])).toMatchObject({ ready: false, label: "待配置" });
+        expect(toolConfigurationState(discussion, [textModel]).reason).toContain("独立指定");
+        expect(buildToolConfigurationInput(discussion, { modelConfigId: textModel.id }).modelConfigId).toBe(textModel.id);
+        expect(toolConfigurationState({ ...discussion, modelConfigId: textModel.id }, [textModel])).toMatchObject({ ready: true, label: "独立模型已配置" });
+        expect(toolConfigurationState({ ...discussion, modelConfigId: "removed" }, [textModel]).ready).toBe(false);
+    });
 });

@@ -93,13 +93,12 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
         const normalized: Partial<Pick<CanvasQuickGeneratePanelProps, "size" | "quality" | "count">> = {};
         if (size !== settings.size) normalized.size = settings.size;
         if (quality !== activeQuality) normalized.quality = activeQuality;
-        if (count !== Number(settings.count)) normalized.count = Number(settings.count);
         if (Object.keys(normalized).length) onSettingsNormalize?.(normalized);
-    }, [availableModel, model, running, size, quality, count, settings.size, activeQuality, settings.count, onSettingsNormalize]);
+    }, [availableModel, model, running, size, quality, settings.size, activeQuality, onSettingsNormalize]);
     if (!open && !closing) return null;
     const disabled = !open || !toolEnabled || optimizing || running || referenceBusy || !availableModel || model !== availableModel || (profile.requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(sizeError);
-    const disabledReason = !toolEnabled ? t("当前图片功能已停用，请联系管理员。") : optimizing ? t("正在优化提示词，请稍候。") : running ? t("本次任务正在提交，请稍候。") : referenceBusy ? t("正在读取参考图，完成后即可生成。") : !availableModel ? t("暂未配置可用模型，请联系管理员。") : model !== availableModel ? t("原模型与当前功能绑定不匹配，已保留草稿和参数；请明确选择使用可用模型。") : profile.requiresPrompt && !prompt.trim() ? t("先填写提示词；输入 @ 可添加参考图。") : !referenceValidation.valid ? referenceValidation.message : sizeError;
-    const referenceDisabledReason = running ? t("本次任务正在提交，请稍候。") : referenceBusy ? t("正在读取参考图，完成后即可生成。") : references.length >= referenceValidation.maximum ? t("已达到当前模型的 {count} 张参考图上限，请先移除一张。", { count: referenceValidation.maximum }) : "";
+    const disabledReason = !toolEnabled ? t("当前图片功能已停用，请联系管理员。") : optimizing ? t("正在优化提示词，请稍候。") : running ? t("本次任务正在生成，请稍候。") : referenceBusy ? t("正在读取参考图，完成后即可生成。") : !availableModel ? t("暂未配置可用模型，请联系管理员。") : model !== availableModel ? t("原模型与当前功能绑定不匹配，已保留草稿和参数；请明确选择使用可用模型。") : profile.requiresPrompt && !prompt.trim() ? t("先填写提示词；输入 @ 可添加参考图。") : !referenceValidation.valid ? referenceValidation.message : sizeError;
+    const referenceDisabledReason = running ? t("本次任务正在生成，请稍候。") : referenceBusy ? t("正在读取参考图，完成后即可生成。") : references.length >= referenceValidation.maximum ? t("已达到当前模型的 {count} 张参考图上限，请先移除一张。", { count: referenceValidation.maximum }) : "";
     return (
         <div {...imageDrop.dropProps} ref={panelRef} data-testid="canvas-quick-generate-panel" data-canvas-no-zoom data-panel-closing={closing || undefined} inert={!open} aria-hidden={!open || undefined}
             className={embedded ? "cw-generator" : "cw-generator cw-generator-mobile cw-surface max-h-[calc(100dvh-144px)] overflow-y-auto"}
@@ -116,7 +115,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                 <ModelPicker toolKey={toolKey} config={boundConfig} value={availableModel} capability="image" modelsSource="server" disabled={!open || running} fullWidth onChange={value => {
                     const next = adaptImageModelSettings({ size, quality, count: String(count), imageOptions }, imageModelProfile(value, models, role));
                     onModelChange(value);
-                    onSizeChange(next.size); onQualityChange(next.quality); onCountChange(Number(next.count)); onImageOptionsChange(next.imageOptions);
+                    onSizeChange(next.size); onQualityChange(next.quality); onImageOptionsChange(next.imageOptions);
                 }}
                     onMissingConfig={onMissingConfig} className="cw-model-picker" />
                 </div>
@@ -154,11 +153,18 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                             if (key === "quality") onQualityChange(value);
                             if (key === "count") onCountChange(Number(value));
                             if (key === "imageOptions") onImageOptionsChange(value);
-                        }} onConfigNormalize={(key, value) => { if (model === availableModel && !running) onSettingsNormalize?.(key === "count" ? { count: Number(value) } : { [key]: value }); }} />
+                        }} onConfigNormalize={(key, value) => { if (key !== "count" && model === availableModel && !running) onSettingsNormalize?.({ [key]: value }); }} />
+                <label className="my-2 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}>
+                    <span>{t("生成张数")} · {t("每张独立任务")}</span>
+                    <select aria-label={t("生成张数")} value={count} disabled={!open || running} onChange={event => onCountChange(Number(event.target.value))}
+                        className="rounded-md border px-2 py-1" style={{ background: theme.node.panel, color: theme.node.text, borderColor: theme.node.stroke }}>
+                        {Array.from({ length: 15 }, (_, index) => index + 1).map(value => <option key={value} value={value}>{t("{count} 张", { count: value })}</option>)}
+                    </select>
+                </label>
                 <Tooltip title={disabledReason || (profile.requiresPrompt ? t("Enter 生成，Shift+Enter 换行") : undefined)}><div className={`cw-generate-action ${disabled ? "is-disabled" : ""}`}>
                     <button type="button" className="cw-generate-button" aria-description={disabled ? disabledReason : undefined} style={disabled ? { pointerEvents: "none" } : undefined} disabled={disabled} onClick={onGenerate}>
-                        {running ? <><LoaderCircle size={16} className="animate-spin" />{t("提交中…")}</> : !profile.requiresPrompt ? t("开始融合") : references.length ? t("生成修改图") : t("生成")}
-                        <span className="cw-generate-count" aria-label={t("每次生成 1 张")}>×1</span>
+                        {running ? <><LoaderCircle size={16} className="animate-spin" />{t("生成中…")}</> : !profile.requiresPrompt ? t("开始融合") : references.length ? t("生成修改图") : t("生成")}
+                        <span className="cw-generate-count" aria-label={t("本次生成 {count} 张", { count })}>×{count}</span>
                     </button>
                 </div></Tooltip>
                 {disabledReason ? <p role="status" className="mt-2 text-xs" style={{ color: theme.node.muted }}>{disabledReason}</p> : null}

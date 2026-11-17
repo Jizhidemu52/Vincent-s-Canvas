@@ -56,9 +56,10 @@ export function imagePromptInvariantNumbers(text: string): Set<string> {
         // Output count/aspect ratio are independently constrained by generation settings, not image-content counts.
         .replace(new RegExp(`(?:生成|输出|出图|制作|提供|返回|只要|只需)\\s*(?:仅|只|恰好)?\\s*\\d+\\s*张(?:图(?:片)?)?|\\b(?:generate|output|return|produce|want|need)\\s+(?:(?:only|exactly)\\s+)?${count}\\s+(?:images?|pictures?|outputs?|variations?)\\b|(?:比例|aspect\\s+ratio)\\s*[:：]?\\s*\\d+\\s*[:：]\\s*\\d+`, "giu"), "")
         .replace(/\b(?:both|a pair of)\s+(?=(?:[a-z]+\s+){0,2}(?:sleeves|cuffs|pockets|buttons|straps|handles|legs|shoes|socks|ears|eyes|wings)\b)/giu, "two ");
-    const found = new Set(Array.from(source.matchAll(/(?<![A-Za-z0-9_.])\d+(?:\.\d+)?(?![\d.])/gu), match => String(Number(match[0]))));
+    const countedSource = source.replace(/\ba\s+(?=(?:(?:single|neat|evenly spaced|vertical|horizontal|straight)[,\s]+){0,4}(?:row|line|column)\b)/giu, "one ");
+    const found = new Set(Array.from(countedSource.matchAll(/(?<![A-Za-z0-9_.])\d+(?:\.\d+)?(?![\d.])/gu), match => String(Number(match[0]))));
     const word = `(?:${Object.keys(ENGLISH_NUMBERS).join("|")})`;
-    for (const match of source.matchAll(new RegExp(`\\b${word}(?:[ -]+(?:and[ -]+)?${word})*\\b`, "giu"))) {
+    for (const match of countedSource.matchAll(new RegExp(`\\b${word}(?:[ -]+(?:and[ -]+)?${word})*\\b`, "giu"))) {
         let total = 0, part = 0;
         for (const token of match[0].toLowerCase().split(/[ -]+/u)) {
             const value = ENGLISH_NUMBERS[token];
