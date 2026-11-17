@@ -26,7 +26,7 @@ const image = (id: string): CanvasNodeData => ({ id, type: CanvasNodeType.Image,
 
 // Run the real hook with persistent hook slots and inert external boundaries.
 // Deferred createOptions exercises the actual asynchronous submission window.
-function harness(prepare: () => Promise<void> = async () => undefined, generate: (index: number) => Promise<void> = async () => undefined) {
+function harness(prepare: () => Promise<void> = async () => undefined, generate: (index: number) => Promise<void> = async () => undefined, admit: (index: number) => Promise<void> = async () => undefined) {
     const nodes = { current: [image("a"), image("b")] };
     const slots: any[] = [], feedback: string[] = [];
     const submissions: Array<{ config: AiConfig; prompt: string; references: ReferenceImage[]; promptInput?: PromptInputData }> = [];
@@ -69,6 +69,7 @@ function harness(prepare: () => Promise<void> = async () => undefined, generate:
                 const index = submissions.length;
                 submissions.push(structuredClone({ config, prompt, references, promptInput }));
                 requests.push(...createImageTaskRequests({ requestId: nodeId, projectId, operationType: "image_generation", modelConfigId: config.model, prompt, sourceUrls: [], count: Number(config.count), parameters: { count: Number(config.count) } }));
+                await admit(index);
                 onSubmitted?.();
                 await generate(index);
                 return { metadata: { status: "success", content: "blob:result" }, uploaded: { url: "blob:result", storageKey: "image:result", width: 320, height: 320, bytes: 10, mimeType: "image/png" } };
@@ -221,9 +222,10 @@ test.each([1, 3, 6])("the creation count %s becomes independent one-image tasks 
     expect(outputs.every(node => node.metadata?.status === "success" && node.metadata.count === 1 && node.metadata.generationRecord?.parameters.count === 1)).toBe(true);
 });
 
-test("double clicks cannot repeat a creation batch before preparation or after backend admission", async () => {
+test("double clicks cannot repeat a creation batch before every task is admitted, then a new batch can start", async () => {
     const preparation = Promise.withResolvers<void>(), result = Promise.withResolvers<void>();
-    const h = harness(() => preparation.promise, () => result.promise), form = optimizedCreation(h);
+    const admissions = Array.from({ length: 4 }, () => Promise.withResolvers<void>());
+    const h = harness(() => preparation.promise, () => result.promise, index => admissions[index]!.promise), form = optimizedCreation(h);
     form.setQuickGenerateCount(3);
     const ready = h.render(), first = ready.runQuickCanvasGeneration();
     await ready.runQuickCanvasGeneration();
@@ -232,30 +234,61 @@ test("double clicks cannot repeat a creation batch before preparation or after b
     preparation.resolve();
     for (let index = 0; index < 8; index++) await Promise.resolve();
     expect(h.requests).toHaveLength(3);
-    const admitted = h.render();
-    expect(admitted.quickGenerateRunning).toBe(true);
-    await admitted.runQuickCanvasGeneration();
+    expect(h.render().quickGenerateRunning).toBe(true);
+    admissions[0]!.resolve(); admissions[1]!.resolve();
+    for (let index = 0; index < 8; index++) await Promise.resolve();
+    const partiallyAdmitted = h.render();
+    expect(partiallyAdmitted.quickGenerateRunning).toBe(true);
+    await partiallyAdmitted.runQuickCanvasGeneration();
     expect(h.requests).toHaveLength(3);
+    admissions[2]!.resolve();
+    for (let index = 0; index < 8; index++) await Promise.resolve();
+    const admitted = h.render();
+    expect(admitted.quickGenerateRunning).toBe(false);
+    expect(h.nodes.current.filter(node => node.id.startsWith("quick-image-")).map(node => node.metadata?.status)).toEqual(["loading", "loading", "loading"]);
+    admitted.setQuickGenerateCount(1);
+    admitted.setQuickGeneratePrompt("独立生成一张针织帽子图");
+    const next = h.render().runQuickCanvasGeneration();
+    for (let index = 0; index < 8; index++) await Promise.resolve();
+    expect(h.requests).toHaveLength(4);
+    expect(new Set(h.requests.map(request => request.requestId)).size).toBe(4);
+    expect(h.requests.slice(0, 3).every(request => request.prompt === prompt)).toBe(true);
+    expect(h.requests[3]!.prompt).toBe("独立生成一张针织帽子图");
+    expect(h.render().quickGenerateRunning).toBe(true);
     result.resolve(); await first;
+    expect(h.render().quickGenerateRunning).toBe(true);
+    admissions[3]!.resolve(); await next;
     expect(h.render().quickGenerateRunning).toBe(false);
 });
 
-test("partial failure retains each result and never replays successful or pending siblings", async () => {
-    const results = Array.from({ length: 3 }, () => Promise.withResolvers<void>());
+test("partial failure preserves original tasks while a new batch finishes independently without replaying siblings", async () => {
+    const results = Array.from({ length: 4 }, () => Promise.withResolvers<void>());
     const h = harness(undefined, index => results[index]!.promise), form = optimizedCreation(h);
     form.setQuickGenerateCount(3);
     const running = h.render().runQuickCanvasGeneration();
     for (let index = 0; index < 8; index++) await Promise.resolve();
+    const originalRequestIds = h.requests.map(request => request.requestId);
     results[0]!.resolve(); results[1]!.reject(new Error("第二张失败"));
     for (let index = 0; index < 8; index++) await Promise.resolve();
     expect(h.nodes.current.filter(node => node.id.startsWith("quick-image-")).map(node => node.metadata?.status)).toEqual(["success", "error", "loading"]);
-    await h.render().runQuickCanvasGeneration();
     expect(h.requests).toHaveLength(3);
+    const nextForm = h.render();
+    expect(nextForm.quickGenerateRunning).toBe(false);
+    nextForm.setQuickGenerateCount(1);
+    nextForm.setQuickGeneratePrompt("另一个独立设计方向");
+    const next = h.render().runQuickCanvasGeneration();
+    for (let index = 0; index < 8; index++) await Promise.resolve();
+    expect(h.requests).toHaveLength(4);
+    expect(h.requests.slice(0, 3).map(request => request.requestId)).toEqual(originalRequestIds);
+    expect(originalRequestIds).not.toContain(h.requests[3]!.requestId);
+    expect(h.requests[3]!.prompt).toBe("另一个独立设计方向");
+    results[3]!.resolve(); await next;
+    expect(h.nodes.current.filter(node => node.id.startsWith("quick-image-")).map(node => node.metadata?.status)).toEqual(["success", "error", "loading", "success"]);
     results[2]!.resolve(); await running;
     const outputs = h.nodes.current.filter(node => node.id.startsWith("quick-image-"));
-    expect(outputs.map(node => node.metadata?.status)).toEqual(["success", "error", "success"]);
+    expect(outputs.map(node => node.metadata?.status)).toEqual(["success", "error", "success", "success"]);
     expect(outputs[1]!.metadata?.errorDetails).toBe("第二张失败");
-    expect(h.requests).toHaveLength(3);
+    expect(h.requests).toHaveLength(4);
     expect(h.feedback).toContain("画布生图完成，成功 2 张，失败 1 张");
     expect(h.render().quickGenerateRunning).toBe(false);
 });
