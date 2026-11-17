@@ -1,5 +1,4 @@
 import { useUiText } from "@/lib/i18n";
-import { MinimalActionPanel } from "@/components/canvas/minimal-action-panel";
 import { canvasActionHint, canvasActionLabel, type CanvasActionId } from "@/lib/canvas/canvas-actions";
 import { canvasActionMenuItem } from "./canvas-action-menu-item";
 import { memo, useState } from "react";
@@ -21,7 +20,6 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRen
     const { selectedCount, canUndo, canRedo, onAddImage, onAddVideo, onAddAudio, onAddText, onAddConfig, onOpenQuickGenerate, onOpenBatchEdit, onUndo, onRedo, onUpload, onDelete, onClear, onDeselect, onOpenMyAssets, onOpenTools, backgroundMode, showImageInfo, onBackgroundModeChange, onShowImageInfoChange, interactionMode = "select", onInteractionModeChange, children, viewControls } = props;
     return (
         <div data-testid="canvas-top-tool-rail" className="cw-dock">
-            <MinimalActionPanel sceneId="garment-colorway" modelId="gpt-image-2.6-sunburst" onAction={(intent, params) => console.log("Pipeline Triggered:", intent, params)} />
             <div className="cw-tools cw-surface cw-toolbar-primary" role="group" aria-label={t("画布常用工具")}>
                 {selectedCount > 1 && Boolean(props.selectedImageCount) && props.onDownloadSelection ? <>
                     <Tooltip title={t("仅打包选中的图片，默认保留原文件格式和画质")}><button type="button" className="cw-icon cw-download-selection" data-usage-control="canvas-tool.downloadSelectedImages" onClick={props.onDownloadSelection}><Download className="size-4" /><span>{canvasActionLabel("downloadSelectedImages", "toolbar", props.selectedImageCount)}</span></button></Tooltip>

@@ -1,7 +1,12 @@
 import { test, expect, newCanvas } from "./fixtures";
 
-test("creation submits N independent images, locks duplicate actions and retains partial results", async ({ page, api }, info) => {
+test("creation submits N independent images, locks pending submission and releases the composer before results", async ({ page, api }, info) => {
     api.taskStatus = "processing";
+    const releaseSubmissions: Array<() => void> = [];
+    await page.route("**/api/tasks", async route => {
+        if (route.request().method() === "POST") await new Promise<void>(resolve => releaseSubmissions.push(resolve));
+        await route.fallback();
+    });
     await page.setViewportSize({ width: 1366, height: 900 });
     const projectId = await newCanvas(page);
     await page.getByRole("button", { name: "展开创建面板", exact: true }).click();
@@ -11,20 +16,32 @@ test("creation submits N independent images, locks duplicate actions and retains
     await expect(generate).toContainText("×3");
     await page.screenshot({ path: info.outputPath("creation-count-three.png"), animations: "disabled" });
     await generate.evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
+    await expect.poll(() => releaseSubmissions.length).toBe(3);
+    await expect(generate).toBeDisabled();
+    await expect(panel.getByRole("combobox", { name: "生成张数", exact: true })).toBeDisabled();
+    expect(api.submissions).toHaveLength(0);
+    releaseSubmissions[0]!();
+    releaseSubmissions[1]!();
+    await expect.poll(() => api.submissions.length).toBe(2);
+    await expect(generate).toBeDisabled();
+    await generate.evaluate((button: HTMLButtonElement) => button.click());
+    expect(releaseSubmissions).toHaveLength(3);
+    releaseSubmissions[2]!();
     await expect.poll(() => api.submissions.length).toBe(3);
     expect(new Set(api.submissions.map(item => item.requestId)).size).toBe(3);
     expect(api.submissions.every(item => item.parameters.count === 1 && item.parameters.n === 1)).toBe(true);
     expect(api.batchSubmissions).toHaveLength(0);
-    await expect(generate).toBeDisabled();
-    await expect(panel.getByRole("combobox", { name: "生成张数", exact: true })).toBeDisabled();
-    await generate.evaluate((button: HTMLButtonElement) => button.click());
+    await expect(generate).toBeEnabled();
+    await expect(panel.getByRole("textbox", { name: "描述图像", exact: true })).toBeEnabled();
+    await expect(panel.getByRole("combobox", { name: "生成张数", exact: true })).toBeEnabled();
+    await page.unroute("**/api/tasks");
     expect(api.submissions).toHaveLength(3);
     const tasks = [...api.tasks.values()];
     tasks[0]!.status = "success"; tasks[0]!.resultUrls = [`/api/assets/${tasks[0]!.id}/content`];
     tasks[1]!.status = "failed"; tasks[1]!.failureReason = "第二张隔离测试失败";
     const outputStates = () => tasks.map(task => api.document(projectId)?.nodes.find((node: any) => node.metadata?.imageTask?.taskId === task.id || node.metadata?.sourceTaskId === task.id)?.metadata.status);
     await expect.poll(outputStates).toEqual(["success", "error", "loading"]);
-    await expect(generate).toBeDisabled();
+    await expect(generate).toBeEnabled();
     tasks[2]!.status = "success"; tasks[2]!.resultUrls = [`/api/assets/${tasks[2]!.id}/content`];
     await expect.poll(outputStates).toEqual(["success", "error", "success"]);
     await expect(generate).toBeEnabled();
@@ -43,4 +60,42 @@ test("creation submits N independent images, locks duplicate actions and retains
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath("creation-count-mobile.png"), animations: "disabled" });
+});
+
+test("creation accepts fifteen single-output tasks then an independent one without waiting for results", async ({ page, api }, info) => {
+    api.taskStatus = "waiting";
+    const projectId = await newCanvas(page);
+    await page.getByRole("button", { name: "展开创建面板", exact: true }).click();
+    const panel = page.getByTestId("canvas-quick-generate-panel");
+    const prompt = panel.getByRole("textbox", { name: "描述图像", exact: true });
+    const count = panel.getByRole("combobox", { name: "生成张数", exact: true });
+    const generate = panel.locator("button.cw-generate-button");
+    await expect(count).toHaveValue("1");
+    expect(await count.locator("option").evaluateAll(options => options.map(option => (option as HTMLOptionElement).value))).toEqual(Array.from({ length: 15 }, (_, index) => String(index + 1)));
+    await count.selectOption("15");
+    await prompt.fill("十五张独立围巾图");
+    await generate.evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
+    await expect.poll(() => api.submissions.length).toBe(15);
+    await expect(prompt).toBeEnabled();
+    await expect(count).toBeEnabled();
+    await count.selectOption("1");
+    await prompt.fill("另起一张独立帽子图");
+    await generate.click();
+    await expect.poll(() => api.submissions.length).toBe(16);
+    await expect.poll(() => api.document(projectId)?.nodes.length).toBe(16);
+    expect(new Set(api.submissions.map(item => item.requestId)).size).toBe(16);
+    expect(api.submissions.every(item => item.parameters.n === 1 && item.parameters.count === 1)).toBe(true);
+    expect(api.submissions.slice(0, 15).every(item => item.prompt === "十五张独立围巾图")).toBe(true);
+    expect(api.submissions[15]!.prompt).toBe("另起一张独立帽子图");
+    expect([...api.tasks.values()].every(task => task.status === "waiting")).toBe(true);
+    expect(api.batchSubmissions).toHaveLength(0);
+    await expect(prompt).toBeEnabled();
+    const readsBeforeReload = api.taskReads.length;
+    await page.reload();
+    await expect.poll(() => page.locator('[data-node-id^="quick-image-"]').count()).toBeGreaterThan(0);
+    await expect.poll(() => new Set(api.taskReads.slice(readsBeforeReload)).size).toBe(16);
+    await expect.poll(() => api.document(projectId)!.nodes.map((node: any) => ({ status: node.metadata.status, error: node.metadata.errorDetails || null }))).toEqual(Array.from({ length: 16 }, () => ({ status: "loading", error: null })));
+    expect(api.submissions).toHaveLength(16);
+    expect(api.document(projectId)!.nodes).toHaveLength(16);
+    await page.screenshot({ path: info.outputPath("creation-fifteen-and-one-waiting.png"), animations: "disabled" });
 });

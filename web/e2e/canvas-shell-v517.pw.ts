@@ -97,6 +97,12 @@ test("体验数据按Esc或外部点击关闭，普通员工不显示入口", as
         expect(overlap, `diagnostics and connection toggle must not overlap at ${viewport.width}px`).toBe(0);
         await connections.click();
         await expect(connections).toHaveAttribute("aria-pressed", "false");
+        await expect(page.getByRole("tooltip", { name: "显示连接线", exact: true })).toBeVisible();
+        await expect.poll(() => trigger.evaluate(element => {
+            const bounds = element.getBoundingClientRect();
+            const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+            return element === hit || Boolean(hit && element.contains(hit));
+        })).toBe(true);
         await trigger.click();
         await expect(details).toHaveAttribute("open", "");
         await page.screenshot({ path: info.outputPath(`diagnostics-connections-${viewport.width}.png`) });

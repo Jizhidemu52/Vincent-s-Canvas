@@ -398,7 +398,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         await Promise.all(
             targetIds.map(async (targetId, index) => {
                 try {
-                    const options = await createOptions(targetId, controller, undefined, toolKey);
+                    const options = await createOptions(targetId, controller, () => finishSubmission(targetId), toolKey);
                     const { metadata, uploaded } = await options.generate(generationConfig, prompt, references, undefined, operationType === "inpaint", promptInput);
                     if (!await waitForWriteAccess()) return;
                     const resultSize = fitNodeSize(uploaded.width, uploaded.height, nodeSize.width, nodeSize.height);

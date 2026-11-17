@@ -126,7 +126,7 @@ export const CanvasConnectionVisibilityToggle = memo(function CanvasConnectionVi
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const label = showConnections ? t("隐藏连接线") : t("显示连接线");
     return <div className="absolute bottom-16 right-3 z-[50]" data-testid="canvas-connection-visibility-control" data-canvas-shortcuts="ignore" onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
-        <Tooltip title={label} placement="left"><button type="button" className="cw-icon cw-surface !h-10 !w-10" data-usage-control="canvas-tool.connections" aria-pressed={showConnections} aria-label={label}
+        <Tooltip title={label} placement="left" styles={{ root: { pointerEvents: "none" } }}><button type="button" className="cw-icon cw-surface !h-10 !w-10" data-usage-control="canvas-tool.connections" aria-pressed={showConnections} aria-label={label}
             style={{ background: showConnections ? theme.toolbar.itemHover : theme.node.panel, color: showConnections ? theme.node.text : theme.node.muted }} onClick={() => setShowConnections(!showConnections)}><Network size={18} strokeWidth={1.5} /></button></Tooltip>
     </div>;
 });

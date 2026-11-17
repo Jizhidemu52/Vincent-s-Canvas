@@ -40,6 +40,9 @@ for (const profile of profiles) for (const viewport of [{ width: 1280, height: 7
             backgroundMode: "dots", showImageInfo: false, viewport: { x: 0, y: 0, k: 1 }, selectedNodeIds: [], history: { past: [], future: [] },
         } });
         await page.goto(`/canvas/${id}`);
+        const toolbar = page.getByTestId("canvas-top-tool-rail");
+        await expect(toolbar).toBeVisible();
+        await expect.poll(() => toolbar.evaluate(element => element.getBoundingClientRect().height)).toBeLessThanOrEqual(64);
         await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
         await page.getByRole("button", { name: "跳过引导", exact: true }).click();
         await page.getByRole("tab", { name: "对话", exact: true }).first().click();
