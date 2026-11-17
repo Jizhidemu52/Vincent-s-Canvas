@@ -3,14 +3,14 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { decodePerformanceThumbnails, inspectRenderedPerformanceImages, openPerformanceScene, preparePerformanceScene, PROJECT_ID } from "./canvas-performance-fixture";
+import { decodePerformanceThumbnails, inspectRenderedPerformanceImages, openPerformanceScene, preparePerformanceScene, resetPerformanceView, PROJECT_ID } from "./canvas-performance-fixture";
 import { summarizeFrames, memoryBudgetFailures } from "../scripts/canvas-performance-budget.mjs";
 import { analyzeCanvasHeap } from "../scripts/canvas-performance-heap.mjs";
 import { parseCanvasProject } from "../src/lib/canvas/canvas-project-codec";
 import { startPerformanceFrameProbe } from "./canvas-performance-frame-probe";
 
 const variant = process.env.CANVAS_PERF_VARIANT;
-const output = resolve(import.meta.dirname, `../../output/canvas-performance/${variant || "not-run"}`);
+const output = resolve(process.env.CANVAS_PERF_OUTPUT_ROOT || resolve(import.meta.dirname, "../../output/canvas-performance"), variant || "not-run");
 test.skip(!variant, "Use the isolated canvas-performance.config.ts and a production build");
 
 async function startFrames(page: Page, busyMs: number) {
@@ -65,12 +65,6 @@ async function readSavedPerformanceProject(page: Page, ownerId: string) {
     if (project.id !== PROJECT_ID) throw new Error("Persisted performance project ID does not match its owner-scoped key");
     return project;
 }
-async function resetView(page: Page) {
-    await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
-    await page.getByRole("button", { name: "100%", exact: true }).click();
-    await page.keyboard.press("Escape");
-    await page.waitForTimeout(350);
-}
 async function gesture(page: Page, label: string) {
     if (label === "pan") {
         await page.mouse.move(1100, 850); await page.mouse.down({ button: "middle" });
@@ -93,6 +87,36 @@ async function gesture(page: Page, label: string) {
         await page.mouse.up();
     }
 }
+
+async function locatePerformanceNode(page: Page) {
+    await page.getByRole("button", { name: "打开画布菜单", exact: true }).click();
+    await page.getByRole("menuitem", { name: /搜索命令、节点和素材/ }).click();
+    await page.getByRole("combobox", { name: "搜索命令、节点和素材" }).fill("性能样本 0");
+    await expect(page.locator(".cw-command-group-heading").filter({ hasText: /^画布节点$/ })).toHaveCount(1);
+    await page.getByRole("option", { name: "性能样本 0 定位", exact: true }).click();
+    await expect(page.locator('[data-node-id="performance-node-0"]')).toBeVisible();
+    await page.waitForTimeout(300);
+}
+
+test("performance reset uses the current menu state and closes it before gestures", async ({ page, context, api }, info) => {
+    api.role = "super_admin";
+    await preparePerformanceScene(context, api);
+    await openPerformanceScene(page);
+    const trigger = page.getByRole("button", { name: "画布缩放与视图", exact: true });
+    await resetPerformanceView(page);
+    await trigger.click();
+    await page.locator(".cw-view-menu").getByRole("button", { name: "200%", exact: true }).click();
+    await expect(trigger).toHaveText("200%");
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Escape");
+    await page.screenshot({ path: info.outputPath("before-reset-existing-menu.png") });
+    await resetPerformanceView(page);
+    await gesture(page, "zoom");
+    await resetPerformanceView(page);
+    await page.screenshot({ path: info.outputPath("after-zoom-reset-menu-closed.png") });
+    expect(api.submissions).toHaveLength(0);
+    expect(api.batchSubmissions).toHaveLength(0);
+});
 
 test("500节点100栅格图：对照帧率、真实堆曲线与200步历史边界", async ({ page, context, api, browser }, testInfo) => {
     // Production diagnostics are intentionally hidden from normal designers.
@@ -121,15 +145,9 @@ test("500节点100栅格图：对照帧率、真实堆曲线与200步历史边�
     for (let repetition = 0; repetition < repetitions; repetition++) for (const label of ["pan", "zoom", "drag"]) {
         // Normal UI reset and a fresh context per variant retain the real
         // persistence path rather than mutating private application stores.
-        await resetView(page);
+        await resetPerformanceView(page);
         if (label === "drag") {
-            // Locate through the product command palette, not a private store.
-            await page.getByRole("button", { name: "打开画布菜单", exact: true }).click();
-            await page.getByRole("menuitem", { name: /搜索命令、节点和素材/ }).click();
-            await page.getByRole("combobox", { name: "搜索命令、节点和素材" }).fill("性能样本 0");
-            await expect(page.locator(".cw-command-group-heading").filter({ hasText: /^画布节点$/ })).toHaveCount(1);
-            await page.getByRole("option", { name: "性能样本 0 定位", exact: true }).click();
-            await page.waitForTimeout(300);
+            await locatePerformanceNode(page);
         }
         await startFrames(page, busyMs);
         await gesture(page, label);
@@ -152,16 +170,16 @@ test("500节点100栅格图：对照帧率、真实堆曲线与200步历史边�
     // A new isolated browser context avoids loaded app references and IDB
     // handles surviving the reset. No product store is exposed for this probe.
     await page.close();
-    const memoryContext = await browser.newContext({ viewport: { width: 1800, height: 1200 }, serviceWorkers: "block", deviceScaleFactor: 1 });
+    const memoryContext = await browser.newContext({ baseURL: testInfo.project.use.baseURL, viewport: { width: 1800, height: 1200 }, serviceWorkers: "block", deviceScaleFactor: 1 });
     const MemoryApi = (await import("./fixtures")).MockCanvasApi;
     const memoryApi = new MemoryApi(testInfo.project.use.baseURL!);
     memoryApi.role = "super_admin";
     await memoryApi.attach(memoryContext);
     await preparePerformanceScene(memoryContext, memoryApi);
     const memoryPage = await memoryContext.newPage();
-    await memoryPage.goto(`${testInfo.project.use.baseURL}/canvas/${PROJECT_ID}`);
-    await expect(memoryPage.locator('[data-node-id="performance-node-0"]')).toBeVisible();
-    const skip = memoryPage.getByRole("button", { name: "跳过引导", exact: true }); if (await skip.isVisible()) await skip.click();
+    await openPerformanceScene(memoryPage);
+    await resetPerformanceView(memoryPage);
+    await locatePerformanceNode(memoryPage);
     await decodePerformanceThumbnails(memoryPage);
     const memoryOwnerId = await memoryPage.evaluate(async () => {
         const response = await fetch("/api/auth/session", { cache: "no-store" });

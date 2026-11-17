@@ -102,6 +102,19 @@ export async function openPerformanceScene(page: Page) {
     await page.waitForTimeout(800);
 }
 
+export async function resetPerformanceView(page: Page) {
+    const trigger = page.getByRole("button", { name: "画布缩放与视图", exact: true });
+    if (await trigger.getAttribute("aria-expanded") !== "true") await trigger.click();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    const menu = page.locator(".cw-view-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "回到 100%", exact: true }).click();
+    await expect(trigger).toHaveText("100%");
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await expect(menu).toBeHidden();
+    await page.waitForTimeout(350);
+}
+
 /** The fixture explicitly retains 100 decoded distinct thumbnails (18.75MiB
  * RGBA minimum). UI image requests are reported separately; this is not a claim
  * that virtualization paints every original or that JS heap includes pixels. */

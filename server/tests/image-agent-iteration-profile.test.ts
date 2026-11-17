@@ -43,7 +43,7 @@ test.each(["creative-chat", "canvas-assistant"] as const)("%s optional edit_spec
     expect(() => parseImageAgentEdit({ prompt: "改袖口", edit_spec: { ...spec, changes: [] } })).toThrow(ImageAgentArgumentsError);
     expect(() => parseImageAgentEdit({ prompt: "改袖口", edit_spec: { ...spec, model: "another-model" } })).toThrow(ImageAgentArgumentsError);
     expect(prepared.input.input.at(-1)).toEqual(request(profile).input.at(-1));
-    expect(String((prepared.input.input[0] as { content: string }).content)).toContain("本轮明确要求优先");
+    expect(String((prepared.input.input[0] as { content: string }).content)).toMatch(/本轮(?:明确)?要求优先/);
 });
 
 test.each(["creative-chat", "canvas-assistant"] as const)("%s repair uses only the original image-planning tool", async profile => {

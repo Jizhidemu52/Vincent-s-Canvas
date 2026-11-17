@@ -8,9 +8,9 @@ if (!process.env.CANVAS_PERF_DIST) throw new Error("Set CANVAS_PERF_DIST to a pr
 
 export default defineConfig({
     testDir: ".", testMatch: "canvas-performance.pw.ts", workers: 1, retries: 0,
-    timeout: 240_000, expect: { timeout: 15_000 }, fullyParallel: false,
+    timeout: 360_000, expect: { timeout: 15_000 }, fullyParallel: false,
     forbidOnly: Boolean(process.env.CI),
-    outputDir: `../../output/canvas-performance/${variant}/traces`,
+    outputDir: resolve(process.env.CANVAS_PERF_OUTPUT_ROOT || resolve(import.meta.dirname, "../../output/canvas-performance"), variant, "traces"),
     reporter: [["list"]],
     use: {
         ...devices["Desktop Chrome"], baseURL: `http://127.0.0.1:${port}`,

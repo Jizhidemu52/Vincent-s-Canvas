@@ -7,7 +7,7 @@ import { comparePerformance } from "./canvas-performance-budget.mjs";
 const option = name => { const at = process.argv.indexOf(name); return at < 0 ? undefined : process.argv[at + 1]; };
 const baselineDist = option("--baseline-dist"), candidateDist = option("--candidate-dist");
 if (!baselineDist || !candidateDist) throw new Error("Usage: bun scripts/canvas-performance-runner.mjs --baseline-dist OLD_PRODUCTION_BUILD --candidate-dist NEW_PRODUCTION_BUILD [--reuse-baseline]");
-const web = resolve(import.meta.dirname, ".."), output = resolve(web, "../output/canvas-performance");
+const web = resolve(import.meta.dirname, ".."), output = resolve(process.env.CANVAS_PERF_OUTPUT_ROOT || resolve(web, "../output/canvas-performance"));
 const run = (variant, dist, port) => new Promise((resolveRun, reject) => {
     const child = spawn(process.execPath, ["x", "playwright", "test", "--config", "e2e/canvas-performance.config.ts"], {
         cwd: web, stdio: "inherit", windowsHide: true,
