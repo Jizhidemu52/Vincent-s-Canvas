@@ -3,11 +3,19 @@
 .canvas-design-discussion button { cursor: pointer; }
 .canvas-design-discussion button:disabled { cursor: not-allowed; opacity: .5; }
 .canvas-design-discussion button:focus-visible, .canvas-design-discussion textarea:focus-visible, .canvas-design-discussion select:focus-visible { outline: 2px solid var(--cw-active); outline-offset: 3px; }
-.canvas-design-discussion .studio-panel { pointer-events: auto; top: 64px; right: 12px; bottom: 12px; border: 1px solid var(--cw-border); border-radius: 14px; overflow: hidden; z-index: 5; box-shadow: 0 12px 40px #0001; }
+.canvas-design-discussion .studio-panel { pointer-events: auto; top: 64px; right: 12px; bottom: 12px; max-width: calc(100% - 24px); border: 1px solid var(--cw-border); border-radius: 14px; overflow: hidden; z-index: 5; box-shadow: 0 12px 40px #0001; font-size: var(--discussion-text-size, 16px); --discussion-label-size: max(12px, calc(var(--discussion-text-size, 16px) - 2px)); --discussion-caption-size: max(12px, calc(var(--discussion-text-size, 16px) - 4px)); }
+.canvas-design-discussion .studio-heading-actions { gap: 4px; }
+.canvas-design-discussion .studio-heading-actions > button:not(.cw-panel-size-button) { display: grid; place-items: center; width: 30px; height: 36px; }
+.canvas-design-discussion .studio-heading-actions .cw-panel-size-button { font-size: 13px; }
+.canvas-design-discussion :is(.studio-message, .studio-question strong, .studio-welcome p, .studio-composer > textarea, .discussion-proposals summary, .proposal-options h3, .proposal-options ul, .proposal-options p, .proposal-intro) { font-size: var(--discussion-text-size, 16px); }
+.canvas-design-discussion :is(.studio-modes button, .studio-context-heading strong, .studio-brief > summary, .studio-brief input, .studio-brief select, .studio-brief textarea, .studio-question button, .discussion-proposals button, .discussion-results figcaption, .discussion-result-actions button, .discussion-focus, .studio-batch, .studio-send button, .studio-composer-tools select, .proposal-dialog select) { font-size: var(--discussion-label-size, 14px); }
+.canvas-design-discussion :is(.studio-modes small, .studio-panel-heading p, .studio-context-heading strong span, .studio-context-heading button, .studio-reference span, .studio-reference select, .studio-references > p, .studio-reference-help, .studio-message > span, .studio-message-refs, .studio-message details, .studio-help, .studio-brief label, .studio-brief > summary > span, .studio-send small, .discussion-settings > summary, .studio-batch small, .studio-composer-tools label, .discussion-results > p, .discussion-results figcaption small, .discussion-result-waiting, .discussion-thinking, .discussion-process, .studio-progress li, .studio-error) { font-size: var(--discussion-caption-size, 12px); }
+.canvas-design-discussion .studio-send { flex-wrap: wrap; }
+.canvas-design-discussion .studio-send > div { margin-left: auto; }
 .canvas-design-discussion .studio-composer-tools { flex-wrap: wrap; gap: 8px 12px; }
 .canvas-design-discussion .studio-composer-tools select { max-width: 180px; }
 .canvas-design-discussion .studio-composer-tools label { min-width: 60px; }
-.canvas-design-discussion .studio-help { font-size: 10px; line-height: 1.5; }
+.canvas-design-discussion .studio-help { line-height: 1.5; }
 .canvas-design-discussion .studio-connection-status { padding: 0 20px; color: var(--cw-muted); font-size: 11px; line-height: 1.6; }
 .canvas-design-discussion .studio-panel button, .canvas-design-discussion .proposal-dialog button { flex-shrink: 0; }
 .canvas-design-discussion .proposal-dialog, .canvas-design-discussion .reference-picker { pointer-events: auto; }
@@ -42,6 +50,6 @@
 .canvas-design-proposal figure { margin: 0; width: 40px; }
 .canvas-design-proposal img { width: 36px; height: 36px; object-fit: contain; background: var(--cw-soft); }
 .canvas-design-proposal figcaption { font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--cw-muted); }
-@media (max-width: 760px) { .canvas-design-discussion { --panel-width: calc(100% - 16px); } .canvas-design-discussion .studio-panel { top: 108px; right: 8px; bottom: 8px; } .dd-island { top: 57px; left: 50%; width: 246px; } .dd-pill { height: 40px; } .dd-notice { top: 107px; } .dd-connect { top: 119px; } .canvas-design-discussion .studio-panel-heading { padding: 10px 15px; } .canvas-design-discussion .studio-modes { margin-bottom: 9px; } .canvas-design-discussion .studio-context-heading { padding-inline: 15px; } .canvas-design-discussion .studio-composer-tools { gap: 6px 8px; } .canvas-design-discussion .studio-composer-tools select { max-width: 160px; } }
+@media (max-width: 760px) { .canvas-design-discussion .studio-panel { width: calc(100% - 16px); max-width: none; top: 108px; right: 8px; bottom: 8px; } .dd-island { top: 57px; left: 50%; width: 246px; } .dd-pill { height: 40px; } .dd-notice { top: 107px; } .dd-connect { top: 119px; } .canvas-design-discussion .studio-panel-heading { padding: 10px 15px; } .canvas-design-discussion .studio-modes { margin-bottom: 9px; } .canvas-design-discussion .studio-context-heading { padding-inline: 15px; } .canvas-design-discussion .studio-composer-tools { gap: 6px 8px; } .canvas-design-discussion .studio-composer-tools select { max-width: 160px; } }
 @media (prefers-reduced-motion: reduce) { .canvas-design-discussion * { scroll-behavior: auto !important; } }
 @media (max-width: 760px) { .canvas-design-discussion .proposal-dialog > footer { gap: 7px; padding-top: 10px; } .canvas-design-discussion .proposal-dialog > footer > div:first-child { display: grid; grid-template-columns: 1fr 1fr; } .canvas-design-discussion .proposal-dialog > footer > div:last-child { display: flex; align-items: center; gap: 10px; } .canvas-design-discussion .proposal-dialog > footer p { flex: 1; } .canvas-design-discussion .proposal-options { margin: 12px 0; } }

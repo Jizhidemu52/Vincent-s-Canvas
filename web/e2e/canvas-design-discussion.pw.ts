@@ -6,6 +6,58 @@ const video = { id: "40000000-0000-4000-8000-000000000115", modelId: "seedance-2
 const catalog = { models: [...models, video], prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: null, configurationVersion: 1 })) };
 const fixtureProposal = { id: "error-proposal", title: "针织展示方向", features: ["保留针织材质", "镜头缓慢推近"], rationale: "仅用于隔离错误状态回归。", prompt: "生成针织服装商品展示视频，缓慢推近，保持针织材质。", referenceIds: [], sourceNotes: [] };
 
+test("discussion display settings resize text and panel without altering drafts or creating tasks", async ({ page, context, api }, info) => {
+    let chats = 0;
+    await context.route("**/api/models", route => route.fulfill({ json: catalog }));
+    await context.route("**/api/chat/responses", route => {
+        chats++;
+        return route.fulfill({ json: { content: JSON.stringify({ message: "先把配色方向聊清楚，再决定是否生成。", questions: [], proposals: [], sources: [], trendStatus: "隔离显示回归" }), toolCalls: [] } });
+    });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await newCanvas(page);
+    await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
+    const panel = page.getByRole("complementary", { name: "设计讨论面板" });
+    const composer = panel.getByRole("textbox", { name: "输入设计需求" });
+    await expect(panel.getByRole("button", { name: "发送讨论", exact: true })).toBeEnabled();
+    await composer.fill("先聊配色，不出图。");
+    await composer.press("Enter");
+    await expect(panel.locator(".studio-message.assistant")).toHaveCSS("font-size", "16px");
+    await composer.fill("这段未发送的草稿需要保留");
+    await panel.getByRole("button", { name: "调整设计讨论显示" }).click();
+    const settings = page.getByRole("dialog", { name: "设计讨论显示设置" });
+    await settings.getByRole("slider", { name: "讨论字号", exact: true }).focus();
+    await page.keyboard.press("End");
+    await settings.getByRole("button", { name: "宽敞", exact: true }).click();
+    await settings.getByRole("button", { name: "关闭面板大小设置" }).click();
+    await expect(panel).toHaveCSS("width", "600px");
+    await expect(panel.locator(".studio-message.assistant")).toHaveCSS("font-size", "20px");
+    await expect(composer).toHaveCSS("font-size", "20px");
+    await expect(composer).toHaveValue("这段未发送的草稿需要保留");
+    const headingActions = panel.locator(".studio-heading-actions");
+    expect(await headingActions.evaluate(element => [...element.querySelectorAll("button")].every(button => button.scrollWidth <= button.clientWidth))).toBe(true);
+    const preferences = await page.evaluate(() => JSON.parse(localStorage.getItem("wireless-canvas:panel-widths")!).state);
+    expect(preferences).toMatchObject({ createWidth: 480, chatWidth: 480, discussionWidth: 600, discussionFontSize: 20 });
+    await page.screenshot({ path: info.outputPath("discussion-appearance-desktop.png"), animations: "disabled" });
+    await page.reload();
+    await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
+    await expect(composer).toHaveValue("这段未发送的草稿需要保留");
+    await expect(panel).toHaveCSS("width", "600px");
+    await expect(panel.locator(".studio-message.assistant")).toHaveCSS("font-size", "20px");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await panel.getByRole("button", { name: "调整设计讨论显示" }).click();
+    await expect(settings.getByRole("slider", { name: "面板宽度", exact: true })).toHaveCount(0);
+    await settings.getByRole("slider", { name: "讨论字号", exact: true }).focus();
+    await page.keyboard.press("Home");
+    await settings.getByRole("button", { name: "关闭面板大小设置" }).click();
+    await expect(panel.locator(".studio-message.assistant")).toHaveCSS("font-size", "14px");
+    await expect(panel.getByRole("button", { name: "发送讨论", exact: true })).toBeInViewport({ ratio: 1 });
+    expect(await headingActions.evaluate(element => [...element.querySelectorAll("button")].every(button => button.scrollWidth <= button.clientWidth))).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: info.outputPath("discussion-appearance-mobile.png"), animations: "disabled" });
+    expect(chats).toBe(1);
+    expect(api.submissions).toHaveLength(0);
+});
+
 test("video discussion prefers Flash without overwriting a saved model choice", async ({ page, context, api }) => {
     const previousVideo = { ...video, id: "40000000-0000-4000-8000-000000000114", modelId: "doubao-seedance-2.5", name: "旧 Seedance" };
     await context.route("**/api/models", route => route.fulfill({ json: { ...catalog, models: [...models, previousVideo, video] } }));

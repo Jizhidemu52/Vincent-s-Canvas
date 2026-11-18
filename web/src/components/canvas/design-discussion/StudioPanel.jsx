@@ -13,6 +13,9 @@ import { readDesignMaterial } from "./studio-media.mjs";
 import { selectedTrendSources } from "./trend-sources.mjs";
 import { DiscussionResults } from "./DiscussionResults.jsx";
 import { messageTasks, resultDiscussionReference } from "./discussion-thread.mjs";
+import { CanvasPanelSizeControl } from "../canvas-panel-size-control";
+import { useCanvasPanelStore } from "@/stores/canvas/use-canvas-panel-store";
+import { clampCanvasDiscussionFontSize, clampCanvasPanelWidth } from "@/lib/canvas/canvas-panel-width";
 
 export function newStudioSession(references = []) {
     return { id: createClientUuid(), references, history: [], executedThrough: 0, brief: {}, documents: [], designRecord: createDesignRecord(), designRecordReferenceSnapshot: [], prompt: "", mode: "discuss", preset: "brand", proposalCount: 6, generationCount: 1, outputKind: "image", videoSeconds: 6, modelId: "", proposalBatch: null };
@@ -49,6 +52,8 @@ function ProposalDialog({ batch, selected, onSelect, onClose, onGenerate, busy, 
 }
 
 export function StudioPanel({ visible, session, onChange, items, onChoose, onImport, onFigures, api, ownerId, catalog, ready, brands, onSave, onSubmitBatch, onClose, onNotice, tasks = [], onLocateResult }) {
+    const panelWidth = useCanvasPanelStore(state => state.discussionWidth);
+    const fontSize = useCanvasPanelStore(state => state.discussionFontSize);
     const [pickerOpen, setPickerOpen] = useState(false);
     const [proposalOpen, setProposalOpen] = useState(false);
     const [chosenProposals, setChosenProposals] = useState([]);
@@ -183,8 +188,8 @@ export function StudioPanel({ visible, session, onChange, items, onChoose, onImp
             input.current.focus();
         } catch (failure) { setError(failure.message); }
     };
-    return <aside className={`studio-panel ${visible ? "" : "studio-panel-hidden"}`} aria-label="设计讨论面板" aria-hidden={!visible} aria-busy={!ready}>
-        <header className="studio-panel-heading"><div><span className="studio-avatar"><Sparkles size={19} /></span><div><h1>设计讨论</h1><p>一起看稿，把方向聊清楚。</p></div></div><button aria-label="收起讨论面板" onClick={onClose}><X size={18} /></button></header>
+    return <aside className={`studio-panel ${visible ? "" : "studio-panel-hidden"}`} style={{ "--panel-width": `${clampCanvasPanelWidth("discussion", panelWidth)}px`, "--discussion-text-size": `${clampCanvasDiscussionFontSize(fontSize)}px` }} aria-label="设计讨论面板" aria-hidden={!visible} aria-busy={!ready}>
+        <header className="studio-panel-heading"><div><span className="studio-avatar"><Sparkles size={19} /></span><div><h1>设计讨论</h1><p>一起看稿，把方向聊清楚。</p></div></div><div className="studio-heading-actions"><CanvasPanelSizeControl kind="discussion" disabled={!ready} /><button aria-label="收起讨论面板" onClick={onClose}><X size={18} /></button></div></header>
         {!ready && <p className="studio-connection-status" role="status">正在恢复讨论或等待画布编辑权限，请稍候再编辑；连接失败时可在顶部重新连接。</p>}
         <nav className="studio-modes" aria-label="设计工作方式"><button disabled={busy || !ready} aria-pressed={session.mode === "discuss"} onClick={() => update({ mode: "discuss" })}><MessageCircle size={16} /><span>聊设计<small>讨论 → 选方案 → 出图</small></span></button><button disabled={busy || !ready} aria-pressed={session.mode === "direct"} onClick={() => update({ mode: "direct" })}><Sparkles size={16} /><span>直接出方案<small>图片 + 资料 → 多个方案图</small></span></button></nav>
         <div className="studio-context-heading"><strong>当前讨论对象 <span>{session.references.length ? `${session.references.length} 张 · 同一段讨论` : "尚未选图"}</span></strong><button disabled={busy || uploading || !ready} onClick={() => setPickerOpen(true)}>画布 / 素材选图</button></div>

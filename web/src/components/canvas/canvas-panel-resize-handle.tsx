@@ -5,7 +5,7 @@ import { canvasPanelWidths, clampCanvasPanelWidth, type CanvasPanelKind } from "
 import { keyboardCanvasPanelWidth } from "@/lib/canvas/canvas-panel-resize-keyboard";
 import { useCanvasPanelStore } from "@/stores/canvas/use-canvas-panel-store";
 
-export function CanvasPanelResizeHandle({ kind }: { kind: CanvasPanelKind }) {
+export function CanvasPanelResizeHandle({ kind }: { kind: Exclude<CanvasPanelKind, "discussion"> }) {
     const t = useUiText();
     const storedWidth = useCanvasPanelStore((state) => kind === "create" ? state.createWidth : state.chatWidth);
     const width = clampCanvasPanelWidth(kind, storedWidth);

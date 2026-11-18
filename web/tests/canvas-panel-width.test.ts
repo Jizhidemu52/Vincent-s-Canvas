@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { canvasPanelWidths, clampCanvasPanelWidth, clampCanvasPromptHeight } from "@/lib/canvas/canvas-panel-width";
+import { canvasPanelWidths, clampCanvasDiscussionFontSize, clampCanvasPanelWidth, clampCanvasPromptHeight } from "@/lib/canvas/canvas-panel-width";
 import { keyboardCanvasPanelWidth } from "@/lib/canvas/canvas-panel-resize-keyboard";
 
 test("creation and chat widths have independent defaults and safe bounds", () => {
@@ -27,4 +27,15 @@ test("input height remains adjustable inside supported bounds", () => {
     expect(clampCanvasPromptHeight(1000)).toBe(480);
     expect(clampCanvasPromptHeight(NaN)).toBe(240);
     expect(clampCanvasPromptHeight(320)).toBe(320);
+});
+
+test("discussion display preferences remain readable and bounded", () => {
+    expect(canvasPanelWidths.discussion.default).toBe(480);
+    expect(clampCanvasPanelWidth("discussion", 100)).toBe(380);
+    expect(clampCanvasPanelWidth("discussion", 1000)).toBe(680);
+    expect(clampCanvasPanelWidth("discussion", Number.NaN)).toBe(480);
+    expect(clampCanvasDiscussionFontSize(1)).toBe(14);
+    expect(clampCanvasDiscussionFontSize(50)).toBe(20);
+    expect(clampCanvasDiscussionFontSize(Number.NaN)).toBe(16);
+    expect(clampCanvasDiscussionFontSize(17.8)).toBe(18);
 });
