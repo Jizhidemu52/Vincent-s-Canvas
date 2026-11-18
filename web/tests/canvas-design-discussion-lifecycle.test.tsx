@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
 import ts from "typescript";
-import { activeStatuses, taskLabel } from "../src/components/canvas/design-discussion/task-model.mjs";
+import { activeStatuses, designTaskMetadata, taskLabel } from "../src/components/canvas/design-discussion/task-model.mjs";
 
 const sourceUrl = new URL("../src/components/canvas/design-discussion/CanvasDesignDiscussion.jsx", import.meta.url);
 const requireModule = createRequire(sourceUrl);
@@ -102,7 +102,7 @@ function harness(options: { tasks?: Data[]; savedSession?: Data; upload?: (url: 
         "@/lib/canvas/canvas-node-size": { fitNodeSize: (width: number, height: number) => ({ width, height }) },
         "@/types/canvas": { CanvasNodeType: { Image: "image", Video: "video" } },
         "./StudioPanel.jsx": { StudioPanel: "StudioPanel", newStudioSession: newSession },
-        "./task-model.mjs": { activeStatuses, taskLabel },
+        "./task-model.mjs": { activeStatuses, designTaskMetadata, taskLabel },
         "./studio-media.mjs": { readImageFiles: async (files: Data[]) => files },
         "./design-record.mjs": { continueDesignRecord: () => ({}) },
         "./studio.css": {}, "./canvas-discussion.css": {},
@@ -125,6 +125,7 @@ function harness(options: { tasks?: Data[]; savedSession?: Data; upload?: (url: 
         render, settle, downloads, starts, histories, locations, writes, runtime, props,
         panel: () => render().find(element => element.type === "StudioPanel")!.props,
         nodes: (id = currentProject) => graphs.get(id)?.nodes || [],
+        select(ids: string[]) { setSelected(new Set(ids)); },
         switchProject(id: string, nodes: Data[] = []) { currentProject = id; graphs.set(id, { nodes, selected: new Set() }); },
         switchOwner(id: string) { identity = { ...identity, user: { ...identity.user, id } }; serverOwner = id; },
         switchServerOwner(id: string) { serverOwner = id; },
@@ -194,6 +195,38 @@ describe("task island hover and pinned interaction", () => {
 });
 
 describe("canvas design discussion async ownership", () => {
+    test("restored canvas selection does not replace saved references, but a new selection still imports", async () => {
+        const references = ["source-a", "source-b"].map(id => ({ id, title: id, image: resultUrl }));
+        const resultNodes = ["result-a", "result-b", "result-c"].map(id => ({ id, title: id, type: "image", metadata: { content: resultUrl, sourceTaskId: id } }));
+        const session = { id: "restored-session", references, history: [], prompt: "", brief: {} };
+        const subject = harness({ savedSession: session, nodes: resultNodes, selected: resultNodes.map(node => node.id) });
+        try {
+            await subject.settle();
+            expect(subject.panel().session.references.map((reference: Data) => reference.id)).toEqual(["source-a", "source-b"]);
+            subject.panel().onChange({ references: [] });
+            await subject.tick();
+            expect(subject.panel().session.references).toEqual([]);
+            subject.select(["result-b"]);
+            await subject.settle();
+            expect(subject.panel().session.references.map((reference: Data) => reference.id)).toEqual(["result-b"]);
+        } finally { subject.dispose(); }
+    });
+
+    test("manually cleared references are not restored by a late canvas selection read", async () => {
+        const pending = deferred<string>();
+        const node = { id: "pending-reference", title: "稍后读取的图", type: "image", metadata: { content: resultUrl } };
+        const subject = harness({ nodes: [node], resolveImage: () => pending.promise });
+        try {
+            await subject.settle();
+            subject.select([node.id]);
+            await subject.settle();
+            subject.panel().onChange({ references: [] });
+            pending.resolve(resultUrl);
+            await subject.settle();
+            expect(subject.panel().session.references).toEqual([]);
+        } finally { subject.dispose(); }
+    });
+
     test("a result finishing after a project change never inserts into the new canvas", async () => {
         const pending = deferred<Data>();
         const subject = harness({ tasks: [savedTask], upload: () => pending.promise });
@@ -354,19 +387,47 @@ describe("original result recovery without generation", () => {
         } finally { subject.dispose(); }
     });
 
+    test.each(["success", "processing"])("a restored %s task reused before its batch receipt was saved keeps only its original canvas node", async status => {
+        const original = { ...savedTask, status, resultUrls: status === "success" ? [resultUrl] : [] };
+        const subject = harness({ tasks: [original] });
+        const receipts: Data[] = [];
+        try {
+            await subject.settle();
+            subject.runtime[0].start = async (input: Data) => {
+                expect(input.requestId).not.toBe(original.requestId);
+                return original;
+            };
+            button(subject.render(), "打开设计讨论").props.onClick();
+            await subject.panel().onSubmitBatch([{ generationAllowed: true, prompt: "reuse the recorded proposal slot" }], (task: Data) => receipts.push(task));
+            await subject.settle();
+            expect(receipts).toEqual([original]);
+            expect(subject.nodes()).toHaveLength(1);
+            expect(subject.nodes()[0].id).toBe("design-local-task-0");
+            if (status === "processing") {
+                expect(subject.nodes()[0].metadata).toMatchObject({ status: "loading", designTask: { requestId: original.requestId, status } });
+                subject.runtime[0].onChange([savedTask]);
+                await subject.settle();
+            }
+            expect(subject.nodes()).toHaveLength(1);
+            expect(subject.nodes()[0].metadata).toMatchObject({ content: resultUrl, sourceTaskId: original.taskId });
+            expect(subject.downloads).toHaveLength(1);
+        } finally { subject.dispose(); }
+    });
+
     test("mounting and hiding the panel never submit generation, including stale open callbacks", async () => {
         const subject = harness();
         try {
             await subject.settle();
-            await expect(subject.panel().onSubmit({ generationAllowed: true })).rejects.toThrow("已关闭");
+            await expect(subject.panel().onSubmitBatch([{ generationAllowed: true }], () => {})).rejects.toThrow("已关闭");
             expect(subject.starts).toEqual([]);
             button(subject.render(), "打开设计讨论").props.onClick();
             const opened = subject.panel();
             expect(opened.visible).toBe(true);
-            await opened.onSubmit({ generationAllowed: true, prompt: "explicit action" });
+            await opened.onSubmitBatch([{ generationAllowed: true, prompt: "explicit action" }], () => {});
             expect(subject.starts).toHaveLength(1);
+            expect(subject.panel().visible).toBe(true);
             opened.onClose();
-            await expect(opened.onSubmit({ generationAllowed: true })).rejects.toThrow("已关闭");
+            await expect(opened.onSubmitBatch([{ generationAllowed: true }], () => {})).rejects.toThrow("已关闭");
             await subject.tick();
             expect(subject.starts).toHaveLength(1);
         } finally { subject.dispose(); }

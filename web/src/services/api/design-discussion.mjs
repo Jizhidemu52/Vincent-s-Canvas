@@ -139,7 +139,7 @@ export function createTaskController({ api, storage, ownerId, projectId = "canva
                 if (task.kind === "task-annotation") { collectAnnotation(task); return; }
                 if (typeof task.id !== "string" || typeof task.requestId !== "string") return;
                 receipts.set(task.id, task);
-                records.push(task.status === "submitting" ? { ...task, status: "uncertain" } : task);
+                records.push(task.status === "preparing" ? { ...task, status: "failed", failureReason: "准备过程已中断，尚未提交模型。" } : task.status === "submitting" ? { ...task, status: "uncertain" } : task);
             });
             tasks = records.sort((a, b) => a.startedAt - b.startedAt).map(withAnnotations);
             emit();
@@ -170,14 +170,26 @@ export function createTaskController({ api, storage, ownerId, projectId = "canva
                     const mode = resolveVideoMode(config, input.references.length, 0, 0, undefined, parameterModel);
                     parameters = videoModelRequestParameters({ ...config, videoMode: mode }, parameterModel, mode);
                 } else parameters = imageParameters(model, input.references.length);
-                const references = [];
-                for (const reference of input.references) references.push({ ...await api.upload(reference, ownerId), kind: reference.kind || "reference", workNote: reference.workNote || "", keep: reference.keep || [], role: reference.role || "auto", ...(reference.parentId ? { parentId: reference.parentId } : {}), ...(reference.taskId ? { taskId: reference.taskId } : {}) });
-                await checkOwner();
-                id = createClientUuid();
-                let task = { id, requestId: id, ownerId, projectId, mediaKind: video ? "video" : "image", prompt: input.prompt.trim(), userText: input.userText || input.prompt.trim(), references, modelId: model.id, model: model.name, parameters, status: "submitting", startedAt: Date.now(), observing: true, resultUrls: [], baseId: input.baseId, keep: input.keep || [], spec: input.spec, workNote: input.workNote || "", conversation: input.conversation || [], brief: input.brief || {}, designRecord: input.designRecord, executionContract: input.executionContract, feedback: { status: "unreviewed", note: "" }, feedbackHistory: [], caseIds: input.caseIds || [] };
+                if (input.requestId && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.requestId)) throw new Error("生成请求编号无效，尚未提交。");
+                id = input.requestId || createClientUuid();
+                const recorded = tasks.find(task => task.requestId === id);
+                if (recorded) return recorded;
+                let task = { id, requestId: id, ownerId, projectId, mediaKind: video ? "video" : "image", prompt: input.prompt.trim(), userText: input.userText || input.prompt.trim(), references: input.references, modelId: model.id, model: model.name, parameters, status: "preparing", startedAt: Date.now(), observing: true, resultUrls: [], baseId: input.baseId, keep: input.keep || [], spec: input.spec, workNote: input.workNote || "", conversation: input.conversation || [], brief: input.brief || {}, designRecord: input.designRecord, executionContract: input.executionContract, feedback: { status: "unreviewed", note: "" }, feedbackHistory: [], caseIds: input.caseIds || [] };
                 if (input.proposal) task.proposal = structuredClone(input.proposal);
+                if (input.discussionSessionId) task.discussionSessionId = input.discussionSessionId;
+                if (input.discussionMessageId) task.discussionMessageId = input.discussionMessageId;
                 await save(task, true);
                 inFlight.add(id);
+                try {
+                    const references = [];
+                    for (const reference of input.references) references.push({ ...await api.upload(reference, ownerId), kind: reference.kind || "reference", workNote: reference.workNote || "", keep: reference.keep || [], role: reference.role || "auto", ...(reference.parentId ? { parentId: reference.parentId } : {}), ...(reference.taskId ? { taskId: reference.taskId } : {}) });
+                    await checkOwner();
+                    task = { ...task, references, status: "submitting" };
+                    await save(task, true);
+                } catch (error) {
+                    if (error.code === "SESSION_CHANGED") throw error;
+                    return await save({ ...task, status: "failed", failureReason: `${error.message}；尚未提交模型。` });
+                }
                 try { task = mergeServerTask(task, await api.submit(task, ownerId), ownerId); }
                 catch (error) {
                     task = { ...task, status: [400, 401, 403, 404, 413, 422].includes(error.status) ? "failed" : "uncertain", failureReason: error.message };

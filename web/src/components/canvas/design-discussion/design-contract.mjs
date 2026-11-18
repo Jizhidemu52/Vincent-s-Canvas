@@ -25,7 +25,9 @@ const attributeObjects = [
     { key: "patches", label: "拼片", pattern: /拼片|贴片|肩片|\b(?:patches|patch|panels?)\b/giu },
     { key: "body", label: "衣身", pattern: /衣身|大身|主体|\b(?:garment body|body)\b/giu },
     { key: "hem", label: "下摆", pattern: /下摆|\bhems?\b/giu },
+    { key: "stripes", label: "条纹", pattern: /(?:袖外侧|袖侧)?条纹|\bstripes?\b/giu },
 ];
+const colorObjectModifiers = /^(?:\s|的|大|小|罗纹|针织|竖向?|横向?|[零一二两三四五六七八九十\d]|颗|粒|枚|条|对|个|只)*$/iu;
 const globalObject = /原图|原稿|原设计|整件(?:服装|衣服|产品)?|整套|全图|全身|\b(?:entire|whole)\s+(?:garment|product|image)\b/iu;
 const globalAttribute = /(?:所有|全部|一切|整体|全局)(?:的)?(?:原有|原始)?(?:颜色|配色|色彩|材质|面料|纱线|图案|针法)|\b(?:all|every|overall)\s+(?:original\s+)?(?:colou?rs?|materials?|fabrics?|patterns?)\b/iu;
 const preservation = /保持|保留|不变|不要(?:再)?(?:改|动|调整)|不得(?:改|动)|不能(?:改|动)|\b(?:keep|preserve|retain|unchanged|unaltered|do not change|don't change)\b/iu;
@@ -74,6 +76,19 @@ function attributeScopes(clause, match, attribute) {
     if (!["color", "material", "pattern"].includes(attribute.key)) return [{ scope: "all", label: attribute.label, explicitGlobal: false }];
     const prefix = clause.slice(0, match.index);
     const suffix = clause.slice(match.index + match[0].length);
+    if (attribute.key === "color") {
+        const following = attributeObjects.flatMap(object => Array.from(suffix.matchAll(object.pattern), found => ({ ...object, index: found.index, end: found.index + found[0].length }))).sort((a, b) => a.index - b.index);
+        if (following.length && colorObjectModifiers.test(suffix.slice(0, following[0].index))) {
+            const selected = [following[0]];
+            for (const object of following.slice(1)) {
+                const gap = suffix.slice(selected.at(-1).end, object.index);
+                const connector = /^\s*(?:、|和|与|及|以及|and|&)\s*/iu.exec(gap);
+                if (!connector || !colorObjectModifiers.test(gap.slice(connector[0].length))) break;
+                selected.push(object);
+            }
+            return selected.map(object => ({ scope: object.key, label: `${object.label}${attribute.label}`, explicitGlobal: false }));
+        }
+    }
     const objects = attributeObjects.flatMap(object => Array.from(prefix.matchAll(object.pattern), found => ({ ...object, index: found.index, end: found.index + found[0].length }))).sort((a, b) => a.index - b.index);
     const whole = Array.from(prefix.matchAll(new RegExp(globalObject.source, "giu"))).at(-1);
     if (whole && whole.index > (objects.at(-1)?.index ?? -1)) return [{ scope: "all", label: attribute.label, explicitGlobal: true }];

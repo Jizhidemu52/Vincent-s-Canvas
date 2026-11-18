@@ -11,11 +11,13 @@ import { createDesignRecord, DESIGN_MODES, REFERENCE_ROLES } from "./design-reco
 import { CATEGORIES } from "./fashion-context.mjs";
 import { readDesignMaterial } from "./studio-media.mjs";
 import { selectedTrendSources } from "./trend-sources.mjs";
+import { DiscussionResults } from "./DiscussionResults.jsx";
+import { messageTasks, resultDiscussionReference } from "./discussion-thread.mjs";
 
 export function newStudioSession(references = []) {
     return { id: createClientUuid(), references, history: [], executedThrough: 0, brief: {}, documents: [], designRecord: createDesignRecord(), designRecordReferenceSnapshot: [], prompt: "", mode: "discuss", preset: "brand", proposalCount: 6, generationCount: 1, outputKind: "image", videoSeconds: 6, modelId: "", proposalBatch: null };
 }
-const fingerprint = session => JSON.stringify({ sessionId: session.id, prompt: session.prompt, references: session.references.map(ref => ({ id: ref.id, role: ref.role || "auto" })), brief: session.brief, documents: session.documents.map(doc => ({ id: doc.id, text: doc.text })), preset: session.preset, count: session.proposalCount, outputKind: session.outputKind || "image", record: session.designRecord, history: session.history.map(message => ({ role: message.role, content: message.content })) });
+const fingerprint = session => JSON.stringify({ sessionId: session.id, prompt: session.prompt, focus: session.discussionFocus, references: session.references.map(ref => ({ id: ref.id, role: ref.role || "auto" })), brief: session.brief, documents: session.documents.map(doc => ({ id: doc.id, text: doc.text })), preset: session.preset, count: session.proposalCount, outputKind: session.outputKind || "image", record: session.designRecord, history: session.history.map(message => ({ role: message.role, content: message.content })) });
 const emptyPrompt = "根据所选图片、品牌与资料提出有差异、可以落图的设计方向。";
 
 function ModelOptions({ models, video }) {
@@ -46,7 +48,7 @@ function ProposalDialog({ batch, selected, onSelect, onClose, onGenerate, busy, 
     </dialog>;
 }
 
-export function StudioPanel({ visible, session, onChange, items, onChoose, onImport, onFigures, api, ownerId, catalog, ready, brands, onSave, onSubmit, onClose, onNotice }) {
+export function StudioPanel({ visible, session, onChange, items, onChoose, onImport, onFigures, api, ownerId, catalog, ready, brands, onSave, onSubmitBatch, onClose, onNotice, tasks = [], onLocateResult }) {
     const [pickerOpen, setPickerOpen] = useState(false);
     const [proposalOpen, setProposalOpen] = useState(false);
     const [chosenProposals, setChosenProposals] = useState([]);
@@ -54,6 +56,7 @@ export function StudioPanel({ visible, session, onChange, items, onChoose, onImp
     const [uploading, setUploading] = useState(false);
     const [error, setError] = useState("");
     const [steps, setSteps] = useState([]);
+    const [pendingMessage, setPendingMessage] = useState(null);
     const busyRef = useRef(false);
     const latest = useRef(session);
     latest.current = session;
@@ -67,7 +70,8 @@ export function StudioPanel({ visible, session, onChange, items, onChoose, onImp
     const chosenModel = session.modelId ? models.find(item => item.id === session.modelId) : models.find(item => video ? (item.parameterModelId || item.modelId) === "seedance-2-5-flash" : item.imageParameterProfile === "seedream55") || models[0];
     const batch = session.proposalBatch;
     const stale = batch && batch.fingerprint !== fingerprint(session);
-    useEffect(() => { scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: "smooth" }); }, [session.history.length, steps]);
+    const taskProgress = tasks.map(task => `${task.id}:${task.status}:${task.resultUrls.length}`).join("|");
+    useEffect(() => { scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: "smooth" }); }, [session.history.length, pendingMessage, taskProgress]);
     const progress = step => setSteps(current => [...current.filter(item => item.id !== step.id), step]);
     const update = changes => { if (!ready) return; setError(""); onChange(changes); };
     const changeRole = (id, role) => {
@@ -83,13 +87,15 @@ export function StudioPanel({ visible, session, onChange, items, onChoose, onImp
             const existing = currentBatch.submissions?.[key] || currentBatch.submissions?.[proposal.id];
             if (existing) assertProposalSubmission(existing);
         }
-        for (const { proposal, index, key } of slots) {
-            if (currentBatch.fingerprint !== fingerprint(latest.current)) throw new Error("当前参考组已改变；剩余方案未提交，请更新方案后再生成。");
-            const existing = currentBatch.submissions?.[key] || currentBatch.submissions?.[proposal.id];
-            if (existing) continue;
+        const pending = slots.filter(({ proposal, key }) => !currentBatch.submissions?.[key] && !currentBatch.submissions?.[proposal.id]);
+        const inputs = pending.map(({ proposal, index, key }) => {
             const plan = createProposalExecution({ proposal, references: currentBatch.references, userRequirements: currentBatch.userRequirements, designRecord: currentBatch.designRecord, designRecordReferenceSnapshot: currentBatch.designRecordReferenceSnapshot, brief: currentBatch.brief, conversation: currentBatch.history, modelId: model.id, outputKind: currentBatch.outputKind || "image", generationAllowed: true });
-            progress({ id: `generate-${key}`, label: `正在提交 ${index + 1}/${count}：「${proposal.title}」`, status: "running" });
-            const task = await onSubmit({ ...plan, videoSeconds: latest.current.videoSeconds || 6, proposal: { ...plan.proposal, id: key, originalId: proposal.id, batchId: currentBatch.id, outputIndex: index } });
+            return { ...plan, discussionSessionId: currentBatch.sessionId, discussionMessageId: currentBatch.messageId, videoSeconds: latest.current.videoSeconds || 6, proposal: { ...plan.proposal, id: key, originalId: proposal.id, batchId: currentBatch.id, outputIndex: index } };
+        });
+        if (inputs.length) {
+            setProposalOpen(false);
+            await onSubmitBatch(inputs, (task, slot) => {
+            const { proposal, index, key } = pending[slot];
             const receipt = proposalSubmission(task);
             currentBatch.submissions = { ...currentBatch.submissions, [key]: receipt };
             onChange(current => current.id === currentBatch.sessionId ? { ...current, proposalBatch: { ...currentBatch } } : current);
@@ -97,6 +103,7 @@ export function StudioPanel({ visible, session, onChange, items, onChoose, onImp
             assertProposalSubmission(receipt);
             submittedCount++;
             progress({ id: `generate-${key}`, label: `${index + 1}/${count}「${proposal.title}」${proposalSubmissionMessage(receipt)}`, status: "complete" });
+            });
         }
         onChange(current => current.id === currentBatch.sessionId ? { ...current, executedThrough: currentBatch.history.length } : current);
         return submittedCount;
@@ -108,20 +115,23 @@ export function StudioPanel({ visible, session, onChange, items, onChoose, onImp
         if (intent === "direct" && !chosenModel) { setError("请选择当前可用的出图模型。"); return; }
         busyRef.current = true; setBusy(true); setError(""); setSteps([]);
         const snapshot = structuredClone(latest.current);
-        const prompt = snapshot.prompt.trim() || (intent === "discuss" ? "一起看看这些图稿与资料，帮我确定下一步设计方向。" : emptyPrompt);
+        const draft = snapshot.prompt.trim() || (intent === "discuss" ? "一起看看这些图稿与资料，帮我确定下一步设计方向。" : emptyPrompt);
+        const prompt = snapshot.discussionFocus ? `围绕${snapshot.discussionFocus.kind === "result" ? "生成结果" : "方案"}「${snapshot.discussionFocus.title}」：${draft}` : draft;
         const initialFingerprint = fingerprint(snapshot);
         const sourceSnapshot = designReferenceSnapshot(snapshot.references);
-        const userMessage = { role: "user", content: prompt, referenceSnapshot: sourceSnapshot };
-        const brief = { ...snapshot.brief, documents: snapshot.documents.map(doc => ({ id: doc.id, name: doc.name, text: doc.text, figures: doc.figures.map(figure => ({ id: figure.id, label: figure.label })) })) };
+        const userMessage = { id: createClientUuid(), role: "user", content: prompt, referenceSnapshot: sourceSnapshot };
+        setPendingMessage(userMessage);
+        const brief = { ...snapshot.brief, ...(snapshot.discussionFocus ? { discussionFocus: snapshot.discussionFocus } : {}), documents: snapshot.documents.map(doc => ({ id: doc.id, name: doc.name, text: doc.text, figures: doc.figures.map(figure => ({ id: figure.id, label: figure.label })) })) };
         try {
             await onSave();
             const count = requestedGenerationCount(prompt) || snapshot.generationCount || 1;
             const result = await requestDesignSession(api, ownerId, { mode: intent === "discuss" ? "discuss" : "propose", outputKind: snapshot.outputKind || "image", prompt, references: snapshot.references, history: snapshot.history, brief, designRecord: snapshot.designRecord, preset: DESIGN_PRESETS.find(preset => preset.id === snapshot.preset), proposalCount: snapshot.proposalCount, trendSources: selectedTrendSources(brief.season), onProgress: progress });
-            const assistantMessage = { role: "assistant", content: result.message, referenceSnapshot: sourceSnapshot, questions: result.questions, sources: result.sources, trendStatus: result.trendStatus };
+            const batchId = result.proposals.length ? createClientUuid() : null;
+            const assistantMessage = { id: createClientUuid(), role: "assistant", content: result.message, referenceSnapshot: sourceSnapshot, questions: result.questions, proposals: result.proposals, proposalBatchId: batchId, sources: result.sources, trendStatus: result.trendStatus };
             const history = [...snapshot.history, userMessage, assistantMessage];
             const next = { ...snapshot, history, prompt: "", generationCount: count };
             const newBatch = result.proposals.length ? {
-                id: createClientUuid(), sessionId: snapshot.id, outputKind: snapshot.outputKind || "image", ...result, history, references: snapshot.references, brief, designRecord: snapshot.designRecord, designRecordReferenceSnapshot: snapshot.designRecordReferenceSnapshot,
+                id: batchId, messageId: assistantMessage.id, sessionId: snapshot.id, outputKind: snapshot.outputKind || "image", ...result, history, references: snapshot.references, brief, designRecord: snapshot.designRecord, designRecordReferenceSnapshot: snapshot.designRecordReferenceSnapshot,
                 userRequirements: history.slice(snapshot.executedThrough || 0).filter(message => message.role === "user").map(message => ({ text: message.content, referenceSnapshot: message.referenceSnapshot })),
                 fingerprint: fingerprint(next), submissions: {},
             } : null;
@@ -131,20 +141,20 @@ export function StudioPanel({ visible, session, onChange, items, onChoose, onImp
             }
             latest.current = { ...next, proposalBatch: newBatch };
             onChange(latest.current);
+            setPendingMessage(null);
             if (newBatch) {
                 setChosenProposals([newBatch.proposals[0].id]);
                 if (intent === "direct") await generate(newBatch, newBatch.proposals.slice(0, Math.min(count, newBatch.proposals.length)).map(proposal => proposal.id), chosenModel, count);
-                else setProposalOpen(true);
             }
         } catch (failure) { setError(failure.message); }
-        finally { busyRef.current = false; setBusy(false); }
+        finally { busyRef.current = false; setBusy(false); setPendingMessage(null); }
     };
     const generateSelected = async () => {
         if (busyRef.current || !batch) return;
         if (!ready) { setError("正在恢复讨论与连接服务，请稍候再生成。"); return; }
         busyRef.current = true; setBusy(true); setError("");
-        try { const count = await generate(structuredClone(batch), chosenProposals, chosenModel, session.generationCount || 1); setProposalOpen(false); onNotice(count ? `已提交 ${count} 个方案任务，请在任务岛查看进度；成功结果会回到画布。` : "所选任务已有确认回执，本次未重复提交；请在任务岛查看最新进度。"); }
-        catch (failure) { setError(failure.message); }
+        try { const count = await generate(structuredClone(batch), chosenProposals, chosenModel, session.generationCount || 1); setProposalOpen(false); onNotice(count ? `已提交 ${count} 个方案任务，画布占位框会显示进度并原位更新结果。` : "所选任务已有确认回执，本次未重复提交；请在任务岛查看最新进度。"); }
+        catch (failure) { setError(failure.message); setProposalOpen(true); }
         finally { busyRef.current = false; setBusy(false); }
     };
     const importMaterial = async event => {
@@ -162,6 +172,17 @@ export function StudioPanel({ visible, session, onChange, items, onChoose, onImp
         finally { setUploading(false); }
     };
     const setBrief = (key, value) => update({ brief: { ...session.brief, [key]: value } });
+    const discussProposal = (proposal, referenceSnapshot) => {
+        update({ discussionFocus: { kind: "proposal", title: proposal.title, proposal, referenceSnapshot }, mode: "discuss" });
+        input.current.focus();
+    };
+    const discussResult = (task, index) => {
+        try {
+            const reference = resultDiscussionReference(task, index);
+            update({ references: [reference], discussionFocus: { kind: "result", title: reference.title, taskId: task.taskId }, mode: "discuss" });
+            input.current.focus();
+        } catch (failure) { setError(failure.message); }
+    };
     return <aside className={`studio-panel ${visible ? "" : "studio-panel-hidden"}`} aria-label="设计讨论面板" aria-hidden={!visible} aria-busy={!ready}>
         <header className="studio-panel-heading"><div><span className="studio-avatar"><Sparkles size={19} /></span><div><h1>设计讨论</h1><p>一起看稿，把方向聊清楚。</p></div></div><button aria-label="收起讨论面板" onClick={onClose}><X size={18} /></button></header>
         {!ready && <p className="studio-connection-status" role="status">正在恢复讨论或等待画布编辑权限，请稍候再编辑；连接失败时可在顶部重新连接。</p>}
@@ -183,21 +204,36 @@ export function StudioPanel({ visible, session, onChange, items, onChoose, onImp
             </details>
             {session.mode === "direct" && <section className="studio-presets"><h2>这次想怎样开发？</h2><div>{DESIGN_PRESETS.map(preset => <button key={preset.id} disabled={busy || !ready} aria-pressed={session.preset === preset.id} onClick={() => update({ preset: preset.id })}><strong>{preset.title}</strong><small>{preset.description}</small></button>)}</div></section>}
             {!session.history.length && <div className="studio-welcome"><span className="studio-eyebrow">LET'S DESIGN TOGETHER</span><h2>{session.mode === "discuss" ? "先聊清楚，再动手。" : "从参考出发，直接看方向。"}</h2><p>{session.mode === "discuss" ? "告诉我这组参考里你喜欢什么、想改变什么。我会看图、接住你的回答，提出不同的方案，再由你选来出图。" : "选好品牌、参考分工和开发预设，点击下方按钮。我会整理方案并提交对应图片任务，结果下方展示特色和所用参考。"}</p></div>}
-            <section className="studio-conversation" aria-label="设计讨论记录">{session.history.map((message, index) => <article key={index} className={`studio-message ${message.role}`}><span>{message.role === "user" ? "你" : "设计助手"}</span><p>{message.content}</p>{message.referenceSnapshot?.length > 0 && <small className="studio-message-refs">本轮：{message.referenceSnapshot.map(ref => `${ref.label} ${ref.title}`).join(" · ")}</small>}{message.questions?.map(question => <div className="studio-question" key={question.id}><strong>{question.question}</strong><div>{question.options.map(option => <button key={option} disabled={busy || !ready} onClick={() => { update({ prompt: option }); input.current.focus(); }}>{option}</button>)}</div></div>)}{message.trendStatus && <details><summary>本轮资料依据</summary><p>{message.trendStatus}</p>{message.sources.map(source => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title} ↗</a>)}</details>}</article>)}</section>
+            <section className="studio-conversation" aria-label="设计讨论记录">{session.history.map((message, index) => <article key={message.id || index} className={`studio-message ${message.role}`}>
+                <span>{message.role === "user" ? "你" : "设计助手"}</span><p>{message.content}</p>
+                {message.referenceSnapshot?.length > 0 && <small className="studio-message-refs">本轮：{message.referenceSnapshot.map(ref => `${ref.label} ${ref.title}`).join(" · ")}</small>}
+                {message.questions?.map(question => <div className="studio-question" key={question.id}><strong>{question.question}</strong><div>{question.options.map(option => <button key={option} disabled={busy || !ready} onClick={() => { update({ prompt: `${question.question}\n我的选择：${option}` }); input.current.focus(); }}>{option}</button>)}</div></div>)}
+                {message.proposals?.length > 0 && <div className="discussion-proposals" aria-label="本轮设计方向">{message.proposals.map((proposal, proposalIndex) => <div key={proposal.id}>
+                    <details><summary><span>{proposalIndex + 1}</span>{proposal.title}</summary><ul>{proposal.features.map(feature => <li key={feature}>{feature}</li>)}</ul><p>{proposal.rationale}</p></details>
+                    <button disabled={busy || !ready} onClick={() => discussProposal(proposal, message.referenceSnapshot)}>围绕这个聊</button>
+                </div>)}</div>}
+                {message.trendStatus && <details><summary>本轮资料依据</summary><p>{message.trendStatus}</p>{message.sources.map(source => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title} ↗</a>)}</details>}
+                <DiscussionResults tasks={messageTasks(session, message, index, tasks)} onDiscuss={discussResult} onLocate={onLocateResult} disabled={busy || !ready} />
+            </article>)}
+                {pendingMessage && <><article className="studio-message user"><span>你</span><p>{pendingMessage.content}</p></article><div className="discussion-thinking" role="status"><LoaderCircle size={14} className="spin" />正在看这一轮的图片和想法…</div></>}
+            </section>
             {batch && <button className="studio-batch" disabled={busy || !ready} onClick={() => { setChosenProposals([batch.proposals[0].id]); setProposalOpen(true); }}><Sparkles size={17} /><span>{stale ? "参考或资料已变化 · 旧方案需要更新" : `${batch.proposals.length} 个设计方案已整理`}<small>{Object.keys(batch.submissions || {}).length ? `已记录 ${Object.keys(batch.submissions).length} 个请求 · 查看回执与特色` : "点击比较、勾选，再生成图片"}</small></span></button>}
-            {steps.length > 0 && <ol className="studio-progress" aria-label="实际处理步骤">{steps.map(step => <li key={step.id}>{step.status === "complete" ? <Check size={13} /> : busy ? <LoaderCircle size={13} className="spin" /> : <span>·</span>}<span>{step.label}{!busy && step.status !== "complete" ? "（本轮已停止）" : ""}</span></li>)}</ol>}
+            {steps.length > 0 && <details className="discussion-process"><summary>本轮处理记录</summary><ol className="studio-progress" aria-label="实际处理步骤">{steps.map(step => <li key={step.id}>{step.status === "complete" ? <Check size={13} /> : busy ? <LoaderCircle size={13} className="spin" /> : <span>·</span>}<span>{step.label}{!busy && step.status !== "complete" ? "（本轮已停止）" : ""}</span></li>)}</ol></details>}
         </div>
         <footer className="studio-composer">
             {error && <p role="alert" className="studio-error">{error}</p>}
+            {session.discussionFocus && <div className="discussion-focus" role="status"><span>正在聊：{session.discussionFocus.title}{session.discussionFocus.kind === "result" ? " · 此图已作为当前修改对象" : ""}</span><button disabled={busy || !ready} aria-label="取消指定讨论对象" onClick={() => update({ discussionFocus: null })}><X size={13} /></button></div>}
             <textarea ref={input} aria-label="输入设计需求" disabled={busy || !ready} maxLength={8000} value={session.prompt} onChange={event => update({ prompt: event.target.value })} placeholder={session.mode === "discuss" ? "我喜欢图1的构图，但想往更轻盈的方向走…" : "补充这次方案的具体要求…"} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && session.mode === "discuss") { event.preventDefault(); void run("discuss"); } }} />
-            <div className="studio-composer-tools">
+            <div className="discussion-composer-controls">
                 <button aria-label="上传参考图片" disabled={busy || uploading || !ready} onClick={() => imageInput.current.click()}><ImagePlus size={17} /></button>
                 <button aria-label="添加 PDF 或文档，单份上限 20 MB" title="PDF / 文档 · 单份上限 20 MB" disabled={busy || uploading || !ready} onClick={() => materialInput.current.click()}>{uploading ? <LoaderCircle size={17} className="spin" /> : <Paperclip size={17} />}</button>
+                <details className="discussion-settings" open={session.mode === "direct" || undefined}><summary>出图设置 · {chosenModel?.label || "选择模型"} · {session.generationCount || 1}{video ? " 个视频" : " 张"}</summary><div className="studio-composer-tools">
                 <label>生成类型<select aria-label="生成类型" disabled={busy || !ready} value={session.outputKind || "image"} onChange={event => update({ outputKind: event.target.value, modelId: "" })}><option value="image">图片</option><option value="video">视频</option></select></label>
                 <label>{video ? "视频模型" : "出图模型"}<select aria-label="出图模型" disabled={busy || !ready} value={chosenModel?.id || session.modelId || ""} onChange={event => update({ modelId: event.target.value })}>{!chosenModel && <option value="">请选择可用模型</option>}<ModelOptions models={models} video={video} /></select></label>
                 <label>可选方案<select aria-label="方案数量" value={session.proposalCount} disabled={busy || !ready} onChange={event => update({ proposalCount: Number(event.target.value) })}>{[1, 2, 3, 4, 5, 6].map(count => <option key={count} value={count}>{count}</option>)}</select></label>
                 <label>生成数量<select aria-label="生成数量" value={session.generationCount || 1} disabled={busy || !ready} onChange={event => update({ generationCount: Number(event.target.value) })}>{Array.from({ length: 15 }, (_, index) => index + 1).map(count => <option key={count} value={count}>{count}</option>)}</select></label>
                 {video && <label>时长（秒）<select aria-label="视频时长" disabled={busy || !ready} value={session.videoSeconds || 6} onChange={event => update({ videoSeconds: Number(event.target.value) })}>{[4, 5, 6, 8, 10, 15].map(seconds => <option key={seconds} value={seconds}>{seconds}</option>)}</select></label>}
+                </div></details>
             </div>
             {video && <p className="studio-help">视频默认 720p、无生成音轨；单图作首帧，多图作参考。实际规格按所选模型核验，素材不符合时不会提交。</p>}
             <div className="studio-send"><small>对话、图片及视频均可能计费<br />{session.mode === "discuss" ? "Enter 只讨论 · 选方案后才出图" : "点击后整理方案并提交图片任务"}</small><div>{session.mode === "discuss" ? <><button disabled={busy || uploading || !ready} onClick={() => void run("propose")}>给我方案</button><button className="studio-primary" disabled={busy || uploading || !ready} onClick={() => void run("discuss")}>{busy ? <LoaderCircle size={15} className="spin" /> : <ArrowUp size={16} />}发送讨论</button></> : <button className="studio-primary" disabled={busy || uploading || !ready || !chosenModel} onClick={() => void run("direct")}>{busy ? <LoaderCircle size={15} className="spin" /> : <Sparkles size={16} />}生成 {session.generationCount || 1} {video ? "个方案视频" : "张方案图"}</button>}</div></div>

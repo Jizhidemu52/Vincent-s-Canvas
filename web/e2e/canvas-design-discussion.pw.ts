@@ -6,6 +6,112 @@ const video = { id: "40000000-0000-4000-8000-000000000115", modelId: "seedance-2
 const catalog = { models: [...models, video], prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: null, configurationVersion: 1 })) };
 const fixtureProposal = { id: "error-proposal", title: "针织展示方向", features: ["保留针织材质", "镜头缓慢推近"], rationale: "仅用于隔离错误状态回归。", prompt: "生成针织服装商品展示视频，缓慢推近，保持针织材质。", referenceIds: [], sourceNotes: [] };
 
+test("video discussion prefers Flash without overwriting a saved model choice", async ({ page, context, api }) => {
+    const previousVideo = { ...video, id: "40000000-0000-4000-8000-000000000114", modelId: "doubao-seedance-2.5", name: "旧 Seedance" };
+    await context.route("**/api/models", route => route.fulfill({ json: { ...catalog, models: [...models, previousVideo, video] } }));
+    await newCanvas(page);
+    await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
+    const panel = page.getByRole("complementary", { name: "设计讨论面板" });
+    await expect(panel.getByRole("button", { name: "发送讨论", exact: true })).toBeEnabled();
+    await panel.locator(".discussion-settings > summary").click();
+    await panel.getByRole("combobox", { name: "生成类型", exact: true }).selectOption("video");
+    await expect(panel.getByRole("combobox", { name: "出图模型", exact: true })).toHaveValue(video.id);
+    await panel.getByRole("combobox", { name: "出图模型", exact: true }).selectOption(previousVideo.id);
+    await panel.getByRole("textbox", { name: "输入设计需求" }).fill("保留已选择的视频模型");
+    await panel.getByRole("button", { name: "收起讨论面板" }).click();
+    await page.reload();
+    await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
+    await expect(panel.getByRole("button", { name: "发送讨论", exact: true })).toBeEnabled();
+    await panel.locator(".discussion-settings > summary").click();
+    await expect(panel.getByRole("combobox", { name: "出图模型", exact: true })).toHaveValue(previousVideo.id);
+    await expect(panel.getByRole("textbox", { name: "输入设计需求" })).toHaveValue("保留已选择的视频模型");
+    expect(api.submissions).toHaveLength(0);
+});
+
+test("discussion stays conversational and generated thumbnails continue the same thread", async ({ page, context, api }, info) => {
+    const requests: any[] = [];
+    await context.route("**/api/models", route => route.fulfill({ json: catalog }));
+    await context.route("**/api/chat/responses", async route => {
+        const body = route.request().postDataJSON(); requests.push(body);
+        const proposals = requests.length === 2 ? [{ ...fixtureProposal, id: "quiet-blue", title: "克制的灰蓝配色", features: ["低饱和灰蓝衣身", "保留白色翻领"], prompt: "生成单件灰蓝色针织开衫白底效果图，保留白色翻领。" }] : [];
+        await route.fulfill({ json: { content: JSON.stringify({ message: requests.length === 1 ? "我倾向降低衣身饱和度，保留白领的识别度。这样会比增加装饰更适合日常穿着。" : requests.length === 2 ? "把刚才聊的克制方向整理成这个方案，我们可以继续推敲。" : "针对这张实际结果，可以减少袖口对比。我先和你比较效果，不会自动重新生成。", questions: [], proposals, sources: [], trendStatus: "隔离交互回归，不代表模型质量。" }), toolCalls: [] } });
+    });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await newCanvas(page);
+    await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
+    const panel = page.getByRole("complementary", { name: "设计讨论面板" });
+    const composer = panel.getByRole("textbox", { name: "输入设计需求" });
+    await expect(panel.getByRole("button", { name: "发送讨论", exact: true })).toBeEnabled();
+    await composer.fill("这件针织开衫怎么做得更日常一点？先聊，不出图。");
+    await composer.press("Enter");
+    await expect(panel.locator(".studio-conversation")).toContainText("我倾向降低衣身饱和度");
+    expect(api.submissions).toHaveLength(0);
+    await expect(page.locator("dialog.proposal-dialog")).not.toBeVisible();
+    await panel.locator(".discussion-settings > summary").click();
+    await panel.getByRole("combobox", { name: "方案数量", exact: true }).selectOption("1");
+    await composer.fill("把这个方向整理成一个可选择的完整方案。");
+    await panel.getByRole("button", { name: "给我方案", exact: true }).click();
+    await expect(panel.locator(".discussion-proposals")).toContainText("克制的灰蓝配色");
+    await expect(page.locator("dialog.proposal-dialog")).not.toBeVisible();
+    await panel.locator(".studio-batch").click();
+    await page.getByRole("button", { name: "按选中方案生成 1 张", exact: true }).click();
+    await expect(panel).toBeVisible();
+    await expect(panel.locator(".discussion-results img")).toHaveCount(1);
+    await expect.poll(() => panel.locator(".discussion-results img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+    expect(api.submissions).toHaveLength(1);
+    const resultSource = await panel.locator(".discussion-results img").getAttribute("src");
+    await panel.getByRole("button", { name: "围绕这张聊", exact: true }).click();
+    await expect(panel.locator(".studio-reference img")).toHaveAttribute("src", resultSource!);
+    await expect(panel.locator(".discussion-focus")).toContainText("此图已作为当前修改对象");
+    await composer.fill("袖口对比有点强，你觉得怎么改更协调？只讨论。");
+    await composer.press("Enter");
+    await expect(panel.locator(".studio-conversation")).toContainText("针对这张实际结果");
+    expect(api.submissions).toHaveLength(1);
+    const lastRequest = requests.at(-1);
+    expect(JSON.stringify(lastRequest.input)).toContain("低饱和灰蓝衣身");
+    expect(JSON.stringify(lastRequest.input)).toContain('\\"kind\\":\\"result\\"');
+    expect(lastRequest.input.flatMap((item: any) => Array.isArray(item.content) ? item.content.filter((part: any) => part.type === "input_image") : [])).toHaveLength(1);
+    await panel.locator(".discussion-settings > summary").click();
+    await page.screenshot({ path: info.outputPath("continuous-discussion-with-result.png"), animations: "disabled" });
+    await page.reload();
+    await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
+    await expect(panel.locator(".discussion-results img")).toHaveCount(1);
+    await expect(panel.locator(".studio-conversation")).toContainText("针对这张实际结果");
+    expect(api.submissions).toHaveLength(1);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await panel.locator(".discussion-results").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: info.outputPath("continuous-discussion-mobile.png"), animations: "disabled" });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("direct generation replaces the pending message before task admission completes", async ({ page, context, api }) => {
+    let releaseTask: (() => void) | undefined;
+    let taskRequested = false;
+    const taskGate = new Promise<void>(resolve => { releaseTask = resolve; });
+    await context.route("**/api/models", route => route.fulfill({ json: catalog }));
+    await context.route("**/api/chat/responses", route => route.fulfill({ json: { content: JSON.stringify({ message: "按你的要求整理好这个方向。", questions: [], proposals: [{ ...fixtureProposal, title: "灰蓝开衫", features: ["灰蓝衣身", "针织材质"], prompt: "生成一张灰蓝色针织开衫白底图。" }], sources: [], trendStatus: "隔离交互回归" }), toolCalls: [] } }));
+    await context.route("**/api/tasks", async route => {
+        if (route.request().method() === "POST") { taskRequested = true; await taskGate; }
+        await route.fallback();
+    });
+    await newCanvas(page);
+    await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
+    const panel = page.getByRole("complementary", { name: "设计讨论面板" });
+    await panel.getByRole("button", { name: /^直接出方案/ }).click();
+    await panel.getByRole("combobox", { name: "方案数量", exact: true }).selectOption("1");
+    await panel.getByRole("textbox", { name: "输入设计需求" }).fill("生成一张灰蓝色针织开衫白底图。");
+    await panel.getByRole("button", { name: "生成 1 张方案图", exact: true }).click();
+    try {
+        await expect.poll(() => taskRequested).toBe(true);
+        await expect(panel.locator(".studio-conversation .studio-message.user")).toHaveCount(1);
+        await expect(panel.locator(".discussion-thinking")).toHaveCount(0);
+        await expect(panel.locator(".studio-conversation")).toContainText("按你的要求整理好这个方向");
+        expect(api.submissions).toHaveLength(0);
+    } finally { releaseTask?.(); }
+    await expect(panel.locator(".discussion-results img")).toHaveCount(1);
+    expect(api.submissions).toHaveLength(1);
+});
+
 test("formal canvas selection, six proposals, three tasks, reload and video discussion", async ({ page, context, api }, info) => {
     const chatBodies: any[] = [];
     await context.route("**/api/models", route => route.fulfill({ json: { models: [...models, video], prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: null, configurationVersion: 1 })) } }));
@@ -31,6 +137,7 @@ test("formal canvas selection, six proposals, three tasks, reload and video disc
     await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
     const panel = page.getByRole("complementary", { name: "设计讨论面板" });
     await expect(panel.locator(".studio-reference")).toHaveCount(2);
+    await panel.locator(".discussion-settings > summary").click();
     await expect(panel.getByRole("combobox", { name: "方案数量", exact: true })).toHaveValue("6");
     await expect(panel).not.toContainText("gemini-4-carbon");
     await panel.getByRole("button", { name: "画布 / 素材选图", exact: true }).click();
@@ -40,6 +147,9 @@ test("formal canvas selection, six proposals, three tasks, reload and video disc
     await panel.getByRole("textbox", { name: "输入设计需求" }).fill("请给我六个配色方案，保留针织材质和服装结构，生成三张。");
     await panel.getByRole("button", { name: "给我方案", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "可选设计方向 · 6 个方案" });
+    await expect(panel.locator(".discussion-proposals > div")).toHaveCount(6);
+    await expect(dialog).not.toBeVisible();
+    await panel.locator(".studio-batch").click();
     await expect(dialog).toBeVisible(); await expect(dialog.locator(".proposal-options article")).toHaveCount(6);
     await expect(dialog.getByRole("combobox", { name: "方案生成数量" })).toHaveValue("3");
     expect(api.submissions).toHaveLength(0); expect(chatBodies[0].toolKey).toBe("canvas-design-chat");
@@ -54,17 +164,23 @@ test("formal canvas selection, six proposals, three tasks, reload and video disc
     expect(new Set(api.submissions.map(item => item.requestId)).size).toBe(3);
     expect(api.submissions.every(item => item.projectId === projectId && item.parameters.count === 1 && item.parameters.n === 1)).toBe(true);
     await expect.poll(() => api.document(projectId)?.nodes.filter((node: any) => node.id.startsWith("design-")).length).toBe(3);
+    await expect(panel).toBeVisible();
+    await expect(panel.locator(".discussion-results img")).toHaveCount(3);
+    await page.screenshot({ path: info.outputPath("results-in-conversation.png"), animations: "disabled" });
     await panel.getByRole("button", { name: "收起讨论面板" }).click();
     await page.screenshot({ path: info.outputPath("formal-three-results.png"), animations: "disabled" });
     await page.reload(); await expect(page.getByRole("button", { name: "打开设计讨论" })).toBeVisible();
     await page.getByRole("button", { name: "打开设计讨论" }).click();
     await expect(panel).toContainText("六个可选择方向"); expect(api.submissions).toHaveLength(3);
+    await expect(panel.locator(".discussion-results img")).toHaveCount(3);
+    await panel.locator(".discussion-settings > summary").click();
     await panel.getByRole("button", { name: "移除图2", exact: true }).click(); await panel.getByRole("button", { name: "移除图1", exact: true }).click();
     await panel.getByRole("combobox", { name: "生成类型", exact: true }).selectOption("video");
     await expect(panel.getByRole("combobox", { name: "出图模型", exact: true })).toHaveValue(video.id);
     await panel.getByRole("combobox", { name: "生成数量", exact: true }).selectOption("1");
     await panel.getByRole("textbox", { name: "输入设计需求" }).fill("生成一个6秒的针织服装视频，保留针织材质和服装结构，缓慢推近。");
     await panel.getByRole("button", { name: "给我方案", exact: true }).click();
+    await panel.locator(".studio-batch").click();
     await expect(dialog).toBeVisible();
     api.taskStatus = "processing";
     await dialog.getByRole("button", { name: "按选中方案生成 1 个视频", exact: true }).click();
@@ -99,11 +215,13 @@ for (const failure of [
     await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
     const panel = page.getByRole("complementary", { name: "设计讨论面板" });
     await expect(panel.getByRole("button", { name: "发送讨论", exact: true })).toBeEnabled();
+    await panel.locator(".discussion-settings > summary").click();
     await panel.getByRole("combobox", { name: "生成类型", exact: true }).selectOption("video");
     await panel.getByRole("textbox", { name: "输入设计需求" }).fill("生成三个针织服装展示视频，保持针织材质，缓慢推近。");
     await panel.getByRole("combobox", { name: "方案数量", exact: true }).selectOption("1");
     await panel.getByRole("combobox", { name: "生成数量", exact: true }).selectOption("3");
     await panel.getByRole("button", { name: "给我方案", exact: true }).click();
+    await panel.locator(".studio-batch").click();
     const dialog = page.getByRole("dialog", { name: "可选设计方向 · 1 个方案" });
     const generate = dialog.getByRole("button", { name: "按选中方案生成 3 个视频", exact: true });
     await generate.click();
@@ -144,6 +262,7 @@ test("delayed connection keeps all editing disabled until the saved discussion i
     await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
     const panel = page.getByRole("complementary", { name: "设计讨论面板" });
     await expect(panel.getByRole("button", { name: "发送讨论", exact: true })).toBeEnabled();
+    await panel.locator(".discussion-settings > summary").click();
     await panel.getByRole("combobox", { name: "生成类型", exact: true }).selectOption("video");
     await panel.getByRole("textbox", { name: "输入设计需求" }).fill("已保存的视频讨论需求");
     await panel.getByRole("button", { name: "收起讨论面板" }).click();
@@ -157,6 +276,7 @@ test("delayed connection keeps all editing disabled until the saved discussion i
     holdModels = false;
     releaseModels?.();
     await expect(panel.getByRole("button", { name: "发送讨论", exact: true })).toBeEnabled();
+    await panel.locator(".discussion-settings > summary").click();
     await expect(panel.getByRole("combobox", { name: "生成类型", exact: true })).toHaveValue("video");
     await expect(panel.getByRole("textbox", { name: "输入设计需求" })).toHaveValue("已保存的视频讨论需求");
     await panel.getByRole("textbox", { name: "输入设计需求" }).fill("恢复后可以继续修改");

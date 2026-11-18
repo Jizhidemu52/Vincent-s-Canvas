@@ -8,9 +8,10 @@ import { storeGeneratedVideo } from "@/services/api/video";
 import { createApi, createTaskController } from "@/services/api/design-discussion.mjs";
 import { createCanvasNode, imageMetadata, videoMetadata } from "@/pages/canvas/canvas-project-utils";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
+import { createClientUuid } from "@/lib/client-uuid";
 import { CanvasNodeType } from "@/types/canvas";
 import { StudioPanel, newStudioSession } from "./StudioPanel.jsx";
-import { activeStatuses, taskLabel } from "./task-model.mjs";
+import { activeStatuses, designTaskMetadata, taskLabel } from "./task-model.mjs";
 import { readImageFiles } from "./studio-media.mjs";
 import { continueDesignRecord } from "./design-record.mjs";
 import "./studio.css";
@@ -51,7 +52,7 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
     const controller = useRef(null);
     const store = useMemo(() => createWorkspaceStorage("design_discussion"), [identityKey]);
     const api = useMemo(() => createApi(globalThis.fetch.bind(globalThis), { projectId }), [projectId]);
-    const scope = useMemo(() => ({ active: false, ownerId: "", adding: new Set(), installed: new Set(), failed: new Set() }), [projectId, identityKey, connection]);
+    const scope = useMemo(() => ({ active: false, ownerId: "", adding: new Set(), installed: new Set(), failed: new Set(), pending: new Map(), locate: [], initialSelectionKey: null, ignoredSelectionKey: null }), [projectId, identityKey, connection]);
     const scopeRef = useRef(scope);
     scopeRef.current = scope;
     const mountedOwner = useRef("");
@@ -95,6 +96,7 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
     const updateSession = useCallback(change => {
         if (!isCurrent()) return;
         const next = typeof change === "function" ? change(sessionRef.current) : { ...sessionRef.current, ...change };
+        if (next.references !== sessionRef.current.references) selectionSequence.current++;
         sessionRef.current = next;
         setSession(next);
         if (sessionStore.current) {
@@ -116,6 +118,12 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
         return identity;
     }, [api, isCurrent, scope]);
     const panelApi = useMemo(() => ({ ...api, session: async () => { try { return await assertOwner(); } catch (error) { reportError(error); throw error; } } }), [api, assertOwner, reportError]);
+    const locateResults = useCallback(ids => {
+        if (!isCurrent()) return;
+        selectionSequence.current++;
+        scope.ignoredSelectionKey = [...ids].sort().join("|");
+        onLocate(ids);
+    }, [scope, isCurrent, onLocate]);
 
     useEffect(() => {
         let alive = true;
@@ -134,6 +142,7 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
             if (saved) {
                 saved.references = await Promise.all(saved.references.map(restoreReference));
                 if (saved.proposalBatch) saved.proposalBatch.references = await Promise.all(saved.proposalBatch.references.map(restoreReference));
+                scope.ignoredSelectionKey = scope.initialSelectionKey;
             }
             if (!alive || !isCurrent()) return;
             setOwnerId(owner); setCatalog(models);
@@ -158,20 +167,23 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
         return () => { alive = false; };
     }, [nodes, ready, isCurrent, reportError]);
     const selectionKey = [...selectedIds].sort().join("|");
+    scope.initialSelectionKey ??= selectionKey;
     useEffect(() => {
         const sequence = ++selectionSequence.current;
         if (!ready) return;
+        if (selectionKey === scope.ignoredSelectionKey) return;
+        scope.ignoredSelectionKey = null;
         const selected = nodesRef.current.filter(node => selectedIds.has(node.id) && node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey));
         if (selected.length > 4) { setNotice(`画布已选 ${selected.length} 张；本轮讨论最多 4 张，未遗漏截取，请减少选择后再讨论。`); return; }
         if (!selected.length) return;
         Promise.all(selected.map(nodeReference)).then(value => {
             if (!isCurrent() || sequence !== selectionSequence.current) return;
             const references = value.filter(Boolean).map(reference => ({ ...reference, role: sessionRef.current.references.find(item => item.id === reference.id)?.role || "auto" }));
-            updateSession({ references });
+            updateSession({ references, discussionFocus: null });
             setNotice("");
         }).catch(reportError);
         return () => { selectionSequence.current++; };
-    }, [selectionKey, ready, updateSession, isCurrent, reportError]);
+    }, [selectionKey, ready, updateSession, isCurrent, reportError, scope]);
 
     useEffect(() => {
         const shortcut = event => {
@@ -208,26 +220,99 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
         return images;
     };
 
+    const submitBatch = async (inputs, onRecorded) => {
+        assertWritable();
+        if (!visibleRef.current) throw new Error("设计讨论已关闭，没有提交新的生成任务。");
+        if (!controller.current || scope.pending.size) throw new Error("正在连接或提交，请勿重复操作。");
+        if (!inputs.length || inputs.length > 15 || inputs.some(input => input.generationAllowed !== true)) throw new Error("生成操作无效，没有提交任务。");
+        const runtime = controller.current;
+        const prepared = inputs.map(input => ({ ...input, requestId: createClientUuid() }));
+        const center = getCanvasCenter();
+        const right = nodesRef.current.reduce((maximum, node) => Math.max(maximum, node.position.x + node.width), center.x);
+        const columns = Math.ceil(Math.sqrt(prepared.length));
+        const placeholders = prepared.map((input, index) => {
+            const node = createCanvasNode(input.mediaKind === "video" ? CanvasNodeType.Video : CanvasNodeType.Image, { x: right + 100 + index % columns * 460, y: center.y + Math.floor(index / columns) * 500 }, designTaskMetadata({ ...input, status: "preparing" }));
+            node.id = `design-${input.requestId}-0`; node.title = input.proposal?.title || "设计方案";
+            Object.assign(node, { width: 420, height: input.mediaKind === "video" ? 236 : 420 });
+            return node;
+        });
+        onBeforeChange();
+        prepared.forEach(input => scope.pending.set(input.requestId, input));
+        scope.locate = placeholders.map(node => node.id);
+        setNodes(current => isCurrent() ? [...current, ...placeholders] : current);
+        setTaskView("closed");
+        setNotice(`已创建 ${prepared.length} 个任务，结果会同时回到讨论与画布。`);
+        let interrupted = "剩余任务未提交，本次已停止。";
+        try {
+            for (const [index, input] of prepared.entries()) {
+                assertWritable();
+                const task = await runtime.start(input);
+                assertWritable();
+                scope.pending.delete(input.requestId);
+                const placeholderId = `design-${input.requestId}-0`;
+                const taskNodeId = `design-${task.id}-0`;
+                if (placeholderId !== taskNodeId) {
+                    setNodes(current => {
+                        if (!isCurrent()) return current;
+                        const existing = current.some(node => node.id === taskNodeId);
+                        return current.flatMap(node => node.id !== placeholderId ? [node] : existing ? [] : [{ ...node, id: taskNodeId, metadata: { ...node.metadata, ...designTaskMetadata(task) } }]);
+                    });
+                    scope.locate = scope.locate.map(id => id === placeholderId ? taskNodeId : id);
+                }
+                onRecorded(task, index);
+            }
+        } catch (error) { interrupted = error.message; reportError(error); throw error; }
+        finally {
+            const unsent = new Set(scope.pending.keys());
+            scope.pending.clear();
+            if (isCurrent() && writable.current && unsent.size) setNodes(current => current.map(node => unsent.has(node.metadata?.designTask?.requestId) ? { ...node, metadata: { ...node.metadata, ...designTaskMetadata({ requestId: node.metadata.designTask.requestId, status: "failed", failureReason: `未继续提交：${interrupted}` }) } } : node));
+        }
+    };
+
+    useEffect(() => {
+        if (!ready || !isCurrent() || !writable.current) return;
+        const byRequest = new Map(tasks.filter(task => task.ownerId === ownerId && task.projectId === projectId).map(task => [task.requestId, task]));
+        setNodes(current => {
+            let changed = false;
+            const next = current.map(node => {
+                const binding = node.metadata?.designTask;
+                if (!binding || node.metadata.content || node.metadata.storageKey) return node;
+                const task = byRequest.get(binding.requestId);
+                if (!task && (scope.pending.has(binding.requestId) || binding.status !== "preparing")) return node;
+                const patch = designTaskMetadata(task || { requestId: binding.requestId, status: "failed", failureReason: "提交准备已中断，请查看原任务记录；不会自动重新提交。" });
+                if (installationErrors[node.id]) { patch.status = "error"; patch.errorDetails = `结果已完成，放入画布失败：${installationErrors[node.id]}。请在创作任务中重试放入原结果。`; }
+                if (node.metadata.status === patch.status && node.metadata.errorDetails === patch.errorDetails && node.metadata.sourceTaskId === patch.sourceTaskId && binding.status === patch.designTask.status && binding.label === patch.designTask.label) return node;
+                changed = true;
+                return { ...node, metadata: { ...node.metadata, ...patch } };
+            });
+            return changed ? next : current;
+        });
+        if (scope.locate.length && scope.locate.every(id => nodes.some(node => node.id === id))) {
+            const ids = scope.locate; scope.locate = []; locateResults(ids);
+        }
+    }, [nodes, tasks, ready, ownerId, projectId, scope, isCurrent, installationErrors, setNodes, locateResults, writable]);
+
     useEffect(() => {
         if (!ready || !isCurrent()) return;
         const install = async task => {
             for (const [index, url] of task.resultUrls.entries()) {
                 const id = `design-${task.id}-${index}`;
                 if (!isCurrent() || !writable.current) return;
-                if (nodesRef.current.some(node => node.id === id) || scope.installed.has(id) || scope.adding.has(id) || scope.failed.has(id)) continue;
+                if (nodesRef.current.some(node => node.id === id && (node.metadata?.content || node.metadata?.storageKey)) || scope.installed.has(id) || scope.adding.has(id) || scope.failed.has(id)) continue;
                 scope.adding.add(id);
                 try {
                     const video = task.mediaKind === "video";
                     const stored = video ? await storeGeneratedVideo({ url, mimeType: "video/mp4" }) : await uploadImage(url);
                     await assertOwner();
                     assertWritable();
+                    const placeholder = nodesRef.current.find(node => node.id === id);
                     const right = nodesRef.current.reduce((maximum, node) => Math.max(maximum, node.position.x + node.width), getCanvasCenter().x);
-                    const node = createCanvasNode(video ? CanvasNodeType.Video : CanvasNodeType.Image, { x: right + 230, y: getCanvasCenter().y }, video ? videoMetadata(stored) : imageMetadata(stored));
+                    const node = createCanvasNode(video ? CanvasNodeType.Video : CanvasNodeType.Image, placeholder?.position || { x: right + 230, y: getCanvasCenter().y }, video ? videoMetadata(stored) : imageMetadata(stored));
                     node.id = id; node.title = task.proposal?.title || (video ? "设计视频" : "设计方案");
-                    Object.assign(node, fitNodeSize(stored.width || 1280, stored.height || 720));
+                    Object.assign(node, fitNodeSize(stored.width || 1280, stored.height || 720, placeholder?.width || 640, placeholder?.height || 640));
                     node.metadata = { ...node.metadata, sourceTaskId: task.taskId, prompt: task.prompt, designProposal: { title: node.title, features: task.proposal?.features || [], rationale: task.proposal?.rationale || "", references: task.references.map(reference => ({ title: reference.title, image: reference.image })) } };
                     onBeforeChange();
-                    setNodes(current => !isCurrent() || current.some(item => item.id === id) ? current : [...current, node]);
+                    setNodes(current => !isCurrent() ? current : current.some(item => item.id === id) ? current.map(item => item.id === id ? { ...item, ...node, position: item.position } : item) : [...current, node]);
                     scope.installed.add(id);
                     setInstallationErrors(current => { const next = { ...current }; delete next[id]; return next; });
                 } catch (error) {
@@ -265,13 +350,13 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
             {expanded && <section className="dd-tasks" aria-label="设计生成任务"><header><strong>创作任务</strong><small>每个结果单独记录</small></header>{!scopedTasks.length ? <p>选中画布图片，打开设计讨论。<br />原有左侧创建与对话保持独立。</p> : [...scopedTasks].reverse().map(task => {
                 const resultIds = task.resultUrls.map((_, index) => `design-${task.id}-${index}`);
                 const failed = resultIds.some(id => installationErrors[id]);
-                const placed = resultIds.length > 0 && resultIds.every(id => nodes.some(node => node.id === id));
+                const placed = resultIds.length > 0 && resultIds.every(id => nodes.some(node => node.id === id && (node.metadata?.content || node.metadata?.storageKey)));
                 const label = failed ? "结果已完成 · 放入画布失败，可重试" : task.status === "success" && !placed && resultIds.length ? "结果已完成 · 正在放入画布" : taskLabel(task);
                 return <article key={task.id} data-design-task-id={task.id} data-status={task.status}><div><strong>{task.proposal?.title || task.userText}</strong><small>{label}</small></div>{failed ? <button aria-label="重试放入设计结果" onClick={() => { try { retryInstallation(task); } catch (error) { reportError(error); } }}><RefreshCw size={15} /></button> : task.status === "success" && placed ? <button aria-label="定位设计结果" onClick={() => { if (isCurrent()) onLocate(resultIds); setTaskView("closed"); }}><LocateFixed size={16} /></button> : <button aria-label="查询原设计任务" onClick={() => action(task, task.status === "paused" && task.upstreamTaskId ? "recover" : "refresh")}><RefreshCw size={15} /></button>}<details><summary>方案、参考与执行记录</summary><p>{task.proposal?.features?.join("；")}</p><div className="dd-task-refs">{task.references.map(reference => <img key={reference.id} src={reference.image} alt={reference.title} />)}</div><p>{task.mediaKind === "video" ? "视频" : "图片"} · {task.model} · 每任务 1 个结果</p><p>请求：{task.requestId}</p>{task.failureReason && <p role="alert">{task.failureReason}</p>}{task.queryError && <p role="alert">{task.queryError}</p>}{resultIds.filter(id => installationErrors[id]).map(id => <p role="alert" key={id}>{installationErrors[id]}</p>)}{task.status === "failed" && <button onClick={() => continueTask(task)}>修改需求后新建任务（可能计费）</button>}</details></article>;
             })}</section>}
         </div>
         {notice && <div className="dd-notice" role="status"><span>{notice}</span><button aria-label="关闭设计讨论提示" onClick={() => setNotice("")}><X size={14} /></button></div>}
         {visible && !ready && <div className="dd-connect"><span>设计讨论尚未连接。</span><button onClick={() => setConnection(value => value + 1)}>重新连接</button></div>}
-        <StudioPanel key={`${projectId}:${identityKey}:${connection}`} visible={visible} session={isCurrent() ? session : newStudioSession()} onChange={updateSession} items={isCurrent() ? items : []} onChoose={async references => { assertWritable(); updateSession({ references: references.map(reference => ({ ...reference, role: sessionRef.current.references.find(item => item.id === reference.id)?.role || "auto" })) }); }} onImport={async files => addImages(await readImageFiles(files))} onFigures={async (figures, name) => { try { await addImages(figures.map(figure => ({ title: `${name} · ${figure.label}`, image: figure.dataUrl || figure.image || figure.url })), false); } catch (error) { reportError(error); } }} api={panelApi} ownerId={isCurrent() ? ownerId : ""} catalog={isCurrent() ? catalog : null} ready={isCurrent() && ready && writable.current} brands={brands} onSave={async () => { assertWritable(); await saveQueue.current; assertWritable(); }} onSubmit={async input => { try { assertWritable(); if (!visibleRef.current) throw new Error("设计讨论已关闭，没有提交新的生成任务。"); if (!controller.current) throw new Error("设计讨论尚未连接，没有提交生成任务。"); return await controller.current.start(input); } catch (error) { reportError(error); throw error; } }} onClose={() => setPanelVisible(false)} onNotice={message => { if (isCurrent()) setNotice(message); }} />
+        <StudioPanel key={`${projectId}:${identityKey}:${connection}`} visible={visible} session={isCurrent() ? session : newStudioSession()} onChange={updateSession} items={isCurrent() ? items : []} onChoose={async references => { assertWritable(); updateSession({ discussionFocus: null, references: references.map(reference => ({ ...reference, role: sessionRef.current.references.find(item => item.id === reference.id)?.role || "auto" })) }); }} onImport={async files => addImages(await readImageFiles(files))} onFigures={async (figures, name) => { try { await addImages(figures.map(figure => ({ title: `${name} · ${figure.label}`, image: figure.dataUrl || figure.image || figure.url })), false); } catch (error) { reportError(error); } }} api={panelApi} ownerId={isCurrent() ? ownerId : ""} catalog={isCurrent() ? catalog : null} ready={isCurrent() && ready && writable.current} brands={brands} onSave={async () => { assertWritable(); await saveQueue.current; assertWritable(); }} onSubmitBatch={submitBatch} onClose={() => setPanelVisible(false)} onNotice={message => { if (isCurrent()) setNotice(message); }} tasks={scopedTasks} onLocateResult={(task, index) => { if (isCurrent()) onLocate([`design-${task.id}-${index}`]); }} />
     </div>;
 }

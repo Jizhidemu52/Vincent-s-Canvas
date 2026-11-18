@@ -4,7 +4,7 @@ export const EXAMPLES = {
 };
 
 const profiles = new Set(["seedream55", "quality-resolution", "quality-resolution-v2", "gpt", "gemini", "pixel", "resolution", "resolution-1k", "standard", "standard-flex", "standard-flex-plus", "mai-image"]);
-export const activeStatuses = new Set(["submitting", "waiting", "processing"]);
+export const activeStatuses = new Set(["preparing", "submitting", "waiting", "processing"]);
 export const ownedAsset = value => typeof value === "string" && /^\/api\/assets\/[0-9a-f-]{36}\/content$/i.test(value);
 
 export function availableModels(catalog, referenceCount) {
@@ -29,6 +29,7 @@ export function taskLabel(task) {
     if (task.persistenceError) return "回执保存中断 · 请查询原任务，勿重复生成";
     if (task.queryError) return "查询中断 · 保留原任务，可刷新查询";
     if (task.observing === false) return "已停止本页查询 · 后台任务未取消";
+    if (task.status === "preparing") return "正在准备参考图 · 尚未提交";
     if (task.status === "uncertain" || task.status === "submitting") return "提交待确认 · 不会自动重发";
     if (task.status === "waiting") return "服务器排队中";
     if (task.status === "processing") return ({ queued: "服务器排队中", submitted: "模型处理中", polling: "查询模型进展", saving: "保存生成结果" })[task.stage] || "模型处理中";
@@ -37,6 +38,13 @@ export function taskLabel(task) {
     if (task.status === "failed") return task.failureReason || "任务失败";
     if (task.status === "cancelled") return "服务器任务已取消";
     return "等待任务信息";
+}
+
+export function designTaskMetadata(task) {
+    const loading = !task.queryError && !task.persistenceError && task.observing !== false && (activeStatuses.has(task.status) || task.status === "success");
+    const label = task.status === "success" ? "生成已完成 · 正在放入画布" : taskLabel(task);
+    return { status: loading ? "loading" : "error", errorDetails: loading ? undefined : label,
+        sourceTaskId: task.taskId, designTask: { requestId: task.requestId, status: task.status, label } };
 }
 
 export function mergeServerTask(local, task, ownerId) {

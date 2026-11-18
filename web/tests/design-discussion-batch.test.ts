@@ -60,6 +60,15 @@ function generationInput(overrides: RecordData = {}) {
 }
 
 describe("independent design generation slots", () => {
+    test("discussion linkage persists with the original task and survives reloading", async () => {
+        const run = fixture();
+        const task = await run.controller.start(generationInput({ discussionSessionId: "discussion-a", discussionMessageId: "reply-a" }));
+        expect(run.storage.records.get(task.id)).toMatchObject({ discussionSessionId: "discussion-a", discussionMessageId: "reply-a" });
+        const restored = fixture({ storage: run.storage });
+        await restored.controller.load();
+        expect(restored.tasks()[0]).toMatchObject({ discussionSessionId: "discussion-a", discussionMessageId: "reply-a" });
+        expect(restored.posts()).toHaveLength(0);
+    });
     test.each(["生成3张", "给我三张图", "出3张图片"])("recognizes %s as three independent results", text => {
         expect(requestedGenerationCount(text)).toBe(3);
     });
