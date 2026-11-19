@@ -16,7 +16,7 @@ export function PromptTemplateCard({ item, editable, canSubmit, onReuse, onInser
     const t = useUiText();
     const display = useDisplayText();
     const [detailsOpen, setDetailsOpen] = useState(false);
-    const targetLabel = t(item.targetTool === "image-generation" ? "图像生成" : item.targetTool === "video" ? "视频生成" : item.targetTool === "canvas" ? "自由画布" : promptTargetLabels[item.targetTool]);
+    const targetLabel = t(promptTargetLabels[item.targetTool]);
     const fillLabel = `${t("填入")} ${targetLabel}`;
     const { pending, run } = useAsyncAction(`prompt-card:${item.id}`);
     const menu = [

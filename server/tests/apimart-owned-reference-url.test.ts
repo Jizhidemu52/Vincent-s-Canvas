@@ -24,6 +24,7 @@ const modelCases = [
   ["gpt-image-2.6-sunburst", "gpt-image-2.6-sunburst", "gpt-image-2.6-sunburst", "/images/generations"],
   ["gemini-nano-banana-2.1", "gemini-nano-banana-2.1", "gemini-nano-banana-2.1", "/images/generations"],
   ["mai-image-2.6-flash", "mai-image-2.6-flash", "mai-image-2.6-flash", "/images/generations"],
+  ["mai-image-2.7-flash", "mai-image-2.7-flash", "mai-image-2.7-flash", "/images/generations"],
   ["grok-imagine-image-2.0", "grok-imagine-image-2.0", "grok-imagine-image-2.0", "/images/generations"],
   ["midjourney", "midjourney", undefined, "/midjourney/generations"],
   ["midjourney-v7", "midjourney", undefined, "/midjourney/generations"],
@@ -105,7 +106,7 @@ test.each(maskModels)("%s keeps PNG masks inline and separate from the owned ref
   }
 });
 
-test.each(["gemini-nano-banana-2.1", "mai-image-2.6-flash", "grok-imagine-image-2.0", "midjourney-blend", "seedream-5-5"])("%s still rejects an independent mask before any request", async modelId => {
+test.each(["gemini-nano-banana-2.1", "mai-image-2.6-flash", "mai-image-2.7-flash", "grok-imagine-image-2.0", "midjourney-blend", "seedream-5-5"])("%s still rejects an independent mask before any request", async modelId => {
   let calls = 0, claims = 0;
   const input = { ...base, modelId, sourceImages: ownedUrls("http"), maskImage: source,
     beforeSubmit: () => { claims++; },

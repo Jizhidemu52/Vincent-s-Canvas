@@ -20,7 +20,7 @@ export function PerformanceDashboard({ teamOnly = false }: { teamOnly?: boolean 
   const [preset, setPreset] = useState<PerformancePreset>("month");
   const [range, setRange] = useState<[string, string] | null>(null);
   const [selection, setSelection] = useState<Pick<PerformanceFilters, "departmentId" | "groupId" | "userId">>({});
-  const [data, setData] = useState<DashboardData>();
+  const [data, setData] = useState<DashboardData & { preset: PerformancePreset }>();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const requestSequence = useRef(0);
@@ -31,7 +31,7 @@ export function PerformanceDashboard({ teamOnly = false }: { teamOnly?: boolean 
     setLoading(true); setLoadError("");
     try {
       const result = await getPerformanceDashboard({ preset, ...(preset === "custom" && range ? { from: range[0], to: range[1] } : {}), ...selection });
-      if (sequence === requestSequence.current) setData(result);
+      if (sequence === requestSequence.current) setData({ ...result, preset });
     } catch (error) { if (sequence === requestSequence.current) setLoadError(error instanceof Error ? error.message : "设计效能数据加载失败"); }
     finally { if (sequence === requestSequence.current) setLoading(false); }
   };
@@ -67,7 +67,7 @@ export function PerformanceDashboard({ teamOnly = false }: { teamOnly?: boolean 
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <Metric onClick={jumpToDetails} icon={<Image className="size-4" />} label={staticUiText("有效出图")} value={format(data.metrics.validOutputs)} sub={`提交 ${format(data.metrics.requestedOutputs)} 张`} />
           <Metric onClick={jumpToDetails} icon={<Activity className="size-4" />} label={staticUiText("任务成功率")} value={rate(data.metrics.successRate)} sub={`成功 ${data.metrics.successCount} / 失败 ${data.metrics.failedCount} / 取消 ${data.metrics.cancelledCount}`} />
-          <Metric icon={<UsersRound className="size-4" />} label={staticUiText("今日使用人数")} value={data.todayUsage ? format(data.todayUsage.users) : "—"} sub="北京时间今日 · 按账号去重，不随日期筛选变化" />
+          <Metric icon={<UsersRound className="size-4" />} label={data.preset === "today" ? staticUiText("今日使用人数") : staticUiText("日均使用人数")} value={data.periodUsage.dailyAverage === null ? "—" : format(data.periodUsage.dailyAverage)} sub={data.preset === "today" ? "北京时间今日 · 按账号去重" : `北京时间 · 每日去重人数之和 ÷ ${data.periodUsage.days} 个自然日（含零使用日）`} />
           <Metric onClick={jumpToDetails} icon={<TrendingUp className="size-4" />} label={staticUiText("自然日均 / 活跃日均")} value={`${format(data.metrics.naturalDailyAverage)} / ${nullable(data.metrics.activeDailyAverage)}`} sub="活跃日为至少有一张有效成果" />
           <Metric onClick={jumpToDetails} icon={<Clock3 className="size-4" />} label={staticUiText("平均完成时长")} value={duration(data.metrics.averageDurationSeconds)} sub={`批量完成率 ${rate(data.metrics.batchCompletionRate)}`} />
         </section>

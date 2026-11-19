@@ -49,7 +49,9 @@ const documentSchema = z.object({
     nodes: z.array(nodeSchema),
     groups: groupsSchema.optional(),
     connections: z.array(z.object({ id: idSchema, fromNodeId: idSchema, toNodeId: idSchema }).passthrough()),
-    chatSessions: z.array(z.object({ id: idSchema, title: z.string(), messages: z.array(messageSchema), createdAt: dateSchema, updatedAt: dateSchema }).passthrough()),
+    chatSessions: z.array(z.object({ id: idSchema, title: z.string(), messages: z.array(messageSchema), createdAt: dateSchema, updatedAt: dateSchema,
+        serverConversationId: z.string().uuid().optional(),
+    }).passthrough().refine(session => !session.serverConversationId || session.messages.length === 0)),
     activeChatId: idSchema.nullable(), backgroundMode: z.enum(["dots", "lines", "blank"]), showImageInfo: z.boolean(),
     viewport: z.object({ x: z.number(), y: z.number(), k: z.number().positive() }).passthrough(),
 }).passthrough();

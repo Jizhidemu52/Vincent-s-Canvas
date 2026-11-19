@@ -1,7 +1,7 @@
 import type { BrowserContext, Page } from "@playwright/test";
 import { test, expect, IMAGE } from "./fixtures";
-import { imageAgentSpecText } from "../src/lib/image-agent/compile";
-import { imageAgentWorkNoteText } from "../src/lib/image-agent/work-note";
+import { imageAgentSpecText } from "../../shared/image-agent/compile";
+import { imageAgentWorkNoteText } from "../../shared/image-agent/work-note";
 
 const archivedPrompt = "原始生成要求：保留毛衫纹理";
 const submittedPrompt = "实际发送私有原文：保留毛衫纹理，不要水印";

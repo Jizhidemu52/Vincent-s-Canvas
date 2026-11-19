@@ -18,8 +18,8 @@ describe("canvas workspace tools", () => {
     test("every active module remains discoverable while retired boards stay out of the workspace", () => {
         const entries = canvasWorkspaceTools(access);
         const covered = new Set(entries.flatMap(item => [item.moduleKey, ...item.capabilities.map(capability => capability.moduleKey)]));
-        expect(moduleDefinitions.filter(item => !covered.has(item.moduleKey)).map(item => item.moduleKey)).toEqual(["angle-control", "series-recipe"]);
-        expect(entries.some(item => ["/angle-control", "/detail-enhance", "/creative/series-recipe"].includes(item.path))).toBe(false);
+        expect(moduleDefinitions.filter(item => !covered.has(item.moduleKey)).map(item => item.moduleKey)).toEqual(["image", "angle-control", "series-recipe"]);
+        expect(entries.some(item => ["/image", "/angle-control", "/detail-enhance", "/creative/series-recipe"].includes(item.path))).toBe(false);
         expect(entries.find(item => item.path === "/hd-upscale")?.moduleKey).toBe("detail-enhance");
     });
 

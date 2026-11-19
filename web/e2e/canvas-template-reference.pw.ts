@@ -29,7 +29,7 @@ test("empty template reference uploads an original into the same node and restor
     const chip = configPanel.locator(`[data-reference-node-id="${source.id}"]`);
     await expect(chip).toHaveAttribute("data-reference-state", "pending");
     await expect(chip).toHaveText("待上传原图");
-    await expect(configPanel.getByRole("button", { name: "开始生成", exact: true })).toBeDisabled();
+    await expect(configPanel.getByRole("button", { name: "运行整套模板 · 3 项", exact: true })).toBeDisabled();
     await expect(configPanel.getByRole("status").filter({ hasText: "先设置参考款原图" })).toBeVisible();
     await expect(configPanel).not.toContainText("已失效引用");
     await page.locator(`[data-node-id="${source.id}"]`).dblclick({ position: { x: 40, y: 40 } });
@@ -51,7 +51,7 @@ test("empty template reference uploads an original into the same node and restor
     expect(api.batchSubmissions).toHaveLength(0);
     await expect(chip).toHaveAttribute("data-reference-state", "image");
     await expect(chip.locator("img")).toBeVisible();
-    await expect(configPanel.getByRole("button", { name: "开始生成", exact: true })).toBeEnabled();
+    await expect(configPanel.getByRole("button", { name: "运行整套模板 · 3 项", exact: true })).toBeEnabled();
     await page.reload();
     const preview = page.locator(`[data-node-id="${source.id}"] img`).first();
     await expect(preview).toBeVisible();
@@ -64,10 +64,52 @@ test("empty template reference uploads an original into the same node and restor
     await expect.poll(() => api.document(id)?.nodes.some((node: any) => node.id === source.id)).toBe(false);
     await expect(chip).toHaveAttribute("data-reference-state", "invalid");
     await expect(chip).toHaveText("已失效引用 ×");
-    await configPanel.getByRole("button", { name: "开始生成", exact: true }).click();
-    await expect(page.getByText("提示词中含有已失效引用，请移除该引用并重新选择素材。", { exact: true })).toBeVisible();
+    await configPanel.getByRole("button", { name: "运行整套模板 · 3 项", exact: true }).click();
+    await expect(page.getByText("提示词中含有已失效引用，请移除该引用并重新选择素材。", { exact: true }).first()).toBeVisible();
     expect(api.submissions).toHaveLength(0);
     expect(api.batchSubmissions).toHaveLength(0);
+});
+
+test("clicking one template branch submits all three once and preserves the original and sibling prompts", async ({ page, context, api }, info) => {
+    const id = await newCanvas(page);
+    await page.getByTestId("canvas-empty-start").getByRole("button", { name: /用模板开始/ }).click();
+    await page.getByRole("dialog", { name: "整套服装画布模板", exact: true }).getByRole("button", { name: "添加这套流程", exact: true }).nth(2).click();
+    await expect.poll(() => api.document(id)?.nodes.length).toBe(4);
+    const original = structuredClone(api.document(id)!);
+    const source = original.nodes.find((node: any) => node.type === "image");
+    const branches = original.nodes.filter((node: any) => node.type === "config");
+    await page.locator(`[data-node-id="${source.id}"]`).dblclick({ position: { x: 40, y: 40 } });
+    const chooser = page.waitForEvent("filechooser");
+    await page.getByRole("region", { name: "参考款原图设置", exact: true }).getByRole("button", { name: "上传参考款原图", exact: true }).click();
+    await (await chooser).setFiles({ name: "template-original.png", mimeType: "image/png", buffer: IMAGE });
+    await expect.poll(() => api.document(id)?.nodes.find((node: any) => node.id === source.id)?.metadata?.naturalWidth).toBe(256);
+    const sourceBefore = structuredClone(api.document(id)!.nodes.find((node: any) => node.id === source.id));
+    let posts = 0, release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    await context.route("**/api/tasks", async route => {
+        if (route.request().method() === "POST") { posts++; await held; }
+        await route.fallback();
+    });
+    const button = page.locator(`[data-node-id="${branches[0].id}"]`).getByRole("button", { name: "运行整套模板 · 3 项", exact: true });
+    await button.click({ clickCount: 2 });
+    await expect.poll(() => posts).toBe(3);
+    await page.screenshot({ path: info.outputPath("template-three-independent-submissions.png"), fullPage: true });
+    release();
+    await expect.poll(() => api.submissions.length).toBe(3);
+    await expect.poll(() => api.document(id)?.nodes.filter((node: any) => node.metadata?.sourceTaskId && node.metadata?.status === "success").length).toBe(3);
+    expect(new Set(api.submissions.map(input => input.requestId)).size).toBe(3);
+    expect(api.submissions.map(input => input.promptInput?.fields?.instruction).sort()).toEqual(branches.map((node: any) => `参考款：图片1\n${node.metadata.promptInput.fields.instruction}`).sort());
+    const sources = api.submissions.map(input => input.sourceUrls);
+    expect(sources[0]).toHaveLength(1);
+    expect(sources).toEqual([sources[0], sources[0], sources[0]]);
+    expect(api.document(id)!.nodes.find((node: any) => node.id === source.id)).toEqual(sourceBefore);
+    expect(api.batchSubmissions).toHaveLength(0);
+    expect(posts).toBe(3);
+    await page.keyboard.press("Shift+1");
+    for (const result of api.document(id)!.nodes.filter((node: any) => node.metadata?.sourceTaskId)) {
+        await expect(page.locator(`[data-node-id="${result.id}"]`)).toBeVisible();
+    }
+    await page.screenshot({ path: info.outputPath("template-three-results.png"), fullPage: true });
 });
 
 test("existing single attachment is promoted with its original storage key and shared cloud asset", async ({ page, api }, info) => {

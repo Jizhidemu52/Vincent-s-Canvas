@@ -1,6 +1,7 @@
 import type { CanvasAgentMode } from "@/components/canvas/canvas-agent-chat-ui";
 import type { CanvasAgentOp, CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import type { CanvasAssistantSession, CanvasNodeData } from "@/types/canvas";
+import type { PublicImageVersion } from "../../../../shared/image-conversation-public";
 
 export type CanvasMediaWorkflowAction =
     | { type: "image_model_change"; messageId: string; model: string }
@@ -16,6 +17,8 @@ export type CanvasMediaWorkflowAction =
     | { type: "open_result"; messageId: string };
 
 export type CanvasAssistantPanelRenderState = {
+    canvasExternalId?: string;
+    onConversationVersionCreated?: (version: PublicImageVersion) => Promise<void>;
     layout?: "sidebar" | "wide";
     onToggleLayout?: () => void;
     selectedNodeIds: Set<string>;
@@ -45,6 +48,8 @@ export type CanvasAssistantPanelRenderState = {
  */
 export function canvasAssistantPanelPropsEqual(previous: CanvasAssistantPanelRenderState, next: CanvasAssistantPanelRenderState) {
     return (
+        previous.canvasExternalId === next.canvasExternalId &&
+        previous.onConversationVersionCreated === next.onConversationVersionCreated &&
         previous.layout === next.layout &&
         previous.onToggleLayout === next.onToggleLayout &&
         previous.selectedNodeIds === next.selectedNodeIds &&

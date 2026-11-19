@@ -19,8 +19,8 @@ describe("usage board navigation", () => {
     });
     test("personal ordering is descending, deterministic, and excludes disabled modules/parents/bindings", () => {
         const counts = { image: 10, video: 20, "creative-garment-colorway": 15, assets: 9, prompts: 8, canvas: 7, team: 9999 };
-        expect(frequentUsageDestinations(counts, flags, []).map(item => item.key)).toEqual(["video", "creative-garment-colorway", "image", "assets", "prompts"]);
-        expect(frequentUsageDestinations(counts, { ...flags, creative: false }, [{ toolKey: "video", enabled: false }]).map(item => item.key)).toEqual(["image", "assets", "prompts", "canvas"]);
+        expect(frequentUsageDestinations(counts, flags, []).map(item => item.key)).toEqual(["video", "creative-garment-colorway", "assets", "prompts", "canvas"]);
+        expect(frequentUsageDestinations(counts, { ...flags, creative: false }, [{ toolKey: "video", enabled: false }]).map(item => item.key)).toEqual(["assets", "prompts", "canvas"]);
         expect(usageBoardAvailable("creative-garment-colorway", flags, [{ toolKey: "creative", enabled: false }])).toBe(false);
         expect(usageBoardAvailable("secret", flags, [])).toBe(false);
     });

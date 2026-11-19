@@ -7,6 +7,7 @@ import { generationErrorDiagnostic } from "../src/lib/generation-feedback";
 import { completedTaskDurationMs } from "../src/lib/completed-task-duration";
 import { defaultConfig } from "../src/stores/use-config-store";
 import { QueuedTaskFailedError, QueuedTaskPausedError, type QueuedTask } from "../src/services/api/generation-tasks";
+import { DEFAULT_WORKBENCH_TASK } from "../src/lib/workbench-task-state";
 
 // Execute the actual page callbacks, not a duplicate implementation of them.
 const source = readFileSync(new URL("../src/pages/image/index.tsx", import.meta.url), "utf8");
@@ -24,30 +25,36 @@ const code = ts.transpileModule(`${names.map(name => `const ${name} = ${function
 const pending: PendingImage = { id: "record-a", ownerId: "employee-a", tool: "image-edit", createdAt: 1, requestId: "request-a", taskId: "task-a", snapshot: { text: "original", config: { ...defaultConfig, model: "disabled-old-provider-model" }, references: [] } };
 const task: QueuedTask = { id: "task-a", requestId: "request-a:0", status: "success", resultUrls: ["/api/assets/result-a/content"], failureReason: null };
 
-function harness(options: { task?: QueuedTask | null; results?: any[]; records?: PendingImage[]; commits?: Map<string, { stopped: boolean; promise?: Promise<unknown> }>; upload?: (url: string) => Promise<void>; afterRemove?: (record: PendingImage) => void } = {}) {
+function harness(options: { task?: QueuedTask | null; results?: any[]; records?: PendingImage[]; commits?: Map<string, { stopped: boolean; promise?: Promise<unknown> }>; upload?: (url: string) => Promise<void>; readMeta?: (url: string) => Promise<void>; save?: () => Promise<void>; afterRemove?: (record: PendingImage) => void } = {}) {
     let currentTask = options.task === undefined ? task : options.task;
     let owner = pending.ownerId;
     let results = options.results || [{ id: pending.id, status: "paused", recovery: pending }];
     const records = new Map((options.records || [pending]).map(record => [record.id, { ...record }]));
-    const calls: string[] = [], logs: any[] = [], uploads: string[] = [];
+    const calls: string[] = [], logs: any[] = [], uploads: string[] = [], origins: Array<{ tool: string; workspaceId: string }> = [];
     const bindings = {
         removedPendingIds: { current: new Set<string>() }, manuallyStoppedIds: { current: new Set<string>() },
         observationStopRequested: { current: false }, observationControllers: { current: new Set<AbortController>() },
         mountedRef: { current: true }, activeSubmissionRef: { current: false }, finishingImages: { current: options.commits || new Map() },
+        confirmedImageResults: { current: new Map() },
         latestPendingImages: { current: [...records.values()] },
         user: { id: owner }, inputDraftScope: "image-edit", pendingRestoreRevision: { current: 0 }, resultViewPinnedRef: { current: false },
         workbenchSubmissions: { acquire: () => () => {} }, setRunning() {}, setStartedAt() {}, setActiveTaskId() {},
         returnToCurrentTask() {},
         useUserStore: { getState: () => ({ user: { id: owner } }) },
         findPendingImageTask, updateImageResultForRecord, classifyTaskRecovery, submissionInvestigationMessage, generationErrorDiagnostic, completedTaskDurationMs,
-        QueuedTaskFailedError, QueuedTaskPausedError,
+        QueuedTaskFailedError, QueuedTaskPausedError, DEFAULT_WORKBENCH_TASK,
         async getQueuedTask(id: string, signal: AbortSignal) { signal.throwIfAborted(); calls.push(`GET ${id}`); return currentTask; },
         async getQueuedTaskByRequestId(id: string, signal: AbortSignal) { signal.throwIfAborted(); calls.push(`GET request:${id}`); return currentTask; },
         async recoverQueuedTask(id: string) { calls.push(`POST recover:${id}`); return task; },
         async waitForTasks(ids: string[]) { calls.push(`WAIT ${ids.join(",")}`); return [currentTask]; },
         async uploadImage(url: string) { uploads.push(url); await options.upload?.(url); return { url, storageKey: `stored:${url}`, width: 100, height: 100, bytes: 123, mimeType: "image/png" }; },
+        async readImageMeta(url: string) { await options.readMeta?.(url); return { width: 100, height: 100, mimeType: "image/png" }; },
+        getDataUrlByteSize: () => 0,
+        uiText: (value: string, fields: Record<string, unknown> = {}) => value.replace(/\{([^}]+)\}/g, (_, key) => String(fields[key] ?? "")),
         canvasImageReferenceIdentity: () => ({}), buildLog: (value: unknown) => value,
-        async saveLog(log: unknown, preserveView: boolean, assertCurrent: () => void) { assertCurrent(); expect(preserveView).toBe(true); logs.push(log); },
+        async saveLog(log: unknown, preserveView: boolean, assertCurrent: () => void, origin: { tool: string; workspaceId: string }) {
+            assertCurrent(); expect(preserveView).toBe(true); await options.save?.(); logs.push(log); origins.push(origin);
+        },
         async persistPending(record: PendingImage) { records.set(record.id, record); bindings.latestPendingImages.current = [...records.values()]; },
         async removePending(record: PendingImage) { records.delete(record.id); bindings.removedPendingIds.current.add(record.id); bindings.latestPendingImages.current = [...records.values()]; options.afterRemove?.(record); },
         setResults(update: ((value: any[]) => any[]) | any[]) { results = typeof update === "function" ? update(results) : update; },
@@ -56,7 +63,7 @@ function harness(options: { task?: QueuedTask | null; results?: any[]; records?:
     };
     const exports = {} as { reconcile: (record: PendingImage, signal: AbortSignal) => Promise<void>; stop: () => void; resume: (records: PendingImage[], resumePaused?: boolean) => Promise<void> };
     new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exports);
-    return { ...exports, bindings, records, calls, logs, uploads, results: () => results, show: (value: any[]) => { results = value; }, server: (value: QueuedTask | null) => { currentTask = value; }, owner: (value: string) => { owner = value; } };
+    return { ...exports, bindings, records, calls, logs, uploads, origins, results: () => results, show: (value: any[]) => { results = value; }, server: (value: QueuedTask | null) => { currentTask = value; }, owner: (value: string) => { owner = value; } };
 }
 
 test("an already successful original task is imported once without using current model configuration", async () => {
@@ -69,6 +76,59 @@ test("an already successful original task is imported once without using current
     expect(h.results()[0]).toMatchObject({ id: pending.id, status: "success", image: { sourceTaskId: task.id } });
     expect(h.records.size).toBe(0);
     expect(h.logs[0].durationMs).toBeNull();
+    expect(h.origins).toEqual([{ tool: pending.tool, workspaceId: DEFAULT_WORKBENCH_TASK }]);
+});
+
+test("a recovered original keeps its submitted tool and non-default workspace", async () => {
+    const original = { ...pending, tool: "image-generation", workspaceId: "original-workspace" };
+    const h = harness({ records: [original] });
+    await h.reconcile(original, new AbortController().signal);
+    expect(h.calls).toEqual(["GET task-a"]);
+    expect(h.logs).toHaveLength(1);
+    expect(h.origins).toEqual([{ tool: original.tool, workspaceId: original.workspaceId }]);
+    expect(h.records.size).toBe(0);
+});
+
+test("a confirmed image stays visible when history fails and retries only the saved original locally", async () => {
+    let unavailable = true;
+    const h = harness({ save: async () => { if (unavailable) throw new Error("isolated history failure"); } });
+    await h.reconcile(pending, new AbortController().signal);
+    expect(h.results()[0]).toMatchObject({ status: "success", image: { dataUrl: task.resultUrls[0], sourceTaskId: task.id } });
+    expect(h.results()[0].storageWarning).toContain("本地记录保存失败");
+    expect(h.records.get(pending.id)).toMatchObject({ id: pending.id, taskId: pending.taskId, requestId: pending.requestId });
+    expect(h.logs).toHaveLength(0);
+    await h.reconcile(pending, new AbortController().signal);
+    expect(h.results()[0].status).toBe("success");
+    expect(h.calls).toEqual(["GET task-a"]);
+    expect(h.uploads).toHaveLength(1);
+    unavailable = false;
+    await h.reconcile(pending, new AbortController().signal);
+    expect(h.results()[0].storageWarning).toBeUndefined();
+    expect(h.records.size).toBe(0);
+    expect(h.logs).toHaveLength(1);
+    expect(h.calls).toEqual(["GET task-a"]);
+    expect(h.uploads).toHaveLength(1);
+});
+
+test("a decodable original remains visible and archived when only the local image cache fails", async () => {
+    const h = harness({ upload: async () => { throw new Error("isolated cache failure"); } });
+    await h.reconcile(pending, new AbortController().signal);
+    expect(h.results()[0]).toMatchObject({ status: "success", image: { dataUrl: task.resultUrls[0], sourceTaskId: task.id, width: 100, height: 100 } });
+    expect(h.results()[0].image.storageKey).toBeUndefined();
+    expect(h.results()[0].storageWarning).toContain("本地图片缓存保存失败");
+    expect(h.records.size).toBe(0);
+    expect(h.logs[0].images[0].dataUrl).toBe(task.resultUrls[0]);
+    expect(h.calls).toEqual(["GET task-a"]);
+});
+
+test("a result that cannot be decoded never becomes a success merely because its server task succeeded", async () => {
+    const h = harness({ upload: async () => { throw new Error("decode failed"); }, readMeta: async () => { throw new Error("original remains unreadable"); } });
+    await h.reconcile(pending, new AbortController().signal);
+    expect(h.results()[0].status).toBe("paused");
+    expect(h.results()[0].image).toBeUndefined();
+    expect(h.records.has(pending.id)).toBe(true);
+    expect(h.logs).toEqual([]);
+    expect(h.calls).toEqual(["GET task-a"]);
 });
 
 test("late image reconciliation uses backend completion time, not the age of the browser record", async () => {
@@ -88,7 +148,7 @@ test.each([
     await h.reconcile(pending, signal);
     expect(h.records.get(pending.id)?.recovery).toBe(state.recovery);
     expect(h.uploads).toEqual([]);
-    if (state.recovery === "investigate") expect(h.results()[0].error).toContain("暂无法恢复上游查询");
+    if (state.recovery === "investigate") expect(h.results()[0].error).toContain("暂时无法获取生成结果");
     h.server(task);
     await h.reconcile(h.records.get(pending.id)!, signal);
     expect(h.calls).toEqual(["GET task-a", "GET task-a"]);

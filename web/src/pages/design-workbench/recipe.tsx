@@ -3,7 +3,7 @@ import { DisplayText, DisplayTranslationScope, DisplayTranslationPreview } from 
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { GenerationInputList } from "@/components/generation-input-list";
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
-import { WorkbenchTasks, useWorkbenchTask, useWorkbenchTaskStatus } from "@/components/workbench-tasks";
+import { WorkbenchTasks, useWorkbenchTask } from "@/components/workbench-tasks";
 import { PracticeExampleRecord } from "@/components/design-examples";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -134,7 +134,6 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     const selected = resultEntries.filter(({ branch }) => branch.status === "success" && branch.selected);
     const completed = succeeded + failed + branches.filter((branch) => branch.status === "cancelled").length;
     const dirty = !!run && (JSON.stringify(run.form) !== JSON.stringify(project.form) || run.references[0]?.id !== project.references[0]?.id || JSON.stringify(run.settings) !== JSON.stringify(recipeSettings(config)));
-    useWorkbenchTaskStatus({ busy: active || working || recovering, pending: uncertain > 0 || branches.some(branch => branch.status === "running"), ready, label: succeeded ? "已完成" : failed ? "已失败" : "草稿" });
 
     const current = useCallback(() => mounted.current && storage.isCurrent() && useUserStore.getState().user?.id === ownerId, [ownerId, storage]);
     const commit = useCallback(

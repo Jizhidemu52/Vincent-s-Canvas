@@ -181,7 +181,7 @@ export function CanvasNodeHoverToolbar({
     const isText = node.type === CanvasNodeType.Text;
     const isConfig = node.type === CanvasNodeType.Config;
     const canOpenDialog = isText || hasImage || isVideo;
-    const canRetry = node.metadata?.status === "error";
+    const canRetry = node.metadata?.status === "error" && !node.metadata?.designTask;
     const videoRecovery = isVideo && Boolean(node.metadata?.videoTaskId);
     const visibleImageToolIds = compactImageQuickToolIds(quickImageToolIds);
     const copyImagePrompt = (target: CanvasNodeData) => {

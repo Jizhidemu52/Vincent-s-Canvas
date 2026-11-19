@@ -10,7 +10,7 @@ export const CHAT_AUTO_IMAGE_SIZE = "auto";
 
 export function chatImageSizeOptions(profile: Profile) {
     return [
-        { value: CHAT_AUTO_IMAGE_SIZE, label: "自动（默认）" },
+        ...(!profile.mai27 ? [{ value: CHAT_AUTO_IMAGE_SIZE, label: "自动（默认）" }] : []),
         ...profile.sizes.filter(value => value !== "auto").map(value => ({ value, label: value.replace("x", " × ") })),
     ];
 }

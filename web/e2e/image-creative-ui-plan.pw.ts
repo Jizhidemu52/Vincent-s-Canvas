@@ -2,9 +2,8 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { test, expect, fixturePng, type MockCanvasApi } from "./fixtures";
+import { activeWorkbench as active, workbenchPanes, readWorkspaceRecords } from "./headless-workbench";
 
-const active = (page: Page) => page.getByRole("tabpanel");
-const taskTabs = (page: Page) => page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab");
 const output = resolve(import.meta.dirname, "../../output/ui-plan-20261112/image-creative");
 
 async function visibleAction(page: Page, button: Locator) {
@@ -33,6 +32,13 @@ async function uploadFront(page: Page, name = "front.png", color = 80) {
     await expect(active(page).getByRole("img", { name, exact: true })).toBeVisible();
 }
 
+async function uploadEditReference(page: Page) {
+    const chooser = page.waitForEvent("filechooser");
+    await active(page).getByRole("button", { name: "上传图片", exact: true }).click();
+    await (await chooser).setFiles({ name: "edit-original.png", mimeType: "image/png", buffer: fixturePng(80) });
+    await expect(active(page).getByRole("img", { name: "edit-original.png", exact: true })).toBeVisible();
+}
+
 for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 1080 }]) {
     test(`image and back-design layout keep actions visible at ${viewport.width}x${viewport.height}`, async ({ page, api }) => {
         await mkdir(output, { recursive: true });
@@ -45,10 +51,11 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 108
         expect(form!.width).toBeGreaterThanOrEqual(430);
         expect(form!.width).toBeLessThanOrEqual(450);
         expect(await prompt.evaluate(element => getComputedStyle(element).fontSize)).toBe("14px");
-        await visibleAction(page, active(page).getByRole("button", { name: "开始生成", exact: true }));
+        await visibleAction(page, active(page).getByRole("button", { name: "开始编辑", exact: true }));
+        await uploadEditReference(page);
         await prompt.fill("LAYOUT_完整展示竖版服装");
         api.taskStatus = "processing";
-        await active(page).getByRole("button", { name: "开始生成", exact: true }).click();
+        await active(page).getByRole("button", { name: "开始编辑", exact: true }).click();
         await expect.poll(() => api.submissions.length).toBe(1);
         const taskId = [...api.tasks.keys()][0];
         const portrait = await page.evaluate(() => {
@@ -88,23 +95,25 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 108
 
 test("image history remains readable during a new run and keeps the new result separate", async ({ page, api }) => {
     await page.goto("/image");
+    await uploadEditReference(page);
     const prompt = active(page).getByRole("textbox", { name: "图像提示词", exact: true });
     await prompt.fill("历史旧图");
-    await active(page).getByRole("button", { name: "开始生成", exact: true }).click();
+    await active(page).getByRole("button", { name: "开始编辑", exact: true }).click();
     const result = active(page).getByRole("img", { name: "生成结果 1", exact: true });
     await expect(result).toBeVisible();
     await expect(result).toHaveAttribute("src", /^(blob:|data:|https?:)/);
     const oldDigest = await imageDigest(result);
     api.taskStatus = "processing";
     await prompt.fill("新任务独立结果");
-    await active(page).getByRole("button", { name: "开始生成", exact: true }).click();
+    await active(page).getByRole("button", { name: "开始编辑", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(2);
     await active(page).getByRole("tab", { name: /历史记录/ }).click();
-    await active(page).locator(".image-history-panel button").filter({ hasText: "历史旧图" }).click();
+    await expect(active(page).locator(".image-history-card")).toHaveCount(1);
+    await active(page).locator(".image-history-card").click();
     await expect.poll(() => imageDigest(result)).toBe(oldDigest);
     await expect(prompt).toHaveValue("新任务独立结果");
     finish(api, [...api.tasks.keys()][1]);
-    await expect(taskTabs(page).first()).toContainText("已完成");
+    await expect(active(page).getByRole("button", { name: "开始编辑", exact: true })).toBeEnabled();
     await expect.poll(() => imageDigest(result)).toBe(oldDigest);
     await active(page).getByRole("tab", { name: "本次结果", exact: true }).click();
     await expect.poll(() => imageDigest(result)).not.toBe(oldDigest);
@@ -115,8 +124,8 @@ test("back design can browse history and create B while A runs, with reverse com
     await page.goto("/creative/back-design");
     await uploadFront(page, "A-front.png", 50);
     await active(page).locator(".cs-generate").click();
-    await expect(taskTabs(page).first()).toContainText("已完成");
     const result = active(page).locator(".cs-result-card .ant-image-img");
+    await expect(result).toBeVisible();
     const oldUrl = await result.getAttribute("src");
     api.taskStatus = "processing";
     await active(page).getByRole("radio", { name: "育克", exact: true }).check();
@@ -127,23 +136,26 @@ test("back design can browse history and create B while A runs, with reverse com
     await active(page).locator(".cs-history-item").last().click();
     await expect(result).toHaveAttribute("src", oldUrl!);
     await active(page).getByRole("button", { name: "新建任务，继续创作", exact: true }).click();
-    await expect(taskTabs(page)).toHaveCount(2);
+    await expect(workbenchPanes(page)).toHaveCount(2);
+    await expect(workbenchPanes(page).first()).toBeHidden();
     await uploadFront(page, "B-front.png", 210);
     await active(page).locator(".cs-generate").click();
     await expect.poll(() => api.submissions.length).toBe(3);
     const bId = [...api.tasks.keys()][2];
     finish(api, bId);
-    await expect(taskTabs(page).nth(1)).toContainText("已完成");
+    await expect(result).toBeVisible();
     const bUrl = await result.getAttribute("src");
-    await taskTabs(page).first().click();
-    await expect(result).toHaveAttribute("src", oldUrl!);
+    await expect(workbenchPanes(page).first().locator(".cs-result-card .ant-image-img")).toHaveAttribute("src", oldUrl!);
     finish(api, aId);
-    await expect(taskTabs(page).first()).toContainText("已完成");
-    await expect(result).toHaveAttribute("src", oldUrl!);
-    await active(page).getByRole("button", { name: "返回当前任务", exact: true }).click();
+    await expect.poll(async () => (await readWorkspaceRecords<any>(page, "creative_scene_workspaces")).filter(record => record.key.startsWith("history-record:") && record.value.results?.some((item: any) => item.taskId === aId || item.image?.sourceTaskId === aId)).map(record => record.value.successCount)).toEqual([1]);
+    await expect(workbenchPanes(page).first().locator(".cs-result-card .ant-image-img")).toHaveAttribute("src", oldUrl!);
+    await expect(result).toHaveAttribute("src", bUrl!);
+    await active(page).getByRole("button", { name: /^最近任务/ }).click();
+    await expect(active(page).locator(".cs-history-item")).toHaveCount(3);
+    await active(page).locator(".cs-history-item").nth(1).click();
     await expect(result).not.toHaveAttribute("src", oldUrl!);
     await expect(result).not.toHaveAttribute("src", bUrl!);
-    await taskTabs(page).nth(1).click();
+    await active(page).getByRole("button", { name: "返回当前任务", exact: true }).click();
     await expect(result).toHaveAttribute("src", bUrl!);
     await expect(active(page).getByRole("img", { name: "B-front.png", exact: true })).toBeVisible();
     expect(api.submissions).toHaveLength(3);

@@ -33,6 +33,10 @@ export function mergePromptEditorParameters(original: Record<string, unknown> | 
         delete parameters.quality;
         delete parameters.width;
         delete parameters.height;
+        if (profile.mai27) {
+            delete parameters.web_grounding;
+            delete parameters.auto_aspect_ratio;
+        }
         if (imageReferenceSizeIsAutomatic(profile, values.referenceAssetIds?.length || 0)) {
             delete parameters.size;
             delete parameters.resolution;

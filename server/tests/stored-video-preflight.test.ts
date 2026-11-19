@@ -69,7 +69,7 @@ describe("stored video task preflight", () => {
     const cache = { zAdd: async () => { queues++; return 1; } };
     const badInput = { ...input, parameters: { videoMode: "first-frame" } };
     await expect(enqueueTask(db as never, cache as never, badInput)).rejects.toThrow("10MB");
-    expect(sql).toContain("COMMIT");
+    expect(sql.every(statement => statement.trimStart().startsWith("SELECT"))).toBe(true);
     expect(sql.some((statement) => statement.includes("INSERT INTO tasks"))).toBe(false);
     expect(sql.some((statement) => /credit_reservations|pricing_rule_versions|credit_ledger/.test(statement))).toBe(false);
     expect(queues).toBe(0);

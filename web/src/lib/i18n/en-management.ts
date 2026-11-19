@@ -1,5 +1,6 @@
 /** Fixed UI copy only. User content and API values are never translated. */
 const enManagement: Record<string, string> = {
+    "切换管理板块": "Switch administration section",
     "部门管理员必须指定部门": "Department administrators must be assigned a department",
     "请输入企业微信成员账号，须与企业微信通讯录中的成员账号一致": "Enter the member account exactly as it appears in the WeCom directory",
     "请设置初始密码": "Set an initial password",
@@ -1566,7 +1567,13 @@ const enManagement: Record<string, string> = {
     "图生视频与商品动态展示": "Image-to-video and animated product presentation",
     "多图创意融合（无需提示词）": "Creative image blending (no prompt required)",
     "日常改款与多图参考": "Everyday restyling and multiple references",
-    "文字对话与图文理解": "Text chat and image understanding"
+    "文字对话与图文理解": "Text chat and image understanding",
+    "新建版本公告": "New version announcement",
+    "公告版本号": "Announcement version",
+    "开始编写": "Start writing",
+    "请输入三段数字版本号，例如 0.5.98 或 v0.5.98": "Enter a three-part numeric version, such as 0.5.98 or v0.5.98",
+    "版本号由你填写，不受当前部署版本限制；不会自动保存或发布。已存在的版本会直接打开。": "Choose your own version, independently of the deployed version. Nothing is saved or published automatically. An existing version will open directly.",
+    "这是当前部署版本；公告可通过“新建版本公告”使用其他版本号。": "This is the deployed version. Use New version announcement to write an announcement for another version."
 };
 
 export default enManagement;

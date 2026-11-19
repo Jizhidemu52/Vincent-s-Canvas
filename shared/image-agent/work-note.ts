@@ -1,5 +1,5 @@
-import { ImageAgentPlanningError } from "../../../../shared/image-agent-iteration";
-import { imagePromptInvariantNumbers } from "../../../../shared/image-prompt-invariants";
+import { ImageAgentPlanningError } from "../image-agent-iteration";
+import { imagePromptInvariantNumbers } from "../image-prompt-invariants";
 
 export type ImageAgentWorkNote = { summary: string; keep: string[]; revokedKeep?: string[] };
 export const IMAGE_AGENT_NOTE_LIMIT = 800;

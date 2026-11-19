@@ -57,4 +57,9 @@ describe("canvas assistant panel render stability", () => {
     test("refreshes the Agent panel when the conversation changes", () => {
         expect(canvasAssistantPanelPropsEqual(state(), state({ sessions: [{ id: "chat-1" }] as CanvasAssistantSession[] }))).toBe(false);
     });
+
+    test("refreshes the server conversation host when canvas identity or result projection changes", () => {
+        expect(canvasAssistantPanelPropsEqual(state(), state({ canvasExternalId: "canvas-b" }))).toBe(false);
+        expect(canvasAssistantPanelPropsEqual(state(), state({ onConversationVersionCreated: async () => undefined }))).toBe(false);
+    });
 });

@@ -108,6 +108,16 @@ describe("current React graph config render cache", () => {
         expect(select(cache, original)).not.toBe(before);
     });
 
+    test("template button count follows current group membership without stale cached labels", () => {
+        const cache = createCanvasConfigRenderCache(), original = graph();
+        const templateNode = (id: string) => ({ ...config(id), metadata: { ...config(id).metadata, promptInput: { scene: "garment-colorway", fields: { templateId: "range" } } } });
+        const members = ["config", "second", "third"], nodes = [templateNode("config"), templateNode("second"), templateNode("third"), image("source")];
+        const current = { ...original, nodes, groups: [{ id: "template", title: "系列配色", nodeIds: members, collapsed: false }] };
+        expect(select(cache, current).templateTaskCount).toBe(3);
+        expect(select(cache, { ...current, groups: [{ ...current.groups[0]!, nodeIds: members.slice(0, 2) }] }).templateTaskCount).toBe(2);
+        expect(select(cache, { ...current, groups: [] }).templateTaskCount).toBe(0);
+    });
+
     test("parallel active groups render independently and finishing B preserves A's cached panel", () => {
         const cache = createCanvasConfigRenderCache(), original = graph();
         const workflow = { ...original, nodes: [...original.nodes, config("second")], groups: [group("a"), group("b", "second")] };

@@ -3,7 +3,7 @@ export const EXAMPLES = {
     sketch: { prompt: "保留服装结构，把这件毛衣转换成干净的黑白款式图。", title: "黑白款式图" },
 };
 
-const profiles = new Set(["seedream55", "quality-resolution", "quality-resolution-v2", "gpt", "gemini", "pixel", "resolution", "resolution-1k", "standard", "standard-flex", "standard-flex-plus", "mai-image"]);
+const profiles = new Set(["seedream55", "quality-resolution", "quality-resolution-v2", "gpt", "gemini", "pixel", "resolution", "resolution-1k", "standard", "standard-flex", "standard-flex-plus", "mai-image", "mai-image-v2"]);
 export const activeStatuses = new Set(["preparing", "submitting", "waiting", "processing"]);
 export const ownedAsset = value => typeof value === "string" && /^\/api\/assets\/[0-9a-f-]{36}\/content$/i.test(value);
 
@@ -18,7 +18,8 @@ export function availableModels(catalog, referenceCount) {
 export function imageParameters(model, referenceCount) {
     const profile = model.imageParameterProfile;
     if (!profiles.has(profile)) throw new Error("这个模型的图片参数尚未接入设计讨论。");
-    if (profile === "mai-image" && referenceCount) return { count: 1 };
+    if ((profile === "mai-image" || profile === "mai-image-v2") && referenceCount) return { count: 1 };
+    if (profile === "mai-image-v2") return { size: "1:1", resolution: "1k", count: 1 };
     if (profile === "seedream55") return { size: "auto", resolution: "1k", n: 1, count: 1 };
     if (profile.startsWith("quality-resolution")) return { size: "auto", quality: "auto", resolution: "1k", count: 1 };
     if (profile.startsWith("standard")) return { size: "auto", quality: "auto", count: 1 };
@@ -33,11 +34,18 @@ export function taskLabel(task) {
     if (task.status === "uncertain" || task.status === "submitting") return "提交待确认 · 不会自动重发";
     if (task.status === "waiting") return "服务器排队中";
     if (task.status === "processing") return ({ queued: "服务器排队中", submitted: "模型处理中", polling: "查询模型进展", saving: "保存生成结果" })[task.stage] || "模型处理中";
+    if (task.status === "needs_input") return task.failureReason || "需要补充设计要求，未创建图片任务";
+    if (task.status === "detached") return "已停止采用本轮结果 · 原任务仍按实际进度处理";
     if (task.status === "success") return task.resultUrls?.length ? "真实结果已放入画布" : "任务已完成 · 结果链接暂不可用";
     if (task.status === "paused") return task.failureReason || "任务暂停 · 可查询原任务";
     if (task.status === "failed") return task.failureReason || "任务失败";
     if (task.status === "cancelled") return "服务器任务已取消";
     return "等待任务信息";
+}
+
+export function designResultNodeId(task, index) {
+    const version = task.resultVersions?.[index];
+    return version ? `design-version-${version.id}` : `design-${task.id}-${index}`;
 }
 
 export function designTaskMetadata(task) {

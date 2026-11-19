@@ -4,6 +4,7 @@ type Visibility = Pick<Document, "hidden" | "addEventListener" | "removeEventLis
 type EventConnection = Pick<EventSource, "addEventListener" | "close">;
 type Watch = { ids: Set<string>; version: number; ownerId: string | undefined; listeners: Set<() => void>; closed: boolean; background: boolean };
 export type TaskEventWatchOptions = { background?: boolean };
+const maxSnapshotDelayMs = 15_000;
 
 /** One notification connection per workspace, regardless of how many views watch a task. */
 export function createTaskEventStream(options: {
@@ -94,7 +95,7 @@ export function createTaskEventStream(options: {
             ready: (ms: number, signal?: AbortSignal) => wait(() => canRead(watch), ms, signal),
             next: (version: number, ms: number, signal?: AbortSignal, fallbackMs = 2_500) => wait(
                 () => canRead(watch) && watch.version !== version,
-                ms, signal, healthy ? ms : fallbackMs,
+                ms, signal, healthy ? Math.min(ms, maxSnapshotDelayMs) : fallbackMs,
             ),
             close() {
                 if (watch.closed) return;

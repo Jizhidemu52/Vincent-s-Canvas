@@ -3,13 +3,13 @@ import { readFileSync } from "node:fs";
 import type { BrowserContext, Page } from "@playwright/test";
 import { test, expect, fixturePng, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
+import { activeWorkbench, workbenchPanes } from "./headless-workbench";
 
 const model = { id: "10000000-0000-4000-8000-000000000003", name: "测试视频模型", modelId: "wan2.7", capabilities: ["video"], creditCost: 0, rmbCost: 0 };
 const resultA = readFileSync(new URL("./media/video.mp4", import.meta.url));
 const resultB = readFileSync(new URL("./media/video-control.mp4", import.meta.url));
 const sourceA = fixturePng(31), sourceB = fixturePng(213);
-const active = (page: Page) => page.getByRole("tabpanel");
-const tabs = (page: Page) => page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab");
+const active = activeWorkbench;
 const prompt = (page: Page) => active(page).getByRole("textbox", { name: "视频提示词", exact: true });
 const sidebarNew = (page: Page) => active(page).getByRole("button", { name: "新建任务，继续创作", exact: true });
 const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
@@ -44,8 +44,9 @@ async function submitA(page: Page, api: MockCanvasApi) {
 }
 
 async function freshB(page: Page) {
-    await expect(tabs(page)).toHaveCount(2);
-    await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
+    await expect(workbenchPanes(page)).toHaveCount(2);
+    await expect(workbenchPanes(page).nth(1)).toBeVisible();
+    await expect(page.getByRole("tablist", { name: "任务列表", exact: true })).toHaveCount(0);
     await expect(prompt(page)).toHaveValue("");
     await expect(active(page).getByRole("img", { name: "A-original.png", exact: true })).toHaveCount(0);
     await expect(active(page).locator("video")).toHaveCount(0);
@@ -90,24 +91,23 @@ test("video sidebar New keeps A intact while B submits and completes first, with
     expect(digest(api.assetBytes.get(api.submissions[0].sourceUrls[0].split("/")[3])!)).toBe(digest(sourceA));
     expect(digest(api.assetBytes.get(api.submissions[1].sourceUrls[0].split("/")[3])!)).toBe(digest(sourceB));
     finish(api, bId);
-    await expect(tabs(page).nth(1)).toContainText("已完成");
     await expect(active(page).locator("video")).toHaveCount(1);
     expect(api.tasks.get(aId)?.status).toBe("processing");
-    await tabs(page).nth(0).click();
-    await expect(prompt(page)).toHaveValue("ENTRY_A_绿色圆形包缓慢转身");
-    await expect(active(page).getByRole("img", { name: "A-original.png", exact: true })).toBeVisible();
-    await expect(active(page).locator("video")).toHaveCount(0);
+    const original = workbenchPanes(page).first();
+    await expect(original).toBeHidden();
+    await expect(original.locator('textarea[aria-label="视频提示词"]')).toHaveValue("ENTRY_A_绿色圆形包缓慢转身");
+    await expect(original.locator('img[alt="A-original.png"]')).toHaveCount(1);
+    await expect(original.locator("video")).toHaveCount(0);
     finish(api, aId);
-    await expect(tabs(page).nth(0)).toContainText("已完成");
+    await expect(original.locator("video")).toHaveCount(1);
     const records = await logs(page);
     expect(records).toHaveLength(2);
     expect(records.find(log => log.taskId === aId)).toMatchObject({ workspaceId: "default", references: ["A-original.png"], bytes: resultA.length, sha256: digest(resultA) });
     expect(records.find(log => log.taskId === bId)).toMatchObject({ references: ["B-original.png"], bytes: resultB.length, sha256: digest(resultB) });
     expect(records.find(log => log.taskId === bId)?.workspaceId).not.toBe("default");
     await page.reload();
-    await expect(tabs(page)).toHaveCount(2);
-    await expect(prompt(page)).toHaveValue("ENTRY_A_绿色圆形包缓慢转身");
-    await tabs(page).nth(1).click();
+    await expect(workbenchPanes(page)).toHaveCount(2);
+    await expect(workbenchPanes(page).first().locator('textarea[aria-label="视频提示词"]')).toHaveValue("ENTRY_A_绿色圆形包缓慢转身");
     await expect(prompt(page)).toHaveValue("ENTRY_B_橙色三角包镜头拉近");
     await expect(active(page).getByRole("img", { name: "B-original.png", exact: true })).toBeVisible();
     await expect(active(page).locator("video")).toHaveCount(1);
@@ -120,8 +120,7 @@ test("video running footer creates only one independent task on a rapid double c
     await active(page).getByRole("button", { name: "新建任务，继续创作", exact: true }).evaluate(button => { button.click(); button.click(); });
     await freshB(page);
     expect(api.tasks.get(aId)?.status).toBe("processing");
-    await tabs(page).nth(0).click();
-    await expect(prompt(page)).toHaveValue("ENTRY_A_绿色圆形包缓慢转身");
+    await expect(workbenchPanes(page).first().locator('textarea[aria-label="视频提示词"]')).toHaveValue("ENTRY_A_绿色圆形包缓慢转身");
     expect(api.submissions).toHaveLength(1);
 });
 
@@ -140,9 +139,9 @@ test("video mobile history New keeps its drawer on persistence failure, then clo
     await active(page).getByRole("button", { name: "记录", exact: true }).click();
     const drawer = page.getByRole("dialog", { name: "生成记录", exact: true });
     await drawer.getByRole("button", { name: "新建", exact: true }).click();
-    await expect(page.getByRole("region", { name: "多任务工作区", exact: true }).getByRole("alert")).toContainText("视频注册表写入失败");
+    await expect(page.getByRole("region", { name: "创作工作区", exact: true }).getByRole("alert")).toContainText("视频注册表写入失败");
     await expect(drawer).toBeVisible();
-    await expect(tabs(page)).toHaveCount(1);
+    await expect(workbenchPanes(page)).toHaveCount(1);
     await expect(prompt(page)).toHaveValue("ENTRY_A_绿色圆形包缓慢转身");
     expect(api.submissions).toHaveLength(1);
     await drawer.getByRole("button", { name: "新建", exact: true }).click();
@@ -152,9 +151,8 @@ test("video mobile history New keeps its drawer on persistence failure, then clo
     await active(page).getByRole("button", { name: "生成视频", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(2);
     expect(api.tasks.get(aId)?.status).toBe("processing");
-    await tabs(page).nth(0).click();
     await expect(drawer).toHaveCount(0);
-    await expect(prompt(page)).toHaveValue("ENTRY_A_绿色圆形包缓慢转身");
+    await expect(workbenchPanes(page).first().locator('textarea[aria-label="视频提示词"]')).toHaveValue("ENTRY_A_绿色圆形包缓慢转身");
 });
 
 test("video idle sidebar New preserves the prior unsubmitted draft", async ({ page, context, api }) => {
@@ -164,8 +162,10 @@ test("video idle sidebar New preserves the prior unsubmitted draft", async ({ pa
     await prompt(page).fill("未提交的旧视频草稿");
     await sidebarNew(page).click();
     await freshB(page);
-    await tabs(page).nth(0).click();
-    await expect(prompt(page)).toHaveValue("未提交的旧视频草稿");
-    await expect(active(page).getByRole("img", { name: "A-original.png", exact: true })).toBeVisible();
+    await expect(workbenchPanes(page).first().locator('textarea[aria-label="视频提示词"]')).toHaveValue("未提交的旧视频草稿");
+    await expect(workbenchPanes(page).first().locator('img[alt="A-original.png"]')).toHaveCount(1);
+    await page.reload();
+    await expect(workbenchPanes(page).first().locator('textarea[aria-label="视频提示词"]')).toHaveValue("未提交的旧视频草稿");
+    await expect(prompt(page)).toHaveValue("");
     expect(api.submissions).toHaveLength(0);
 });

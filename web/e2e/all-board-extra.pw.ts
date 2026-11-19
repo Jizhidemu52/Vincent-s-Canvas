@@ -204,13 +204,14 @@ test("team leader can filter business performance and export the audited nonfina
     const dashboard = page.getByTestId("performance-dashboard");
     await expect(dashboard.getByRole("heading", { name: "出图效率与成果转化" })).toBeVisible();
     await expect(dashboard.getByRole("button", { name: /^有效出图/ })).toContainText("3");
-    await expect(dashboard.getByText("今日使用人数", { exact: true }).locator("..").locator("..")).toContainText("17");
+    await expect(dashboard.getByText("日均使用人数", { exact: true }).locator("..")).toContainText("17");
+    await expect(dashboard.getByText("今日使用人数", { exact: true })).toHaveCount(0);
     for (const label of ["成果下载率", "成果可用性均分", "返工率 / 按时交付率", "积分 / 人民币成本"]) {
         await expect(dashboard.getByRole("button", { name: label })).toHaveCount(0);
     }
     await dashboard.getByText("本周", { exact: true }).click();
     await expect.poll(() => state.reads.filter(path => path.startsWith("/api/performance?")).at(-1)).toContain("preset=week");
-    await expect(dashboard.getByText("今日使用人数", { exact: true }).locator("..").locator("..")).toContainText("17");
+    await expect(dashboard.getByText("日均使用人数", { exact: true }).locator("..")).toContainText("17");
     await dashboard.getByRole("combobox").first().click();
     await page.locator(".ant-select-dropdown:visible").getByText("隔离设计师", { exact: true }).click();
     await expect.poll(() => state.reads.filter(path => path.startsWith("/api/performance?")).at(-1)).toContain(`userId=${OWNER}`);

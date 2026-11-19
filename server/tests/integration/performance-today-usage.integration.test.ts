@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { getPerformanceDashboard, getPerformanceTodayUsage } from "../../src/performance";
+import { getPerformanceDashboard, getPerformanceUsage } from "../../src/performance";
+import { resolveRange } from "../../src/routes/performance";
 import type { SessionUser } from "../../src/types";
 import { createIsolatedPostgres } from "../helpers/isolated-postgres";
 
@@ -11,6 +12,8 @@ const todayEnd = "2026-11-12T16:00:00.000Z";
 const activityAt = "2026-11-12T08:00:00.000Z";
 const actor = (role: SessionUser["role"] = "super_admin", departmentId: string | null = null, groupId: string | null = null) =>
   ({ id: randomUUID(), role, departmentId, groupId, groupRole: groupId ? "leader" : null }) as SessionUser;
+const todayUsage = (db: Awaited<ReturnType<typeof createFixture>>["db"], auth: SessionUser, filters = {}, at = now) =>
+  getPerformanceUsage(db, auth, { ...resolveRange("today", undefined, undefined, at), ...filters }, at);
 
 async function createFixture() {
   const fixture = await createIsolatedPostgres();
@@ -57,7 +60,7 @@ sqlTest("today usage returns zero with no actual activity and never changes roll
     const before = (await fixture.db.query("SELECT processing_enabled FROM usage_rollup_state")).rows;
     expect(before).toEqual([{ processing_enabled: false }]);
     fixture.statements.length = 0;
-    expect(await getPerformanceTodayUsage(fixture.db, actor(), {}, now)).toEqual({ date: "2026-11-12", timeZone: "Asia/Shanghai", users: 0 });
+    expect(await todayUsage(fixture.db, actor())).toEqual({ from: todayStart, to: todayEnd, timeZone: "Asia/Shanghai", days: 1, userDays: 0, dailyAverage: 0 });
     expect(fixture.statements).toHaveLength(1);
     expect(fixture.statements.every(sql => /^\s*SELECT\b/i.test(sql))).toBe(true);
     expect(fixture.statements[0]).not.toMatch(/prompt|usage_daily_facts|rollup/i);
@@ -87,11 +90,11 @@ sqlTest("today usage respects Shanghai half-open midnight boundaries for every s
     await fixture.event(visitsOnly, activityAt, "visit");
     await fixture.event(visitsOnly, activityAt, "gap");
     await fixture.user();
-    expect((await getPerformanceTodayUsage(fixture.db, actor(), {}, now)).users).toBe(7);
-    expect(await getPerformanceTodayUsage(fixture.db, actor(), {}, new Date(todayEnd))).toEqual({ date: "2026-11-13", timeZone: "Asia/Shanghai", users: 3 });
-    expect((await getPerformanceTodayUsage(fixture.db, actor(), {}, new Date("2026-11-11T15:59:59.999Z"))).users).toBe(3);
-    expect((await getPerformanceTodayUsage(fixture.db, actor(), { userId: guest }, now)).users).toBe(0);
-    expect((await getPerformanceTodayUsage(fixture.db, actor(), { userId: randomUUID() }, now)).users).toBe(0);
+    expect((await todayUsage(fixture.db, actor())).dailyAverage).toBe(7);
+    expect(await todayUsage(fixture.db, actor(), {}, new Date(todayEnd))).toMatchObject({ from: todayEnd, days: 1, userDays: 3, dailyAverage: 3 });
+    expect((await todayUsage(fixture.db, actor(), {}, new Date("2026-11-11T15:59:59.999Z"))).dailyAverage).toBe(3);
+    expect((await todayUsage(fixture.db, actor(), { userId: guest })).dailyAverage).toBe(0);
+    expect((await todayUsage(fixture.db, actor(), { userId: randomUUID() })).dailyAverage).toBe(0);
   } finally { await fixture.close(); }
 }, 60_000);
 
@@ -106,7 +109,7 @@ sqlTest("today usage includes non-image tasks and chat-only or local-interaction
     await fixture.task(audio, activityAt, { operation: "audio_generation", status: "waiting" });
     await fixture.chat(chat);
     await fixture.event(local, activityAt, "export");
-    expect((await getPerformanceTodayUsage(fixture.db, actor(), {}, now)).users).toBe(4);
+    expect((await todayUsage(fixture.db, actor())).dailyAverage).toBe(4);
   } finally { await fixture.close(); }
 }, 60_000);
 
@@ -129,7 +132,7 @@ sqlTest("today usage intersects department, group and individual permissions wit
     await fixture.event(moved, "2026-11-12T10:00:00.000Z");
     const adminA = actor("department_admin", fixture.departmentA);
     const leaderA = actor("designer", fixture.departmentA, fixture.groupA);
-    const count = async (auth: SessionUser, filters = {}) => (await getPerformanceTodayUsage(fixture.db, auth, filters, now)).users;
+    const count = async (auth: SessionUser, filters = {}) => (await todayUsage(fixture.db, auth, filters)).dailyAverage;
     expect(await count(actor())).toBe(4);
     expect(await count(actor(), { departmentId: fixture.departmentA })).toBe(3);
     expect(await count(actor(), { groupId: fixture.groupA })).toBe(2);
@@ -156,24 +159,72 @@ sqlTest("today usage intersects department, group and individual permissions wit
   } finally { await fixture.close(); }
 }, 60_000);
 
-sqlTest("historical performance filters retain today's count and comparisons do not repeat its query", async () => {
+sqlTest("historical performance filters change usage and comparisons do not repeat its query", async () => {
   const fixture = await createFixture();
   try {
     const designer = await fixture.user({ groupId: fixture.groupA });
-    const actualNow = new Date();
-    await fixture.event(designer, actualNow.toISOString());
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(actualNow);
+    await fixture.event(designer, now.toISOString());
+    await fixture.event(designer, "2020-01-02T00:00:00.000Z");
     const before = (await fixture.db.query("SELECT processing_enabled FROM usage_rollup_state")).rows;
     fixture.statements.length = 0;
     const dashboard = await getPerformanceDashboard(fixture.db, actor(), {
-      from: "2020-01-01T00:00:00.000Z", to: "2020-02-01T00:00:00.000Z", userId: designer,
-    });
-    expect(dashboard.todayUsage).toEqual({ date: today, timeZone: "Asia/Shanghai", users: 1 });
+      from: "2019-12-31T16:00:00.000Z", to: "2020-01-31T16:00:00.000Z", userId: designer,
+    }, now);
+    expect(dashboard.periodUsage).toMatchObject({ timeZone: "Asia/Shanghai", days: 31, userDays: 1, dailyAverage: 0.03 });
     expect(dashboard.metrics.validOutputs).toBe(0);
     expect(dashboard.tasks).toEqual([]);
     expect(dashboard.comparisons).not.toBeNull();
     expect(fixture.statements.filter(sql => sql.includes("count(DISTINCT r.user_id)"))).toHaveLength(1);
     expect(fixture.statements.every(sql => /^\s*SELECT\b/i.test(sql))).toBe(true);
     expect((await fixture.db.query("SELECT processing_enabled FROM usage_rollup_state")).rows).toEqual(before);
+  } finally { await fixture.close(); }
+}, 60_000);
+
+sqlTest("week and month usage average daily distinct accounts including zero days, not period unique accounts", async () => {
+  const fixture = await createFixture();
+  try {
+    const repeated = await fixture.user();
+    const second = await fixture.user();
+    await fixture.task(repeated, "2026-11-09T00:00:00Z");
+    await fixture.chat(repeated, "2026-11-09T00:00:00Z");
+    await fixture.event(repeated, "2026-11-09T00:00:00Z");
+    await fixture.event(second, "2026-11-09T00:00:00Z");
+    await fixture.event(repeated, "2026-11-10T00:00:00Z");
+    await fixture.event(repeated, activityAt);
+    await fixture.event(second, "2026-11-01T00:00:00Z");
+    await fixture.event(second, "2026-11-13T00:00:00Z");
+    const week = await getPerformanceUsage(fixture.db, actor(), resolveRange("week", undefined, undefined, now), now);
+    const month = await getPerformanceUsage(fixture.db, actor(), resolveRange("month", undefined, undefined, now), now);
+    expect(week).toMatchObject({ days: 4, userDays: 4, dailyAverage: 1 });
+    expect(month).toMatchObject({ days: 12, userDays: 5, dailyAverage: 0.42 });
+    expect((await getPerformanceUsage(fixture.db, actor(), { ...resolveRange("week", undefined, undefined, now), userId: repeated }, now)).dailyAverage).toBe(0.75);
+  } finally { await fixture.close(); }
+}, 60_000);
+
+sqlTest("custom periods count touched Beijing calendar days and respect exclusive end times", async () => {
+  const fixture = await createFixture();
+  try {
+    const designer = await fixture.user();
+    await fixture.event(designer, "2026-11-09T15:59:59.999Z");
+    await fixture.chat(designer, "2026-11-09T16:00:00.000Z");
+    await fixture.task(designer, "2026-11-09T16:01:00.000Z");
+    const range = { from: "2026-11-09T15:59:00Z", to: "2026-11-09T16:01:00Z" };
+    expect(await getPerformanceUsage(fixture.db, actor(), range, now)).toMatchObject({ days: 2, userDays: 2, dailyAverage: 1 });
+    expect(await getPerformanceUsage(fixture.db, actor(), { ...range, to: "2026-11-09T16:00:00Z" }, now)).toMatchObject({ days: 1, userDays: 1, dailyAverage: 1 });
+    expect(await getPerformanceUsage(fixture.db, actor(), { from: "2026-11-10T16:00:00Z", to: "2026-11-11T16:00:00Z" }, now)).toMatchObject({ days: 1, userDays: 0, dailyAverage: 0 });
+  } finally { await fixture.close(); }
+}, 60_000);
+
+sqlTest("future calendar days and their activity never enter a selected period average", async () => {
+  const fixture = await createFixture();
+  try {
+    const designer = await fixture.user();
+    await fixture.event(designer, activityAt);
+    await fixture.event(designer, todayEnd);
+    const range = { from: todayStart, to: "2026-12-01T16:00:00.000Z" };
+    expect(await getPerformanceUsage(fixture.db, actor(), range, now)).toMatchObject({ to: todayEnd, days: 1, userDays: 1, dailyAverage: 1 });
+    fixture.statements.length = 0;
+    expect(await getPerformanceUsage(fixture.db, actor(), { ...range, from: todayEnd }, now)).toMatchObject({ days: 0, userDays: 0, dailyAverage: null });
+    expect(fixture.statements).toHaveLength(0);
   } finally { await fixture.close(); }
 }, 60_000);

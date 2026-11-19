@@ -15,8 +15,11 @@ export function taskHistoryScope(query: unknown, values: unknown[]) {
   const { board } = z.object({ board: boardSchema }).parse(query);
   const quickAction = isQuickImageAction(board) ? board : null;
   const toolKey = quickAction ? quickImageTaskTarget(quickAction).toolKey : board === "image-generation" ? "image" : board;
-  const operations = quickAction ? [quickImageTaskTarget(quickAction).operationType] : [...getToolDefinition(toolKey)!.operations];
-  values.push(toolKey === "image" ? ["image", "image-generation"] : [toolKey], operations);
+  const mergedImageHistory = board === "image-edit";
+  const operations = quickAction ? [quickImageTaskTarget(quickAction).operationType] : mergedImageHistory
+    ? [...new Set([...getToolDefinition("image-edit")!.operations, ...getToolDefinition("image")!.operations])]
+    : [...getToolDefinition(toolKey)!.operations];
+  values.push(mergedImageHistory ? ["image-edit", "image", "image-generation"] : toolKey === "image" ? ["image", "image-generation"] : [toolKey], operations);
   const clauses = [
     `COALESCE(t.tool_key,CASE WHEN jsonb_typeof(t.parameters->'tool')='string' THEN t.parameters->>'tool' END)=ANY($${values.length - 1}::text[])`,
     `t.operation_type=ANY($${values.length}::text[])`,

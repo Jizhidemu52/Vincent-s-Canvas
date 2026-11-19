@@ -98,6 +98,17 @@ function harness(target = node(), options: { recover?: () => Promise<unknown>; r
 }
 
 describe("lazy node retry runtime", () => {
+    test.each([CanvasNodeType.Image, CanvasNodeType.Video])("a design-discussion %s execution cannot enter legacy generation even with a connected prompt", async type => {
+        const target = node(type, { designTask: { requestId: "original-design-slot", status: "uncertain" }, status: "error" });
+        const h = harness(target);
+        h.nodesRef.current.push({ ...node(CanvasNodeType.Text, { content: "生成一张针织服装图" }), id: "connected-prompt" });
+        h.connectionsRef.current.push({ id: "connection", fromNodeId: "connected-prompt", toNodeId: target.id });
+        await h.run();
+        expect(h.calls).toEqual([]); expect(h.running).toEqual([]);
+        expect(h.feedback).toEqual(["请在「创作任务」中查询或继续原请求，不会从画布重试重新生成。"]);
+        expect(h.nodesRef.current[0]).toEqual(target);
+    });
+
     test("an existing image task is observed without fresh generation", async () => {
         const h = harness(node(), { recover: async () => [{ status: "failed" }] });
         await h.run();

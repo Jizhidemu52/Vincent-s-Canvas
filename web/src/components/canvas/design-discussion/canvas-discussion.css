@@ -52,4 +52,19 @@
 .canvas-design-proposal figcaption { font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--cw-muted); }
 @media (max-width: 760px) { .canvas-design-discussion .studio-panel { width: calc(100% - 16px); max-width: none; top: 108px; right: 8px; bottom: 8px; } .dd-island { top: 57px; left: 50%; width: 246px; } .dd-pill { height: 40px; } .dd-notice { top: 107px; } .dd-connect { top: 119px; } .canvas-design-discussion .studio-panel-heading { padding: 10px 15px; } .canvas-design-discussion .studio-modes { margin-bottom: 9px; } .canvas-design-discussion .studio-context-heading { padding-inline: 15px; } .canvas-design-discussion .studio-composer-tools { gap: 6px 8px; } .canvas-design-discussion .studio-composer-tools select { max-width: 160px; } }
 @media (prefers-reduced-motion: reduce) { .canvas-design-discussion * { scroll-behavior: auto !important; } }
+@media (max-width: 760px) {
+    .canvas-design-discussion .studio-panel > :not(.studio-scroll):not(.studio-references) { flex-shrink: 0; }
+    .canvas-design-discussion .studio-scroll { min-height: 0; }
+    .canvas-design-discussion .studio-modes small { display: none; }
+    .canvas-design-discussion .studio-context-heading { flex-wrap: wrap; }
+    .canvas-design-discussion .studio-context-heading strong { min-width: 0; }
+    .canvas-design-discussion .studio-references { flex-shrink: 1; min-height: 0; }
+    .canvas-design-discussion .studio-composer { position: relative; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+    .canvas-design-discussion .discussion-composer-controls { align-items: center; gap: 4px; margin: 4px 0 8px; }
+    .canvas-design-discussion .discussion-composer-controls > button { display: grid; place-items: center; min-width: 44px; min-height: 44px; }
+    .canvas-design-discussion .discussion-settings .studio-composer-tools { position: absolute; bottom: 100%; left: 12px; right: 12px; z-index: 2; max-height: min(240px, 35dvh); overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 12px; border: 1px solid var(--cw-border); border-radius: 10px; background: var(--cw-panel); box-shadow: 0 8px 24px #0002; }
+    .canvas-design-discussion .studio-composer-tools label { flex: 1 1 100%; justify-content: space-between; }
+    .canvas-design-discussion .studio-composer-tools select { min-height: 40px; font-size: 16px; }
+    .canvas-design-discussion .studio-send button { min-height: 44px; }
+}
 @media (max-width: 760px) { .canvas-design-discussion .proposal-dialog > footer { gap: 7px; padding-top: 10px; } .canvas-design-discussion .proposal-dialog > footer > div:first-child { display: grid; grid-template-columns: 1fr 1fr; } .canvas-design-discussion .proposal-dialog > footer > div:last-child { display: flex; align-items: center; gap: 10px; } .canvas-design-discussion .proposal-dialog > footer p { flex: 1; } .canvas-design-discussion .proposal-options { margin: 12px 0; } }

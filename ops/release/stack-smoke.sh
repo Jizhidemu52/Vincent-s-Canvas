@@ -29,6 +29,7 @@ values={
  'PROVIDER_ENCRYPTION_KEY':base64.b64encode(secrets.token_bytes(32)).decode(),
  'WORKER_CONCURRENCY':'4','WORKER_SHUTDOWN_GRACE_SECONDS':'120','TASK_MOCK_MODE':'false',
  'AUTH_ENABLED':'true','OA_LOGIN_ENABLED':'false','CREDITS_ENABLED':'true','ROLE_PORTALS_ENABLED':'true',
+ 'IMAGE_CONVERSATIONS_ENABLED':'true',
  'S3_ENDPOINT':'http://minio:9000','S3_PUBLIC_ENDPOINT':'','S3_REGION':'us-east-1','S3_BUCKET':'canvas-ci',
  'S3_ACCESS_KEY_ID':'canvas-ci','S3_SECRET_ACCESS_KEY':secrets.token_hex(24),'S3_FORCE_PATH_STYLE':'true',
 }

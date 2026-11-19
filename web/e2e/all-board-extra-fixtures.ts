@@ -57,7 +57,7 @@ const history = { id: "team-task", userId: OWNER, userName: "隔离设计师", o
 function performanceData(): PerformanceDashboard {
     return {
         period: { from: "2026-11-01T00:00:00+08:00", to: "2026-11-08T00:00:00+08:00" },
-        todayUsage: { date: "2026-11-12", timeZone: "Asia/Shanghai", users: 17 },
+        periodUsage: { from: "2026-11-01T00:00:00+08:00", to: "2026-11-08T00:00:00+08:00", timeZone: "Asia/Shanghai", days: 7, userDays: 119, dailyAverage: 17 },
         metrics: { requestedOutputs: 4, validOutputs: 3, naturalDailyAverage: 0.43, activeDailyAverage: 3, successCount: 3, failedCount: 1, cancelledCount: 0,
             successRate: 75, batchCompletionRate: 75, averageDurationSeconds: 15, reworkRate: 0, onTimeDeliveryRate: 100, totalCredits: 12, totalRmbCost: 0.12,
             averageCreditsPerOutput: 4, averageCostPerOutput: 0.04, averageCostPerAdopted: 0.06, downloadRate: 66.67, averageUsabilityScore: 60 },

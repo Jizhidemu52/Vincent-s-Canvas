@@ -38,6 +38,15 @@ describe("design performance", () => {
     expect(result.metrics.onTimeDeliveryRate).toBeNull();
   });
 
+  test("preset ranges cover elapsed Beijing calendar days across week, month and year boundaries", () => {
+    const range = (preset: "today" | "week" | "month", at: string) => resolveRange(preset, undefined, undefined, new Date(at));
+    expect(range("today", "2026-11-08T16:00:00Z")).toEqual({ from: "2026-11-08T16:00:00.000Z", to: "2026-11-09T16:00:00.000Z" });
+    expect(range("week", "2026-11-08T15:59:59Z")).toEqual({ from: "2026-11-01T16:00:00.000Z", to: "2026-11-08T16:00:00.000Z" });
+    expect(range("week", "2026-11-08T16:00:00Z")).toEqual({ from: "2026-11-08T16:00:00.000Z", to: "2026-11-09T16:00:00.000Z" });
+    expect(range("week", "2026-01-01T00:00:00Z")).toEqual({ from: "2025-12-28T16:00:00.000Z", to: "2026-01-01T16:00:00.000Z" });
+    expect(range("month", "2028-02-29T00:00:00Z")).toEqual({ from: "2028-01-31T16:00:00.000Z", to: "2028-02-29T16:00:00.000Z" });
+  });
+
   test("deduplicates funnel events and calculates rework and on-time delivery", () => {
     const task = { id: "task", userId: "user", userName: "张三", departmentId: "dept", departmentName: "设计部", groupId: "group",
       operationType: "image_generation", modelName: "Image", prompt: "商品图", status: "success", credits: 4, rmbCost: 0.8,

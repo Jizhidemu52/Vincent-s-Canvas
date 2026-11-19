@@ -1,0 +1,1762 @@
+{
+  "schema": 1,
+  "additions": {
+    "columns": [
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_events",
+        "column_name": "conversation_id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 1,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "int8",
+        "data_type": "bigint",
+        "table_name": "image_conversation_events",
+        "column_name": "seq",
+        "is_nullable": "NO",
+        "numeric_scale": 0,
+        "column_default": null,
+        "ordinal_position": 2,
+        "numeric_precision": 64
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_events",
+        "column_name": "turn_id",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 3,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversation_events",
+        "column_name": "event_type",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 4,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "jsonb",
+        "data_type": "jsonb",
+        "table_name": "image_conversation_events",
+        "column_name": "payload",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 5,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "timestamptz",
+        "data_type": "timestamp with time zone",
+        "table_name": "image_conversation_events",
+        "column_name": "created_at",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "now()",
+        "ordinal_position": 6,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_messages",
+        "column_name": "id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 1,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_messages",
+        "column_name": "conversation_id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 2,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_messages",
+        "column_name": "turn_id",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 3,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "int8",
+        "data_type": "bigint",
+        "table_name": "image_conversation_messages",
+        "column_name": "seq",
+        "is_nullable": "NO",
+        "numeric_scale": 0,
+        "column_default": null,
+        "ordinal_position": 4,
+        "numeric_precision": 64
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversation_messages",
+        "column_name": "role",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 5,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversation_messages",
+        "column_name": "kind",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 6,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversation_messages",
+        "column_name": "text",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 7,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "jsonb",
+        "data_type": "jsonb",
+        "table_name": "image_conversation_messages",
+        "column_name": "attachments",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "'[]'::jsonb",
+        "ordinal_position": 8,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "timestamptz",
+        "data_type": "timestamp with time zone",
+        "table_name": "image_conversation_messages",
+        "column_name": "created_at",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "now()",
+        "ordinal_position": 9,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_turns",
+        "column_name": "id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 1,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_turns",
+        "column_name": "conversation_id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 2,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_turns",
+        "column_name": "owner_user_id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 3,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversation_turns",
+        "column_name": "client_request_id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 4,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversation_turns",
+        "column_name": "payload_hash",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 5,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "jsonb",
+        "data_type": "jsonb",
+        "table_name": "image_conversation_turns",
+        "column_name": "input_payload",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 6,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "int8",
+        "data_type": "bigint",
+        "table_name": "image_conversation_turns",
+        "column_name": "accepted_revision",
+        "is_nullable": "NO",
+        "numeric_scale": 0,
+        "column_default": null,
+        "ordinal_position": 7,
+        "numeric_precision": 64
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_turns",
+        "column_name": "input_active_version_id",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 8,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_turns",
+        "column_name": "base_version_id",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 9,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_turns",
+        "column_name": "output_version_id",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 10,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_turns",
+        "column_name": "reply_to_turn_id",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 11,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversation_turns",
+        "column_name": "intent",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 12,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversation_turns",
+        "column_name": "state",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "'accepted'::text",
+        "ordinal_position": 13,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversation_turns",
+        "column_name": "planner_status",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "'not_started'::text",
+        "ordinal_position": 14,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversation_turns",
+        "column_name": "planner_request_id",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 15,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "timestamptz",
+        "data_type": "timestamp with time zone",
+        "table_name": "image_conversation_turns",
+        "column_name": "planner_dispatch_started_at",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 16,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_turns",
+        "column_name": "planner_lease_token",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 17,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "timestamptz",
+        "data_type": "timestamp with time zone",
+        "table_name": "image_conversation_turns",
+        "column_name": "planner_lease_expires_at",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 18,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "int8",
+        "data_type": "bigint",
+        "table_name": "image_conversation_turns",
+        "column_name": "execution_epoch",
+        "is_nullable": "NO",
+        "numeric_scale": 0,
+        "column_default": "0",
+        "ordinal_position": 19,
+        "numeric_precision": 64
+      },
+      {
+        "udt_name": "jsonb",
+        "data_type": "jsonb",
+        "table_name": "image_conversation_turns",
+        "column_name": "plan",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 20,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "jsonb",
+        "data_type": "jsonb",
+        "table_name": "image_conversation_turns",
+        "column_name": "context_manifest",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 21,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "jsonb",
+        "data_type": "jsonb",
+        "table_name": "image_conversation_turns",
+        "column_name": "settings_snapshot",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 22,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_turns",
+        "column_name": "task_id",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 23,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversation_turns",
+        "column_name": "task_request_id",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 24,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "bool",
+        "data_type": "boolean",
+        "table_name": "image_conversation_turns",
+        "column_name": "auto_activate",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "true",
+        "ordinal_position": 25,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "jsonb",
+        "data_type": "jsonb",
+        "table_name": "image_conversation_turns",
+        "column_name": "last_error",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 26,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "timestamptz",
+        "data_type": "timestamp with time zone",
+        "table_name": "image_conversation_turns",
+        "column_name": "created_at",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "now()",
+        "ordinal_position": 27,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "timestamptz",
+        "data_type": "timestamp with time zone",
+        "table_name": "image_conversation_turns",
+        "column_name": "updated_at",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "now()",
+        "ordinal_position": 28,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_versions",
+        "column_name": "id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 1,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_versions",
+        "column_name": "conversation_id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 2,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_versions",
+        "column_name": "root_version_id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 3,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_versions",
+        "column_name": "parent_version_id",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 4,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "int8",
+        "data_type": "bigint",
+        "table_name": "image_conversation_versions",
+        "column_name": "version_no",
+        "is_nullable": "NO",
+        "numeric_scale": 0,
+        "column_default": null,
+        "ordinal_position": 5,
+        "numeric_precision": 64
+      },
+      {
+        "udt_name": "int8",
+        "data_type": "bigint",
+        "table_name": "image_conversation_versions",
+        "column_name": "image_no",
+        "is_nullable": "NO",
+        "numeric_scale": 0,
+        "column_default": null,
+        "ordinal_position": 6,
+        "numeric_precision": 64
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversation_versions",
+        "column_name": "label",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 7,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_versions",
+        "column_name": "asset_id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 8,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversation_versions",
+        "column_name": "source",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 9,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversation_versions",
+        "column_name": "turn_id",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 10,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "int4",
+        "data_type": "integer",
+        "table_name": "image_conversation_versions",
+        "column_name": "output_index",
+        "is_nullable": "NO",
+        "numeric_scale": 0,
+        "column_default": "0",
+        "ordinal_position": 11,
+        "numeric_precision": 32
+      },
+      {
+        "udt_name": "jsonb",
+        "data_type": "jsonb",
+        "table_name": "image_conversation_versions",
+        "column_name": "requested_state",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "'{\"goals\": [], \"constraints\": [], \"schemaVersion\": 1}'::jsonb",
+        "ordinal_position": 12,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "jsonb",
+        "data_type": "jsonb",
+        "table_name": "image_conversation_versions",
+        "column_name": "observation",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 13,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversation_versions",
+        "column_name": "acceptance",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "'unreviewed'::text",
+        "ordinal_position": 14,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "jsonb",
+        "data_type": "jsonb",
+        "table_name": "image_conversation_versions",
+        "column_name": "parameters",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 15,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "jsonb",
+        "data_type": "jsonb",
+        "table_name": "image_conversation_versions",
+        "column_name": "actual_dimensions",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 16,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "timestamptz",
+        "data_type": "timestamp with time zone",
+        "table_name": "image_conversation_versions",
+        "column_name": "created_at",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "now()",
+        "ordinal_position": 17,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversations",
+        "column_name": "id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 1,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversations",
+        "column_name": "owner_user_id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 2,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversations",
+        "column_name": "project_uuid",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 3,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversations",
+        "column_name": "canvas_external_id",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 4,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversations",
+        "column_name": "entrypoint",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 5,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversations",
+        "column_name": "title",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 6,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "image_conversations",
+        "column_name": "active_version_id",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 7,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "int8",
+        "data_type": "bigint",
+        "table_name": "image_conversations",
+        "column_name": "state_revision",
+        "is_nullable": "NO",
+        "numeric_scale": 0,
+        "column_default": "0",
+        "ordinal_position": 8,
+        "numeric_precision": 64
+      },
+      {
+        "udt_name": "int8",
+        "data_type": "bigint",
+        "table_name": "image_conversations",
+        "column_name": "last_message_seq",
+        "is_nullable": "NO",
+        "numeric_scale": 0,
+        "column_default": "0",
+        "ordinal_position": 9,
+        "numeric_precision": 64
+      },
+      {
+        "udt_name": "int8",
+        "data_type": "bigint",
+        "table_name": "image_conversations",
+        "column_name": "last_image_no",
+        "is_nullable": "NO",
+        "numeric_scale": 0,
+        "column_default": "0",
+        "ordinal_position": 10,
+        "numeric_precision": 64
+      },
+      {
+        "udt_name": "int8",
+        "data_type": "bigint",
+        "table_name": "image_conversations",
+        "column_name": "last_event_seq",
+        "is_nullable": "NO",
+        "numeric_scale": 0,
+        "column_default": "0",
+        "ordinal_position": 11,
+        "numeric_precision": 64
+      },
+      {
+        "udt_name": "jsonb",
+        "data_type": "jsonb",
+        "table_name": "image_conversations",
+        "column_name": "context_summary",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "'{\"text\": \"\", \"goals\": [], \"schemaVersion\": 1, \"unresolvedQuestions\": []}'::jsonb",
+        "ordinal_position": 12,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "int8",
+        "data_type": "bigint",
+        "table_name": "image_conversations",
+        "column_name": "context_summary_through_seq",
+        "is_nullable": "NO",
+        "numeric_scale": 0,
+        "column_default": "0",
+        "ordinal_position": 13,
+        "numeric_precision": 64
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversations",
+        "column_name": "create_request_id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 14,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "image_conversations",
+        "column_name": "create_request_hash",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 15,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "timestamptz",
+        "data_type": "timestamp with time zone",
+        "table_name": "image_conversations",
+        "column_name": "created_at",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "now()",
+        "ordinal_position": 16,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "timestamptz",
+        "data_type": "timestamp with time zone",
+        "table_name": "image_conversations",
+        "column_name": "updated_at",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "now()",
+        "ordinal_position": 17,
+        "numeric_precision": null
+      }
+    ],
+    "indexes": [
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_conversation_events_pkey ON public.image_conversation_events USING btree (conversation_id, seq)",
+        "indexname": "image_conversation_events_pkey",
+        "tablename": "image_conversation_events"
+      },
+      {
+        "indexdef": "CREATE INDEX image_events_retention ON public.image_conversation_events USING btree (created_at)",
+        "indexname": "image_events_retention",
+        "tablename": "image_conversation_events"
+      },
+      {
+        "indexdef": "CREATE INDEX image_events_turn ON public.image_conversation_events USING btree (turn_id) WHERE (turn_id IS NOT NULL)",
+        "indexname": "image_events_turn",
+        "tablename": "image_conversation_events"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_conversation_messages_pkey ON public.image_conversation_messages USING btree (id)",
+        "indexname": "image_conversation_messages_pkey",
+        "tablename": "image_conversation_messages"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_messages_one_user_per_turn ON public.image_conversation_messages USING btree (turn_id) WHERE (role = 'user'::text)",
+        "indexname": "image_messages_one_user_per_turn",
+        "tablename": "image_conversation_messages"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_messages_sequence ON public.image_conversation_messages USING btree (conversation_id, seq)",
+        "indexname": "image_messages_sequence",
+        "tablename": "image_conversation_messages"
+      },
+      {
+        "indexdef": "CREATE INDEX image_messages_turn ON public.image_conversation_messages USING btree (turn_id) WHERE (turn_id IS NOT NULL)",
+        "indexname": "image_messages_turn",
+        "tablename": "image_conversation_messages"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_conversation_turns_pkey ON public.image_conversation_turns USING btree (id)",
+        "indexname": "image_conversation_turns_pkey",
+        "tablename": "image_conversation_turns"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_conversation_turns_task_id_key ON public.image_conversation_turns USING btree (task_id)",
+        "indexname": "image_conversation_turns_task_id_key",
+        "tablename": "image_conversation_turns"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_conversation_turns_task_request_id_key ON public.image_conversation_turns USING btree (task_request_id)",
+        "indexname": "image_conversation_turns_task_request_id_key",
+        "tablename": "image_conversation_turns"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_turns_client_request ON public.image_conversation_turns USING btree (owner_user_id, client_request_id)",
+        "indexname": "image_turns_client_request",
+        "tablename": "image_conversation_turns"
+      },
+      {
+        "indexdef": "CREATE INDEX image_turns_conversation_history ON public.image_conversation_turns USING btree (conversation_id, created_at DESC, id DESC)",
+        "indexname": "image_turns_conversation_history",
+        "tablename": "image_conversation_turns"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_turns_conversation_identity ON public.image_conversation_turns USING btree (conversation_id, id)",
+        "indexname": "image_turns_conversation_identity",
+        "tablename": "image_conversation_turns"
+      },
+      {
+        "indexdef": "CREATE INDEX image_turns_planner_recovery ON public.image_conversation_turns USING btree (state, planner_lease_expires_at, updated_at) WHERE (state = ANY (ARRAY['accepted'::text, 'planning'::text, 'uncertain'::text]))",
+        "indexname": "image_turns_planner_recovery",
+        "tablename": "image_conversation_turns"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_turns_single_flight ON public.image_conversation_turns USING btree (conversation_id) WHERE (state = ANY (ARRAY['accepted'::text, 'planning'::text, 'queued'::text, 'generating'::text, 'uncertain'::text]))",
+        "indexname": "image_turns_single_flight",
+        "tablename": "image_conversation_turns"
+      },
+      {
+        "indexdef": "CREATE INDEX image_turns_task_reconciliation ON public.image_conversation_turns USING btree (state, updated_at) WHERE ((task_id IS NOT NULL) AND (state = ANY (ARRAY['queued'::text, 'generating'::text, 'uncertain'::text, 'detached'::text])))",
+        "indexname": "image_turns_task_reconciliation",
+        "tablename": "image_conversation_turns"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_conversation_versions_pkey ON public.image_conversation_versions USING btree (id)",
+        "indexname": "image_conversation_versions_pkey",
+        "tablename": "image_conversation_versions"
+      },
+      {
+        "indexdef": "CREATE INDEX image_versions_asset ON public.image_conversation_versions USING btree (asset_id)",
+        "indexname": "image_versions_asset",
+        "tablename": "image_conversation_versions"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_versions_conversation_identity ON public.image_conversation_versions USING btree (conversation_id, id)",
+        "indexname": "image_versions_conversation_identity",
+        "tablename": "image_conversation_versions"
+      },
+      {
+        "indexdef": "CREATE INDEX image_versions_history ON public.image_conversation_versions USING btree (conversation_id, image_no)",
+        "indexname": "image_versions_history",
+        "tablename": "image_conversation_versions"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_versions_image_number ON public.image_conversation_versions USING btree (conversation_id, image_no)",
+        "indexname": "image_versions_image_number",
+        "tablename": "image_conversation_versions"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_versions_root_identity ON public.image_conversation_versions USING btree (conversation_id, root_version_id, id)",
+        "indexname": "image_versions_root_identity",
+        "tablename": "image_conversation_versions"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_versions_root_number ON public.image_conversation_versions USING btree (conversation_id, root_version_id, version_no)",
+        "indexname": "image_versions_root_number",
+        "tablename": "image_conversation_versions"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_versions_turn_output ON public.image_conversation_versions USING btree (turn_id, output_index) WHERE (source = 'generated'::text)",
+        "indexname": "image_versions_turn_output",
+        "tablename": "image_conversation_versions"
+      },
+      {
+        "indexdef": "CREATE INDEX image_conversations_canvas ON public.image_conversations USING btree (owner_user_id, canvas_external_id) WHERE (canvas_external_id IS NOT NULL)",
+        "indexname": "image_conversations_canvas",
+        "tablename": "image_conversations"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_conversations_create_request ON public.image_conversations USING btree (owner_user_id, create_request_id)",
+        "indexname": "image_conversations_create_request",
+        "tablename": "image_conversations"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_conversations_owner_identity ON public.image_conversations USING btree (id, owner_user_id)",
+        "indexname": "image_conversations_owner_identity",
+        "tablename": "image_conversations"
+      },
+      {
+        "indexdef": "CREATE INDEX image_conversations_owner_list ON public.image_conversations USING btree (owner_user_id, created_at DESC, id DESC)",
+        "indexname": "image_conversations_owner_list",
+        "tablename": "image_conversations"
+      },
+      {
+        "indexdef": "CREATE UNIQUE INDEX image_conversations_pkey ON public.image_conversations USING btree (id)",
+        "indexname": "image_conversations_pkey",
+        "tablename": "image_conversations"
+      },
+      {
+        "indexdef": "CREATE INDEX image_conversations_project ON public.image_conversations USING btree (project_uuid) WHERE (project_uuid IS NOT NULL)",
+        "indexname": "image_conversations_project",
+        "tablename": "image_conversations"
+      }
+    ],
+    "constraints": [
+      {
+        "name": "image_conversation_events_conversation_id_fkey",
+        "type": "f",
+        "relation": "image_conversation_events",
+        "definition": "FOREIGN KEY (conversation_id) REFERENCES image_conversations(id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_conversation_events_event_type_check",
+        "type": "c",
+        "relation": "image_conversation_events",
+        "definition": "CHECK ((event_type = ANY (ARRAY['conversation.created'::text, 'turn.accepted'::text, 'turn.updated'::text, 'plan.ready'::text, 'task.queued'::text, 'task.progress'::text, 'version.created'::text, 'active.changed'::text, 'turn.completed'::text, 'turn.failed'::text, 'turn.cancelled'::text, 'turn.detached'::text, 'turn.uncertain'::text, 'message.created'::text, 'context_summary.updated'::text, 'settings.resolved'::text])))"
+      },
+      {
+        "name": "image_conversation_events_payload_check",
+        "type": "c",
+        "relation": "image_conversation_events",
+        "definition": "CHECK ((jsonb_typeof(payload) = 'object'::text))"
+      },
+      {
+        "name": "image_conversation_events_pkey",
+        "type": "p",
+        "relation": "image_conversation_events",
+        "definition": "PRIMARY KEY (conversation_id, seq)"
+      },
+      {
+        "name": "image_conversation_events_seq_check",
+        "type": "c",
+        "relation": "image_conversation_events",
+        "definition": "CHECK (((seq >= 1) AND (seq <= '9000000000000000'::bigint)))"
+      },
+      {
+        "name": "image_events_turn_same_conversation",
+        "type": "f",
+        "relation": "image_conversation_events",
+        "definition": "FOREIGN KEY (conversation_id, turn_id) REFERENCES image_conversation_turns(conversation_id, id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_conversation_messages_attachments_check",
+        "type": "c",
+        "relation": "image_conversation_messages",
+        "definition": "CHECK ((jsonb_typeof(attachments) = 'array'::text))"
+      },
+      {
+        "name": "image_conversation_messages_conversation_id_fkey",
+        "type": "f",
+        "relation": "image_conversation_messages",
+        "definition": "FOREIGN KEY (conversation_id) REFERENCES image_conversations(id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_conversation_messages_kind_check",
+        "type": "c",
+        "relation": "image_conversation_messages",
+        "definition": "CHECK ((kind = ANY (ARRAY['text'::text, 'image'::text, 'status'::text])))"
+      },
+      {
+        "name": "image_conversation_messages_pkey",
+        "type": "p",
+        "relation": "image_conversation_messages",
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "image_conversation_messages_role_check",
+        "type": "c",
+        "relation": "image_conversation_messages",
+        "definition": "CHECK ((role = ANY (ARRAY['user'::text, 'assistant'::text])))"
+      },
+      {
+        "name": "image_conversation_messages_seq_check",
+        "type": "c",
+        "relation": "image_conversation_messages",
+        "definition": "CHECK (((seq >= 1) AND (seq <= '9000000000000000'::bigint)))"
+      },
+      {
+        "name": "image_messages_content",
+        "type": "c",
+        "relation": "image_conversation_messages",
+        "definition": "CHECK ((((text IS NOT NULL) AND (char_length(text) > 0)) OR (jsonb_array_length(attachments) > 0)))"
+      },
+      {
+        "name": "image_messages_image_attachment",
+        "type": "c",
+        "relation": "image_conversation_messages",
+        "definition": "CHECK (((kind <> 'image'::text) OR (jsonb_array_length(attachments) > 0)))"
+      },
+      {
+        "name": "image_messages_sequence",
+        "type": "u",
+        "relation": "image_conversation_messages",
+        "definition": "UNIQUE (conversation_id, seq)"
+      },
+      {
+        "name": "image_messages_turn_same_conversation",
+        "type": "f",
+        "relation": "image_conversation_messages",
+        "definition": "FOREIGN KEY (conversation_id, turn_id) REFERENCES image_conversation_turns(conversation_id, id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_messages_user_has_turn",
+        "type": "c",
+        "relation": "image_conversation_messages",
+        "definition": "CHECK (((role <> 'user'::text) OR (turn_id IS NOT NULL)))"
+      },
+      {
+        "name": "image_conversation_turns_accepted_revision_check",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((accepted_revision >= 1) AND (accepted_revision <= '9000000000000000'::bigint)))"
+      },
+      {
+        "name": "image_conversation_turns_client_request_id_check",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((char_length(client_request_id) >= 1) AND (char_length(client_request_id) <= 160)))"
+      },
+      {
+        "name": "image_conversation_turns_context_manifest_check",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((context_manifest IS NULL) OR (jsonb_typeof(context_manifest) = 'object'::text)))"
+      },
+      {
+        "name": "image_conversation_turns_execution_epoch_check",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((execution_epoch >= 0) AND (execution_epoch <= '9000000000000000'::bigint)))"
+      },
+      {
+        "name": "image_conversation_turns_input_payload_check",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK ((jsonb_typeof(input_payload) = 'object'::text))"
+      },
+      {
+        "name": "image_conversation_turns_intent_check",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK ((intent = ANY (ARRAY['discuss'::text, 'clarify'::text, 'restore'::text, 'edit'::text, 'generate_new'::text])))"
+      },
+      {
+        "name": "image_conversation_turns_last_error_check",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((last_error IS NULL) OR (jsonb_typeof(last_error) = 'object'::text)))"
+      },
+      {
+        "name": "image_conversation_turns_owner_user_id_fkey",
+        "type": "f",
+        "relation": "image_conversation_turns",
+        "definition": "FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_conversation_turns_payload_hash_check",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK ((payload_hash ~ '^[0-9a-f]{64}$'::text))"
+      },
+      {
+        "name": "image_conversation_turns_pkey",
+        "type": "p",
+        "relation": "image_conversation_turns",
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "image_conversation_turns_plan_check",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((plan IS NULL) OR (jsonb_typeof(plan) = 'object'::text)))"
+      },
+      {
+        "name": "image_conversation_turns_planner_request_id_check",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((planner_request_id IS NULL) OR ((char_length(planner_request_id) >= 1) AND (char_length(planner_request_id) <= 160))))"
+      },
+      {
+        "name": "image_conversation_turns_planner_status_check",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK ((planner_status = ANY (ARRAY['not_started'::text, 'in_flight'::text, 'succeeded'::text, 'failed'::text, 'unknown'::text])))"
+      },
+      {
+        "name": "image_conversation_turns_settings_snapshot_check",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((settings_snapshot IS NULL) OR (jsonb_typeof(settings_snapshot) = 'object'::text)))"
+      },
+      {
+        "name": "image_conversation_turns_state_check",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK ((state = ANY (ARRAY['accepted'::text, 'planning'::text, 'queued'::text, 'generating'::text, 'uncertain'::text, 'completed'::text, 'failed'::text, 'cancelled'::text, 'detached'::text])))"
+      },
+      {
+        "name": "image_conversation_turns_task_id_fkey",
+        "type": "f",
+        "relation": "image_conversation_turns",
+        "definition": "FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_conversation_turns_task_id_key",
+        "type": "u",
+        "relation": "image_conversation_turns",
+        "definition": "UNIQUE (task_id)"
+      },
+      {
+        "name": "image_conversation_turns_task_request_id_check",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((task_request_id IS NULL) OR ((char_length(task_request_id) >= 1) AND (char_length(task_request_id) <= 160))))"
+      },
+      {
+        "name": "image_conversation_turns_task_request_id_fkey",
+        "type": "f",
+        "relation": "image_conversation_turns",
+        "definition": "FOREIGN KEY (task_request_id) REFERENCES tasks(request_id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_conversation_turns_task_request_id_key",
+        "type": "u",
+        "relation": "image_conversation_turns",
+        "definition": "UNIQUE (task_request_id)"
+      },
+      {
+        "name": "image_turns_base_same_conversation",
+        "type": "f",
+        "relation": "image_conversation_turns",
+        "definition": "FOREIGN KEY (conversation_id, base_version_id) REFERENCES image_conversation_versions(conversation_id, id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_turns_client_request",
+        "type": "u",
+        "relation": "image_conversation_turns",
+        "definition": "UNIQUE (owner_user_id, client_request_id)"
+      },
+      {
+        "name": "image_turns_conversation_identity",
+        "type": "u",
+        "relation": "image_conversation_turns",
+        "definition": "UNIQUE (conversation_id, id)"
+      },
+      {
+        "name": "image_turns_detached_no_activation",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((state <> 'detached'::text) OR (NOT auto_activate)))"
+      },
+      {
+        "name": "image_turns_dispatch_metadata",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((planner_status <> ALL (ARRAY['in_flight'::text, 'unknown'::text])) OR ((planner_request_id IS NOT NULL) AND (planner_dispatch_started_at IS NOT NULL))))"
+      },
+      {
+        "name": "image_turns_input_active_same_conversation",
+        "type": "f",
+        "relation": "image_conversation_turns",
+        "definition": "FOREIGN KEY (conversation_id, input_active_version_id) REFERENCES image_conversation_versions(conversation_id, id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_turns_nonimage_no_task",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((intent IS NULL) OR (intent <> ALL (ARRAY['discuss'::text, 'clarify'::text, 'restore'::text])) OR ((task_id IS NULL) AND (task_request_id IS NULL))))"
+      },
+      {
+        "name": "image_turns_not_self_reply",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((reply_to_turn_id IS NULL) OR (reply_to_turn_id <> id)))"
+      },
+      {
+        "name": "image_turns_output_same_conversation",
+        "type": "f",
+        "relation": "image_conversation_turns",
+        "definition": "FOREIGN KEY (conversation_id, output_version_id) REFERENCES image_conversation_versions(conversation_id, id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_turns_owner_conversation",
+        "type": "f",
+        "relation": "image_conversation_turns",
+        "definition": "FOREIGN KEY (conversation_id, owner_user_id) REFERENCES image_conversations(id, owner_user_id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_turns_planner_lease_pair",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((planner_lease_token IS NULL) = (planner_lease_expires_at IS NULL)))"
+      },
+      {
+        "name": "image_turns_reply_same_conversation",
+        "type": "f",
+        "relation": "image_conversation_turns",
+        "definition": "FOREIGN KEY (conversation_id, reply_to_turn_id) REFERENCES image_conversation_turns(conversation_id, id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_turns_task_pair",
+        "type": "c",
+        "relation": "image_conversation_turns",
+        "definition": "CHECK (((task_id IS NULL) = (task_request_id IS NULL)))"
+      },
+      {
+        "name": "image_conversation_versions_acceptance_check",
+        "type": "c",
+        "relation": "image_conversation_versions",
+        "definition": "CHECK ((acceptance = ANY (ARRAY['unreviewed'::text, 'accepted'::text, 'rejected'::text])))"
+      },
+      {
+        "name": "image_conversation_versions_actual_dimensions_check",
+        "type": "c",
+        "relation": "image_conversation_versions",
+        "definition": "CHECK (((actual_dimensions IS NULL) OR (jsonb_typeof(actual_dimensions) = 'object'::text)))"
+      },
+      {
+        "name": "image_conversation_versions_asset_id_fkey",
+        "type": "f",
+        "relation": "image_conversation_versions",
+        "definition": "FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_conversation_versions_conversation_id_fkey",
+        "type": "f",
+        "relation": "image_conversation_versions",
+        "definition": "FOREIGN KEY (conversation_id) REFERENCES image_conversations(id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_conversation_versions_image_no_check",
+        "type": "c",
+        "relation": "image_conversation_versions",
+        "definition": "CHECK (((image_no >= 1) AND (image_no <= '9000000000000000'::bigint)))"
+      },
+      {
+        "name": "image_conversation_versions_label_check",
+        "type": "c",
+        "relation": "image_conversation_versions",
+        "definition": "CHECK (((char_length(label) >= 1) AND (char_length(label) <= 200)))"
+      },
+      {
+        "name": "image_conversation_versions_observation_check",
+        "type": "c",
+        "relation": "image_conversation_versions",
+        "definition": "CHECK (((observation IS NULL) OR (jsonb_typeof(observation) = 'object'::text)))"
+      },
+      {
+        "name": "image_conversation_versions_output_index_check",
+        "type": "c",
+        "relation": "image_conversation_versions",
+        "definition": "CHECK ((output_index = 0))"
+      },
+      {
+        "name": "image_conversation_versions_parameters_check",
+        "type": "c",
+        "relation": "image_conversation_versions",
+        "definition": "CHECK (((parameters IS NULL) OR (jsonb_typeof(parameters) = 'object'::text)))"
+      },
+      {
+        "name": "image_conversation_versions_pkey",
+        "type": "p",
+        "relation": "image_conversation_versions",
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "image_conversation_versions_requested_state_check",
+        "type": "c",
+        "relation": "image_conversation_versions",
+        "definition": "CHECK ((jsonb_typeof(requested_state) = 'object'::text))"
+      },
+      {
+        "name": "image_conversation_versions_source_check",
+        "type": "c",
+        "relation": "image_conversation_versions",
+        "definition": "CHECK ((source = ANY (ARRAY['upload'::text, 'generated'::text])))"
+      },
+      {
+        "name": "image_conversation_versions_version_no_check",
+        "type": "c",
+        "relation": "image_conversation_versions",
+        "definition": "CHECK (((version_no >= 1) AND (version_no <= '9000000000000000'::bigint)))"
+      },
+      {
+        "name": "image_versions_conversation_identity",
+        "type": "u",
+        "relation": "image_conversation_versions",
+        "definition": "UNIQUE (conversation_id, id)"
+      },
+      {
+        "name": "image_versions_image_number",
+        "type": "u",
+        "relation": "image_conversation_versions",
+        "definition": "UNIQUE (conversation_id, image_no)"
+      },
+      {
+        "name": "image_versions_parent_same_root",
+        "type": "f",
+        "relation": "image_conversation_versions",
+        "definition": "FOREIGN KEY (conversation_id, root_version_id, parent_version_id) REFERENCES image_conversation_versions(conversation_id, root_version_id, id) DEFERRABLE INITIALLY DEFERRED"
+      },
+      {
+        "name": "image_versions_root_identity",
+        "type": "u",
+        "relation": "image_conversation_versions",
+        "definition": "UNIQUE (conversation_id, root_version_id, id)"
+      },
+      {
+        "name": "image_versions_root_number",
+        "type": "u",
+        "relation": "image_conversation_versions",
+        "definition": "UNIQUE (conversation_id, root_version_id, version_no)"
+      },
+      {
+        "name": "image_versions_root_same_conversation",
+        "type": "f",
+        "relation": "image_conversation_versions",
+        "definition": "FOREIGN KEY (conversation_id, root_version_id) REFERENCES image_conversation_versions(conversation_id, id) DEFERRABLE INITIALLY DEFERRED"
+      },
+      {
+        "name": "image_versions_root_shape",
+        "type": "c",
+        "relation": "image_conversation_versions",
+        "definition": "CHECK ((((parent_version_id IS NULL) AND (root_version_id = id) AND (version_no = 1)) OR ((parent_version_id IS NOT NULL) AND (parent_version_id <> id) AND (root_version_id <> id) AND (version_no > 1))))"
+      },
+      {
+        "name": "image_versions_source_shape",
+        "type": "c",
+        "relation": "image_conversation_versions",
+        "definition": "CHECK ((((source = 'upload'::text) AND (turn_id IS NULL) AND (parameters IS NULL) AND (parent_version_id IS NULL)) OR ((source = 'generated'::text) AND (turn_id IS NOT NULL) AND (parameters IS NOT NULL))))"
+      },
+      {
+        "name": "image_versions_turn_same_conversation",
+        "type": "f",
+        "relation": "image_conversation_versions",
+        "definition": "FOREIGN KEY (conversation_id, turn_id) REFERENCES image_conversation_turns(conversation_id, id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_conversations_active_same_conversation",
+        "type": "f",
+        "relation": "image_conversations",
+        "definition": "FOREIGN KEY (id, active_version_id) REFERENCES image_conversation_versions(conversation_id, id) DEFERRABLE INITIALLY DEFERRED"
+      },
+      {
+        "name": "image_conversations_canvas_binding",
+        "type": "c",
+        "relation": "image_conversations",
+        "definition": "CHECK ((((entrypoint = 'standalone'::text) AND (canvas_external_id IS NULL)) OR ((entrypoint = 'canvas'::text) AND (canvas_external_id IS NOT NULL) AND (char_length(canvas_external_id) > 0))))"
+      },
+      {
+        "name": "image_conversations_canvas_owner",
+        "type": "f",
+        "relation": "image_conversations",
+        "definition": "FOREIGN KEY (owner_user_id, canvas_external_id) REFERENCES canvas_documents(owner_user_id, external_id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_conversations_context_summary_check",
+        "type": "c",
+        "relation": "image_conversations",
+        "definition": "CHECK ((jsonb_typeof(context_summary) = 'object'::text))"
+      },
+      {
+        "name": "image_conversations_create_request",
+        "type": "u",
+        "relation": "image_conversations",
+        "definition": "UNIQUE (owner_user_id, create_request_id)"
+      },
+      {
+        "name": "image_conversations_create_request_hash_check",
+        "type": "c",
+        "relation": "image_conversations",
+        "definition": "CHECK ((create_request_hash ~ '^[0-9a-f]{64}$'::text))"
+      },
+      {
+        "name": "image_conversations_create_request_id_check",
+        "type": "c",
+        "relation": "image_conversations",
+        "definition": "CHECK (((char_length(create_request_id) >= 1) AND (char_length(create_request_id) <= 160)))"
+      },
+      {
+        "name": "image_conversations_entrypoint_check",
+        "type": "c",
+        "relation": "image_conversations",
+        "definition": "CHECK ((entrypoint = ANY (ARRAY['standalone'::text, 'canvas'::text])))"
+      },
+      {
+        "name": "image_conversations_last_event_seq_check",
+        "type": "c",
+        "relation": "image_conversations",
+        "definition": "CHECK (((last_event_seq >= 0) AND (last_event_seq <= '9000000000000000'::bigint)))"
+      },
+      {
+        "name": "image_conversations_last_image_no_check",
+        "type": "c",
+        "relation": "image_conversations",
+        "definition": "CHECK (((last_image_no >= 0) AND (last_image_no <= '9000000000000000'::bigint)))"
+      },
+      {
+        "name": "image_conversations_last_message_seq_check",
+        "type": "c",
+        "relation": "image_conversations",
+        "definition": "CHECK (((last_message_seq >= 0) AND (last_message_seq <= '9000000000000000'::bigint)))"
+      },
+      {
+        "name": "image_conversations_owner_identity",
+        "type": "u",
+        "relation": "image_conversations",
+        "definition": "UNIQUE (id, owner_user_id)"
+      },
+      {
+        "name": "image_conversations_owner_user_id_fkey",
+        "type": "f",
+        "relation": "image_conversations",
+        "definition": "FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_conversations_pkey",
+        "type": "p",
+        "relation": "image_conversations",
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "image_conversations_project_uuid_fkey",
+        "type": "f",
+        "relation": "image_conversations",
+        "definition": "FOREIGN KEY (project_uuid) REFERENCES projects(id) ON DELETE RESTRICT"
+      },
+      {
+        "name": "image_conversations_state_revision_check",
+        "type": "c",
+        "relation": "image_conversations",
+        "definition": "CHECK (((state_revision >= 0) AND (state_revision <= '9000000000000000'::bigint)))"
+      },
+      {
+        "name": "image_conversations_summary_position",
+        "type": "c",
+        "relation": "image_conversations",
+        "definition": "CHECK (((context_summary_through_seq >= 0) AND (context_summary_through_seq <= last_message_seq)))"
+      },
+      {
+        "name": "image_conversations_title_check",
+        "type": "c",
+        "relation": "image_conversations",
+        "definition": "CHECK (((title IS NULL) OR ((char_length(title) >= 1) AND (char_length(title) <= 200))))"
+      }
+    ],
+    "functions": [],
+    "triggers": []
+  },
+  "seedColumns": [
+    {
+      "udt_name": "uuid",
+      "data_type": "uuid",
+      "table_name": "model_configs",
+      "column_name": "id",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": "gen_random_uuid()",
+      "ordinal_position": 1,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "uuid",
+      "data_type": "uuid",
+      "table_name": "model_configs",
+      "column_name": "provider_id",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": null,
+      "ordinal_position": 2,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "text",
+      "data_type": "text",
+      "table_name": "model_configs",
+      "column_name": "name",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": null,
+      "ordinal_position": 3,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "text",
+      "data_type": "text",
+      "table_name": "model_configs",
+      "column_name": "model_id",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": null,
+      "ordinal_position": 4,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "_text",
+      "data_type": "ARRAY",
+      "table_name": "model_configs",
+      "column_name": "capabilities",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": "'{}'::text[]",
+      "ordinal_position": 5,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "int4",
+      "data_type": "integer",
+      "table_name": "model_configs",
+      "column_name": "credit_cost",
+      "is_nullable": "NO",
+      "numeric_scale": 0,
+      "column_default": "0",
+      "ordinal_position": 6,
+      "numeric_precision": 32
+    },
+    {
+      "udt_name": "numeric",
+      "data_type": "numeric",
+      "table_name": "model_configs",
+      "column_name": "rmb_cost",
+      "is_nullable": "NO",
+      "numeric_scale": 6,
+      "column_default": "0",
+      "ordinal_position": 7,
+      "numeric_precision": 16
+    },
+    {
+      "udt_name": "int4",
+      "data_type": "integer",
+      "table_name": "model_configs",
+      "column_name": "concurrency_limit",
+      "is_nullable": "NO",
+      "numeric_scale": 0,
+      "column_default": "5",
+      "ordinal_position": 8,
+      "numeric_precision": 32
+    },
+    {
+      "udt_name": "bool",
+      "data_type": "boolean",
+      "table_name": "model_configs",
+      "column_name": "enabled",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": "true",
+      "ordinal_position": 9,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "uuid",
+      "data_type": "uuid",
+      "table_name": "model_configs",
+      "column_name": "created_by",
+      "is_nullable": "YES",
+      "numeric_scale": null,
+      "column_default": null,
+      "ordinal_position": 10,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "timestamptz",
+      "data_type": "timestamp with time zone",
+      "table_name": "model_configs",
+      "column_name": "created_at",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": "now()",
+      "ordinal_position": 11,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "timestamptz",
+      "data_type": "timestamp with time zone",
+      "table_name": "model_configs",
+      "column_name": "updated_at",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": "now()",
+      "ordinal_position": 12,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "uuid",
+      "data_type": "uuid",
+      "table_name": "model_configs",
+      "column_name": "workflow_config_id",
+      "is_nullable": "YES",
+      "numeric_scale": null,
+      "column_default": null,
+      "ordinal_position": 13,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "uuid",
+      "data_type": "uuid",
+      "table_name": "model_configs",
+      "column_name": "replacement_model_config_id",
+      "is_nullable": "YES",
+      "numeric_scale": null,
+      "column_default": null,
+      "ordinal_position": 14,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "int4",
+      "data_type": "integer",
+      "table_name": "model_configs",
+      "column_name": "public_number",
+      "is_nullable": "YES",
+      "numeric_scale": 0,
+      "column_default": null,
+      "ordinal_position": 15,
+      "numeric_precision": 32
+    },
+    {
+      "udt_name": "text",
+      "data_type": "text",
+      "table_name": "schema_migrations",
+      "column_name": "name",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": null,
+      "ordinal_position": 1,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "timestamptz",
+      "data_type": "timestamp with time zone",
+      "table_name": "schema_migrations",
+      "column_name": "applied_at",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": "now()",
+      "ordinal_position": 2,
+      "numeric_precision": null
+    }
+  ],
+  "modelTrigger": [
+    {
+      "name": "model_public_number_before_write",
+      "enabled": "O",
+      "relation": "model_configs",
+      "definition": "CREATE TRIGGER model_public_number_before_write BEFORE INSERT OR UPDATE ON public.model_configs FOR EACH ROW EXECUTE FUNCTION assign_model_public_number()"
+    }
+  ],
+  "modelFunction": [
+    {
+      "identity": "assign_model_public_number()",
+      "definition": "CREATE OR REPLACE FUNCTION public.assign_model_public_number()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n  -- A model keeps its assigned identity even after a capability change.\n  IF TG_OP='UPDATE' AND OLD.public_number IS NOT NULL THEN\n    NEW.public_number := OLD.public_number;\n  ELSIF NEW.capabilities && ARRAY['generate','edit','upscale','remove_background','batch']::text[]\n    AND NOT NEW.capabilities && ARRAY['chat','video','audio']::text[] THEN\n    NEW.public_number := nextval('model_public_number_seq');\n  ELSE\n    NEW.public_number := NULL;\n  END IF;\n  RETURN NEW;\nEND;\n$function$\n"
+    }
+  ],
+  "numberSequence": {
+    "cycle": false,
+    "max_value": "9223372036854775807",
+    "min_value": "1",
+    "cache_size": "1",
+    "start_value": "1",
+    "increment_by": "1",
+    "sequencename": "model_public_number_seq"
+  }
+}

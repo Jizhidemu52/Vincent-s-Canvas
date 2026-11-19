@@ -1,4 +1,4 @@
-import { compileImageAgentPrompt } from "../../../lib/image-agent/compile.ts";
+import { compileImageAgentPrompt } from "../../../../../shared/image-agent/compile.ts";
 import { createClientUuid } from "../../../lib/client-uuid.ts";
 import { ImageAgentPlanningError, isImageAgentPlanningIssue, parseImageAgentEditSpec, parseImageAgentReview } from "../../../../../shared/image-agent-iteration.ts";
 import { transformImagePromptInstructions } from "../../../../../shared/image-prompt-invariants.ts";

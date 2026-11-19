@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { test as base, expect, type Page } from "@playwright/test";
 import { MockCanvasApi, IMAGE } from "./fixtures";
+import { activeWorkbench as pane } from "./headless-workbench";
 
 const sourcePrompt = "保留针织纹理、中文绣花和颜色";
 const translations: Record<string, string> = {
@@ -64,7 +65,6 @@ const test = base.extend<{ studio: Fixture }>({ studio: async ({ context }, use,
     expect(api.pageErrors).toEqual([]);
 } });
 
-const pane = (page: Page) => page.getByRole("tabpanel");
 async function storedWorkspace(page: Page) {
     return page.evaluate(async () => {
         const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
@@ -76,12 +76,12 @@ async function storedWorkspace(page: Page) {
 
 test("English display translates layer content while Chinese, source data and canvas pixels remain exact", async ({ page, studio }, testInfo) => {
     await page.goto("/layer-studio");
-    await expect(pane(page).getByRole("heading", { name: "图层拆分与图片生成", exact: true })).toBeVisible();
+    await expect(pane(page).getByRole("heading", { name: "豆包生图", exact: true })).toBeVisible();
     await pane(page).getByLabel("上传参考图片", { exact: true }).setInputFiles({ name: "原始毛衫.png", mimeType: "image/png", buffer: IMAGE });
     await pane(page).getByRole("textbox", { name: "拆分说明", exact: true }).fill(sourcePrompt);
     await pane(page).getByLabel("请求文字 OCR", { exact: true }).check();
     await pane(page).getByRole("button", { name: "开始拆分", exact: true }).click();
-    await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
+    await expect(pane(page).getByLabel("生成状态")).toHaveText("生成成功");
     await expect(pane(page).getByRole("spinbutton", { name: "X 位置", exact: true })).toHaveValue("16");
     await pane(page).getByText("文字识别与样式（模型参考值）", { exact: true }).click();
     await expect(pane(page)).toContainText("微软雅黑");
@@ -97,7 +97,7 @@ test("English display translates layer content while Chinese, source data and ca
     const sourcePixels = await pane(page).locator("canvas").evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
 
     await page.getByTestId("language-switch").click();
-    await expect(pane(page).getByRole("heading", { name: "Layer Studio", exact: true })).toBeVisible();
+    await expect(pane(page).getByRole("heading", { name: "Doubao Image Studio", exact: true })).toBeVisible();
     await expect(pane(page).getByTestId("display-translation-preview")).toContainText(translations[sourcePrompt]);
     await expect(pane(page).locator(".layer-editor-inspector h4")).toHaveText("Knitted lettering layer");
     await expect(pane(page).locator(".layer-editor-inspector")).toContainText("Preserve the original knitting and embroidery details");
@@ -120,7 +120,7 @@ test("English display translates layer content while Chinese, source data and ca
     await page.screenshot({ path: testInfo.outputPath("layer-studio-en.png"), fullPage: true });
 
     await page.getByTestId("language-switch").click();
-    await expect(pane(page).getByRole("heading", { name: "图层拆分与图片生成", exact: true })).toBeVisible();
+    await expect(pane(page).getByRole("heading", { name: "豆包生图", exact: true })).toBeVisible();
     await expect(pane(page).getByTestId("display-translation-preview")).toHaveCount(0);
     await expect(pane(page).locator("[data-display-translation]")).toHaveCount(0);
     expect(await pane(page).innerText()).toBe(chineseText);

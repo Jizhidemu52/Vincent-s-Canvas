@@ -1,7 +1,7 @@
 import type { ChatHistoryMessage } from "@/lib/chat-context";
-import { buildImageAgentContext, type ImageAgentHistoryMessage } from "@/lib/image-agent/context";
-import { imageAgentCandidateIds, imageAgentEditNote, imageAgentWorkId, resolveImageAgentBase, resolveImageAgentFocus, selectImageAgentWorkingSet, type ImageAgentImage } from "@/lib/image-agent/focus";
-import { imageAgentVisualPrompt, resolveImageAgentWorkNote, type ImageAgentWorkNote } from "@/lib/image-agent/work-note";
+import { buildImageAgentContext, type ImageAgentHistoryMessage } from "../../../shared/image-agent/context";
+import { imageAgentCandidateIds, imageAgentEditNote, imageAgentWorkId, resolveImageAgentBase, resolveImageAgentFocus, selectImageAgentWorkingSet, type ImageAgentImage } from "../../../shared/image-agent/focus";
+import { imageAgentVisualPrompt, resolveImageAgentWorkNote, type ImageAgentWorkNote } from "../../../shared/image-agent/work-note";
 import { DuplicateJsonKeyError, parseStrictJson } from "@/lib/strict-json";
 import type { AiTextMessage, ToolResponseResult } from "@/services/api/image";
 import type { ReferenceImage } from "@/types/image";
@@ -9,7 +9,7 @@ import type { AgentDocument, DesignRequirements } from "../../../shared/image-ag
 import { agentDocumentCatalog, agentDocumentContext } from "@/lib/agent-documents";
 import { designRequirementsText } from "../../../shared/image-agent-documents";
 import { ImageAgentPlanningError, type ImageAgentEditSpec } from "../../../shared/image-agent-iteration";
-import { compileImageAgentPrompt, imageAgentSpecText } from "@/lib/image-agent/compile";
+import { compileImageAgentPrompt, imageAgentSpecText } from "../../../shared/image-agent/compile";
 
 type CreativeChatAttachment = { id?: string; name: string; kind?: "image" | "text"; mimeType?: string; dataUrl?: string; textContent?: string; storageKey?: string };
 /** Historical records remain readable; new edits use parentId/workId/workNote. */

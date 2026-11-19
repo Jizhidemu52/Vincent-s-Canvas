@@ -27,7 +27,10 @@ async function releaseFixture(context: BrowserContext) {
         if (path === "/api/admin/audit-logs") return json(route, { auditLogs: [] });
         if (path === "/api/admin/credit-policy") return json(route, { creditsEnabled: false, updatedAt: null });
         if (/history/.test(path)) return json(route, { history: [], total: 0, totalRmbCost: 0 });
-        if (path === "/api/admin/release-notes" && method === "GET") return json(route, { notes: state.notes, hasMore: false });
+        if (path === "/api/admin/release-notes" && method === "GET") {
+            const params = new URL(route.request().url()).searchParams, offset = Number(params.get("offset") || 0), limit = Number(params.get("limit") || 50);
+            return json(route, { notes: state.notes.slice(offset, offset + limit), hasMore: state.notes.length > offset + limit });
+        }
         const match = path.match(/^\/api\/admin\/release-notes\/([^/]+)\/(draft|publish)$/);
         if (!match) return route.fallback();
         const target = decodeURIComponent(match[1]), current = state.notes.find(note => note.version === target), body = route.request().postDataJSON();
@@ -52,6 +55,96 @@ async function releaseFixture(context: BrowserContext) {
     });
     return { state, publicBody };
 }
+
+for (const publishedAt of ["2026-11-03T12:00:00.000Z", null]) {
+    test(`manually entering a paginated ${publishedAt ? "published note stays read-only" : "draft preserves its revision"}`, async ({ page, context, api }, info) => {
+        const { state } = await releaseFixture(context); api.role = "super_admin";
+        state.notes = [...Array.from({ length: publishedAt ? 100 : 50 }, (_, index) => published(`v8.0.${index}`)), { ...published("v1.2.3"), title: "较早版本的原始公告", revision: 7, publishedAt }];
+        await page.goto("/admin?tab=release-notes");
+        const panel = page.getByTestId("admin-release-notes");
+        await expect(panel.getByRole("button", { name: "加载更早版本", exact: true })).toBeVisible();
+        await panel.getByRole("button", { name: "新建版本公告", exact: true }).click();
+        await panel.getByLabel("公告版本号", { exact: true }).fill("1.2.3");
+        await panel.getByRole("button", { name: "开始编写", exact: true }).click();
+        if (publishedAt) {
+            await expect(panel.getByRole("heading", { name: "较早版本的原始公告", exact: true })).toBeVisible();
+            await expect(panel.getByText("已发布 · 只读", { exact: true })).toBeVisible();
+            await expect(panel.getByLabel("更新标题", { exact: true })).toHaveCount(0);
+            expect(state.saves).toBe(0);
+        } else {
+            await expect(panel.getByLabel("更新标题", { exact: true })).toHaveValue("较早版本的原始公告");
+            await panel.getByLabel("更新标题", { exact: true }).fill("较早草稿的定向修改");
+            await panel.getByRole("button", { name: "保存草稿", exact: true }).click();
+            await expect(panel.getByRole("button", { name: "发布给所有使用者", exact: true })).toBeEnabled();
+            expect(state.notes.find(note => note.version === "v1.2.3")).toMatchObject({ revision: 8, title: "较早草稿的定向修改", publishedAt: null });
+            expect(state.saves).toBe(1);
+        }
+        await page.screenshot({ path: info.outputPath(publishedAt ? "older-published-readonly.png" : "older-draft-revision.png"), fullPage: true });
+        expect(state.publishes).toBe(0); expect(api.submissions).toHaveLength(0);
+    });
+}
+
+test("manual version lookup keeps the current draft when a later page fails and permits explicit retry", async ({ page, context, api }) => {
+    const { state } = await releaseFixture(context); api.role = "super_admin";
+    state.notes = [{ ...published(), publishedAt: null }, ...Array.from({ length: 49 }, (_, index) => published(`v8.0.${index}`)), { ...published("v1.2.3"), title: "较早版本的原始公告" }];
+    let pageFailure = true;
+    await context.route("**/api/admin/release-notes?*", route => pageFailure && new URL(route.request().url()).searchParams.get("offset") === "50"
+        ? json(route, { message: "早期公告暂时无法读取" }, 503) : route.fallback());
+    await page.goto("/admin?tab=release-notes");
+    const panel = page.getByTestId("admin-release-notes");
+    await panel.getByLabel("更新标题", { exact: true }).fill("当前尚未保存的文字");
+    await panel.getByRole("button", { name: "新建版本公告", exact: true }).click();
+    await panel.getByLabel("公告版本号", { exact: true }).fill("1.2.3");
+    await panel.getByRole("button", { name: "开始编写", exact: true }).click();
+    await page.getByRole("button", { name: "放弃修改", exact: true }).click();
+    await expect(panel.getByRole("alert")).toHaveText("早期公告暂时无法读取");
+    await expect(panel.getByLabel("更新标题", { exact: true })).toHaveValue("当前尚未保存的文字");
+    await expect(panel.getByLabel("公告版本号", { exact: true })).toHaveValue("1.2.3");
+    expect(state.saves).toBe(0); expect(state.publishes).toBe(0);
+    pageFailure = false;
+    await panel.getByRole("button", { name: "开始编写", exact: true }).click();
+    await page.getByRole("button", { name: "放弃修改", exact: true }).click();
+    await expect(panel.getByRole("heading", { name: "较早版本的原始公告", exact: true })).toBeVisible();
+    await expect(panel.getByText("已发布 · 只读", { exact: true })).toBeVisible();
+    expect(state.saves).toBe(0); expect(state.publishes).toBe(0); expect(api.submissions).toHaveLength(0);
+});
+
+test("admin creates a manually entered announcement version independently of the published deployment", async ({ page, context, api }, info) => {
+    const { state } = await releaseFixture(context); api.role = "super_admin";
+    state.notes = [published()];
+    await page.goto("/admin?tab=release-notes");
+    const panel = page.getByTestId("admin-release-notes");
+    await expect(panel.getByText("已发布 · 只读", { exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "新建版本公告", exact: true }).click();
+    await panel.getByLabel("公告版本号", { exact: true }).fill("not-a-version");
+    await panel.getByRole("button", { name: "开始编写", exact: true }).click();
+    await expect(panel.getByRole("alert")).toContainText("请输入三段数字版本号");
+    await panel.getByLabel("公告版本号", { exact: true }).fill(" 9.8.7 ");
+    await panel.getByRole("button", { name: "开始编写", exact: true }).click();
+    await expect(panel.getByLabel("更新标题", { exact: true })).toHaveValue("");
+    await expect(panel.getByRole("textbox", { name: "当前版本", exact: true })).toHaveValue(version);
+    expect(state.saves).toBe(0); expect(state.publishes).toBe(0);
+    await panel.getByLabel("更新标题", { exact: true }).fill("管理员手动编写的版本");
+    await panel.getByLabel("更新内容", { exact: true }).fill("不依赖部署版本号的新公告。\n先保存草稿，尚未公开。");
+    await panel.getByRole("button", { name: "保存草稿", exact: true }).click();
+    await expect(panel.getByRole("button", { name: "发布给所有使用者", exact: true })).toBeEnabled();
+    expect(state.notes[0]).toMatchObject({ version: "v9.8.7", title: "管理员手动编写的版本", publishedAt: null });
+    expect(state.notes.find(note => note.version === version)).toEqual(published());
+    await page.screenshot({ path: info.outputPath("manual-version-draft-desktop.png"), fullPage: true });
+    await panel.getByRole("button", { name: "新建版本公告", exact: true }).click();
+    await panel.getByLabel("公告版本号", { exact: true }).fill(version);
+    await panel.getByRole("button", { name: "开始编写", exact: true }).click();
+    await expect(panel.getByText("已发布 · 只读", { exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "新建版本公告", exact: true }).click();
+    await panel.getByLabel("公告版本号", { exact: true }).fill("v9.8.7");
+    await panel.getByRole("button", { name: "开始编写", exact: true }).click();
+    await expect(panel.getByLabel("更新标题", { exact: true })).toHaveValue("管理员手动编写的版本");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await panel.getByRole("button", { name: "新建版本公告", exact: true }).click();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: info.outputPath("manual-version-mobile.png"), fullPage: true });
+    expect(state.saves).toBe(1); expect(state.publishes).toBe(0); expect(api.submissions).toHaveLength(0);
+});
 
 test("draft stays private; publish is explicit; ordinary users read plain text in light, dark and narrow views", async ({ page, context, api }, info) => {
     const { state } = await releaseFixture(context); api.role = "super_admin";

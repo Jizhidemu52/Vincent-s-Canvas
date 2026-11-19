@@ -51,7 +51,7 @@ test("main navigation enables creative prompt preview, cancels without generatio
     await expect(page.getByRole("button", { name: /^生成款式/ })).toBeEnabled();
     await expect(description).toHaveValue("钴蓝色针织帽，罗纹翻边");
     await expect(page.getByText("方案 1 已取消", { exact: true })).toBeVisible();
-    await expect(page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab").first()).toContainText("已取消");
+    await expect(page.getByRole("tablist", { name: "任务列表", exact: true })).toHaveCount(0);
     await expect(page.getByText("方案 1 生成失败", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "刷新进度", exact: true })).toHaveCount(0);
     await expect.poll(() => page.evaluate(async () => {
@@ -94,7 +94,10 @@ test("recent destinations stay on home, core navigation stays visible, and mobil
     const nav = page.getByRole("navigation", { name: "主导航" });
     await expect(nav.getByRole("button", { name: /^固定/ })).toHaveCount(0);
     await expect(nav.getByRole("link", { name: "自由画布", exact: true })).toBeInViewport();
-    await nav.getByRole("link", { name: "图像生成", exact: true }).click();
+    await expect(nav.getByRole("link", { name: "图像生成", exact: true })).toHaveCount(0);
+    const imageTools = nav.getByRole("button", { name: "图像工具", exact: true });
+    if (await imageTools.getAttribute("aria-expanded") !== "true") await imageTools.click();
+    await nav.getByRole("link", { name: "图片编辑", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "图像提示词" })).toBeVisible();
     await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
     await nav.getByRole("link", { name: "素材库", exact: true }).click();
@@ -102,7 +105,7 @@ test("recent destinations stay on home, core navigation stays visible, and mobil
     await nav.getByRole("link", { name: "工作台", exact: true }).click();
     const recent = page.getByRole("region", { name: "最近使用", exact: true });
     await expect(recent.getByRole("link").first()).toHaveText("素材库");
-    await expect(recent.getByRole("link", { name: "图像生成", exact: true })).toHaveAttribute("href", "/image");
+    await expect(recent.getByRole("link", { name: "图片编辑", exact: true })).toHaveAttribute("href", "/image?tool=image-edit");
     await page.reload();
     await expect(recent.getByRole("link").first()).toHaveText("素材库");
     await expect(nav.getByRole("link", { name: "自由画布", exact: true })).toBeInViewport();

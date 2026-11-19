@@ -2,9 +2,10 @@ import { test, expect, type BrowserContext, type Locator, type Page, type Respon
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { SMOKE_CHAT_REPLY, SMOKE_VIDEO_META, SMOKE_VIDEO_SHA256 } from "../../server/tests/production-smoke/mock-provider";
+import { SMOKE_CHAT_REPLY, SMOKE_CONVERSATION_PROMPT, SMOKE_CONVERSATION_REPLY, SMOKE_VIDEO_META, SMOKE_VIDEO_SHA256 } from "../../server/tests/production-smoke/mock-provider";
+import type { PublicConversationSnapshot, PublicTurnDetails } from "../../shared/image-conversation-public";
 
-type Seed = { schema: 1; project: string; userId: string; username: string; password: string; paid: false; models: { image: string; video: string; chat: string } };
+type Seed = { schema: 1; project: string; userId: string; username: string; password: string; paid: false; models: { image: string; video: string; chat: string; conversationImage: string } };
 type Node = { id: string; type: string; title: string; metadata?: { content?: string; sourceTaskId?: string; imageTask?: { taskId?: string }; status?: string } };
 type Canvas = { id: string; revision: number; deleted: boolean; document: { nodes: Node[] } | null };
 type Task = { id: string; requestId: string; userId: string; modelConfigId: string; status: string; operationType: string; resultUrls: string[]; failureReason?: string; credits: number };
@@ -137,6 +138,7 @@ test("exact formal stack: login, large upload, canvas generation/recovery, origi
     const fixture = await readFile(resolve(output, "upload.png"));
     expect(fixture.byteLength).toBeGreaterThan(1024 * 1024);
     const outside: string[] = [], errors: string[] = [], taskPosts: string[] = [], chatPosts: string[] = [];
+    const conversationWrites: Array<{ path: string; clientRequestId: string }> = [];
     const playbackResponses: PlaywrightResponse[] = [];
     await restrictBrowser(context, baseURL!, outside, errors);
     page.on("response", response => { if (/^\/api\/assets\/[a-f0-9-]{36}\/playback$/.test(new URL(response.url()).pathname) && response.request().method() === "GET") playbackResponses.push(response); });
@@ -145,9 +147,10 @@ test("exact formal stack: login, large upload, canvas generation/recovery, origi
         const path = new URL(request.url()).pathname;
         if (path === "/api/tasks") taskPosts.push(String(request.postDataJSON()?.operationType));
         if (path === "/api/chat/responses") chatPosts.push(path);
+        if (path.startsWith("/api/image-conversations")) conversationWrites.push({ path, clientRequestId: request.postDataJSON()?.clientRequestId });
     });
     await login(page, seed);
-    expect(await getJson(page, "/api/deployment")).toMatchObject({ authenticationEnabled: true, oaLoginEnabled: false, creditsEnabled: true });
+    expect(await getJson(page, "/api/deployment")).toMatchObject({ authenticationEnabled: true, oaLoginEnabled: false, creditsEnabled: true, imageConversationsEnabled: true });
     expect(await getJson(page, "/deployment-release.json")).toMatchObject({ schema: 1, commit: process.env.CANVAS_SMOKE_COMMIT });
     if (process.env.CANVAS_SMOKE_MODE === "staging") {
         const entry = await page.request.get("/deployment-release.json");
@@ -281,24 +284,71 @@ test("exact formal stack: login, large upload, canvas generation/recovery, origi
     expect(chatCatalog.tools.find(tool => tool.toolKey === "gpt-chat")).toMatchObject({ modelConfigId: seed.models.chat, enabled: true });
     expect(chatCatalog.models.find(model => model.id === seed.models.chat)?.capabilities,
         "The isolated chat binding must support the image-agent vision contract before Send").toEqual(expect.arrayContaining(["chat", "vision"]));
+    expect(chatCatalog.tools.find(tool => tool.toolKey === "gpt-chat-image")).toMatchObject({ modelConfigId: seed.models.conversationImage, enabled: true });
+    const legacyChat = await page.evaluate(async () => {
+        const response = await fetch("/api/chat/responses", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ requestId: crypto.randomUUID(), toolKey: "gpt-chat", input: [{ role: "user", content: "Reply with a short confirmation only; do not generate or edit any image." }], tools: [] }) });
+        return { status: response.status, body: await response.json() };
+    });
+    expect(legacyChat).toMatchObject({ status: 200, body: { content: SMOKE_CHAT_REPLY, toolCalls: [] } });
+    await expect(page.getByTestId("server-image-conversation")).toBeVisible();
     const composer = page.getByRole("textbox", { name: "对话内容", exact: true });
     await expect(composer).toBeEnabled();
-    await composer.fill("Reply with a short confirmation only; do not generate or edit any image.");
-    const chatResponse = page.waitForResponse(response => new URL(response.url()).pathname === "/api/chat/responses" && response.request().method() === "POST");
+    await composer.fill(SMOKE_CONVERSATION_PROMPT);
+    const createdResponse = page.waitForResponse(response => new URL(response.url()).pathname === "/api/image-conversations" && response.request().method() === "POST");
+    const turnResponse = page.waitForResponse(response => /^\/api\/image-conversations\/[^/]+\/turns$/.test(new URL(response.url()).pathname) && response.request().method() === "POST");
     await page.getByRole("button", { name: "发送", exact: true }).click();
-    const replied = await chatResponse;
-    expect(replied.status()).toBe(200);
-    expect(await replied.json()).toMatchObject({ content: SMOKE_CHAT_REPLY, toolCalls: [] });
-    await expect(page.getByText(SMOKE_CHAT_REPLY, { exact: true })).toBeVisible();
+    const created = await createdResponse;
+    expect(created.status()).toBe(201);
+    const conversationId = (await created.json()).data.id as string;
+    const submittedTurn = await turnResponse;
+    expect(submittedTurn.status()).toBe(202);
+    const turnId = (await submittedTurn.json()).data.turnId as string;
+    const turnRequestId = submittedTurn.request().postDataJSON().clientRequestId as string;
+    const readConversation = async (target = page) => (await getJson<{ code: string; data: PublicConversationSnapshot }>(target, `/api/image-conversations/${conversationId}`)).data;
+    const readTurn = async (target = page) => (await getJson<{ code: string; data: PublicTurnDetails }>(target, `/api/image-conversations/${conversationId}/turns/${turnId}`)).data.turn;
+    const conversationRefreshState = (await readTurn()).state;
+    expect(["accepted", "planning", "queued", "generating"]).toContain(conversationRefreshState);
+    await page.reload();
+    await expect(page.getByTestId("server-image-conversation")).toBeVisible();
+    await expect.poll(async () => {
+        const turn = await readTurn();
+        if (["failed", "uncertain", "cancelled", "detached"].includes(turn.state)) throw new Error(`Formal conversation ${turn.state}: ${turn.lastError?.message || "no reason"}`);
+        return turn.state;
+    }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toBe("completed");
+    const conversation = await readConversation(), turn = await readTurn(), version = conversation.activeVersion!;
+    expect(conversation.pendingTurn).toBeNull();
+    expect(turn).toMatchObject({ id: turnId, conversationId, clientRequestId: turnRequestId, state: "completed", plannerStatus: "succeeded", intent: "generate_new", outputVersionId: version.id, lastError: null });
+    expect(version).toMatchObject({ conversationId, source: "generated", turnId, imageNo: 1, actualDimensions: { width: 1024, height: 1024 } });
+    expect(turn.settingsSnapshot?.effective).toMatchObject({ modelConfigId: seed.models.conversationImage, model: seed.models.conversationImage, n: 1, output_format: "png" });
+    expect(turn.settingsSnapshot?.actual).toMatchObject({ dimensions: { width: 1024, height: 1024 }, mimeType: "image/png" });
+    expect((await getJson<{ data: PublicTurnDetails }>(page, `/api/image-conversations/${conversationId}/turns/by-request/${encodeURIComponent(turnRequestId)}`)).data.turn.id).toBe(turnId);
+    const conversationTask = await completedTask(page, turn.taskId!, seed, "image_generation", seed.models.conversationImage);
+    expect(conversationTask.resultUrls).toEqual([`/api/assets/${version.assetId}/content`]);
+    const conversationImage = page.locator(`[data-version-id="${version.id}"]`);
+    await expect(conversationImage.locator("img")).toBeVisible();
+    await expect(page.getByText(SMOKE_CONVERSATION_REPLY, { exact: true })).toBeVisible();
+    const conversationDownload = page.waitForEvent("download");
+    await conversationImage.locator("a[download]").click();
+    const conversationOriginalFile = testInfo.outputPath("conversation-original.png");
+    await (await conversationDownload).saveAs(conversationOriginalFile);
+    const conversationOriginal = await readFile(conversationOriginalFile);
+    expect(conversationOriginal).toEqual(fixture);
+    await page.screenshot({ path: testInfo.outputPath("formal-conversation-completed.png"), animations: "disabled" });
     expect(chatPosts).toHaveLength(1);
     expect(taskPosts).toEqual(["image_generation", "video_generation"]);
+    expect(conversationWrites).toEqual([{ path: "/api/image-conversations", clientRequestId: created.request().postDataJSON().clientRequestId },
+        { path: `/api/image-conversations/${conversationId}/turns`, clientRequestId: turnRequestId }]);
 
     // A clean browser context has no IndexedDB/localStorage/cookies. Re-login
     // through the real UI and recover the same server-saved canvas and assets.
     const fresh = await browser.newContext({ baseURL, viewport: { width: 1600, height: 1100 }, locale: "zh-CN", serviceWorkers: "block" });
+    const restoredWrites: string[] = [];
+    let restoredConversation!: { id: string; turnId: string; taskId: string; versionId: string; assetId: string; state: string };
     try {
         await restrictBrowser(fresh, baseURL!, outside, errors);
         const recovered = await fresh.newPage();
+        recovered.on("request", request => { if (request.method() === "POST" && /^\/api\/(image-conversations|tasks|chat\/responses)(?:\/|$)/.test(new URL(request.url()).pathname)) restoredWrites.push(new URL(request.url()).pathname); });
         await login(recovered, seed, `/canvas/${canvasId}`);
         await expect(recovered.locator(`[data-node-id="${uploaded.id}"]`)).toBeVisible();
         await expect(recovered.locator(`[data-node-id="${generated.id}"]`)).toBeVisible();
@@ -307,6 +357,17 @@ test("exact formal stack: login, large upload, canvas generation/recovery, origi
         expect(restored.document!.nodes.find(node => node.id === uploaded.id)?.metadata?.content).toBe(uploaded.metadata!.content);
         expect(restored.document!.nodes.find(node => node.id === generated.id)?.metadata).toMatchObject({ sourceTaskId: image.id, content: image.resultUrls[0] });
         await recovered.screenshot({ path: testInfo.outputPath("formal-canvas-restored.png"), animations: "disabled" });
+        await recovered.goto("/chat");
+        await expect(recovered.getByTestId("server-image-conversation")).toBeVisible();
+        await recovered.getByRole("navigation", { name: "会话列表", exact: true }).getByRole("button").first().click();
+        await expect(recovered.locator(`[data-version-id="${version.id}"] img`)).toBeVisible();
+        const restoredSnapshot = await readConversation(recovered), restoredTurn = await readTurn(recovered);
+        expect(restoredSnapshot.activeVersion).toEqual(version);
+        expect(restoredSnapshot.pendingTurn).toBeNull();
+        expect(restoredTurn).toEqual(turn);
+        expect(restoredWrites).toEqual([]);
+        restoredConversation = { id: restoredSnapshot.id, turnId: restoredTurn.id, taskId: restoredTurn.taskId!, versionId: restoredSnapshot.activeVersion!.id, assetId: restoredSnapshot.activeVersion!.assetId, state: restoredTurn.state };
+        await recovered.screenshot({ path: testInfo.outputPath("formal-conversation-restored.png"), animations: "disabled" });
     } finally { await fresh.close(); }
 
     expect(outside, "No browser request leaves the isolated Web origin").toEqual([]);
@@ -319,5 +380,9 @@ test("exact formal stack: login, large upload, canvas generation/recovery, origi
         original: { bytes: originalBytes.byteLength, sha256: sha256(originalBytes), ...dimensions },
         videoPlayback: { assetId: videoAssetId, originalBefore: videoOriginalBefore, originalAfter: videoOriginalAfter, downloadedOriginal: videoDownloadHash, first: { ...firstPlayback, ...firstPlayed, codecs: firstCodecs }, refreshed: { ...refreshedPlayback, ...refreshedPlayed, codecs: refreshedCodecs } },
         taskPosts, chatPosts: chatPosts.length, refreshStatus, paid: false,
+        conversation: { id: conversationId, turnId, taskId: turn.taskId, versionId: version.id, assetId: version.assetId, imageNo: version.imageNo,
+            stateRevision: conversation.stateRevision, state: turn.state, plannerStatus: turn.plannerStatus, refreshState: conversationRefreshState,
+            original: { bytes: conversationOriginal.byteLength, sha256: sha256(conversationOriginal), ...dimensions }, writes: conversationWrites,
+            restored: restoredConversation, restoredWrites },
     }, null, 2), { flag: "wx", mode: 0o600 });
 });

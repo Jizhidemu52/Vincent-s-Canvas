@@ -1,7 +1,8 @@
 import { resolve } from "node:path";
 import { mkdir } from "node:fs/promises";
-import { test, expect } from "./fixtures";
+import { test, expect, IMAGE } from "./fixtures";
 import { antSelect, chooseAntSelect } from "./antd-select-helpers";
+import { activeWorkbench } from "./headless-workbench";
 import { toolDefinitions } from "../../shared/feature-catalog";
 
 const output = resolve(import.meta.dirname, "../../output/ui-plan-20261112/image-primary");
@@ -19,8 +20,9 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 108
     test(`inline primary controls select actual model ratio resolution at ${viewport.width}`, async ({ page, api }) => {
         await mkdir(output, { recursive: true });
         await page.setViewportSize(viewport);
-        await page.goto("/image");
-        const pane = page.getByRole("tabpanel");
+        await page.goto("/image?tool=image-edit");
+        const pane = activeWorkbench(page);
+        await pane.locator("input[type=file][accept='image/*']").setInputFiles({ name: "inline-reference.png", mimeType: "image/png", buffer: IMAGE });
         const primary = pane.getByRole("region", { name: "常用参数", exact: true });
         await expect(primary).toBeVisible();
         const picker = primary.getByRole("combobox", { name: "选择模型", exact: true });
@@ -58,9 +60,10 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 108
         await expect(dialog.getByLabel("输出格式", { exact: true })).not.toBeVisible();
         await dialog.getByRole("button", { name: /^完\s*成$/ }).click();
         api.taskStatus = "processing";
-        await pane.getByRole("button", { name: "开始生成", exact: true }).click();
+        await pane.getByRole("button", { name: "开始编辑", exact: true }).click();
         await expect.poll(() => api.submissions.length).toBe(1);
-        expect(api.submissions[0]).toMatchObject({ modelConfigId: models[1]!.id });
+        expect(api.submissions[0]).toMatchObject({ modelConfigId: models[1]!.id, operationType: "inpaint" });
+        expect(api.submissions[0]!.sourceUrls).toHaveLength(1);
         expect(api.submissions[0]!.parameters).toMatchObject({ size: "16:9", resolution: "2k" });
         await chooseAntSelect(ratio, "9:16");
         expect(api.submissions[0]!.parameters).toMatchObject({ size: "16:9", resolution: "2k" });
@@ -69,8 +72,8 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 108
 }
 
 test("inline exact-pixel restriction preserves explicit dimensions and independent quality", async ({ page, api }) => {
-    await page.goto("/image");
-    const pane = page.getByRole("tabpanel");
+    await page.goto("/image?tool=image-edit");
+    const pane = activeWorkbench(page);
     await pane.getByRole("button", { name: "切换生成图片模型", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: /切换生成图片模型/ });
     await dialog.locator("summary", { hasText: "自定义像素" }).click();

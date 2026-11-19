@@ -62,6 +62,7 @@ if service in ('api','worker'):
  assert container['Config']['Cmd']==['bun','src/index.ts' if service=='api' else 'src/worker.ts']
  env=dict(value.split('=',1) for value in container['Config']['Env'])
  assert env['NODE_ENV']=='production' and env['TASK_MOCK_MODE']=='false' and env['AUTH_ENABLED']=='true' and env['OA_LOGIN_ENABLED']=='false'
+ assert env['IMAGE_CONVERSATIONS_ENABLED']=='true'
 PY
 done
 python3 - "$work/network.private.json" "$work/web-container.private.json" <<'PY'

@@ -58,6 +58,16 @@ function elements(value: unknown): ReactElement<any>[] {
 }
 
 describe("compact image toolbar", () => {
+    test("design-discussion executions cannot invoke generic retry from the toolbar", () => {
+        const harness = toolbarHarness();
+        harness.node.metadata!.designTask = { requestId: "original-design-slot", status: "uncertain" };
+        const dropdown = elements(harness.render()).find(element => element.props.menu?.items)!;
+        const items = dropdown.props.menu.items.flatMap((item: any) => item.children || [item]);
+        expect(items.some((item: any) => item.key === "retry")).toBe(false);
+        dropdown.props.menu.onClick({ key: "retry", domEvent: { stopPropagation() {} } });
+        expect(harness.calls).toEqual([]);
+    });
+
     test("defaults to four common actions including the eraser while preserving stored customization data", () => {
         expect(defaultImageQuickToolIds).toEqual(["manualEdit", "eraser", "edit", "download"]);
         const saved = { ids: ["info", "delete", "saveAsset", "download", "edit", "copyPrompt", "upscale"], showLabels: false };

@@ -77,7 +77,12 @@ function imageModule(search: string): ModuleKey {
 }
 
 function ImageToolRoute() {
-    const { pathname, search } = useLocation();
+    const { pathname, search, hash, state } = useLocation();
+    const params = new URLSearchParams(search);
+    if (!params.get("tool") || params.get("tool") === "image-generation" || params.get("tool") === "image") {
+        params.set("tool", "image-edit");
+        return <Navigate to={{ pathname: "/image", search: params.toString(), hash }} state={state} replace />;
+    }
     return retiredWorkbenchName(pathname, search) ? routeElement(RetiredWorkbenchPage) : <ModuleGate moduleKey={imageModule}>{routeElement(ImagePage)}</ModuleGate>;
 }
 

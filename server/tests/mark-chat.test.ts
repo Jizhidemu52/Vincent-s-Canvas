@@ -101,7 +101,7 @@ test.each([
     { protocol: "apimart", model_id: "gpt-6-astra", withTools: false, endpoint: "responses" },
     { protocol: "apimart", model_id: "gpt-6-sol", withTools: true, endpoint: "chat/completions" },
     { protocol: "openai-chat", model_id: "gpt-6-astra", withTools: true, endpoint: "chat/completions" },
-])("fixed Responses routing is limited to Mark gpt-6-astra and never sets reasoning effort: %j", async ({ protocol, model_id, withTools, endpoint }) => {
+])("fixed Responses routing preserves model and protocol boundaries without setting reasoning effort: %j", async ({ protocol, model_id, withTools, endpoint }) => {
     let calls = 0;
     globalThis.fetch = (async (url, init) => {
         calls++;

@@ -74,6 +74,8 @@ import { createAdminReleaseNotesRouter, createReleaseNotesRouter } from "./route
 import { ProviderImageAccess, PROVIDER_IMAGE_PATH } from "./provider-image-access";
 import { createProviderImagesRouter } from "./routes/provider-images";
 import { ProviderChatImageAccess, createProviderChatImagesRouter } from "./provider-chat-images";
+import { createImageConversationRuntime } from "./image-conversation-runtime";
+import { createImageConversationsRouter, imageConversationBoundary, imageConversationErrors } from "./routes/image-conversations";
 
 const config = loadConfig();
 const features = deploymentFeatures(config);
@@ -92,6 +94,7 @@ if (config.TRUST_PROXY === "true") app.set("trust proxy", 1);
 app.disable("x-powered-by");
 app.use(helmet());
 app.use(requestLogging());
+app.use("/api/image-conversations", imageConversationBoundary, express.json({ limit: "128kb" }), imageConversationErrors);
 app.use(["/api/design-library", "/api/admin/design-library"], designLibraryBoundary(features.oaLoginEnabled), express.json({ limit: "128kb" }), designLibraryBodyErrors);
 app.use("/api/reference-import", express.json({ limit: "16kb" }), referenceImportBodyErrors);
 app.use(["/api/usage", "/api/admin/usage"], express.json({ limit: "128kb" }), usageErrors);
@@ -115,9 +118,10 @@ if (config.PROVIDER_IMAGE_PUBLIC_ORIGIN) {
     new ProviderImageAccess(db, cache, storage, config.PROVIDER_IMAGE_PUBLIC_ORIGIN), storage,
   ));
 }
-const readCreditsEnabled = async () => features.authenticationEnabled && await getCreditsEnabled(db, features.creditsEnabled);
+const readCreditsEnabled = async (client: Pick<typeof db, "query"> = db) => features.authenticationEnabled && await getCreditsEnabled(client, features.creditsEnabled);
+const imageConversations = createImageConversationRuntime(db, cache, config, { storage, providerImages: providerChatImages, creditsEnabled: readCreditsEnabled });
 app.get("/api/deployment", async (_request, response, next) => {
-  try { response.set("Cache-Control", "no-store").json({ ...features, creditsEnabled: await readCreditsEnabled() }); }
+  try { response.set("Cache-Control", "no-store").json({ ...features, creditsEnabled: await readCreditsEnabled(), imageConversationsEnabled: config.IMAGE_CONVERSATIONS_ENABLED === "true" }); }
   catch (error) { next(error); }
 });
 
@@ -149,6 +153,10 @@ app.use("/api/design-library", requireSession, requireAccountReady, async (_requ
 }, createDesignLibraryRouter(designLibrary));
 app.use("/api/admin/design-library", requireAdminSession, requireAccountReady, createDesignLibraryRouter(designLibrary, { admin: true }));
 const protectModelIdentity = designerModelPrivacy(db);
+app.use("/api/image-conversations", requireSession, requireAccountReady, createImageConversationsRouter(db, {
+  cursorSecret: config.PROVIDER_ENCRYPTION_KEY ?? "", events: imageConversations.events,
+  acceptingNewTurns: () => config.IMAGE_CONVERSATIONS_ENABLED === "true", wakeWorker: imageConversations.wake,
+}));
 app.use("/api/canvas-documents", requireSession, requireAccountReady, protectModelIdentity, createCanvasDocumentsRouter(db));
 app.use("/api/reference-import", requireSession, requireAccountReady, createReferenceImportRouter(db));
 app.use(
@@ -423,8 +431,8 @@ const server = app.listen({ port: config.PORT, host: config.HOST }, () =>
 );
 const shutdown = createApiShutdown({
   server,
-  drainSubscriptions: () => taskEvents.drain(),
-  closeBackground: () => Promise.all([thumbnailMaintenance.stop(), videoPlayback.stop()]),
+  drainSubscriptions: () => { taskEvents.drain(); imageConversations.events.close(); },
+  closeBackground: () => Promise.all([thumbnailMaintenance.stop(), videoPlayback.stop(), imageConversations.stop()]),
   closeEvents: () => taskEvents.close(),
   closeDatabase: () => db.end(),
   closeCache: () => cache.quit(),

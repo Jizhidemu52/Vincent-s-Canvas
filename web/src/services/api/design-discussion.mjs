@@ -5,6 +5,8 @@ import { availableModels, imageParameters, mergeServerTask, ownedAsset } from ".
 import { normalizeFeedback, validateDesignRecord } from "../../components/canvas/design-discussion/design-record.mjs";
 import { designVideoModels } from "../../components/canvas/design-discussion/model-presets.mjs";
 import { isImageAgentPlanningIssue } from "../../../../shared/image-agent-iteration.ts";
+import { createImageConversationApi } from "./image-conversations";
+import { createDesignConversationController } from "./design-discussion-conversations";
 
 export function createApi(fetcher = globalThis.fetch.bind(globalThis), { projectId = "canvas-island-demo" } = {}) {
     async function request(path, options = {}) {
@@ -60,7 +62,28 @@ export function createApi(fetcher = globalThis.fetch.bind(globalThis), { project
     };
 }
 
-export function createTaskController({ api, storage, ownerId, projectId = "canvas-island-demo", onChange }) {
+export function createTaskController({ api, storage, ownerId, projectId = "canvas-island-demo", onChange, imageConversationsEnabled = false, conversationApi, assertWritable }) {
+    if (!imageConversationsEnabled) return createLegacyTaskController({ api, storage, ownerId, projectId, onChange });
+    let legacyTasks = [], imageTasks = [];
+    const emit = () => onChange([...legacyTasks, ...imageTasks].sort((left, right) => left.startedAt - right.startedAt));
+    const legacy = createLegacyTaskController({ api, storage, ownerId, projectId, onChange: value => { legacyTasks = value; emit(); } });
+    const images = createDesignConversationController({ api: conversationApi || createImageConversationApi(ownerId), storage, ownerId, canvasExternalId: projectId, assertWritable,
+        uploadReference: reference => api.upload(reference, ownerId), assertOwner: async () => {
+            const identity = await api.session();
+            if (identity?.user?.id !== ownerId || identity.user.status !== "active") throw Object.assign(new Error("登录身份已变化，请刷新页面后再操作。"), { code: "SESSION_CHANGED" });
+        }, onChange: value => { imageTasks = value; emit(); } });
+    return {
+        async load() { await legacy.load(); await images.load(); },
+        start: input => input.mediaKind === "video" ? legacy.start(input) : images.start(input),
+        async refreshAll() { await legacy.refreshAll(); await images.refreshAll(); },
+        action: (id, action) => images.has(id) ? images.action(id, action) : legacy.action(id, action),
+        saveReview: (id, review) => images.has(id) ? images.saveReview(id, review) : legacy.saveReview(id, review),
+        saveFeedback: (id, feedback) => images.has(id) ? images.saveFeedback(id, normalizeFeedback(feedback)) : legacy.saveFeedback(id, feedback),
+        dispose: () => images.dispose(),
+    };
+}
+
+function createLegacyTaskController({ api, storage, ownerId, projectId = "canvas-island-demo", onChange }) {
     let tasks = [];
     let starting = false;
     let polling = false;
@@ -136,6 +159,7 @@ export function createTaskController({ api, storage, ownerId, projectId = "canva
             receipts.clear(); annotations.clear();
             await storage.iterate(task => {
                 if (task?.ownerId !== ownerId || (task.projectId && task.projectId !== projectId)) return;
+                if (task.kind === "image-conversation-execution") return;
                 if (task.kind === "task-annotation") { collectAnnotation(task); return; }
                 if (typeof task.id !== "string" || typeof task.requestId !== "string") return;
                 receipts.set(task.id, task);

@@ -4,9 +4,19 @@ import { findPendingImageTask, pendingImagesForWorkspace, snapshotImageRequest, 
 
 const pending: PendingImage = { id: "record", requestId: "paid-request", ownerId: "alice", tool: "image-edit", createdAt: 1, snapshot: { text: "original prompt", config: { ...defaultConfig, model: "original-model" }, references: [] } };
 
-test("only the current employee and tool can restore in-flight records", () => {
-    const records = [pending, { ...pending, ownerId: "bob" }, { ...pending, tool: "image-generation" }];
+test("only the current employee and matching workspaces can restore in-flight records", () => {
+    const records = [pending, { ...pending, ownerId: "bob" }, { ...pending, tool: "detail-enhance" }, { ...pending, workspaceId: "other" }];
     expect(pendingImagesForWorkspace(records, "alice", "image-edit")).toEqual([pending]);
+});
+
+test("retired generation workspaces recover once in the default edit workspace without rewriting their identity", () => {
+    const legacy = { ...pending, id: "legacy", tool: "image-generation", workspaceId: "image-generation:task:old", createdAt: 2 };
+    const records = [legacy, pending, { ...legacy, ownerId: "bob" }];
+    expect(pendingImagesForWorkspace(records, "alice", "image-edit")).toEqual([pending, legacy]);
+    expect(pendingImagesForWorkspace(records, "alice", "image-edit", "image-edit:task:new")).toEqual([]);
+    expect(pendingImagesForWorkspace(records, "alice", "detail-enhance")).toEqual([]);
+    expect(legacy.tool).toBe("image-generation");
+    expect(legacy.workspaceId).toBe("image-generation:task:old");
 });
 
 test("durable snapshots retain original image parameters but never browser provider credentials", () => {

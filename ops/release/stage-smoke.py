@@ -138,6 +138,7 @@ def stage_compose(state, credentials, scripts):
         "NODE_ENV": "production", "PORT": "3100", "HOST": "0.0.0.0", "SESSION_COOKIE_NAME": "canvas_ci_session", "SESSION_TTL_SECONDS": "28800", "TRUST_PROXY": "true",
         "DATABASE_URL": "postgres://wireless_canvas:" + credentials["postgres"] + "@postgres:5432/wireless_canvas", "REDIS_URL": "redis://redis:6379",
         "PROVIDER_ENCRYPTION_KEY": credentials["encryption"], "TASK_MOCK_MODE": "false", "AUTH_ENABLED": "true", "OA_LOGIN_ENABLED": "false", "CREDITS_ENABLED": "true", "ROLE_PORTALS_ENABLED": "true",
+        "IMAGE_CONVERSATIONS_ENABLED": "true",
         "WORKER_CONCURRENCY": "2", "WORKER_SHUTDOWN_GRACE_SECONDS": "120", "S3_ENDPOINT": "http://minio:9000", "S3_PUBLIC_ENDPOINT": "", "S3_REGION": "us-east-1", "S3_BUCKET": "canvas-ci",
         "S3_ACCESS_KEY_ID": "canvas-ci", "S3_SECRET_ACCESS_KEY": credentials["storage"], "S3_FORCE_PATH_STYLE": "true",
         "CANVAS_SMOKE_MODE": "staging", "CANVAS_SMOKE_PROJECT": state["project"], "CANVAS_SMOKE_COMMIT": state["commit"], "CANVAS_SMOKE_ALLOW_SEED": "isolated-compose-only", "CANVAS_SMOKE_SOURCE_ROOT": "/app/src",
@@ -276,6 +277,7 @@ def resource_matches(resource, state, kind, require_running=False):
             environment = dict(value.split("=", 1) for value in resource["Config"].get("Env", []))
             require(resource["Config"].get("Cmd") == ["bun", "src/index.ts" if role == "api" else "src/worker.ts"]
                     and environment.get("NODE_ENV") == "production" and environment.get("TASK_MOCK_MODE") == "false"
+                    and environment.get("IMAGE_CONVERSATIONS_ENABLED") == "true"
                     and environment.get("AUTH_ENABLED") == "true" and environment.get("OA_LOGIN_ENABLED") == "false"
                     and environment.get("REDIS_URL") == "redis://redis:6379" and environment.get("S3_ENDPOINT") == "http://minio:9000", "FORMAL_ISOLATED_RUNTIME_REQUIRED")
         return resource["Id"]

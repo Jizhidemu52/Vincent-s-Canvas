@@ -30,11 +30,15 @@ PACKAGE_FILES = [
     "ops/release/layer-studio-052-state.sql", "server/src/migrations/052_layer_studio.sql",
     "ops/release/canvas-design-chat-053.py", "ops/release/canvas-design-chat-053-catalog.json",
     "ops/release/canvas-design-chat-053-state.sql", "server/src/migrations/053_canvas_design_chat.sql",
+    "ops/release/image-conversations-054-055.py", "ops/release/image-conversations-054-055-catalog.json",
+    "ops/release/image-conversations-054-055-state.sql", "server/src/migrations/054_image_conversations.sql",
+    "server/src/migrations/055_mai27_model_catalog.sql",
 ]
 
 
 def fixed_migration_tail(manifest, first):
-    allowed = ["048_usage_daily_facts.sql", "049_quick_image_configurations.sql", *CREATIVE_MIGRATIONS, "052_layer_studio.sql", "053_canvas_design_chat.sql"]
+    allowed = ["048_usage_daily_facts.sql", "049_quick_image_configurations.sql", *CREATIVE_MIGRATIONS, "052_layer_studio.sql", "053_canvas_design_chat.sql",
+               "054_image_conversations.sql", "055_mai27_model_catalog.sql"]
     expected = allowed[allowed.index(first):]
     actual = [row["name"] for row in manifest["migrations"] if row["name"] >= first[:3]]
     return bool(actual) and actual == expected[:len(actual)]
@@ -71,6 +75,15 @@ def verify_053_payload(root, manifest):
     require(len(rows) == 1 and fixed_migration_tail(manifest, Path(relative).name), "FIXED_053_MIGRATION_REQUIRED")
     sql = root / relative
     require(sql.is_file() and not sql.is_symlink() and digest_file(sql) == rows[0]["sha256"], "PACKAGED_053_SQL_MIGRATION_HASH_MISMATCH")
+
+
+def verify_054_055_payload(root, manifest):
+    names = ["054_image_conversations.sql", "055_mai27_model_catalog.sql"]
+    rows = [row for row in manifest["migrations"] if row["name"] >= "054"]
+    require([row["name"] for row in rows] == names, "FIXED_054_055_MIGRATIONS_REQUIRED")
+    for row in rows:
+        sql = root / "server/src/migrations" / row["name"]
+        require(sql.is_file() and not sql.is_symlink() and digest_file(sql) == row["sha256"], "PACKAGED_054_055_SQL_MIGRATION_HASH_MISMATCH")
 
 
 def repository_commit(root):
@@ -123,6 +136,7 @@ def package(root, candidate, verification, image_archive, destination):
     verify_049_payload(root, candidate)
     verify_052_payload(root, candidate)
     verify_053_payload(root, candidate)
+    verify_054_055_payload(root, candidate)
     seed = build_source_seed(root)
     manifest = copy.deepcopy(candidate); manifest["verification"] = verification
     validate_manifest(manifest)
@@ -151,6 +165,7 @@ def package(root, candidate, verification, image_archive, destination):
     verify_049_payload(destination, manifest)
     verify_052_payload(destination, manifest)
     verify_053_payload(destination, manifest)
+    verify_054_055_payload(destination, manifest)
     verify_creative_payload(destination, manifest)
     archive = destination.with_suffix(destination.suffix + ".tar")
     require(not archive.exists(), "PACKAGE_ARCHIVE_ALREADY_EXISTS")

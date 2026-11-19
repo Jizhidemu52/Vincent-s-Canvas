@@ -9,6 +9,7 @@ import { configUsesSeparateImageInputs, getConfigImageInputs, getSharedConfigFor
 import { resolveSharedGenerationPlan, type SharedGenerationPlan } from "@/lib/canvas/canvas-shared-generation";
 import { ensureCanvasModelsReady, resolveCanvasImageConfig } from "@/lib/canvas/canvas-generation-model";
 import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
+import type { canvasDesignTemplateBatch } from "@/lib/canvas/canvas-design-template-batch";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
@@ -33,6 +34,29 @@ type Runtime = {
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
     message: { info: (text: ReactNode) => unknown; error: (text: ReactNode) => unknown };
 };
+type TemplateGenerate = (nodeId: string, mode: CanvasGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void, sequenceLock?: string, sequenceSignal?: AbortSignal, retryFailedOnly?: boolean) => Promise<void>;
+
+export async function runCanvasDesignTemplateBatch(batch: NonNullable<ReturnType<typeof canvasDesignTemplateBatch>>, locks: Set<string>, generate: (node: CanvasNodeData) => Promise<void>) {
+    if (locks.has(batch.id)) return false;
+    locks.add(batch.id);
+    try {
+        const results = await Promise.allSettled(batch.nodes.map(generate));
+        const failure = results.find(result => result.status === "rejected");
+        if (failure?.status === "rejected") throw failure.reason;
+        return true;
+    } finally { locks.delete(batch.id); }
+}
+
+export async function runCanvasTemplateGeneration(batch: NonNullable<ReturnType<typeof canvasDesignTemplateBatch>>, args: Parameters<TemplateGenerate>, locks: Set<string>, generate: TemplateGenerate, message: Runtime["message"]) {
+    const outputs: CanvasGenerationOutput[] = [];
+    const ran = await runCanvasDesignTemplateBatch(batch, locks, async node => {
+        await generate(node.id, node.metadata?.generationMode || "image", node.id === args[0] ? args[2] : node.metadata?.composerContent ?? node.metadata?.prompt ?? "",
+            result => { outputs.push(...result.outputs); });
+    });
+    if (ran) args[3]?.({ mode: args[1], outputs });
+    else message.info(uiText("这套模板正在运行，请勿重复提交"));
+}
+
 /** Loaded on execution; all targets are validated before the first paid request. */
 export async function runCanvasGeneration(
     nodeId: string, mode: CanvasGenerationMode, prompt: string,

@@ -16,6 +16,7 @@ test('candidate app images never rebuild while all test resources stay in one is
   expect(config.services.worker.image).toBe('api:tested');
   expect(config.services.web.image).toBe('web:tested');
   expect(config.services.worker.environment.TASK_MOCK_MODE).toBe('false');
+  for (const role of ['api', 'worker']) expect(config.services[role].environment.IMAGE_CONVERSATIONS_ENABLED).toBe('true');
   expect(config.networks).toEqual({
     default: { name: 'ci-release-123-amd64_default', internal: true },
     ingress: { name: 'ci-release-123-amd64_ingress', internal: false },

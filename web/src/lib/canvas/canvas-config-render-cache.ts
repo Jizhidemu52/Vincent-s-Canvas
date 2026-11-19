@@ -3,6 +3,7 @@ import { resolveCanvasNodeImageReferences } from "@/lib/canvas/canvas-image-refe
 import { getConfigImageInputs, getSharedConfigTargets } from "@/lib/canvas/canvas-shared-connections";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeGroup } from "@/types/canvas";
 import type { ImageReferenceItem } from "@/types/image";
+import { canvasDesignTemplateBatches } from "./canvas-design-template-batch";
 
 export type CanvasConfigInputSummary = { textCount: number; imageCount: number; videoCount: number; audioCount: number };
 export type CanvasConfigRenderGraph = { nodes: CanvasNodeData[]; connections: CanvasConnection[]; groups: CanvasNodeGroup[] };
@@ -14,6 +15,7 @@ export type CanvasConfigRenderSnapshot = {
     linkedTaskCount: number;
     linkedTaskHasImages: boolean;
     workflowRunning: boolean;
+    templateTaskCount?: number;
     workflow?: { groupId?: string; status?: string; stepStatus?: string };
 };
 
@@ -34,7 +36,7 @@ function sameSnapshot(first: CanvasConfigRenderSnapshot, second: CanvasConfigRen
     return sameFields(first.inputSummary, second.inputSummary) && sameItems(first.inputs, second.inputs, sameInput)
         && sameItems(first.imageReferences, second.imageReferences, sameFields)
         && first.inputImageTaskCount === second.inputImageTaskCount && first.linkedTaskCount === second.linkedTaskCount
-        && first.linkedTaskHasImages === second.linkedTaskHasImages && first.workflowRunning === second.workflowRunning
+        && first.linkedTaskHasImages === second.linkedTaskHasImages && first.workflowRunning === second.workflowRunning && first.templateTaskCount === second.templateTaskCount
         && sameFields(first.workflow, second.workflow);
 }
 
@@ -47,9 +49,14 @@ export function createCanvasConfigRenderCache() {
     let nodeById = new Map<string, CanvasNodeData>();
     const edgesByNode = new Map<string, CanvasConnection[]>();
     const groupByConfig = new Map<string, CanvasNodeGroup>();
+    const templateCounts = new Map<string, number>();
     const entries = new Map<string, { metadata: CanvasNodeData["metadata"]; nodes: CanvasNodeData[]; edges: CanvasConnection[]; snapshot: CanvasConfigRenderSnapshot }>();
     return {
         select(node: CanvasNodeData, graph: CanvasConfigRenderGraph, inputSummary: CanvasConfigInputSummary, inputs: NodeGenerationInput[], activeGroupIds: ReadonlySet<string>): CanvasConfigRenderSnapshot {
+            if (indexedNodes !== graph.nodes || indexedConnections !== graph.connections || indexedGroups !== graph.groups) {
+                templateCounts.clear();
+                for (const batch of canvasDesignTemplateBatches(graph.nodes, graph.groups, graph.connections)) for (const config of batch.nodes) templateCounts.set(config.id, batch.nodes.length);
+            }
             if (indexedNodes !== graph.nodes) {
                 indexedNodes = graph.nodes;
                 nodeById = new Map(graph.nodes.map(item => [item.id, item]));
@@ -81,10 +88,11 @@ export function createCanvasConfigRenderCache() {
                 ? { groupId: group?.id, status: group?.imageSequence?.status, stepStatus: group?.imageSequence?.steps.find(step => step.configNodeId === node.id)?.status }
                 : undefined;
             const workflowRunning = Boolean(group && activeGroupIds.has(group.id));
+            const templateTaskCount = templateCounts.get(node.id) || 0;
             const previous = entries.get(node.id);
             if (previous && previous.metadata === node.metadata && sameItems(previous.nodes, relatedNodes) && sameItems(previous.edges, edges)
                 && sameFields(previous.snapshot.inputSummary, inputSummary) && sameItems(previous.snapshot.inputs, inputs, sameInput)
-                && previous.snapshot.workflowRunning === workflowRunning && sameFields(previous.snapshot.workflow, workflow)) return previous.snapshot;
+                && previous.snapshot.workflowRunning === workflowRunning && previous.snapshot.templateTaskCount === templateTaskCount && sameFields(previous.snapshot.workflow, workflow)) return previous.snapshot;
 
             // Config reference resolution is one hop. Keep current connection order
             // but exclude every unrelated node so existing resolvers stay cheap.
@@ -96,12 +104,12 @@ export function createCanvasConfigRenderCache() {
                 inputImageTaskCount: getConfigImageInputs(node.id, nodes, edges).length,
                 linkedTaskCount: targets.length,
                 linkedTaskHasImages: targets.some(item => item.type === CanvasNodeType.Image && Boolean(item.metadata?.content || item.metadata?.storageKey)),
-                workflowRunning, workflow,
+                workflowRunning, workflow, templateTaskCount,
             };
             const snapshot = previous && sameSnapshot(previous.snapshot, candidate) ? previous.snapshot : candidate;
             entries.set(node.id, { metadata: node.metadata, nodes: relatedNodes, edges, snapshot });
             return snapshot;
         },
-        clear() { entries.clear(); indexedNodes = indexedConnections = indexedGroups = undefined; nodeById.clear(); edgesByNode.clear(); groupByConfig.clear(); },
+        clear() { entries.clear(); indexedNodes = indexedConnections = indexedGroups = undefined; nodeById.clear(); edgesByNode.clear(); groupByConfig.clear(); templateCounts.clear(); },
     };
 }

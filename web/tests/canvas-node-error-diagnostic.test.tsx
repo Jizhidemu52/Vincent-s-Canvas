@@ -102,6 +102,15 @@ test("image reload remains available independently of a stale result marker", ()
     expect(reloaded).toBe(1); expect(h.retries).toEqual([]);
 });
 
+test("design-discussion execution errors expose their original workflow instead of generic retry", () => {
+    const h = harness({ imageTask: undefined, designTask: { requestId: "original-design-slot", status: "uncertain" } });
+    expect(h.html).toContain("请在「创作任务」中查询或继续原请求。");
+    expect(elements(h.tree).filter(element => element.type === "button")).toHaveLength(0);
+    expect(h.retries).toEqual([]);
+    const reload = harness({ designTask: { requestId: "original-design-slot" } }, { onReload() {} });
+    expect(reload.html).toContain("重新加载");
+});
+
 test("media diagnostics use their existing request/task bindings too", async () => {
     const h = harness({ imageTask: undefined, sourceTaskId: undefined, mediaTask: { ...binding, requestId: "media-request", taskId: "media-task" }, videoTaskId: "media-task" }, { type: CanvasNodeType.Video });
     await h.copy();

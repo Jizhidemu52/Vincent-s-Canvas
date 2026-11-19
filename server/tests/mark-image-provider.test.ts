@@ -36,7 +36,8 @@ async function fixture(role = "super_admin", encryptionKey: string | undefined =
     if (sql.startsWith("SELECT") && sql.includes("FROM model_configs")) {
       expect(values[0]).toBe(MARK_IMAGE_PROVIDER_ID);
       if (sql.includes('AS "workflowProviderId"')) return { rows: models.filter(model => model.modelId === values[1]).map(model => ({ workflowConfigId: model.workflowConfigId, workflowProviderId: model.workflowProviderId, workflowCapability: model.workflowCapability, workflowEnabled: model.workflowEnabled })) };
-      return { rows: models.map(({ providerId, ...model }) => model) };
+      if (sql.includes("model_id=ANY($2::text[])")) return { rows: models.filter(model => values[1].includes(model.modelId)).map(({ providerId, ...model }) => model) };
+      throw new Error(`Unexpected model selection: ${sql}`);
     }
     if (sql.startsWith("INSERT INTO providers")) {
       const [id, name, baseUrl, enabled, encryptedCredentials] = values;
@@ -118,6 +119,21 @@ test("dedicated credential saves preserve model replacement and compatible workf
   Object.assign(selected, { replacementModelConfigId: "replacement", workflowConfigId: "workflow", workflowProviderId: MARK_IMAGE_PROVIDER_ID, workflowCapability: "edit", workflowEnabled: true });
   expect((await save(f.url, { ...input(), apiKey: "" })).status).toBe(200);
   expect(f.state().models.find(model => model.id === selected.id)).toMatchObject({ replacementModelConfigId: "replacement", workflowConfigId: "workflow" });
+});
+
+test("APIMart option saves hide retired models without mutating their fixed-tool configurations", async () => {
+  const f = await fixture();
+  expect((await save(f.url, input())).status).toBe(200);
+  const retained = ["grok-imagine-image-2.0", "gemini-3.1-flash-image-preview-official", "mai-image-2.6-flash"].map((modelId, index) => ({
+    id: crypto.randomUUID(), providerId: MARK_IMAGE_PROVIDER_ID, modelId, name: `retained-${index}`, capabilities: ["generate", "edit", "batch"],
+    enabled: index !== 0, creditCost: 9 + index, rmbCost: 0.5, concurrencyLimit: 7, workflowConfigId: `fixed-workflow-${index}`, replacementModelConfigId: null,
+  }));
+  f.state().models.push(...retained);
+  const before = structuredClone(retained);
+  const read = await (await fetch(f.url)).json();
+  expect(read.models.map((model: { modelId: string }) => model.modelId)).toEqual(MARK_PLATFORM_MODELS.map(model => model.modelId));
+  expect((await save(f.url, { ...input(), apiKey: "" })).status).toBe(200);
+  expect(f.state().models.filter(model => before.some(prior => prior.id === model.id))).toEqual(before);
 });
 
 test("incompatible workflow bindings return a repairable conflict and rollback instead of clearing fields", async () => {

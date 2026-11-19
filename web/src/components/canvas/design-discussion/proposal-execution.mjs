@@ -83,9 +83,9 @@ function checkedProposal(value) {
     };
 }
 
-export function createProposalExecution({ proposal, references, userRequirements = [], designRecord = createDesignRecord(), designRecordReferenceSnapshot, brief = {}, conversation = [], modelId, outputKind = "image", generationAllowed } = {}) {
+export function createProposalExecution({ proposal, references, userRequirements = [], designRecord = createDesignRecord(), designRecordReferenceSnapshot, brief = {}, conversation = [], modelId, outputKind = "image", generationAllowed, serverImageExecution = false } = {}) {
     if (generationAllowed !== true) throw fail("必须由用户明确点击已选方案的生成操作");
-    const model = boundedText(modelId, 200, "生图模型");
+    const model = serverImageExecution && outputKind === "image" ? "" : boundedText(modelId, 200, "生图模型");
     const candidate = checkedProposal(proposal);
     const current = list(references, 4, "当前参考图").map(reference => {
         if (!reference || typeof reference !== "object") throw fail("当前参考图无效");

@@ -2,7 +2,7 @@ import { getQueuedTask, getQueuedTaskByRequestId, recoverQueuedTask, QueuedTaskF
 import { classifyTaskRecovery } from "@/services/api/task-result-reconciliation";
 import { imageResultProcessingFailureMessage, isImageResultProcessingFailure, mergeGenerationDiagnostics } from "@/lib/generation-feedback";
 import type { CreativeImageLineage } from "@/lib/creative-chat";
-import type { ImageAgentWorkNote } from "@/lib/image-agent/work-note";
+import type { ImageAgentWorkNote } from "../../../../shared/image-agent/work-note";
 import type { CanvasMaskAdaptation } from "@/lib/canvas/canvas-mask-adaptation";
 import type { ChatRegionComposite } from "@/lib/image-agent/mask";
 

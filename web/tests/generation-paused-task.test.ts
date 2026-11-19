@@ -86,7 +86,7 @@ test.each(pauseCases.flatMap(pause => [false, true].map(initiallyProcessing => (
         expect(paused.taskId).toBe("interrupted-image-task");
         expect(paused.canRecover).toBe(canRecover);
         expect(paused.message).toContain("interrupted-image-task");
-        expect(paused.message).toContain(canRecover ? "可恢复查询原任务" : "请勿重复提交");
+        expect(paused.message).toContain(canRecover ? "可恢复查询原任务" : "暂时无法获取生成结果");
     }
     expect(polls).toBe(initiallyProcessing ? 2 : 1);
     expect(requests.filter((request) => request.method === "POST")).toEqual([{ path: "/api/tasks", method: "POST" }]);

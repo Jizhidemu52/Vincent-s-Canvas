@@ -11,7 +11,7 @@ import { deploymentFeatures } from "@/lib/deployment-features";
 import { omitFinancialFields } from "@/lib/financial-presentation";
 import { listGenerationHistory, readHistoryOriginal, historyAssetPath, type GenerationHistoryTask } from "@/services/api/generation-task-history";
 
-const statusLabels: Record<string, string> = { waiting: "排队中", queued: "排队中", processing: "处理中", paused: "待核查", success: "已完成", failed: "未完成", cancelled: "已取消" };
+const statusLabels: Record<string, string> = { waiting: "排队中", queued: "排队中", processing: "处理中", paused: "未完成", success: "已完成", failed: "失败", cancelled: "已取消" };
 const titleOf = (task: GenerationHistoryTask) => task.userInput?.userText || task.prompt || "图片处理任务";
 
 function OriginalPreview({ path, ownerId }: { path: string; ownerId: string }) {

@@ -49,8 +49,7 @@ const test = base.extend<{ studio: Studio }>({ studio: async ({ context, page },
     expect(api.blocked).toEqual([]); expect(api.unexpected).toEqual([]); expect(api.pageErrors).toEqual([]);
 } });
 
-const pane = (page: Page) => page.getByRole("tabpanel");
-const tabs = (page: Page) => page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab");
+const pane = (page: Page) => page.getByRole("region", { name: "创作工作区", exact: true });
 const generate = (page: Page) => pane(page).getByRole("button", { name: "生成图片", exact: true });
 async function generatedMode(page: Page) {
     await page.goto("/layer-studio");
@@ -66,13 +65,13 @@ test("generation uses anonymous one-shot contract and persists before POST; refr
     await page.locator(".ant-select-dropdown:visible .ant-select-item-option-content").getByText("透明", { exact: true }).click();
     await expect(pane(page).getByRole("combobox", { name: "输出格式", exact: true })).toBeDisabled();
     await generate(page).click();
-    await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
+    await expect(pane(page).getByLabel("生成状态")).toContainText("生成成功");
     expect(studio.checkedDurable).toBe(true);
     expect(studio.api.submissions).toHaveLength(1);
     expect(studio.api.submissions[0]).toMatchObject({ toolKey: "layer-studio", operationType: "image_generation", parameters: { n: 1, background: "transparent", output_format: "png", optimize_prompt_options: { mode: "standard" } } });
     expect(studio.api.submissions[0]).not.toHaveProperty("modelConfigId");
     await page.reload();
-    await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
+    await expect(pane(page).getByLabel("生成状态")).toContainText("生成成功");
     expect(studio.api.submissions).toHaveLength(1);
     await expect(page.locator("body")).not.toContainText(/seedream|apimart|E2E GPT Image/i);
     const position = pane(page).getByRole("spinbutton", { name: "X 位置", exact: true });
@@ -98,7 +97,7 @@ test("decomposition saves original bytes, includes base in cap, omits background
     await pane(page).getByRole("combobox", { name: "底图格式", exact: true }).click();
     await page.locator(".ant-select-dropdown:visible .ant-select-item-option-content").getByText("JPEG", { exact: true }).click();
     await pane(page).getByRole("button", { name: "开始拆分", exact: true }).click();
-    await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
+    await expect(pane(page).getByLabel("生成状态")).toContainText("生成成功");
     const submitted = studio.api.submissions[0];
     expect(submitted.parameters).toMatchObject({ n: 1, size: "auto", layer_decomposition: true, layer_decomposition_options: { max_images: 100, text_recognition: true }, output_format: "jpeg" });
     expect(submitted.parameters).not.toHaveProperty("background"); expect(submitted.prompt).toBe("");
@@ -111,34 +110,44 @@ test("ambiguous POST and reload keep one request; queries never resubmit", async
     await generate(page).click();
     await expect.poll(() => studio.api.submissions.length).toBe(1);
     await expect(generate(page)).toBeDisabled();
-    await pane(page).getByRole("button", { name: "查询原任务", exact: true }).click();
+    await pane(page).getByRole("button", { name: "刷新结果", exact: true }).click();
     await page.reload();
-    await expect(pane(page).getByLabel("原任务状态")).toContainText("处理中");
+    await expect(pane(page).getByLabel("生成状态")).toContainText("处理中");
     await expect(generate(page)).toBeDisabled();
     expect(studio.api.submissions).toHaveLength(1);
     expect(studio.api.taskReads.length).toBeGreaterThan(0);
 });
 
-test("two task panes preserve independent drafts and keep pending pane locked", async ({ page, studio }) => {
+test("continuing creation preserves independent drafts while the hidden original request keeps updating", async ({ page, studio }) => {
     studio.status = "processing";
     await generatedMode(page); await generate(page).click();
     await expect.poll(() => studio.api.submissions.length).toBe(1);
-    await page.getByRole("button", { name: "新建任务", exact: true }).click();
-    await expect(tabs(page)).toHaveCount(2);
-    await pane(page).getByRole("textbox", { name: "拆分说明", exact: true }).fill("第二个独立任务");
-    await tabs(page).nth(0).click();
-    await expect(pane(page).getByRole("textbox", { name: "图片描述", exact: true })).toHaveValue("保持原始形状与细节的产品图");
     await expect(generate(page)).toBeDisabled();
-    await tabs(page).nth(1).click();
+    await pane(page).getByRole("button", { name: "继续创作", exact: true }).click();
+    await expect(page.getByRole("tablist", { name: "任务列表", exact: true })).toHaveCount(0);
+    await pane(page).getByRole("textbox", { name: "拆分说明", exact: true }).fill("第二个独立任务");
+    const records = () => page.evaluate(async () => {
+        const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
+        const values: any[] = [];
+        await createWorkspaceStorage("layer_studio_workspaces").iterate(value => { values.push(value); });
+        return values;
+    });
+    await expect.poll(async () => (await records()).some(value => value.form.prompt === "第二个独立任务")).toBe(true);
+    expect((await records()).find(value => value.jobs.length)?.form.prompt).toBe("保持原始形状与细节的产品图");
+    const task = [...studio.api.tasks.values()][0];
+    task.status = "failed"; task.failureReason = "Fixture confirmed failure";
+    await expect.poll(async () => (await records()).find(value => value.jobs.length)?.jobs[0].phase).toBe("failed");
+    await expect(pane(page).getByRole("textbox", { name: "拆分说明", exact: true })).toHaveValue("第二个独立任务");
     await page.reload();
     await expect(pane(page).getByRole("textbox", { name: "拆分说明", exact: true })).toHaveValue("第二个独立任务");
+    expect((await records()).find(value => value.jobs.length)?.jobs[0].requestId).toBe(task.requestId);
     expect(studio.api.submissions).toHaveLength(1);
 });
 
 test("missing configured price disables generation but saved result editor remains", async ({ page, studio }) => {
     studio.api.role = "super_admin";
     await generatedMode(page); await generate(page).click();
-    await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
+    await expect(pane(page).getByLabel("生成状态")).toContainText("生成成功");
     studio.quote = false;
     await page.reload();
     await expect(pane(page).getByText("功能配置尚未就绪，暂不能创建新任务；已有结果仍可编辑和下载。", { exact: false })).toBeVisible();
@@ -167,9 +176,10 @@ test("mobile layout and exact-size validation stay usable without a request", as
 
 test("partial saved results recover the accepted task only after an explicit action", async ({ page, studio }) => {
     await generatedMode(page); await generate(page).click();
-    await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
+    await expect(pane(page).getByLabel("生成状态")).toContainText("生成成功");
     const task = [...studio.api.tasks.values()][0];
     task.status = "paused"; task.resultDocument.status = "partial";
+    task.resultDocument.items[0].state = "pending";
     await page.evaluate(async requestId => {
         const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
         const store = createWorkspaceStorage("layer_studio_workspaces");
@@ -178,10 +188,10 @@ test("partial saved results recover the accepted task only after an explicit act
         for (const [key, value] of records) { value.jobs[0].phase = "pending"; await store.setItem(key, value); }
     }, task.requestId);
     await page.reload();
-    await expect(pane(page).getByRole("button", { name: "恢复原任务查询 / 保存", exact: true })).toBeVisible();
+    await expect(pane(page).getByRole("button", { name: "重试保存", exact: true })).toBeVisible();
     expect(studio.recoveries).toBe(0); expect(studio.api.submissions).toHaveLength(1);
-    await pane(page).getByRole("button", { name: "恢复原任务查询 / 保存", exact: true }).click();
-    await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
+    await pane(page).getByRole("button", { name: "重试保存", exact: true }).click();
+    await expect(pane(page).getByLabel("生成状态")).toContainText("生成成功");
     expect(studio.recoveries).toBe(1); expect(studio.api.submissions).toHaveLength(1);
 });
 
@@ -204,7 +214,7 @@ test("missing layer recovery is actionable in the editor and preserves edits wit
     await page.goto("/layer-studio");
     await pane(page).getByLabel("上传参考图片", { exact: true }).setInputFiles({ name: "original.png", mimeType: "image/png", buffer: IMAGE });
     await pane(page).getByRole("button", { name: "开始拆分", exact: true }).click();
-    await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
+    await expect(pane(page).getByLabel("生成状态")).toContainText("生成成功");
     const position = pane(page).getByRole("spinbutton", { name: "X 位置", exact: true });
     await position.fill("24"); await position.press("Tab");
     const task = [...studio.api.tasks.values()][0];
@@ -218,24 +228,25 @@ test("missing layer recovery is actionable in the editor and preserves edits wit
         for (const [key, value] of records) { value.jobs[0].phase = "pending"; await store.setItem(key, value); }
     }, task.requestId);
     await page.reload();
-    const recovery = pane(page).getByLabel("图层原件恢复", { exact: true });
-    await expect(recovery).toContainText("已保存 1 / 5 份原件");
+    const recovery = pane(page).getByLabel("图片保存状态", { exact: true });
+    await expect(recovery).toContainText("部分图片保存失败（1/5）");
     await expect(recovery.getByRole("button", { name: "重新读取已保存原件", exact: true })).toHaveCount(0);
     await expect(pane(page).getByRole("button", { name: "导出合成 PNG", exact: true })).toBeDisabled();
     const reads = studio.api.taskReads.length;
-    await recovery.getByRole("button", { name: "查询原任务并更新图层", exact: true }).click();
+    await page.reload();
+    await expect(recovery).toContainText("部分图片保存失败（1/5）");
     await expect.poll(() => studio.api.taskReads.length).toBeGreaterThan(reads);
     expect(studio.recoveries).toBe(0); expect(studio.api.submissions).toHaveLength(1);
     await recovery.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath("partial-desktop.png") });
     await page.setViewportSize({ width: 390, height: 844 });
-    const resume = recovery.getByRole("button", { name: "继续保存缺失图层（不重新生成）", exact: true });
+    const resume = recovery.getByRole("button", { name: "重试保存", exact: true });
     await resume.scrollIntoViewIfNeeded();
     await expect(resume).toBeInViewport();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath("partial-mobile.png") });
     await resume.dblclick();
-    await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
+    await expect(pane(page).getByLabel("生成状态")).toContainText("生成成功");
     await expect(recovery).toHaveCount(0);
     await expect(pane(page).getByRole("button", { name: "导出合成 PNG", exact: true })).toBeEnabled();
     await expect(position).toHaveValue("24");
@@ -249,21 +260,28 @@ test("missing original request stays recoverable after reload and never creates 
     await generatedMode(page); await generate(page).click();
     await expect.poll(() => studio.api.submissions.length).toBe(1);
     const requestId = studio.api.submissions[0].requestId;
-    await expect(pane(page).getByText(/暂未查到原请求/)).toBeVisible();
+    await expect(pane(page).getByText("暂时无法获取结果，系统会继续更新。", { exact: true })).toBeVisible();
     await page.reload();
-    await expect(pane(page).getByLabel("原任务状态")).toContainText(requestId);
-    await pane(page).getByRole("button", { name: "查询原任务", exact: true }).click();
+    await expect(pane(page).getByLabel("生成状态")).toContainText("暂未完成");
+    await expect(pane(page).getByText("待核查", { exact: true })).toHaveCount(0);
+    expect(await page.evaluate(async () => {
+        const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
+        const identities: string[] = [];
+        await createWorkspaceStorage("layer_studio_workspaces").iterate((value: any) => { identities.push(...value.jobs.map((job: any) => job.requestId)); });
+        return identities;
+    })).toEqual([requestId]);
+    await pane(page).getByRole("button", { name: "刷新结果", exact: true }).click();
     await expect(generate(page)).toBeDisabled();
     expect(studio.api.submissions).toHaveLength(1);
 });
 
 test("disabled module hides navigation and new generation without removing saved editor", async ({ page, context, studio }) => {
     await generatedMode(page); await generate(page).click();
-    await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
+    await expect(pane(page).getByLabel("生成状态")).toContainText("生成成功");
     await context.route("**/api/modules", route => route.fulfill({ json: { modules: moduleDefinitions.map(item => ({ moduleKey: item.moduleKey, enabled: item.moduleKey !== "layer-studio" })) } }));
     await page.reload();
-    await expect(pane(page).getByRole("heading", { name: "图层拆分与图片生成", exact: true })).toBeVisible();
-    await expect(page.getByRole("navigation", { name: "主导航", exact: true }).getByRole("link", { name: "图层拆分与图片生成", exact: true })).toHaveCount(0);
+    await expect(pane(page).getByRole("heading", { name: "豆包生图", exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "主导航", exact: true }).getByRole("link", { name: "豆包生图", exact: true })).toHaveCount(0);
     await expect(generate(page)).toBeDisabled();
     await expect(pane(page).getByRole("button", { name: "导出合成 PNG", exact: true })).toBeEnabled();
     expect(studio.api.submissions).toHaveLength(1);

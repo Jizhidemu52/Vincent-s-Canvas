@@ -1,5 +1,5 @@
 import type { CreativeImageCatalogEntry } from "@/lib/creative-chat";
-import { imageAgentVersion, imageAgentWorkId, resolveImageAgentFocus } from "@/lib/image-agent/focus";
+import { imageAgentVersion, imageAgentWorkId, resolveImageAgentFocus } from "../../../../shared/image-agent/focus";
 import type { ChatSession } from "./chat-types";
 
 export function chatFocusImage(catalog: CreativeImageCatalogEntry[], session?: Pick<ChatSession, "focusImageId" | "editTargetImageId" | "newCreation">) {

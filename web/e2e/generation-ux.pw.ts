@@ -25,8 +25,8 @@ test("desktop: persistent tool-scoped drafts and references with a visible submi
     const prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
     await expect(prompt).toBeVisible();
     await expect(page.getByText("还差：填写提示词", { exact: true })).toBeVisible();
-    await inViewport(page.getByRole("button", { name: "开始生成", exact: true }), 900);
-    await prompt.fill("图像生成独立草稿");
+    await inViewport(page.getByRole("button", { name: "开始编辑", exact: true }), 900);
+    await prompt.fill("图像编辑独立草稿");
     await pasteReference(page, "图像提示词");
     await expect(page.getByRole("img", { name: "粘贴原图.png", exact: true })).toBeVisible();
     await page.locator(".generation-form").evaluate((element, bytes) => {
@@ -36,14 +36,15 @@ test("desktop: persistent tool-scoped drafts and references with a visible submi
     }, [...IMAGE]);
     await expect(page.getByRole("img", { name: "拖入原图.png", exact: true })).toBeVisible();
     await page.reload();
-    await expect(prompt).toHaveValue("图像生成独立草稿");
+    await expect(prompt).toHaveValue("图像编辑独立草稿");
     await expect(page.getByRole("img", { name: "粘贴原图.png", exact: true })).toBeVisible();
     await expect(page.getByRole("img", { name: "拖入原图.png", exact: true })).toBeVisible();
-    await page.goto("/image?tool=image-edit");
-    await expect(prompt).toHaveValue("");
-    await prompt.fill("图像编辑独立草稿");
+    await page.goto("/video");
+    const videoPrompt = page.getByRole("textbox", { name: "视频提示词", exact: true });
+    await expect(videoPrompt).toHaveValue("");
+    await videoPrompt.fill("视频独立草稿");
     await page.goto("/image");
-    await expect(prompt).toHaveValue("图像生成独立草稿");
+    await expect(prompt).toHaveValue("图像编辑独立草稿");
     await page.screenshot({ path: info.outputPath("image-desktop.png") });
     expect(api.submissions).toHaveLength(0);
 });
@@ -51,8 +52,10 @@ test("desktop: persistent tool-scoped drafts and references with a visible submi
 test("desktop: viewing generated image preserves the draft, explicit reuse confirms, canvas receives original bytes", async ({ page, api }, info) => {
     await page.goto("/image");
     const prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
+    await pasteReference(page, "图像提示词");
+    await expect(page.getByRole("img", { name: "粘贴原图.png", exact: true })).toBeVisible();
     await prompt.fill("原任务服装设计");
-    await page.getByRole("button", { name: "开始生成", exact: true }).click();
+    await page.getByRole("button", { name: "开始编辑", exact: true }).click();
     await expect(page.getByRole("button", { name: "放入画布", exact: true })).toBeVisible();
     expect(api.submissions).toHaveLength(1);
     await prompt.fill("下一条正在编辑的草稿");
@@ -71,7 +74,9 @@ test("desktop: viewing generated image preserves the draft, explicit reuse confi
     await expect(page).toHaveURL(/\/canvas\/[^/?]+$/);
     const id = new URL(page.url()).pathname.split("/").at(-1)!;
     await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
-    expect(api.document(id)!.nodes[0].metadata.prompt).toBe("原任务服装设计");
+    expect(api.document(id)!.nodes[0].metadata.prompt).toBe(api.submissions[0].prompt);
+    expect(api.document(id)!.nodes[0].metadata.prompt).toContain("原任务服装设计");
+    expect(api.document(id)!.nodes[0].metadata.prompt).not.toContain("下一条正在编辑的草稿");
     expect(api.assetBytes.size).toBeGreaterThanOrEqual(2);
     await page.screenshot({ path: info.outputPath("image-result-canvas.png") });
     expect(api.submissions).toHaveLength(1);
@@ -84,7 +89,7 @@ test("mobile: image and video primary actions remain visible and video draft sur
         { id: "video-model", name: "隔离视频模型", modelId: "MiniMax-H3", capabilities: ["video"], protocol: "apimart", providerName: "隔离测试" },
     ], prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: tool.toolKey.includes("video") ? "video-model" : "image-model", configurationVersion: 1 })) }) }));
     await page.goto("/image");
-    await inViewport(page.getByRole("button", { name: "开始生成", exact: true }), 844);
+    await inViewport(page.getByRole("button", { name: "开始编辑", exact: true }), 844);
     await expect(page.getByText("还差：填写提示词", { exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath("image-mobile.png") });
@@ -126,8 +131,10 @@ test("queued cancellation is explicit, calls the original task once and verifies
         return route.fallback();
     });
     await page.goto("/image");
+    await pasteReference(page, "图像提示词");
+    await expect(page.getByRole("img", { name: "粘贴原图.png", exact: true })).toBeVisible();
     await page.getByRole("textbox", { name: "图像提示词", exact: true }).fill("只取消尚未发往上游的原任务");
-    await page.getByRole("button", { name: "开始生成", exact: true }).click();
+    await page.getByRole("button", { name: "开始编辑", exact: true }).click();
     const cancel = page.getByRole("button", { name: "取消任务", exact: true });
     await expect(cancel).toBeEnabled();
     await cancel.click();

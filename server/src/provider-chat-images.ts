@@ -7,8 +7,8 @@ import { probeMediaBytes } from "./media-probe";
 import { normalizeProviderImageOrigin, ProviderImageAccessError, PROVIDER_IMAGE_PATH } from "./provider-image-access";
 import { PromptOptimizationError } from "./prompt-safety";
 import type { ChatCompletionInput } from "./routes/chat";
+import { CARBON_RESULT_TIMEOUT_MS, CHAT_RESULT_TIMEOUT_MS, type ChatResultTimeout } from "./chat-result-wait";
 
-const ttlSeconds = 240; // Covers the single 180s request, never a conversation lifetime.
 const maxImageBytes = 4 * 1024 * 1024;
 const maxRequestBytes = 12 * 1024 * 1024;
 const tokenPattern = /^[a-f0-9]{64}$/;
@@ -39,7 +39,7 @@ export class ProviderChatImageAccess {
     if (!result.rows.length) throw new ProviderImageAccessError(404);
   }
 
-  async run<T>(userId: string, input: ChatCompletionInput, invoke: (input: ChatCompletionInput) => Promise<T>): Promise<T> {
+  async run<T>(userId: string, input: ChatCompletionInput, invoke: (input: ChatCompletionInput) => Promise<T>, requestTimeoutMs: ChatResultTimeout = CHAT_RESULT_TIMEOUT_MS): Promise<T> {
     const parts = input.input.flatMap(item => "role" in item && Array.isArray(item.content) ? item.content.filter(part => part.type === "input_image") : []);
     if (!parts.length) return invoke(input);
     if (!this.origin) throw new PromptOptimizationError("PROVIDER_IMAGE_ORIGIN_REQUIRED", "服务端未配置参考图片访问域名，尚未发送识图请求。", 503);
@@ -63,6 +63,7 @@ export class ProviderChatImageAccess {
     }
     await this.activeUser(userId);
     const token = randomBytes(32).toString("hex");
+    const ttlSeconds = (requestTimeoutMs === CARBON_RESULT_TIMEOUT_MS ? CARBON_RESULT_TIMEOUT_MS : CHAT_RESULT_TIMEOUT_MS) / 1000 + 60;
     const grant = grantSchema.parse({ userId, expiresAt: Date.now() + ttlSeconds * 1000, images });
     try { await this.cache.set(key(token), JSON.stringify(grant), { EX: ttlSeconds }); }
     catch { throw new PromptOptimizationError("PROVIDER_IMAGE_UNAVAILABLE", "参考图片临时授权未建立，尚未发送模型请求。", 503); }

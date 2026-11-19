@@ -16,7 +16,7 @@ export function referencePolicyForModel(modelId: string, profile = imageModelPro
     const normalized = modelId.trim().toLowerCase();
     const label = (name: string) => isAdminRole(useUserStore.getState().user?.role) ? name : "当前模型";
     if (profile.kind === "seedream55") return { label: "豆包生图", minimum: 0, maximum: 10, supportsReferences: true };
-    if (profile.kind === "mai-image") return { label: label("MAI Image 2.6 Flash"), minimum: 0, maximum: 5, supportsReferences: true };
+    if (profile.kind === "mai-image") return { label: label(profile.mai27 ? "MAI Image 2.7 Flash" : "MAI Image 2.6 Flash"), minimum: 0, maximum: 5, supportsReferences: true };
     if (profile.kind === "quality-resolution") return { label: label("当前出图模型"), minimum: 0, maximum: 16, supportsReferences: true };
     if (profile.kind === "resolution-1k") return { label: "当前工作台（应用限制，并非渠道固定上限）", minimum: 0, maximum: 16, supportsReferences: true };
     if (profile.kind === "grok-image") return { label: label("Grok Image 2"), minimum: 0, maximum: 3, supportsReferences: true };

@@ -27,7 +27,7 @@ export function readWorkbenchTasks(value: unknown): WorkbenchTaskState {
         || !state.tasks.some(task => task.id === DEFAULT_WORKBENCH_TASK)
         || !state.tasks.some(task => task.id === state.activeId)
         || !Number.isSafeInteger(state.nextNumber) || state.nextNumber <= Math.max(...state.tasks.map(task => task.number))) {
-        throw new Error("任务页签记录暂时无法读取，请重试；原任务和草稿未被覆盖。");
+        throw new Error("工作区暂时无法读取，请重试；原任务和草稿未被覆盖。");
     }
     return structuredClone(state);
 }

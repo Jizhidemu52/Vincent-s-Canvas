@@ -1,5 +1,15 @@
 import { z } from "zod";
 import { normalizeProviderImageOrigin } from "./provider-image-access";
+import { fixedFlareQualitySchema, flareResolutionSchema } from "../../shared/image-conversation-schemas";
+
+const conversationOutputLimits = z.string().transform((value, context) => {
+    try { return JSON.parse(value || "{}"); }
+    catch { context.addIssue({ code: "custom", message: "IMAGE_CONVERSATION_OUTPUT_LIMITS must contain valid JSON" }); return z.NEVER; }
+}).pipe(z.strictObject({
+    allowedQualities: z.array(fixedFlareQualitySchema).min(1).optional(),
+    allowedResolutions: z.array(flareResolutionSchema).min(1).optional(),
+    maxInternalCredits: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+})).optional();
 
 const schema = z.object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -15,6 +25,8 @@ const schema = z.object({
     OA_USERINFO_URL: z.string().url().default("https://oa.in-choice.com.cn:82/api/api/organization/user/info_login"),
     CREDITS_ENABLED: z.enum(["true", "false"]).default("false"),
     ROLE_PORTALS_ENABLED: z.enum(["true", "false"]).default("false"),
+    IMAGE_CONVERSATIONS_ENABLED: z.enum(["true", "false"]).default("false"),
+    IMAGE_CONVERSATION_OUTPUT_LIMITS: conversationOutputLimits,
     BOOTSTRAP_ADMIN_USERNAME: z.string().min(1).optional(),
     BOOTSTRAP_ADMIN_DISPLAY_NAME: z.string().min(1).default("超级管理员"),
     BOOTSTRAP_ADMIN_PASSWORD: z.string().min(12).optional(),
@@ -41,6 +53,9 @@ export type AppConfig = z.infer<typeof schema>;
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
     const config = schema.parse(env);
+    if (config.IMAGE_CONVERSATIONS_ENABLED === "true" && (!config.PROVIDER_ENCRYPTION_KEY || Buffer.from(config.PROVIDER_ENCRYPTION_KEY, "base64").length !== 32)) {
+        throw new Error("IMAGE_CONVERSATIONS_ENABLED requires a base64-encoded 32-byte PROVIDER_ENCRYPTION_KEY");
+    }
     if (config.PROVIDER_IMAGE_PUBLIC_ORIGIN !== undefined) {
         config.PROVIDER_IMAGE_PUBLIC_ORIGIN = normalizeProviderImageOrigin(config.PROVIDER_IMAGE_PUBLIC_ORIGIN);
     }

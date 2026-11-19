@@ -3,6 +3,7 @@ import { gzipSync } from "node:zlib";
 import type { BrowserContext, Page } from "@playwright/test";
 import { test, expect, IMAGE } from "./fixtures";
 import { chooseAntSelect } from "./antd-select-helpers";
+import { activeWorkbench } from "./headless-workbench";
 import { toolDefinitions } from "../../shared/feature-catalog";
 
 const translations: Record<string, string> = {
@@ -153,8 +154,8 @@ test("image settings translates visible markup and validation without altering t
     await context.route("**/api/models", route => route.fulfill({ json: { models: [{
         id: "10000000-0000-4000-8000-000000000001", modelId: "gpt-image-2.6-flare", name: "aplmart-gpt2.6-flare", publicName: "aplmart-gpt2.6-flare", imageParameterProfile: "quality-resolution-v2", capabilities: ["generate", "edit", "upscale"], creditCost: 0, rmbCost: 0,
     }], prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: null, configurationVersion: 1 })) } }));
-    await page.goto("/image");
-    const pane = page.getByRole("tabpanel");
+    await page.goto("/image?tool=image-edit");
+    const pane = activeWorkbench(page);
     await pane.locator("input[type=file][accept='image/*']").setInputFiles({ name: "测试毛衫参考.png", mimeType: "image/png", buffer: IMAGE });
     await pane.getByRole("button", { name: "切换生成图片模型", exact: true }).click();
     const dialog = page.getByRole("dialog");

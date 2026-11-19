@@ -56,6 +56,7 @@ import { collectAffectedConnectionIds, refreshVisibleConnectionsForDrag, sameCan
 import { beginCanvasHover, commitCanvasHover, endCanvasHover, resetCanvasHover, type CanvasHoverState } from "@/lib/canvas/canvas-hover-stability";
 import { canvasImageExportSelection } from "@/lib/canvas/canvas-image-export-selection";
 import { canvasImageBaseName } from "@/lib/canvas/canvas-image-filename";
+import type { PublicImageVersion } from "../../../../shared/image-conversation-public";
 import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
 import { canvasImageReferenceMentions, resolveCanvasNodeImageReferences } from "@/lib/canvas/canvas-image-references";
 import { canvasImagePreviewEdge } from "@/lib/canvas/canvas-image-thumbnail";
@@ -151,6 +152,7 @@ const CanvasSaveFailureNotice = lazy(() => import("@/components/canvas/canvas-sa
 const loadExperienceMetrics = () => import("@/lib/canvas/canvas-experience-metrics");
 const loadCanvasFileActions = () => import("./canvas-editor-file-actions");
 const loadCanvasNodeUploadRuntime = () => import("./canvas-node-upload-runtime");
+const loadCanvasConversationRuntime = () => import("./canvas-image-conversation-runtime");
 const CanvasNodeContextMenu = lazy(() => import("@/components/canvas/canvas-context-menu").then(module => ({ default: module.CanvasNodeContextMenu })));
 const CanvasConnectionControls = lazy(() => import("@/components/canvas/canvas-connection-controls").then(module => ({ default: module.CanvasConnectionControls })));
 const CanvasConnectionHover = lazy(() => import("@/components/canvas/canvas-connection-hover").then(module => ({ default: module.CanvasConnectionHover })));
@@ -2446,7 +2448,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         setDialogNodeId(config.id);
         setTemplateSourceId(undefined);
         focusCanvasArea(config.position, config.width, config.height);
-        message.success(t("已添加 3 个生成配置；编辑提示词后逐个点击生成，当前未调用模型"));
+        message.success(t("已添加 3 个生成配置；点击任一步即可运行整套模板，当前未调用模型"));
     };
 
     const arrangeNodes = async (mode: import("@/lib/canvas/canvas-node-arrange").CanvasArrangeMode, confirmed = false) => {
@@ -2551,16 +2553,21 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         [createImageFileNode, message, runLocalImageOperation, screenToCanvas, size.height, size.width],
     );
 
+    const conversationRuntime = useMemo(() => ({
+        ownerId: useUserStore.getState().user?.id, projectId, designProjectIdRef, savedProjectIdRef, nodesRef, setNodes,
+        projectSaveQueueRef, updateProject, setChatSessions, setActiveChatId,
+        runtime: generationRuntime, containerRef, screenToCanvas, size,
+    }), [editorOwner, projectId, generationRuntime.isObservationCurrent, generationRuntime.waitForWriteAccess, screenToCanvas, size.width, size.height, updateProject]);
+
     const handleAssistantSessionsChange = useCallback(async (sessions: CanvasAssistantSession[], activeId: string | null, options?: { flush: boolean }) => {
-        setChatSessions(sessions);
-        setActiveChatId(activeId);
-        if (options?.flush) {
-            // An older full-project snapshot must land before this completed conversation.
-            projectSaveQueueRef.current?.flush();
-            updateProject(projectId, { chatSessions: sessions, activeChatId: activeId });
-            await flushCanvasPersistence();
-        }
-    }, [projectId, updateProject]);
+        const { saveCanvasConversationSessions } = await loadCanvasConversationRuntime();
+        await saveCanvasConversationSessions(conversationRuntime, sessions, activeId, options);
+    }, [conversationRuntime]);
+
+    const installConversationVersion = useCallback(async (version: PublicImageVersion) => {
+        const { installCanvasConversationVersion } = await loadCanvasConversationRuntime();
+        await installCanvasConversationVersion(conversationRuntime, version);
+    }, [conversationRuntime]);
 
     const startTitleEditing = useCallback(() => {
         setTitleDraft(projectTitle || "未命名画布");
@@ -2590,7 +2597,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
 
     const resultStackExcludedNodeIds = useCallback(() => new Set(groupsRef.current.flatMap(group => group.nodeIds)), []);
     const { handleGenerateNode, handleRetryFailedTargets, handleVariationNode, handleRegenerateNode, handleRetryNode, generateImageFromTextNode, restoreNodeGenerationInput } = useCanvasGeneration({
-        projectId, nodesRef, connectionsRef, designProjectIdRef, projectSaveQueueRef, runtime: generationRuntime,
+        projectId, nodesRef, connectionsRef, groupsRef, designProjectIdRef, projectSaveQueueRef, runtime: generationRuntime,
         setDialogNodeId, focusCanvasArea, handleMissingModelConfig, isAiConfigReady, flushPendingHistory, resultStackExcludedNodeIds,
     });
     const recordActionsRef = useRef({ handleRegenerateNode, restoreNodeGenerationInput });
@@ -3362,6 +3369,8 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                 {isCanvasDesktopLayout && agentLayout !== "wide" ? <Suspense fallback={null}><CanvasPanelResizeHandle kind="chat" /></Suspense> : null}
                 <Suspense fallback={<aside aria-live="polite" className="flex w-full shrink-0 items-center justify-center text-sm">{t("正在加载对话…")}</aside>}>
                     <CanvasAssistantPanel
+                        canvasExternalId={projectId}
+                        onConversationVersionCreated={installConversationVersion}
                         layout={agentLayout}
                         onToggleLayout={toggleAgentLayout}
                         selectedNodeIds={selectedNodeIds}

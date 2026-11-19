@@ -4,11 +4,11 @@ import { canvasConversationImages } from "./canvas-assistant-image-catalog";
 import type { CanvasAgentSnapshot, CanvasAgentOp } from "./canvas-agent-ops";
 import { placeCanvasImageOutputs } from "./canvas-image-output-placement";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasNodeData } from "@/types/canvas";
-import { imageAgentEditNote, imageAgentWorkId, getImageAgentVersions, resolveImageAgentBase, IMAGE_AGENT_MAX_IMAGES, type ImageAgentImage } from "@/lib/image-agent/focus";
-import { imageAgentVisualPrompt, resolveImageAgentWorkNote, type ImageAgentWorkNote } from "@/lib/image-agent/work-note";
-import { IMAGE_AGENT_PREVIEW_BYTES, type ImageAgentHistoryMessage } from "@/lib/image-agent/context";
+import { imageAgentEditNote, imageAgentWorkId, getImageAgentVersions, resolveImageAgentBase, IMAGE_AGENT_MAX_IMAGES, type ImageAgentImage } from "../../../../shared/image-agent/focus";
+import { imageAgentVisualPrompt, resolveImageAgentWorkNote, type ImageAgentWorkNote } from "../../../../shared/image-agent/work-note";
+import { IMAGE_AGENT_PREVIEW_BYTES, type ImageAgentHistoryMessage } from "../../../../shared/image-agent/context";
 import type { ImageAgentRegionSelection } from "@/lib/image-agent/mask";
-import { compileImageAgentPrompt, imageAgentSpecText } from "@/lib/image-agent/compile";
+import { compileImageAgentPrompt, imageAgentSpecText } from "../../../../shared/image-agent/compile";
 import { ImageAgentPlanningError, parseImageAgentEditSpec, parseImageAgentReview, type ImageAgentEditSpec, type ImageAgentRepairPreparationIssue, type ImageAgentReview } from "../../../../shared/image-agent-iteration";
 import { designRequirementsText, type DesignRequirements } from "../../../../shared/image-agent-documents";
 

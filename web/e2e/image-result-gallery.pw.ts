@@ -3,9 +3,9 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 import { test, expect, fixturePng, type MockCanvasApi } from "./fixtures";
+import { activeWorkbench as active, workbenchPanes } from "./headless-workbench";
 
 const owner = "00000000-0000-4000-8000-000000000099";
-const active = (page: Page) => page.getByRole("tabpanel");
 const thumbs = (page: Page) => active(page).getByRole("group", { name: "结果缩略图", exact: true }).getByRole("button");
 const visibleSlot = (page: Page) => active(page).locator(".image-result-slot:visible");
 
@@ -70,17 +70,18 @@ test("gallery selects original images and retains independent task and history s
     await active(page).getByRole("tab", { name: /^历史记录/ }).click();
     await active(page).locator(".image-history-panel button").filter({ hasText: "图库历史 older" }).click();
     await expect(visibleSlot(page)).toHaveAttribute("data-result-slot", "older-1");
-    await page.getByRole("button", { name: "新建任务", exact: true }).click();
+    await active(page).getByRole("tab", { name: /^历史记录/ }).click();
+    await active(page).locator(".image-history-panel").getByRole("button", { name: "新建", exact: true }).click();
     await expect(visibleSlot(page)).toHaveCount(0);
     await active(page).getByRole("tab", { name: /^历史记录/ }).click();
     await active(page).locator(".image-history-panel button").filter({ hasText: "图库历史 older" }).click();
     await expect(visibleSlot(page)).toHaveAttribute("data-result-slot", "older-0");
-    await page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab").first().click();
-    await expect(visibleSlot(page)).toHaveAttribute("data-result-slot", "older-1");
+    await expect(workbenchPanes(page).first()).toBeHidden();
+    await expect(workbenchPanes(page).first().locator(".image-result-slot:not([hidden])")).toHaveAttribute("data-result-slot", "older-1");
+    await expect(visibleSlot(page)).toHaveAttribute("data-result-slot", "older-0");
     expect(api.submissions).toEqual([]);
     await mkdir(output, { recursive: true });
-    await active(page).getByRole("button", { name: "返回当前任务", exact: true }).click();
-    await visibleSlot(page).getByRole("img", { name: "生成结果 3", exact: true }).scrollIntoViewIfNeeded();
+    await visibleSlot(page).getByRole("img", { name: "生成结果 1", exact: true }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: resolve(output, "gallery-1366-preview.png") });
     await active(page).getByRole("group", { name: "结果缩略图", exact: true }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: resolve(output, "gallery-1366-controls.png") });
@@ -98,7 +99,7 @@ async function seedPending(page: Page, api: MockCanvasApi) {
         const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
         const { defaultConfig } = await import("/src/stores/use-config-store.ts");
         const pending = createWorkspaceStorage("image_pending_tasks");
-        for (const [index, id] of ids.entries()) await pending.setItem(id, { id, ownerId: owner, workspaceId: "default", tool: "image-generation", createdAt: 1700000000000 + index, requestId: `${id}-request`, taskId: id,
+        for (const [index, id] of ids.entries()) await pending.setItem(id, { id, ownerId: owner, workspaceId: index === 1 ? "image-generation:task:legacy-retry" : index === 2 ? "image-generation:task:legacy-third" : "default", tool: "image-generation", createdAt: 1700000000000 + index, requestId: `${id}-request`, taskId: id,
             snapshot: { text: `原槽 ${index + 1}`, config: { ...defaultConfig, model: "gpt-image-2", imageModel: "gpt-image-2", count: "1" }, references: [] } });
     }, { ids, owner });
     await page.reload();
@@ -124,6 +125,7 @@ test("reverse completion never steals selection and retry addresses the original
     await visibleSlot(page).getByRole("button", { name: "按原参数重试", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
     expect(api.submissions[0].prompt).toContain("原槽 2");
+    expect(api.submissions[0]).toMatchObject({ operationType: "image_generation", toolKey: "image", parameters: { tool: "image" } });
     await expect(thumbs(page).nth(1)).toContainText("已完成");
     await expect(visibleSlot(page)).toHaveAttribute("data-result-slot", ids[1]);
     await expect(visibleSlot(page)).toHaveAttribute("data-result-index", "1");
@@ -136,9 +138,13 @@ test("reverse completion never steals selection and retry addresses the original
     const persisted = await page.evaluate(async () => {
         const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
         const values: unknown[] = []; await createWorkspaceStorage("image_generation_logs").iterate(value => { values.push(value); });
-        return JSON.stringify(values);
+        return values;
     });
-    expect(persisted).not.toContain("displayId");
+    expect(JSON.stringify(persisted)).not.toContain("displayId");
+    expect(persisted).toHaveLength(3);
+    expect(persisted.every((value: any) => value.tool === "image-generation")).toBe(true);
+    expect(persisted.find((value: any) => value.images.some((image: any) => image.sourceTaskId === ids[2]))).toMatchObject({ workspaceId: "image-generation:task:legacy-third" });
+    expect(persisted.find((value: any) => value.prompt.includes("原槽 2"))).toMatchObject({ workspaceId: "image-generation:task:legacy-retry" });
     expect(JSON.stringify(api.submissions)).not.toContain("displayId");
 });
 
@@ -159,9 +165,14 @@ test("390px thumbnail strip scrolls without viewport overflow and single results
     await historyBounds(page, 390, output);
     await active(page).getByRole("tab", { name: "本次结果", exact: true }).click();
     await expect(visibleSlot(page)).toHaveAttribute("data-result-slot", "latest-7");
-    await page.getByRole("button", { name: "新建任务", exact: true }).click();
+    await active(page).getByRole("tab", { name: /^历史记录/ }).click();
+    await active(page).locator(".image-history-panel").getByRole("button", { name: "新建", exact: true }).click();
+    const upload = page.waitForEvent("filechooser");
+    await active(page).getByRole("button", { name: "上传图片", exact: true }).click();
+    await (await upload).setFiles({ name: "single-result-source.png", mimeType: "image/png", buffer: fixturePng(48) });
+    await expect(active(page).getByRole("img", { name: "single-result-source.png", exact: true })).toBeVisible();
     await active(page).getByRole("textbox", { name: "图像提示词", exact: true }).fill("单图不需要缩略图条");
-    await active(page).getByRole("button", { name: "开始生成", exact: true }).click();
+    await active(page).getByRole("button", { name: "开始编辑", exact: true }).click();
     await expect(visibleSlot(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
     await expect(active(page).getByRole("group", { name: "结果缩略图", exact: true })).toHaveCount(0);
     expect(api.submissions).toHaveLength(1);

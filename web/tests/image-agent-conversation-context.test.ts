@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildImageAgentContext, IMAGE_AGENT_CATALOG_BRIEF_CHARACTERS, IMAGE_AGENT_EARLIER_HISTORY_CHARACTERS, imageAgentHistoryMessages, type ImageAgentHistoryMessage } from "../src/lib/image-agent/context";
+import { buildImageAgentContext, IMAGE_AGENT_CATALOG_BRIEF_CHARACTERS, IMAGE_AGENT_EARLIER_HISTORY_CHARACTERS, imageAgentHistoryMessages, type ImageAgentHistoryMessage } from "../../shared/image-agent/context";
 import { buildCreativeChatRequest, type CreativeChatMessage } from "../src/lib/creative-chat";
 import { prepareChatProfileInput } from "../../server/src/prompt-chat-profiles";
 

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
 import ts from "typescript";
-import { activeStatuses, designTaskMetadata, taskLabel } from "../src/components/canvas/design-discussion/task-model.mjs";
+import { activeStatuses, designResultNodeId, designTaskMetadata, taskLabel } from "../src/components/canvas/design-discussion/task-model.mjs";
 
 const sourceUrl = new URL("../src/components/canvas/design-discussion/CanvasDesignDiscussion.jsx", import.meta.url);
 const requireModule = createRequire(sourceUrl);
@@ -29,7 +29,7 @@ function elements(value: unknown): ReactElement<any>[] {
     return [element, ...elements(element.props.children)];
 }
 
-function harness(options: { tasks?: Data[]; savedSession?: Data; upload?: (url: string, video: boolean) => Promise<Data>; resolveImage?: (key: string, fallback: string) => Promise<string>; nodes?: Data[]; selected?: string[] } = {}) {
+function harness(options: { tasks?: Data[]; savedSession?: Data; upload?: (url: string, video: boolean) => Promise<Data>; resolveImage?: (key: string, fallback: string) => Promise<string>; nodes?: Data[]; selected?: string[]; conversations?: boolean } = {}) {
     const state: any[] = [], effects: Array<{ deps?: unknown[]; cleanup?: () => void }> = [];
     const layouts: Array<() => void> = [], queued: Array<() => void> = [];
     const timers = new Set<() => Promise<unknown> | void>();
@@ -77,6 +77,7 @@ function harness(options: { tasks?: Data[]; savedSession?: Data; upload?: (url: 
         "lucide-react": { ChevronDown: "icon", LocateFixed: "icon", RefreshCw: "icon", Sparkles: "icon", X: "icon" },
         "@/stores/canvas/canvas-graph-store": { useCanvasGraphField: (field: string) => field === "nodes" ? [graph().nodes, setNodes] : [graph().selected, setSelected] },
         "@/stores/use-user-store": { useUserStore: userStore },
+        "@/lib/deployment-features": { deploymentFeatures: { imageConversationsEnabled: options.conversations === true } },
         "@/lib/workspace-storage": { createWorkspaceStorage: () => {
             const owner = identity.user.id;
             return { isCurrent: () => owner === identity.user.id && identity.status === "authenticated", getItem: async (key: string) => records.get(key) || null, setItem: async (key: string, value: Data) => { writes.push({ key, value }); records.set(key, value); }, iterate: async () => {} };
@@ -102,7 +103,7 @@ function harness(options: { tasks?: Data[]; savedSession?: Data; upload?: (url: 
         "@/lib/canvas/canvas-node-size": { fitNodeSize: (width: number, height: number) => ({ width, height }) },
         "@/types/canvas": { CanvasNodeType: { Image: "image", Video: "video" } },
         "./StudioPanel.jsx": { StudioPanel: "StudioPanel", newStudioSession: newSession },
-        "./task-model.mjs": { activeStatuses, designTaskMetadata, taskLabel },
+        "./task-model.mjs": { activeStatuses, designResultNodeId, designTaskMetadata, taskLabel },
         "./studio-media.mjs": { readImageFiles: async (files: Data[]) => files },
         "./design-record.mjs": { continueDesignRecord: () => ({}) },
         "./studio.css": {}, "./canvas-discussion.css": {},
@@ -141,6 +142,35 @@ function button(tree: ReactElement<any>[], label: string) {
     if (!element) throw new Error(`Missing fixture button: ${label}`);
     return element;
 }
+
+describe("conversation result projection identity", () => {
+    const version = { id: "81000000-0000-4000-8000-000000000003", conversationId: "81000000-0000-4000-8000-000000000001", assetId: "11111111-1111-4111-8111-111111111111", turnId: "81000000-0000-4000-8000-000000000006" };
+    const task = { ...savedTask, resultVersions: [version], conversationExecution: { phase: "completed", turnDispatchStartedAt: "2026-11-19T04:00:00Z" } };
+    test("a persisted version with another node id is reused and located without download or POST", async () => {
+        const node = { id: "already-installed-version", type: "image", position: { x: 10, y: 20 }, width: 500, height: 700, metadata: { content: resultUrl, imageConversation: { conversationId: version.conversationId, versionId: version.id, assetId: version.assetId, turnId: version.turnId } } };
+        const subject = harness({ conversations: true, tasks: [task], nodes: [node] });
+        try {
+            await subject.settle(); await subject.tick();
+            button(subject.render(), "查看设计生成任务").props.onClick();
+            button(subject.render(), "定位设计结果").props.onClick();
+            expect(subject.nodes()).toEqual([node]); expect(subject.downloads).toEqual([]); expect(subject.starts).toEqual([]);
+            expect(subject.locations.at(-1)).toEqual([node.id]);
+        } finally { subject.dispose(); }
+    });
+    test("the original placeholder becomes one version-bound node at the same position", async () => {
+        const position = { x: 530, y: 780 };
+        const placeholder = { id: `design-${task.id}-0`, type: "image", position, width: 420, height: 420, metadata: designTaskMetadata(task) };
+        const subject = harness({ conversations: true, tasks: [task], nodes: [placeholder] });
+        try {
+            await subject.settle(); await subject.tick();
+            expect(subject.nodes()).toHaveLength(1);
+            expect(subject.nodes()[0]).toMatchObject({ id: `design-version-${version.id}`, position, metadata: { imageConversation: { versionId: version.id, conversationId: version.conversationId, assetId: version.assetId, turnId: version.turnId }, designExecutionId: task.id } });
+            expect(subject.downloads).toHaveLength(1); expect(subject.starts).toEqual([]);
+            subject.props.writable.current = false;
+            expect(() => subject.runtime[0].assertWritable()).toThrow("不可写");
+        } finally { subject.dispose(); }
+    });
+});
 
 describe("task island hover and pinned interaction", () => {
     test("hover previews tasks and pointer leave closes an unpinned preview", async () => {

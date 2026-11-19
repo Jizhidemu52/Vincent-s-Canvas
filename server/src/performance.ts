@@ -34,27 +34,24 @@ type AssetRow = {
 
 type BatchRow = { id: string; totalItems: number; completedItems: number; failedItems: number; status: string };
 
-export async function getPerformanceDashboard(db: Database, actor: SessionUser, filters: PerformanceFilters) {
-  const [dashboard, todayUsage] = await Promise.all([
+export async function getPerformanceDashboard(db: Database, actor: SessionUser, filters: PerformanceFilters, now = new Date()) {
+  const [dashboard, periodUsage] = await Promise.all([
     getPerformanceDashboardInternal(db, actor, filters, true),
-    getPerformanceTodayUsage(db, actor, filters),
+    getPerformanceUsage(db, actor, filters, now),
   ]);
-  return { ...dashboard, todayUsage };
+  return { ...dashboard, periodUsage };
 }
 
-/** Actual use, not logins/visits; independent of the dashboard's selected period. */
-export async function getPerformanceTodayUsage(db: Database, actor: SessionUser, filters: Omit<PerformanceFilters, "from" | "to">, now = new Date()) {
-  const date = shanghaiDate(now.toISOString());
-  const from = new Date(`${date}T00:00:00+08:00`);
-  const scope = buildScope(actor, {
-    ...filters,
-    from: from.toISOString(),
-    to: new Date(from.getTime() + 86_400_000).toISOString(),
-  }, "r", "r.occurred_at");
-  // Event/chat rows have no department snapshot, so use their user's department,
-  // as usage analytics does. Group membership is evaluated at each activity time.
-  const result = await db.query<{ users: number }>(
-    `SELECT count(DISTINCT r.user_id)::int AS users
+export async function getPerformanceUsage(db: Database, actor: SessionUser, filters: PerformanceFilters, now = new Date()) {
+  const todayStart = new Date(`${shanghaiDate(now.toISOString())}T00:00:00+08:00`);
+  const to = new Date(Math.min(new Date(filters.to).getTime(), todayStart.getTime() + 86_400_000)).toISOString();
+  const dates = new Date(filters.from) < new Date(to) ? dateKeys(`${shanghaiDate(filters.from)}T00:00:00+08:00`, to) : [];
+  const period = { from: filters.from, to, timeZone: "Asia/Shanghai" as const, days: dates.length };
+  if (!dates.length) return { ...period, userDays: 0, dailyAverage: null };
+  const scope = buildScope(actor, { ...filters, to }, "r", "r.occurred_at");
+  const result = await db.query<{ date: string; users: number }>(
+    `SELECT to_char(r.occurred_at AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD') AS date,
+            count(DISTINCT r.user_id)::int AS users
        FROM (
          SELECT t.user_id,t.department_id,t.queued_at AS occurred_at
            FROM tasks t WHERE t.queued_at>=$1::timestamptz AND t.queued_at<$2::timestamptz
@@ -70,9 +67,11 @@ export async function getPerformanceTodayUsage(db: Database, actor: SessionUser,
        ) r JOIN users u ON u.id=r.user_id
        LEFT JOIN LATERAL (SELECT group_id FROM group_memberships x WHERE x.user_id=r.user_id
          AND x.effective_at<=r.occurred_at AND (x.ended_at IS NULL OR x.ended_at>r.occurred_at) LIMIT 1) gm ON true
-       ${scope.where} AND coalesce(u.is_guest,false)=false`, scope.values,
+       ${scope.where} AND coalesce(u.is_guest,false)=false
+       GROUP BY 1`, scope.values,
   );
-  return { date, timeZone: "Asia/Shanghai" as const, users: result.rows[0]?.users ?? 0 };
+  const userDays = result.rows.reduce((sum, row) => sum + row.users, 0);
+  return { ...period, userDays, dailyAverage: round(userDays / dates.length) };
 }
 
 async function getPerformanceDashboardInternal(db: Database, actor: SessionUser, filters: PerformanceFilters, includeComparisons: boolean): Promise<ReturnType<typeof aggregatePerformance> & { comparisons: PerformanceComparisons | null }> {

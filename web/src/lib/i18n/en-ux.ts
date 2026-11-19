@@ -1,5 +1,6 @@
 /** Employee-facing interaction copy. User content and protocol identifiers are not translation keys. */
 export default {
+    "图片已生成，但本地图片缓存保存失败：{value1}": "The image was generated, but its local image cache could not be saved: {value1}",
     "编辑默认参考底图画幅；特殊尺寸由模型自适应，不保证返回原像素尺寸。下方尺寸用于新创作。": "Edits follow the source framing by default. The model adapts unusual dimensions; the original pixel dimensions are not guaranteed. The size below applies to new creations.",
     "文本文件必须使用有效的 UTF-8 编码，请转换编码后上传": "Text files must use valid UTF-8 encoding. Convert the encoding before uploading.",
     "不允许上传可执行网页、SVG、XML 或含空字符的文本文件": "Executable webpages, SVG, XML, and text files containing null characters are not allowed.",
@@ -53,6 +54,13 @@ export default {
     "模型决定尺寸": "Model-selected dimensions",
     "约 100 万像素": "About 1 MP",
     "模型决定尺寸 · 约 100 万像素": "Model-selected dimensions · About 1 MP",
+    "模型决定尺寸 · PNG": "Model-selected dimensions · PNG",
+    "图生图尺寸由模型决定 · PNG": "Model-selected editing dimensions · PNG",
+    "图生图尺寸由模型根据参考图决定；尺寸与分辨率设置不参与本次请求。移除全部参考图后恢复文生图设置。": "Editing dimensions are chosen by the model from the references. Size and resolution settings are not sent. Remove all references to restore text-to-image settings.",
+    "文生图支持 1K / 2K、宽高比及最多 4194304 总像素，不支持自适应。最多 5 张参考图，图生图尺寸由模型决定；不支持 4K、蒙版、透明背景或联网参考，固定输出 PNG。": "Text-to-image supports 1K / 2K, aspect ratios and up to 4,194,304 pixels, without automatic sizing. Supports up to 5 references with model-selected editing dimensions. No 4K, masks, transparency or web grounding; output is PNG.",
+    "宽高须为不少于 768 的正整数，总像素不超过 4194304。模型将实际输出宽高各向下取整到 32 的倍数；宽高比模式支持 1:4 至 4:1，不支持自适应。": "Width and height must be integers of at least 768, with no more than 4,194,304 total pixels. The model rounds each output dimension down to a multiple of 32. Aspect ratios support 1:4 to 4:1, without automatic sizing.",
+    "该模型文生图不支持自适应，请选择宽高比或像素尺寸。": "This model does not support automatic text-to-image sizing. Select an aspect ratio or pixel dimensions.",
+    "调整尺寸时向下对齐到最近的 32 像素倍数，最小为 768。": "Round dimensions down to the nearest multiple of 32, with a minimum of 768.",
     "图生图约 100 万像素 · PNG": "Image editing: about 1 MP · PNG",
     "上传一张原图，自动去除背景并导出透明 PNG，保留主体与原图。": "Upload one image to remove its background and export a transparent PNG. The original is retained.",
     "上传一张原图，提升图片清晰度，原图保持不变。": "Upload one image to improve its clarity. The original stays unchanged.",
@@ -67,6 +75,7 @@ export default {
     "请选中原图，再次点击对应的图片快捷处理。": "Select the original image and choose the quick image action again.",
     "自动（默认）": "Automatic (default)",
     "默认自动选择画幅，也可手动指定比例。": "The aspect ratio is automatic by default. You can also select a ratio.",
+    "默认使用 1:1 画幅，可手动指定比例；带参考图时由模型决定尺寸。": "The default aspect ratio is 1:1. You can select a ratio; with reference images, the model determines the output dimensions.",
     "大图优先使用轻量预览；原图保留，下载原图不降质": "Large images use lightweight previews where available. Originals are retained and original downloads keep their quality.",
     // Original-task reconciliation never resubmits an uncertain paid request.
     "刷新状态": "Refresh status",

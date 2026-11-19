@@ -3,7 +3,7 @@ import { staticUiText } from "@/lib/static-ui-copy";
 import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Empty, Input, Select, Space, Tag, Typography } from "antd";
-import { RefreshCw } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { listAdminReleaseNotes, publishReleaseNote, ReleaseNotesError, saveReleaseNoteDraft, type AdminReleaseNote } from "@/services/api/release-notes";
 import { releaseVersion } from "@/lib/release-notes-state";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
@@ -25,6 +25,7 @@ export default function ReleaseNotesPanel() {
     const [baseline, setBaseline] = useState<AdminReleaseNote | null>(null), [draft, setDraft] = useState(emptyDraft);
     const [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [hasMore, setHasMore] = useState(false);
     const [error, setError] = useState(""), [conflict, setConflict] = useState(false);
+    const [creating, setCreating] = useState(false), [newVersion, setNewVersion] = useState(""), [versionError, setVersionError] = useState("");
     const pending = useRef(false), epoch = useRef(0);
     const dirty = !baseline?.publishedAt && (draft.title !== (baseline?.title || "") || draft.content !== (baseline?.content || ""));
     const { confirmDiscard } = useUnsavedGuard(dirty || conflict, staticUiText("版本更新草稿尚未保存，离开后会丢失本次编辑。"));
@@ -49,7 +50,7 @@ export default function ReleaseNotesPanel() {
     };
     useEffect(() => {
         epoch.current++; pending.current = false;
-        setNotes([]); setReady(false); setBusy(false); select(currentVersion, []);
+        setNotes([]); setReady(false); setBusy(false); setCreating(false); setNewVersion(""); setVersionError(""); select(currentVersion, []);
         if (enabled) void load(0, currentVersion);
         return () => { epoch.current++; pending.current = false; };
     }, [ownerId, status, enabled]);
@@ -58,6 +59,30 @@ export default function ReleaseNotesPanel() {
         if (conflict && !await modal.confirm({ title: staticUiText("读取服务器上的最新版本？"), content: staticUiText("当前文字不会自动合并。请先复制需要保留的内容；继续将用服务器版本替换编辑框。"), okText: staticUiText("读取最新版本"), cancelText: staticUiText("保留当前文字") })) return;
         if (!conflict && !await confirmDiscard()) return;
         await load();
+    };
+    const create = async () => {
+        if (pending.current || !ready || !enabled) return;
+        const selected = releaseVersion(newVersion);
+        if (!/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(selected)) { setVersionError("请输入三段数字版本号，例如 0.5.98 或 v0.5.98"); return; }
+        pending.current = true;
+        const captured = epoch.current;
+        try {
+            if (!await confirmDiscard() || !isCurrent(captured)) return;
+            setBusy(true); setVersionError("");
+            let rows = notes, more = hasMore, offset = notes.length;
+            while (more && !rows.some(note => note.version === selected)) {
+                const result = await listAdminReleaseNotes(offset);
+                if (!isCurrent(captured)) return;
+                if (result.hasMore && !result.notes.length) throw new Error("版本更新暂时无法读取，请稍后重试");
+                offset += result.notes.length;
+                rows = [...rows, ...result.notes.filter(note => !rows.some(old => old.version === note.version))];
+                more = result.hasMore;
+            }
+            setNotes(rows); setHasMore(more); select(selected, rows);
+            setCreating(false); setNewVersion(""); setVersionError("");
+        } catch (cause) {
+            if (isCurrent(captured)) setVersionError(cause instanceof Error ? cause.message : "版本更新暂时无法读取，请稍后重试");
+        } finally { if (isCurrent(captured)) { pending.current = false; setBusy(false); } }
     };
     const save = async () => {
         if (pending.current || !ready || !enabled || baseline?.publishedAt || conflict) return;
@@ -93,14 +118,15 @@ export default function ReleaseNotesPanel() {
     };
     if (!enabled) return <Alert type="info" title={staticUiText("版本更新发布仅供正式服务的超级管理员使用")} />;
     const published = Boolean(baseline?.publishedAt);
-    const options = [...new Set([currentVersion, ...notes.map(note => note.version)])].map(value => {
+    const options = [...new Set([version, currentVersion, ...notes.map(note => note.version)])].map(value => {
         const note = notes.find(item => item.version === value);
         return { value, label: `${value}${value === currentVersion ? " · 当前版本" : ""} · ${note?.publishedAt ? "已发布" : note ? "草稿" : "待编写"}` };
     });
     return <section data-testid="admin-release-notes" className="wb-surface min-w-0 p-5 sm:p-6">
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">{staticUiText("版本更新")}</h2><p className="mt-1 text-sm text-muted-foreground">{staticUiText("先保存草稿，确认后发布给所有使用者。每个版本只发布一次。")}</p></div><Button icon={<RefreshCw size={14} />} loading={busy} onClick={() => void refresh()}>{staticUiText("刷新列表")}</Button></div>
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">{staticUiText("版本更新")}</h2><p className="mt-1 text-sm text-muted-foreground">{staticUiText("先保存草稿，确认后发布给所有使用者。每个版本只发布一次。")}</p></div><Space wrap><Button icon={<Plus size={14} />} disabled={busy || !ready} onClick={() => { setCreating(true); setVersionError(""); }}>{staticUiText("新建版本公告")}</Button><Button icon={<RefreshCw size={14} />} loading={busy} onClick={() => void refresh()}>{staticUiText("刷新列表")}</Button></Space></div>
+        {creating ? <div className="mb-5 rounded-lg border p-4"><label htmlFor="release-new-version" className="mb-2 block text-sm">{staticUiText("公告版本号")}</label><div className="flex flex-wrap gap-2"><Input id="release-new-version" className="!w-56 max-w-full" autoFocus value={newVersion} maxLength={64} status={versionError ? "error" : undefined} placeholder="0.5.98" disabled={busy} onChange={event => { setNewVersion(event.target.value); setVersionError(""); }} onPressEnter={() => void create()} /><Button type="primary" disabled={busy || !newVersion.trim()} onClick={() => void create()}>{staticUiText("开始编写")}</Button><Button disabled={busy} onClick={() => setCreating(false)}>{staticUiText("取消")}</Button></div><p className="mt-2 text-xs text-muted-foreground">{staticUiText("版本号由你填写，不受当前部署版本限制；不会自动保存或发布。已存在的版本会直接打开。")}</p>{versionError ? <p role="alert" className="mt-2 text-sm">{displayUi(versionError)}</p> : null}</div> : null}
         {error ? <Alert className="mb-5" showIcon type={conflict ? "warning" : "error"} title={displayUi(error)} /> : null}
-        <div className="mb-5 grid gap-4 sm:grid-cols-2"><div><label htmlFor="release-current-version" className="mb-2 block text-sm">{staticUiText("当前版本")}</label><Input id="release-current-version" aria-label={staticUiText("当前版本")} readOnly value={currentVersion} /><p className="mt-1 text-xs text-muted-foreground">{staticUiText("自动取自当前部署版本，不可手动修改。")}</p></div><div><label className="mb-2 block text-sm">{staticUiText("选择版本")}</label><Select aria-label={staticUiText("选择版本")} className="w-full" value={version} options={displayConfig(options, "options")} disabled={busy || !ready} onChange={async value => { if (await confirmDiscard()) select(value); }} /></div></div>
+        <div className="mb-5 grid gap-4 sm:grid-cols-2"><div><label htmlFor="release-current-version" className="mb-2 block text-sm">{staticUiText("当前版本")}</label><Input id="release-current-version" aria-label={staticUiText("当前版本")} readOnly value={currentVersion} /><p className="mt-1 text-xs text-muted-foreground">{staticUiText("这是当前部署版本；公告可通过“新建版本公告”使用其他版本号。")}</p></div><div><label className="mb-2 block text-sm">{staticUiText("选择版本")}</label><Select aria-label={staticUiText("选择版本")} className="w-full" value={version} options={displayConfig(options, "options")} disabled={busy || !ready} onChange={async value => { if (await confirmDiscard()) select(value); }} /></div></div>
         {ready ? <>
             <div className="mb-4 flex flex-wrap items-center gap-2"><Tag color={published ? "green" : "default"}>{published ? staticUiText("已发布 · 只读") : staticUiText("未发布草稿")}</Tag><span className="text-xs text-muted-foreground">{published ? staticUiText("{p0} 发布", { p0: `${formatBeijingDateTime(baseline!.publishedAt)}` }) : staticUiText("草稿只对超级管理员可见，不会出现在使用者首页。")}</span></div>
             {published ? <article><Typography.Title level={4} style={{ overflowWrap: "anywhere" }}>{displayUi(baseline?.title)}</Typography.Title><Typography.Paragraph style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", lineHeight: 1.9 }}>{displayUi(baseline?.content)}</Typography.Paragraph></article> : <>

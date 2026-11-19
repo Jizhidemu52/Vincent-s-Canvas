@@ -7,6 +7,9 @@ import { createCanvasProjectAsyncLifecycle } from "@/lib/canvas/canvas-project-a
 import * as hydration from "@/pages/canvas/canvas-project-hydration";
 import { boundedCanvasHistory } from "@/pages/canvas/use-canvas-history";
 import { CanvasNodeType } from "@/types/canvas";
+import { canvasDesignTemplateBatch } from "@/lib/canvas/canvas-design-template-batch";
+import { createCanvasDesignTemplate } from "@/lib/canvas/canvas-design-templates";
+import { runCanvasTemplateGeneration } from "@/pages/canvas/canvas-shared-generation-runtime";
 
 // Execute the actual controller bodies. Only React state, scheduling, and the
 // network/chunk boundaries are supplied; these tests never generate media.
@@ -37,14 +40,20 @@ describe("page-private generation dispatch", () => {
         const acquireDispatch = evaluateCallback("use-canvas-generation.ts", "acquireDispatch", {
             dispatchOwnersRef: { current: new Map() }, generationDispatchLocksRef: { current: locks },
         });
-        const run = evaluateCallback("use-canvas-generation.ts", "handleGenerateNode", {
-            generationDispatchLocksRef: { current: locks }, nodesRef: { current: [] }, connectionsRef, acquireDispatch,
+        const nodesRef = { current: [] };
+        const generateNode = evaluateCallback("use-canvas-generation.ts", "generateNode", {
+            generationDispatchLocksRef: { current: locks }, nodesRef, connectionsRef, acquireDispatch,
             runtime: { generationRequestsRef: { current: new Map() } }, waitForWriteAccess: async () => true,
             effectiveConfig: {}, buildGenerationConfig: () => ({}), isAiConfigReady: () => true,
             executeGenerateNode: execute, recoverPending: () => null, startGenerationRequest: () => {}, finishGenerationRequest: () => {},
             setRunningNodeId: () => {}, setNodes: () => {}, message: { info: (text: string) => messages.push(text), error: (text: string) => messages.push(text) },
             loadGenerationRuntime: load,
         }, code => code.replace('import("./canvas-shared-generation-runtime")', "loadGenerationRuntime()"));
+        const run = evaluateCallback("use-canvas-generation.ts", "handleGenerateNode", {
+            generateNode, canvasDesignTemplateBatch, nodesRef, connectionsRef,
+            groupsRef: { current: [] }, generationDispatchLocksRef: { current: locks },
+            message: { info: (text: string) => messages.push(text) },
+        });
         return { run, locks, messages, connectionsRef, execute, executions };
     }
 
@@ -92,6 +101,72 @@ describe("page-private generation dispatch", () => {
         await state.run("config", "image", "step", (value: unknown) => outcomes.push(value));
         expect(state.locks.size).toBe(0);
         expect(outcomes).toEqual([{ mode: "image", outputs: [{ nodeId: "config", status: "failed", error: "offline chunk" }] }]);
+    });
+});
+
+describe("on-demand template execution", () => {
+    function templateHarness() {
+        const graph = createCanvasDesignTemplate("range", undefined, { x: 0, y: 0 }, "image-model");
+        const pending = Promise.withResolvers<{ runCanvasTemplateGeneration: typeof runCanvasTemplateGeneration }>();
+        const finishing = Promise.withResolvers<void>();
+        const access = Promise.withResolvers<boolean>();
+        const calls: Array<{ id: string; prompt: string }> = [], messages: string[] = [], outcomes: unknown[] = [];
+        let ownerId = "employee-a", observing = true, writable = true, delayAccess = false, accessCalls = 0;
+        const designProjectIdRef = { current: "canvas-a" }, retryScope = { active: true }, locks = new Set<string>();
+        const nodesRef = { current: graph.nodes };
+        const run = evaluateCallback("use-canvas-generation.ts", "handleGenerateNode", {
+            canvasDesignTemplateBatch, nodesRef, connectionsRef: { current: graph.connections }, groupsRef: { current: [graph.group] },
+            generationDispatchLocksRef: { current: locks }, designProjectIdRef, projectId: "canvas-a", retryScope,
+            useUserStore: { getState: () => ({ user: { id: ownerId } }) }, isObservationCurrent: () => observing,
+            waitForWriteAccess: async () => { accessCalls++; return delayAccess ? access.promise : writable; }, loadTemplateRuntime: () => pending.promise,
+            generateNode: async (id: string, mode: "image", prompt: string, onResult: Function) => {
+                calls.push({ id, prompt }); await finishing.promise; onResult({ mode, outputs: [{ nodeId: id, status: "success" }] });
+            },
+            message: { info: (text: string) => messages.push(text), error: (text: string) => messages.push(text) },
+        }, code => code.replace('import("./canvas-shared-generation-runtime")', "loadTemplateRuntime()"));
+        const branches = graph.nodes.filter(node => node.type === CanvasNodeType.Config);
+        return {
+            graph, branches, calls, messages, outcomes, locks, nodesRef, accessCalls: () => accessCalls,
+            run: () => run(branches[0]!.id, "image", "clicked prompt", (value: unknown) => outcomes.push(value)),
+            loaded: () => pending.resolve({ runCanvasTemplateGeneration }), complete: () => finishing.resolve(), fail: () => pending.reject(new Error("offline chunk")),
+            owner: () => { ownerId = "employee-b"; }, project: () => { designProjectIdRef.current = "canvas-b"; }, unmount: () => { retryScope.active = false; },
+            observation: () => { observing = false; }, revoke: () => { writable = false; }, delayAccess: () => { delayAccess = true; }, grant: () => access.resolve(true),
+        };
+    }
+
+    test("lazy template execution preserves the clicked prompt, sibling snapshots and one batch lock", async () => {
+        const state = templateHarness(), first = state.run(), duplicate = state.run();
+        expect(state.calls).toEqual([]);
+        state.nodesRef.current = state.graph.nodes.map(node => ({ ...node, metadata: { ...node.metadata, composerContent: "next draft" } }));
+        state.loaded();
+        for (let index = 0; index < 8; index++) await Promise.resolve();
+        expect(state.calls).toEqual(state.branches.map((node, index) => ({ id: node.id, prompt: index === 0 ? "clicked prompt" : node.metadata!.composerContent! })));
+        expect(state.locks.size).toBe(1);
+        expect(state.messages).toEqual([uiText("这套模板正在运行，请勿重复提交")]);
+        state.complete(); await Promise.all([first, duplicate]);
+        expect(state.outcomes).toHaveLength(1); expect(state.locks.size).toBe(0); expect(state.calls).toHaveLength(3);
+    });
+
+    for (const change of ["owner", "project", "unmount", "observation", "revoke"] as const) test(`a ${change} change during loading cannot submit any template branch`, async () => {
+        const state = templateHarness(), running = state.run();
+        state[change](); state.loaded(); await running;
+        expect(state.calls).toEqual([]); expect(state.outcomes).toEqual([]); expect(state.locks.size).toBe(0);
+    });
+
+    test("template ownership is rechecked after awaiting write access", async () => {
+        const state = templateHarness(); state.delayAccess(); state.loaded();
+        const running = state.run();
+        for (let index = 0; index < 4; index++) await Promise.resolve();
+        expect(state.accessCalls()).toBe(1);
+        state.owner(); state.grant(); await running;
+        expect(state.calls).toEqual([]); expect(state.outcomes).toEqual([]);
+    });
+
+    test("a failed template chunk reports the original action without submitting or retaining locks", async () => {
+        const state = templateHarness(), running = state.run();
+        state.fail(); await running;
+        expect(state.calls).toEqual([]); expect(state.locks.size).toBe(0); expect(state.messages).toEqual(["offline chunk"]);
+        expect(state.outcomes).toEqual([{ mode: "image", outputs: [{ nodeId: state.branches[0]!.id, status: "failed", error: "offline chunk" }] }]);
     });
 });
 

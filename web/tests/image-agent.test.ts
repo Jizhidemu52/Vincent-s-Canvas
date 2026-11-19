@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { getImageAgentVersions, imageAgentCandidateIds, imageAgentVersion, resolveImageAgentBase, resolveImageAgentFocus, selectImageAgentWorkingSet, type ImageAgentImage } from "../src/lib/image-agent/focus";
-import { buildImageAgentContext, imageAgentHistoryMessages } from "../src/lib/image-agent/context";
-import { imageAgentWorkNoteText, mergeImageAgentWorkNote } from "../src/lib/image-agent/work-note";
+import { getImageAgentVersions, imageAgentCandidateIds, imageAgentVersion, resolveImageAgentBase, resolveImageAgentFocus, selectImageAgentWorkingSet, type ImageAgentImage } from "../../shared/image-agent/focus";
+import { buildImageAgentContext, imageAgentHistoryMessages } from "../../shared/image-agent/context";
+import { imageAgentWorkNoteText, mergeImageAgentWorkNote } from "../../shared/image-agent/work-note";
 
 const images: ImageAgentImage[] = [
     { id: "original", label: "图1", name: "T恤", kind: "upload" },

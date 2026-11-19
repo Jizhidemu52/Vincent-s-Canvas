@@ -3,6 +3,7 @@ import { test, expect, IMAGE, type MockCanvasApi } from "./fixtures";
 import { generalPromptTemplates } from "../../shared/general-prompt-templates";
 import { toolDefinitions } from "../../shared/feature-catalog";
 import { antSelect, chooseAntSelect } from "./antd-select-helpers";
+import { activeWorkbench, workbenchPanes } from "./headless-workbench";
 
 const OWNER = "00000000-0000-4000-8000-000000000099";
 const TEMPLATE = generalPromptTemplates.find(item => item.id === "precise-local-recolor")!;
@@ -14,9 +15,13 @@ const MODELS = [
     { id: "10000000-0000-4000-8000-000000000026", name: "aplmart-gpt2.6-flare" },
     { id: "10000000-0000-4000-8000-000000000027", name: "aplmart-gpt2.6-sunburst" },
 ].map(model => ({ ...model, modelId: model.id, publicName: model.name, imageParameterProfile: "quality-resolution-v2", imageSupportsMask: true, capabilities: ["generate", "edit", "batch"], creditCost: 0, rmbCost: 0 }));
-const active = (page: Page) => page.getByRole("tabpanel");
-const tabs = (page: Page) => page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab");
+const active = activeWorkbench;
 const input = (page: Page) => active(page).getByRole("textbox", { name: "图像提示词", exact: true });
+
+async function newImageDraft(page: Page) {
+    await active(page).getByRole("tab", { name: /^历史记录/ }).click();
+    await active(page).locator(".image-history-panel").getByRole("button", { name: "新建", exact: true }).click();
+}
 
 async function settings(page: Page) {
     await active(page).getByRole("button", { name: "切换生成图片模型", exact: true }).click();
@@ -45,15 +50,13 @@ async function readDrafts(page: Page) {
 
 async function prepareThreeTasks(page: Page, targetPrompt = "") {
     await page.goto("/image?tool=image-edit");
-    await expect(tabs(page).first()).toContainText("草稿");
+    await expect(input(page)).toBeEnabled();
     await input(page).fill(FIRST);
-    await page.getByRole("button", { name: "新建任务", exact: true }).click();
-    await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
-    await expect(tabs(page).nth(1)).toContainText("草稿");
+    await newImageDraft(page);
+    await expect(workbenchPanes(page).nth(1)).toBeVisible();
     await input(page).fill(SECOND);
-    await page.getByRole("button", { name: "新建任务", exact: true }).click();
-    await expect(tabs(page).nth(2)).toHaveAttribute("aria-selected", "true");
-    await expect(tabs(page).nth(2)).toContainText("草稿");
+    await newImageDraft(page);
+    await expect(workbenchPanes(page).nth(2)).toBeVisible();
     await expect(input(page)).toHaveValue("");
     if (targetPrompt) await input(page).fill(targetPrompt);
 
@@ -90,8 +93,8 @@ async function fillFromRealTemplateDetails(page: Page, template = TEMPLATE) {
     await detail.getByRole("button", { name: template.targetTool === "video" ? "填入 视频生成" : "填入 图片编辑", exact: true }).click();
     await expect.poll(() => new URL(page.url()).pathname).toBe(template.targetTool === "video" ? "/video" : "/image");
     expect(new URL(page.url()).searchParams.get("tool")).toBe(template.targetTool === "video" ? null : "image-edit");
-    await expect(tabs(page)).toHaveCount(3);
-    await expect(tabs(page).nth(2)).toHaveAttribute("aria-selected", "true");
+    await expect(workbenchPanes(page)).toHaveCount(3);
+    await expect(workbenchPanes(page).nth(2)).toBeVisible();
 }
 
 function expectNoGeneration(api: MockCanvasApi) {
@@ -169,11 +172,10 @@ test("ordinary prompt URL fills only active task 3, preserves its inputs, and is
     await input(page).fill(edited);
     await expect.poll(async () => (await readDrafts(page)).tasks[2].prompt).toBe(edited);
     for (const [index, text] of [[0, FIRST], [1, SECOND], [2, edited]] as const) {
-        await tabs(page).nth(index).click();
-        await expect(input(page)).toHaveValue(text);
+        await expect(workbenchPanes(page).nth(index).locator('textarea[aria-label="图像提示词"]')).toHaveValue(text);
     }
     await page.reload();
-    await expect(tabs(page).nth(2)).toHaveAttribute("aria-selected", "true");
+    await expect(workbenchPanes(page).nth(2)).toBeVisible();
     await expect(input(page)).toHaveValue(edited);
     await expectTargetOptions(page);
     const restored = await readDrafts(page);
@@ -193,12 +195,10 @@ test("ordinary prompt URL confirms an occupied active draft; cancel keeps it and
     await expect(confirmation).toBeHidden();
     await expect.poll(() => new URL(page.url()).searchParams.has("prompt")).toBe(false);
     expect(await readDrafts(page)).toEqual(before);
-    await tabs(page).nth(1).click();
-    await expect(input(page)).toHaveValue(SECOND);
-    await tabs(page).nth(2).click();
+    await expect(workbenchPanes(page).nth(1).locator('textarea[aria-label="图像提示词"]')).toHaveValue(SECOND);
     await expect(input(page)).toHaveValue(THIRD);
     await page.reload();
-    await expect(tabs(page).nth(2)).toContainText("草稿");
+    await expect(workbenchPanes(page).nth(2)).toBeVisible();
     await expect(input(page)).toHaveValue(THIRD);
     await expect(confirmation).toHaveCount(0);
     expect(await readDrafts(page)).toEqual(before);
@@ -212,20 +212,15 @@ test("ordinary prompt URL freezes task 3 while its prompt and settings reads are
     await holdDraftDelivery(page, target.scope);
     await fillFromRealTemplateDetails(page);
     await expect.poll(() => page.evaluate(() => (window as any).__promptUrlReadGate.pending)).toEqual(expect.arrayContaining([`${target.scope}:prompt`, `${target.scope}:settings`]));
-    await expect(tabs(page).nth(2)).toContainText("读取中");
+    await expect(input(page)).toBeDisabled();
     await expect(input(page)).toHaveValue("");
     expect(new URL(page.url()).searchParams.get("prompt")).toBe(TEMPLATE.prompt);
-    await tabs(page).nth(1).click();
-    await expect(input(page)).toHaveValue(SECOND);
+    await expect(workbenchPanes(page).nth(1).locator('textarea[aria-label="图像提示词"]')).toHaveValue(SECOND);
     await page.evaluate(() => (window as any).__promptUrlReadGate.release("prompt"));
-    await tabs(page).nth(2).click();
-    await expect(tabs(page).nth(2)).toContainText("读取中");
+    await expect(input(page)).toBeDisabled();
     await expect(input(page)).toHaveValue("");
-    await tabs(page).nth(1).click();
     await page.evaluate(() => (window as any).__promptUrlReadGate.release("settings"));
-    await expect(tabs(page).nth(2)).toContainText("草稿");
-    await expect(input(page), "Changing tabs during restoration must not retarget the URL to task 2").toHaveValue(SECOND);
-    await tabs(page).nth(2).click();
+    await expect(workbenchPanes(page).nth(1).locator('textarea[aria-label="图像提示词"]'), "Delayed restoration must not retarget the URL to hidden task 2").toHaveValue(SECOND);
     await expect(input(page)).toHaveValue(TEMPLATE.prompt);
     await expect.poll(() => new URL(page.url()).searchParams.has("prompt")).toBe(false);
     const after = await readDrafts(page);
@@ -263,9 +258,8 @@ async function prepareVideoTasks(page: Page, targetPrompt: string) {
     await page.route("**/api/models", route => route.fulfill({ json: { models: VIDEO_MODELS, prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: null, configurationVersion: 1 })) } }));
     await page.goto("/video");
     for (const [index, value] of [FIRST, SECOND, targetPrompt].entries()) {
-        if (index) await page.getByRole("button", { name: "新建任务", exact: true }).click();
-        await expect(tabs(page).nth(index)).toHaveAttribute("aria-selected", "true");
-        await expect(tabs(page).nth(index)).toContainText("草稿");
+        if (index) await active(page).getByRole("button", { name: "新建任务，继续创作", exact: true }).click();
+        await expect(workbenchPanes(page).nth(index)).toBeVisible();
         await expect(videoInput(page)).toHaveValue("");
         if (value) await videoInput(page).fill(value);
     }
@@ -303,12 +297,10 @@ for (const occupied of [false, true]) test(`video template URL ${occupied ? "can
     if (!occupied) await videoInput(page).fill(edited);
     await expect.poll(async () => (await readVideoDrafts(page)).tasks[2].prompt).toBe(edited);
     for (const [index, value] of [[0, FIRST], [1, SECOND], [2, edited]] as const) {
-        await tabs(page).nth(index).click();
-        await expect(videoInput(page)).toHaveValue(value);
+        await expect(workbenchPanes(page).nth(index).locator('textarea[aria-label="视频提示词"]')).toHaveValue(value);
     }
     await page.reload();
-    await expect(tabs(page).nth(2)).toContainText("草稿");
-    await expect(tabs(page).nth(2)).toHaveAttribute("aria-selected", "true");
+    await expect(workbenchPanes(page).nth(2)).toBeVisible();
     await expect(videoInput(page)).toHaveValue(edited);
     await expect(confirmation).toHaveCount(0);
     const afterReload = await readVideoDrafts(page);
@@ -318,7 +310,7 @@ for (const occupied of [false, true]) test(`video template URL ${occupied ? "can
     expectNoGeneration(api);
 });
 
-test("ordinary prompt/model URL stays with loading task 3 when task 4 is created; confirm changes only its prompt/model and consumes only those query fields", async ({ page, api }) => {
+test("ordinary prompt/model URL blocks a new workspace while loading, then changes only its target and consumes only the input query fields", async ({ page, api }) => {
     const before = await prepareThreeTasks(page, THIRD);
     const target = before.tasks[2];
     const fourth = "URL_HANDOFF_NEW_TASK_4：后创建任务不得接收原交接";
@@ -329,33 +321,19 @@ test("ordinary prompt/model URL stays with loading task 3 when task 4 is created
     params.append("keep", "first value");
     params.append("keep", "第二个值");
     await page.goto(`/image?${params}#reference-panel`);
-    await expect(tabs(page)).toHaveCount(3);
-    await expect(tabs(page).nth(2)).toHaveAttribute("aria-selected", "true");
+    await expect(workbenchPanes(page)).toHaveCount(3);
+    await expect(workbenchPanes(page).nth(2)).toBeVisible();
     await expect.poll(() => page.evaluate(() => (window as any).__promptUrlReadGate.pending)).toEqual(expect.arrayContaining([`${target.scope}:prompt`, `${target.scope}:settings`]));
-    await expect(tabs(page).nth(2)).toContainText("读取中");
+    await expect(input(page)).toBeDisabled();
     const confirmation = page.getByRole("dialog", { name: "替换当前草稿？", exact: true });
     await expect(confirmation).toHaveCount(0);
 
-    await page.getByRole("button", { name: "新建任务", exact: true }).click();
-    await expect(tabs(page)).toHaveCount(4);
-    await expect(tabs(page).nth(3)).toHaveAttribute("aria-selected", "true");
-    await expect(tabs(page).nth(3)).toContainText("草稿");
-    await expect(input(page), "A newly mounted task must not inherit the pending URL").toHaveValue("");
-    await input(page).fill(fourth);
+    await active(page).getByRole("tab", { name: /^历史记录/ }).click();
+    const create = active(page).locator(".image-history-panel").getByRole("button", { name: "新建", exact: true });
+    await expect(create).toBeDisabled();
+    await create.evaluate(button => button.click());
+    await expect(workbenchPanes(page)).toHaveCount(3);
     await page.evaluate(() => (window as any).__promptUrlReadGate.release());
-    await expect(tabs(page).nth(2)).toContainText("草稿");
-    await expect(tabs(page).nth(3)).toHaveAttribute("aria-selected", "true");
-    await expect(input(page)).toHaveValue(fourth);
-    await expect(confirmation, "Do not ask task 4 to confirm replacement of task 3").toHaveCount(0);
-    await expect.poll(async () => (await readDrafts(page)).tasks[3]?.prompt).toBe(fourth);
-    const ready = await readDrafts(page);
-    expect(ready.tasks.slice(0, 3)).toEqual(before.tasks);
-    expect(ready.tasks[3].settings, "Task 4 must not receive even the model part of the URL").toBeNull();
-    expect(ready.tasks[3].references).toEqual([]);
-    expect(new URL(page.url()).searchParams.get("prompt")).toBe(TEMPLATE.prompt);
-    expect(new URL(page.url()).searchParams.get("model")).toBe(MODELS[0].id);
-
-    await tabs(page).nth(2).click();
     await expect(confirmation).toBeVisible();
     await expect(input(page)).toHaveValue(THIRD);
     expect((await readDrafts(page)).tasks[2]).toEqual(target);
@@ -372,7 +350,6 @@ test("ordinary prompt/model URL stays with loading task 3 when task 4 is created
     const after = await readDrafts(page);
     expect(after.tasks[0]).toEqual(before.tasks[0]);
     expect(after.tasks[1]).toEqual(before.tasks[1]);
-    expect(after.tasks[3]).toEqual(ready.tasks[3]);
     await expect(active(page).getByRole("region", { name: "参考图", exact: true }).getByRole("img", { name: REFERENCE, exact: true })).toBeVisible();
     const dialog = await settings(page);
     await expect(dialog.locator('[data-usage-control="model"][role="combobox"]')).toContainText(/flare/i);
@@ -382,7 +359,17 @@ test("ordinary prompt/model URL stays with loading task 3 when task 4 is created
     await dialog.locator("summary", { hasText: "高级参数" }).click();
     await expect(antSelect(dialog.getByRole("combobox", { name: "输出格式", exact: true }))).toHaveText("PNG");
     await dialog.getByRole("button", { name: "关闭模型设置", exact: true }).click();
-    await tabs(page).nth(3).click();
+    await newImageDraft(page);
+    await expect(workbenchPanes(page)).toHaveCount(4);
+    await expect(input(page)).toHaveValue("");
+    await input(page).fill(fourth);
+    await expect(input(page)).toHaveValue(fourth);
+    await expect.poll(async () => (await readDrafts(page)).tasks[3]?.prompt).toBe(fourth);
+    const created = await readDrafts(page);
+    expect(created.tasks[2]).toEqual(after.tasks[2]);
+    expect(created.tasks[3].settings).toBeNull();
+    expect(created.tasks[3].references).toEqual([]);
+    await page.reload();
     await expect(input(page)).toHaveValue(fourth);
     await expect(confirmation).toHaveCount(0);
     expectNoGeneration(api);

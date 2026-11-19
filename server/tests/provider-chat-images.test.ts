@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
@@ -514,4 +514,59 @@ test("actual text-only adapter succeeds with zero grants even when image infrast
         expect(f.reads).toHaveLength(0);
         expect(f.deletes).toHaveLength(0);
     }, (_request, response) => { response.json(completion); });
+});
+
+test.each([
+    { privateProfile: true, waitForResult: true, modelId: "gemini-4-carbon", ttl: 660 },
+    { privateProfile: true, waitForResult: false, modelId: "gemini-4-carbon", ttl: 240 },
+    { privateProfile: false, waitForResult: true, modelId: "gemini-4-carbon", ttl: 240 },
+    { privateProfile: true, waitForResult: true, modelId: "gpt-6-sol", ttl: 240 },
+])("only the internal $modelId private=$privateProfile wait=$waitForResult budget grants $ttl seconds", async ({ privateProfile, waitForResult, modelId, ttl }) => {
+    const f = fixture();
+    await withServer(f, async (base, requests) => {
+        const result = await requestChatCompletion({ ...carbonModel(base), model_id: modelId }, {}, {
+            ...inputFor(dataUrl(await image())), privateProfile, waitForResult, providerImages: { access: f.access, userId: ownerId },
+        });
+        expect(result.content).toBe("Two fixtures inspected.");
+        expect(requests).toHaveLength(1);
+        expect(requests[0]!.body).not.toHaveProperty("waitForResult");
+        expect(f.writes).toHaveLength(1);
+        expect(f.writes[0]!.options).toEqual({ EX: ttl });
+        expect(f.records.size).toBe(0);
+        expect(f.deletes).toHaveLength(1);
+    }, (_request, response) => { response.json(completion); });
+});
+
+test.each([false, true])("the extended grant remains readable after 447s and is revoked immediately on completion (failure=%s)", async fails => {
+    const f = fixture(), input = inputFor(dataUrl(await image()));
+    const initialTime = Date.now();
+    let currentTime = initialTime;
+    const time = spyOn(Date, "now").mockImplementation(() => currentTime);
+    const failure = Object.assign(new Error("single provider timeout"), { name: "TimeoutError" });
+    let token = "", calls = 0;
+    try {
+        const result = f.access.run(ownerId, input, async prepared => {
+            calls++;
+            token = tokenOf(imageUrls(prepared)[0]!);
+            expect(f.writes[0]!.options).toEqual({ EX: 660 });
+            await f.access.run(ownerId, input, async ordinary => {
+                const ordinaryToken = tokenOf(imageUrls(ordinary)[0]!);
+                expect(ordinaryToken).not.toBe(token);
+                expect(f.writes[1]!.options).toEqual({ EX: 240 });
+                currentTime += 447_923;
+                expect((await f.access.resolve(token, "0")).bytes).toEqual(await image());
+                await expect(f.access.resolve(ordinaryToken, "0")).rejects.toMatchObject({ status: 404 });
+                expect(JSON.parse(f.writes[1]!.value).expiresAt).toBe(initialTime + 240_000);
+            });
+            if (fails) throw failure;
+            return "accepted";
+        }, 600_000);
+        if (fails) await expect(result).rejects.toBe(failure);
+        else expect(await result).toBe("accepted");
+        expect(calls).toBe(1);
+        expect(f.writes).toHaveLength(2);
+        expect(f.deletes).toHaveLength(2);
+        expect(f.records.size).toBe(0);
+        await expect(f.access.resolve(token, "0")).rejects.toMatchObject({ status: 404 });
+    } finally { time.mockRestore(); }
 });

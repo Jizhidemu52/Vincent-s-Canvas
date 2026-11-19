@@ -16,6 +16,7 @@ import { messageTasks, resultDiscussionReference } from "./discussion-thread.mjs
 import { CanvasPanelSizeControl } from "../canvas-panel-size-control";
 import { useCanvasPanelStore } from "@/stores/canvas/use-canvas-panel-store";
 import { clampCanvasDiscussionFontSize, clampCanvasPanelWidth } from "@/lib/canvas/canvas-panel-width";
+import { deploymentFeatures } from "@/lib/deployment-features";
 
 export function newStudioSession(references = []) {
     return { id: createClientUuid(), references, history: [], executedThrough: 0, brief: {}, documents: [], designRecord: createDesignRecord(), designRecordReferenceSnapshot: [], prompt: "", mode: "discuss", preset: "brand", proposalCount: 6, generationCount: 1, outputKind: "image", videoSeconds: 6, modelId: "", proposalBatch: null };
@@ -30,6 +31,7 @@ function ModelOptions({ models, video }) {
 
 function ProposalDialog({ batch, selected, onSelect, onClose, onGenerate, busy, ready, error, stale, models, modelId, onModel, count, onCount, video }) {
     const dialog = useRef();
+    const serverImageExecution = deploymentFeatures.imageConversationsEnabled && !video;
     useEffect(() => { dialog.current.showModal(); }, []);
     return <dialog ref={dialog} className="proposal-dialog" aria-labelledby="proposal-title" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
         <header><div><span className="studio-eyebrow">选择方向，再让想法落图</span><h2 id="proposal-title">可选设计方向 · {batch.proposals.length} 个方案</h2></div><button aria-label="关闭方案选择" disabled={busy} onClick={onClose}><X size={20} /></button></header>
@@ -47,7 +49,7 @@ function ProposalDialog({ batch, selected, onSelect, onClose, onGenerate, busy, 
                 {receipts.map(([key, receipt]) => <p key={key} className="proposal-receipt">提交回执：{proposalSubmissionMessage(receipt)}。在任务岛查看最新进度，不会重复生成。</p>)}
             </article>;
         })}</div>
-        <footer><div><label>{video ? "视频模型" : "出图模型"}<select aria-label="方案出图模型" disabled={busy || !ready} value={modelId || ""} onChange={event => onModel(event.target.value)}><ModelOptions models={models} video={video} /></select></label><label>生成数量<select aria-label="方案生成数量" disabled={busy || !ready} value={count} onChange={event => onCount(Number(event.target.value))}>{Array.from({ length: 15 }, (_, index) => index + 1).map(value => <option key={value} value={value} disabled={value < selected.length}>{value}</option>)}</select></label></div><div><p>计划生成 {count} 个独立{video ? "视频" : "图片"}任务 · 已记录的请求不会重发</p><button className="studio-primary" disabled={busy || !ready || stale || !selected.length || !modelId || count < selected.length} onClick={onGenerate}>{busy ? <LoaderCircle size={16} className="spin" /> : <Sparkles size={16} />}按选中方案生成 {count} {video ? "个视频" : "张"}</button></div></footer>
+        <footer><div>{serverImageExecution ? <span>自动图片服务 · 自动参数</span> : <label>{video ? "视频模型" : "出图模型"}<select aria-label="方案出图模型" disabled={busy || !ready} value={modelId || ""} onChange={event => onModel(event.target.value)}><ModelOptions models={models} video={video} /></select></label>}<label>生成数量<select aria-label="方案生成数量" disabled={busy || !ready} value={count} onChange={event => onCount(Number(event.target.value))}>{Array.from({ length: 15 }, (_, index) => index + 1).map(value => <option key={value} value={value} disabled={value < selected.length}>{value}</option>)}</select></label></div><div><p>计划生成 {count} 个独立{video ? "视频" : "图片"}任务 · 已记录的请求不会重发</p><button className="studio-primary" disabled={busy || !ready || stale || !selected.length || (!serverImageExecution && !modelId) || count < selected.length} onClick={onGenerate}>{busy ? <LoaderCircle size={16} className="spin" /> : <Sparkles size={16} />}按选中方案生成 {count} {video ? "个视频" : "张"}</button></div></footer>
     </dialog>;
 }
 
@@ -71,7 +73,8 @@ export function StudioPanel({ visible, session, onChange, items, onChoose, onImp
     const materialDetails = useRef();
     const scroll = useRef();
     const video = session.outputKind === "video";
-    const models = video ? designVideoModels(catalog) : designModels(catalog, session.references.length);
+    const serverImageExecution = deploymentFeatures.imageConversationsEnabled && !video;
+    const models = serverImageExecution ? [] : video ? designVideoModels(catalog) : designModels(catalog, session.references.length);
     const chosenModel = session.modelId ? models.find(item => item.id === session.modelId) : models.find(item => video ? (item.parameterModelId || item.modelId) === "seedance-2-5-flash" : item.imageParameterProfile === "seedream55") || models[0];
     const batch = session.proposalBatch;
     const stale = batch && batch.fingerprint !== fingerprint(session);
@@ -84,7 +87,7 @@ export function StudioPanel({ visible, session, onChange, items, onChoose, onImp
         update({ references: session.references.map(ref => ref.id === id ? { ...ref, role } : ref) });
     };
     const generate = async (currentBatch, ids, model, count) => {
-        if (!model) throw new Error("当前选择的模型不可用，请明确选择可用项。");
+        if (!serverImageExecution && !model) throw new Error("当前选择的模型不可用，请明确选择可用项。");
         if (currentBatch.fingerprint !== fingerprint(latest.current)) throw new Error("参考图、资料或讨论已变化，请重新提方案。");
         const slots = generationSlots(currentBatch.proposals, ids, count);
         let submittedCount = 0;
@@ -94,7 +97,7 @@ export function StudioPanel({ visible, session, onChange, items, onChoose, onImp
         }
         const pending = slots.filter(({ proposal, key }) => !currentBatch.submissions?.[key] && !currentBatch.submissions?.[proposal.id]);
         const inputs = pending.map(({ proposal, index, key }) => {
-            const plan = createProposalExecution({ proposal, references: currentBatch.references, userRequirements: currentBatch.userRequirements, designRecord: currentBatch.designRecord, designRecordReferenceSnapshot: currentBatch.designRecordReferenceSnapshot, brief: currentBatch.brief, conversation: currentBatch.history, modelId: model.id, outputKind: currentBatch.outputKind || "image", generationAllowed: true });
+            const plan = createProposalExecution({ proposal, references: currentBatch.references, userRequirements: currentBatch.userRequirements, designRecord: currentBatch.designRecord, designRecordReferenceSnapshot: currentBatch.designRecordReferenceSnapshot, brief: currentBatch.brief, conversation: currentBatch.history, modelId: model?.id, outputKind: currentBatch.outputKind || "image", generationAllowed: true, serverImageExecution });
             return { ...plan, discussionSessionId: currentBatch.sessionId, discussionMessageId: currentBatch.messageId, videoSeconds: latest.current.videoSeconds || 6, proposal: { ...plan.proposal, id: key, originalId: proposal.id, batchId: currentBatch.id, outputIndex: index } };
         });
         if (inputs.length) {
@@ -117,7 +120,7 @@ export function StudioPanel({ visible, session, onChange, items, onChoose, onImp
         if (busyRef.current) return;
         if (!ready) { setError("真实服务未连接，请先重新连接。"); return; }
         if (!catalog?.tools?.some(tool => tool.toolKey === "canvas-design-chat" && tool.enabled)) { setError("当前后台尚未启用设计对话模型。"); return; }
-        if (intent === "direct" && !chosenModel) { setError("请选择当前可用的出图模型。"); return; }
+        if (intent === "direct" && !serverImageExecution && !chosenModel) { setError("请选择当前可用的出图模型。"); return; }
         busyRef.current = true; setBusy(true); setError(""); setSteps([]);
         const snapshot = structuredClone(latest.current);
         const draft = snapshot.prompt.trim() || (intent === "discuss" ? "一起看看这些图稿与资料，帮我确定下一步设计方向。" : emptyPrompt);
@@ -232,16 +235,16 @@ export function StudioPanel({ visible, session, onChange, items, onChoose, onImp
             <div className="discussion-composer-controls">
                 <button aria-label="上传参考图片" disabled={busy || uploading || !ready} onClick={() => imageInput.current.click()}><ImagePlus size={17} /></button>
                 <button aria-label="添加 PDF 或文档，单份上限 20 MB" title="PDF / 文档 · 单份上限 20 MB" disabled={busy || uploading || !ready} onClick={() => materialInput.current.click()}>{uploading ? <LoaderCircle size={17} className="spin" /> : <Paperclip size={17} />}</button>
-                <details className="discussion-settings" open={session.mode === "direct" || undefined}><summary>出图设置 · {chosenModel?.label || "选择模型"} · {session.generationCount || 1}{video ? " 个视频" : " 张"}</summary><div className="studio-composer-tools">
+                <details className="discussion-settings" open={session.mode === "direct" || undefined}><summary>出图设置 · {serverImageExecution ? "自动参数" : chosenModel?.label || "选择模型"} · {session.generationCount || 1}{video ? " 个视频" : " 张"}</summary><div className="studio-composer-tools">
                 <label>生成类型<select aria-label="生成类型" disabled={busy || !ready} value={session.outputKind || "image"} onChange={event => update({ outputKind: event.target.value, modelId: "" })}><option value="image">图片</option><option value="video">视频</option></select></label>
-                <label>{video ? "视频模型" : "出图模型"}<select aria-label="出图模型" disabled={busy || !ready} value={chosenModel?.id || session.modelId || ""} onChange={event => update({ modelId: event.target.value })}>{!chosenModel && <option value="">请选择可用模型</option>}<ModelOptions models={models} video={video} /></select></label>
+                {serverImageExecution ? <span>自动图片服务 · 按需求规划画质和尺寸</span> : <label>{video ? "视频模型" : "出图模型"}<select aria-label="出图模型" disabled={busy || !ready} value={chosenModel?.id || session.modelId || ""} onChange={event => update({ modelId: event.target.value })}>{!chosenModel && <option value="">请选择可用模型</option>}<ModelOptions models={models} video={video} /></select></label>}
                 <label>可选方案<select aria-label="方案数量" value={session.proposalCount} disabled={busy || !ready} onChange={event => update({ proposalCount: Number(event.target.value) })}>{[1, 2, 3, 4, 5, 6].map(count => <option key={count} value={count}>{count}</option>)}</select></label>
                 <label>生成数量<select aria-label="生成数量" value={session.generationCount || 1} disabled={busy || !ready} onChange={event => update({ generationCount: Number(event.target.value) })}>{Array.from({ length: 15 }, (_, index) => index + 1).map(count => <option key={count} value={count}>{count}</option>)}</select></label>
                 {video && <label>时长（秒）<select aria-label="视频时长" disabled={busy || !ready} value={session.videoSeconds || 6} onChange={event => update({ videoSeconds: Number(event.target.value) })}>{[4, 5, 6, 8, 10, 15].map(seconds => <option key={seconds} value={seconds}>{seconds}</option>)}</select></label>}
                 </div></details>
             </div>
             {video && <p className="studio-help">视频默认 720p、无生成音轨；单图作首帧，多图作参考。实际规格按所选模型核验，素材不符合时不会提交。</p>}
-            <div className="studio-send"><small>对话、图片及视频均可能计费<br />{session.mode === "discuss" ? "Enter 只讨论 · 选方案后才出图" : "点击后整理方案并提交图片任务"}</small><div>{session.mode === "discuss" ? <><button disabled={busy || uploading || !ready} onClick={() => void run("propose")}>给我方案</button><button className="studio-primary" disabled={busy || uploading || !ready} onClick={() => void run("discuss")}>{busy ? <LoaderCircle size={15} className="spin" /> : <ArrowUp size={16} />}发送讨论</button></> : <button className="studio-primary" disabled={busy || uploading || !ready || !chosenModel} onClick={() => void run("direct")}>{busy ? <LoaderCircle size={15} className="spin" /> : <Sparkles size={16} />}生成 {session.generationCount || 1} {video ? "个方案视频" : "张方案图"}</button>}</div></div>
+            <div className="studio-send"><small>对话、图片及视频均可能计费<br />{session.mode === "discuss" ? "Enter 只讨论 · 选方案后才出图" : "点击后整理方案并提交图片任务"}</small><div>{session.mode === "discuss" ? <><button disabled={busy || uploading || !ready} onClick={() => void run("propose")}>给我方案</button><button className="studio-primary" disabled={busy || uploading || !ready} onClick={() => void run("discuss")}>{busy ? <LoaderCircle size={15} className="spin" /> : <ArrowUp size={16} />}发送讨论</button></> : <button className="studio-primary" disabled={busy || uploading || !ready || (!serverImageExecution && !chosenModel)} onClick={() => void run("direct")}>{busy ? <LoaderCircle size={15} className="spin" /> : <Sparkles size={16} />}生成 {session.generationCount || 1} {video ? "个方案视频" : "张方案图"}</button>}</div></div>
         </footer>
         <input ref={imageInput} disabled={busy || uploading || !ready} hidden type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={event => { const files = Array.from(event.target.files || []); event.target.value = ""; if (files.length) onImport(files).catch(failure => setError(failure.message)); }} />
         <input ref={materialInput} disabled={busy || uploading || !ready} hidden type="file" aria-label="上传设计资料" accept=".pdf,.docx,.xlsx,.xls,.txt,.md,.csv" onChange={importMaterial} />

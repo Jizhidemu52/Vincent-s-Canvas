@@ -1,4 +1,4 @@
-import { BookMarked, Box, FileText, Grid2x2, ImageIcon, ImagePlus, Images, Layers3, Lightbulb, MessageSquare, Palette, RotateCcw, ScanLine, Scissors, ShieldCheck, UserRoundCog, Video } from "lucide-react";
+import { BookMarked, Box, FileText, Grid2x2, ImagePlus, Images, Layers3, Lightbulb, MessageSquare, Palette, RotateCcw, ScanLine, Scissors, ShieldCheck, UserRoundCog, Video } from "lucide-react";
 
 import type { AdminOperationType } from "@/lib/admin-domain";
 
@@ -6,7 +6,7 @@ export const navigationTools = [
     { slug: "local-restyle", path: "/local-restyle", label: "局部改款", icon: Scissors, group: "local" },
     { slug: "garment-colorway", path: "/garment-colorway", label: "服装配色", icon: Palette, group: "local" },
     { slug: "back-design", path: "/back-design", label: "背面设计", icon: RotateCcw, group: "local" },
-    { slug: "layer-studio", path: "/layer-studio", label: "图层拆分与图片生成", icon: Layers3, group: "local" },
+    { slug: "layer-studio", path: "/layer-studio", label: "豆包生图", icon: Layers3, group: "local" },
     { slug: "remove-background", path: "/remove-background", label: "一键去背景", icon: Scissors, group: "local" },
     { slug: "hd-upscale", path: "/hd-upscale", label: "高清放大", icon: ScanLine, group: "local" },
     { slug: "item-extract", path: "/item-extract", label: "提取产品图", icon: Box, group: "local" },
@@ -29,13 +29,6 @@ export const navigationTools = [
         path: "/image?tool=seamless-stitch",
         label: "无缝拼接",
         icon: Grid2x2,
-        group: "local",
-    },
-    {
-        slug: "image",
-        path: "/image",
-        label: "图像生成",
-        icon: ImageIcon,
         group: "local",
     },
     {
@@ -123,7 +116,6 @@ export const navigationToolBilling: Partial<Record<NavigationToolSlug, { operati
     "hd-upscale": { operationType: "upscale", toolKey: "detail-enhance" },
     "item-extract": { operationType: "inpaint", toolKey: "image-edit" },
     "gpt-chat": { operationType: "chat", toolKey: "gpt-chat" },
-    image: { operationType: "image_generation", toolKey: "image" },
     "image-edit": { operationType: "inpaint", toolKey: "image-edit" },
     "seamless-stitch": { operationType: "seamless_stitch", toolKey: "seamless-stitch" },
     "midjourney-blend": { operationType: "image_generation", toolKey: "midjourney-blend" },

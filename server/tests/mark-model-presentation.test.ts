@@ -25,11 +25,11 @@ test("Mark choices require the fixed provider and exact supported IDs, without c
 });
 
 test("all platform models retain distinct UUIDs, exact display prefixes and explicit mask capabilities", () => {
-  expect(MARK_PLATFORM_MODELS).toHaveLength(15);
+  expect(MARK_PLATFORM_MODELS).toHaveLength(13);
   expect(MARK_PLATFORM_MODELS.map(model => model.modelId)).toEqual([
     "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-nano-banana-2.1", "gpt-6-astra", "happyhorse-1.1",
-    "midjourney-blend", "gpt-image-2", "grok-imagine-image-2.0", "gemini-3.1-flash-image-preview-official", "claude-sonnet-5-5",
-    "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "mai-image-2.6-flash", "seedream-5-5", "gemini-4-carbon",
+    "midjourney-blend", "gpt-image-2", "claude-sonnet-5-5",
+    "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "mai-image-2.7-flash", "seedream-5-5", "gemini-4-carbon",
   ]);
   for (const [index, preset] of MARK_PLATFORM_MODELS.entries()) {
     const row = { ...mark, ...preset, id: `mark-model-${index}` };
@@ -89,11 +89,13 @@ test("GPT 2.6 exposes separate descriptions and quality-resolution controls with
   }
 });
 
-test("Nano2 Official exposes neutral capability limits, independently of Nano2.1", () => {
-  const preset = MARK_PLATFORM_MODELS.find(model => model.modelId === "gemini-3.1-flash-image-preview-official")!;
-  const shown = presentPublicModel({ ...mark, ...preset, id: "nano-two-official" }, "designer");
-  expect(shown).toMatchObject({ modelId: "nano-two-official", name: "aplmart-nano2", imageParameterProfile: "resolution", imageSupportsMask: false, imageSupportsOfficialFallback: false });
-  expect(shown).not.toHaveProperty("parameterModelId");
+test("retired Grok, Nano2 and MAI2.6 configurations cannot reappear as creation or featured choices", () => {
+  const retired = ["grok-imagine-image-2.0", "gemini-3.1-flash-image-preview-official", "mai-image-2.6-flash"];
+  const rows = retired.map(modelId => ({ ...mark, id: modelId, modelId, enabled: true }));
+  expect(MARK_PLATFORM_MODELS.filter(preset => retired.includes(preset.modelId))).toEqual([]);
+  expect(selectCreativeModels(rows)).toEqual([]);
+  expect(rows.every(row => !isFeaturedModelCandidate(row))).toBe(true);
+  expect(MARK_PLATFORM_MODELS.find(preset => preset.modelId === "gemini-nano-banana-2.1")).toMatchObject({ name: "aplmart-nano2.1", defaultEnabled: true });
 });
 
 test.each(["designer", "super_admin", "department_admin"])("%s selects Mark by configuration UUID and receives neutral parameter profiles", role => {

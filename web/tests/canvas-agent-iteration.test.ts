@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { resolveCanvasImageAgentEdit, validateCanvasImageAgentPlan, canvasImageAgentCatalog, canvasImageAgentDesignBrief, canvasImageAgentResultOps, canvasImageAgentReviewTarget, canvasImageAgentReviewFingerprint, canvasImageAgentReviewInputs, canvasImageAgentReviewMatches, canvasImageAgentCorrectionDraft, canvasImageAgentHistory, canvasImageAgentInspectionDetails, type CanvasImageAgentImage, type CanvasImageAgentRecord } from "@/lib/canvas/canvas-image-agent";
 import { portableCanvasMedia } from "@/lib/canvas/canvas-portable-media";
-import { buildImageAgentContext } from "@/lib/image-agent/context";
+import { buildImageAgentContext } from "../../shared/image-agent/context";
 import { applyCanvasAgentOps, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { requestImageAgentPlanWithRepair } from "@/lib/image-agent/planning-repair";
 import { ImageAgentPlanningError } from "../../shared/image-agent-iteration";

@@ -5,6 +5,7 @@ export type DeploymentFeatures = {
     creditsEnabled: boolean;
     rolePortalsEnabled: boolean;
     oaLoginEnabled: boolean;
+    imageConversationsEnabled: boolean;
 };
 
 export function normalizeDeploymentFeatures(value: Partial<DeploymentFeatures> = {}): DeploymentFeatures {
@@ -15,6 +16,7 @@ export function normalizeDeploymentFeatures(value: Partial<DeploymentFeatures> =
         creditsEnabled: authenticationEnabled && value.creditsEnabled === true,
         rolePortalsEnabled: authenticationEnabled && value.rolePortalsEnabled === true,
         oaLoginEnabled,
+        imageConversationsEnabled: authenticationEnabled && value.imageConversationsEnabled === true,
     };
 }
 
@@ -29,7 +31,8 @@ export async function loadDeploymentFeatures() {
         const response = await fetch("/api/deployment", { credentials: "include", cache: "no-store", referrerPolicy: "no-referrer", signal: AbortSignal.timeout(5000) });
         if (!response.ok) return false;
         const value = await response.json();
-        if (!value || typeof value !== "object" || Object.keys(deploymentFeatures).some((key) => typeof value[key] !== "boolean")) return false;
+        if (!value || typeof value !== "object" || Object.keys(deploymentFeatures).filter(key => key !== "imageConversationsEnabled").some((key) => typeof value[key] !== "boolean")
+            || (value.imageConversationsEnabled !== undefined && typeof value.imageConversationsEnabled !== "boolean")) return false;
         Object.assign(deploymentFeatures, normalizeDeploymentFeatures(value));
         return true;
     } catch {

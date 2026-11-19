@@ -21,7 +21,7 @@ import { defaultVideoMotionSettings, normalizeVideoMotionSettings, type VideoMot
 import type { PromptInputData } from "../../../../shared/prompt-contracts";
 import { PracticeExampleRecord } from "@/components/design-examples";
 import { useGenerationWorkspace } from "@/hooks/use-generation-workspace";
-import { WorkbenchTasks, useWorkbenchTask, useWorkbenchTaskStatus } from "@/components/workbench-tasks";
+import { WorkbenchTasks, useWorkbenchTask } from "@/components/workbench-tasks";
 import { DEFAULT_WORKBENCH_TASK, matchesWorkbenchTask } from "@/lib/workbench-task-state";
 import { GenerationElapsed } from "@/components/generation-elapsed";
 import { GenerationQueueProgress } from "@/components/generation-queue-progress";
@@ -226,7 +226,6 @@ function VideoGenerationWorkspace() {
     const [logsError, setLogsError] = useState("");
     const draftReady = configReady && promptReady && referencesReady && videosReady && audiosReady && motionReady && rawReady;
     usePromptUrlHandoff({ ready: draftReady, prompt, applyPrompt: setPrompt, applyModel: value => updateConfig("videoModel", value) });
-    useWorkbenchTaskStatus({ busy: submitting || running || readingReferences, pending: logs.some(log => log.status === "生成中" || log.status === "查询暂停"), ready: draftReady && logsReady, label: results.some(result => result.status === "success") ? "已完成" : results.some(result => result.status === "failed") ? "已失败" : "草稿" });
     useUnsavedGuard(readingReferences, uiText("参考素材正在读取，离开可能中断上传。"));
     const reusePrompt = (next: string, apply = () => setPrompt(next)) => {
         if (!shouldConfirmPromptReuse(prompt, next)) { apply(); return; }

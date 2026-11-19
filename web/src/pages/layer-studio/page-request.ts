@@ -15,7 +15,7 @@ export async function submitLayerStudioOnce(job: LayerStudioJob, dependencies: {
     try { accepted = applyLayerStudioSnapshot(job, await dependencies.create(job.submission)); }
     catch (error) {
         const rejected = error instanceof LayerStudioApiError && error.rejected;
-        accepted = { ...job, phase: rejected ? "failed" : "uncertain", notice: rejected ? error.message : "提交结果待核查；已保留请求编号，只查询原任务，不会重复生成。" };
+        accepted = { ...job, phase: rejected ? "failed" : "uncertain", notice: rejected ? error.message : "暂未完成，正在更新结果。" };
     }
     dependencies.assertCurrent();
     await dependencies.persist(accepted);

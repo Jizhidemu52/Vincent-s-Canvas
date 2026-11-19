@@ -7,6 +7,7 @@ import { formatDuration } from "@/lib/image-utils";
 import { isImageResultProcessingFailure, mergeGenerationDiagnostics } from "@/lib/generation-feedback";
 import { defaultConfig } from "@/stores/use-config-store";
 import { snapshotImageRequest, updateImageResultForRecord } from "@/pages/image/image-pending";
+import { DEFAULT_WORKBENCH_TASK } from "@/lib/workbench-task-state";
 
 const source = ts.createSourceFile("image.tsx", readFileSync(new URL("../src/pages/image/index.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 function pageFunction(name: string, scope: Record<string, unknown>) {
@@ -29,19 +30,23 @@ async function finishImageThroughPage(origin: "new" | "resume", durationMs: numb
     const pending = { id: "original-record", ownerId: "owner", requestId: "original-request", taskId: "original-task", tool: "image-edit", createdAt: 1, snapshot };
     const task = { id: pending.taskId, status: "success", resultUrls: ["/api/assets/original/content"], queuedAt: "2026-11-10T07:50:48.073Z", completedAt: durationMs === null ? null : "2026-11-10T07:59:32.825Z" };
     const scope = {
-        finishingImages: { current: new Map() }, manuallyStoppedIds: { current: new Set() }, observationStopRequested: { current: false },
+        finishingImages: { current: new Map() }, confirmedImageResults: { current: new Map() }, manuallyStoppedIds: { current: new Set() }, observationStopRequested: { current: false },
         observationControllers: { current: new Set() }, activeSubmissionRef: { current: false }, mountedRef: { current: true },
         pendingRestoreRevision: { current: 0 }, resultViewPinnedRef: { current: false }, inputDraftScope: "draft",
         user: { id: "owner" }, useUserStore: { getState: () => ({ user: { id: "owner" } }) },
         uploadImage: async (url: string) => ({ url, storageKey: "stored:original", width: 100, height: 100, bytes: 123, mimeType: "image/png" }),
         canvasImageReferenceIdentity: () => ({}), buildLog: (value: unknown) => value,
-        saveLog: async (value: unknown) => { logs.push(value); },
+        saveLog: async (value: unknown, preserveView: boolean, _assertCurrent: () => void, savedOrigin: unknown) => {
+            expect(preserveView).toBe(true);
+            expect(savedOrigin).toEqual({ tool: pending.tool, workspaceId: origin === "new" ? "workspace" : DEFAULT_WORKBENCH_TASK });
+            logs.push(value);
+        },
         removePending: async () => {}, persistPending: async () => {},
         setResults: noop, setRunning: noop, setStartedAt: noop, setActiveTaskId: noop, setOptimizingPrompt: noop,
         returnToCurrentTask: noop,
         workbenchSubmissions: { acquire: () => noop },
         findPendingImageTask: async () => task,
-        completedTaskDurationMs, snapshotImageRequest, updateImageResultForRecord,
+        completedTaskDurationMs, snapshotImageRequest, updateImageResultForRecord, DEFAULT_WORKBENCH_TASK,
         nanoid: () => "original-record", historyTool: "image-edit", workspaceId: "workspace", operationType: "image_generation", businessModels: [],
         imageModelProfile: () => ({ kind: "openai" }), modelOptionName: (value: string) => value,
         requestGeneration: async (_config: unknown, _text: unknown, options: any) => {
@@ -92,9 +97,9 @@ test("a genuinely measured zero image duration remains distinct from unknown", (
 });
 
 test.each([
-    { recovery: "investigate", title: "需要管理员协助", action: "刷新进度" },
-    { recovery: "resume", title: "暂时无法获取进度", action: "继续获取结果" },
-    { recovery: "observe", title: "暂时无法获取进度", action: "刷新进度" },
+    { recovery: "investigate", title: "暂未完成", action: "刷新进度" },
+    { recovery: "resume", title: "暂未完成", action: "继续获取结果" },
+    { recovery: "observe", title: "暂未完成", action: "刷新进度" },
 ])("the image recovery state %s never offers a new paid retry", state => {
     const card = pageFunction("FailedImageCard", {
         React, useUiText() {}, uiText: (value: string) => value,

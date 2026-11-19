@@ -11,14 +11,14 @@ export const usageDestinations: UsageDestination[] = [
     { key: "pattern-repeat", label: "图案循环", path: "/creative/pattern-repeat", moduleKey: "pattern-repeat" },
     { key: "reference-import", label: "网页参考导入", path: "/reference-import", moduleKey: "reference-import" },
 ];
-const imageBoards = new Set(["image", "image-edit", "seamless-stitch", "midjourney-blend"]);
+const imageBoards = new Set(["image-edit", "seamless-stitch", "midjourney-blend"]);
 const boards = new Set(moduleDefinitions.filter(item => !["team", "performance"].includes(item.moduleKey)).map(item => item.moduleKey as string));
 export function usageBoardForLocation(pathname: string, search = ""): string | null {
     if (retiredWorkbenchName(pathname, search)) return null;
     if (pathname === "/remove-background" || pathname === "/item-extract") return "image-edit";
     if (pathname === "/hd-upscale") return "detail-enhance";
     if (pathname === "/") return "home";
-    if (pathname === "/image") { const key = new URLSearchParams(search).get("tool") || "image"; return imageBoards.has(key) ? key : "image"; }
+    if (pathname === "/image") { const key = new URLSearchParams(search).get("tool") || "image-edit"; return imageBoards.has(key) ? key : "image-edit"; }
     if (/^\/canvas(?:\/[^/]+)?\/?$/.test(pathname)) return "canvas";
     if (pathname === "/my-prompts") return "prompts";
     if (pathname === "/chat") return "gpt-chat";

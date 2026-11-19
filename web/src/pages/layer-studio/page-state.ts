@@ -43,7 +43,7 @@ export function applyLayerStudioSnapshot(job: LayerStudioJob, task: QueuedTask):
             : task.status === "paused" || task.stage === "submission_unknown" ? "uncertain" : "pending";
     return { ...job, taskId: task.id, taskStatus: task.status, upstreamAccepted: Boolean(task.upstreamTaskId), phase, document,
         notice: phase === "failed" ? "任务未完成；原输入与已保存结果保留。请在新任务中修改输入。"
-            : phase === "uncertain" ? "原任务待核查；只恢复查询或保存，不会重新生成。" : undefined };
+            : phase === "uncertain" ? "暂未完成，正在更新结果。" : undefined };
 }
 
 export function readLayerStudioWorkspace(value: unknown, ownerId: string, workspaceId: string) {
@@ -51,5 +51,5 @@ export function readLayerStudioWorkspace(value: unknown, ownerId: string, worksp
     const record = value as LayerStudioWorkspace;
     if (record.version !== 1 || record.ownerId !== ownerId || record.workspaceId !== workspaceId || !record.form || !Array.isArray(record.references) || !Array.isArray(record.jobs)
         || record.jobs.some(job => job.ownerId !== ownerId || job.workspaceId !== workspaceId)) throw new Error("工作区记录无法安全读取，未覆盖已有数据。");
-    return { ...record, jobs: record.jobs.map(job => job.phase === "submitting" ? { ...job, phase: "uncertain" as const, notice: "上次提交待核查；保留原请求编号，只查询原任务。" } : job) };
+    return { ...record, jobs: record.jobs.map(job => job.phase === "submitting" ? { ...job, phase: "uncertain" as const, notice: "正在更新结果。" } : job) };
 }

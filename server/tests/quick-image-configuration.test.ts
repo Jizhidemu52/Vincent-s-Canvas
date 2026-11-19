@@ -9,6 +9,7 @@ const configuration = (parameters: Record<string, unknown>) => ({ modelConfigId:
 
 describe("quick image model selection and safe parameter boundaries", () => {
   for (const [modelId, parameters] of [
+    ["mai-image-2.7-flash", { background: "opaque", nsfw_check: true }],
     ["mai-image-2.6-flash", { web_grounding: false }],
     ["gemini-nano-banana-2.1", { resolution: "4k", size: "auto" }],
     ["gpt-image-2.5-flare", { resolution: "2k", quality: "high", output_format: "webp", output_compression: 90 }],

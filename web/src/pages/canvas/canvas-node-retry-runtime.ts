@@ -53,6 +53,7 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
         projectId, nodesRef, connectionsRef, setNodes, effectiveConfig, handleGenerateNode, handleMissingModelConfig, isAiConfigReady, message, modal,
         flushSave, isCurrent, waitForWriteAccess = async () => true, buildGenerationConfig, buildImageGenerationMetadata, buildAudioGenerationMetadata, videoMetadata, audioMetadata, videoTaskErrorMetadata, isGenerationCanceled } = action;
     if (!await waitForWriteAccess() || !isCurrent()) return;
+    if (node.metadata?.designTask) { message.info(uiText("请在「创作任务」中查询或继续原请求，不会从画布重试重新生成。")); return; }
     if (node.type === CanvasNodeType.Image && await recoverPending(node.id)) return;
     if (node.metadata?.quickImageAction) { message.info(uiText("请选中原图，再次点击对应的图片快捷处理")); return; }
     if (!await waitForWriteAccess() || !isCurrent()) return;

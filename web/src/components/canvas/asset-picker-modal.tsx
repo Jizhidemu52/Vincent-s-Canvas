@@ -2,12 +2,12 @@ import { useUiText } from "@/lib/i18n";
 import { useDisplayText, DisplayText, DisplayTranslationScope } from "@/hooks/use-display-text";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Input, Modal, Spin, Tag, Tooltip } from "antd";
-import { Check, ImageIcon, Search } from "lucide-react";
+import { Check, ImageIcon, Search, Upload } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { isSupportedServerAsset, serverAssetToLocal } from "@/lib/server-asset-local";
 import { needsCanvasAssetPreviewResolution, resolveCanvasAssetPreview } from "@/lib/canvas/canvas-asset-preview";
-import { resolveImageUrl } from "@/services/image-storage";
+import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { fetchServerAsset, listServerAssets } from "@/services/api/server-assets";
 import { canUserAccessAsset, serverAssetIdFromAsset, useAssetStore, type Asset } from "@/stores/use-asset-store";
@@ -17,7 +17,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 
 export type InsertAssetPayload =
     | { kind: "text"; content: string; title: string }
-    | { kind: "image"; dataUrl: string; title: string; storageKey?: string; mimeType?: string; imageName?: string; imageVersion?: number; originalFileName?: string; sourceAssetId?: string }
+    | { kind: "image"; dataUrl: string; title: string; storageKey?: string; mimeType?: string; imageName?: string; imageVersion?: number; originalFileName?: string; sourceAssetId?: string; origin?: "upload" }
     | { kind: "video"; url: string; title: string; storageKey?: string; width?: number; height?: number };
 
 type Props = {
@@ -119,6 +119,11 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: Pick<Props
     const [inserting, setInserting] = useState(false);
     const insertingRef = useRef(false);
     const [insertError, setInsertError] = useState("");
+    const uploadInput = useRef<HTMLInputElement>(null);
+    const uploadScope = useRef({ open, ownerId, selectionMode });
+    uploadScope.current = { open, ownerId, selectionMode };
+    const uploadEpoch = useRef(0);
+    useEffect(() => { uploadEpoch.current += 1; insertingRef.current = false; setInserting(false); return () => { uploadEpoch.current += 1; }; }, [open, ownerId, selectionMode]);
     const imageOnly = selectionMode !== "single";
     const queryScope = JSON.stringify([open, ownerId, refreshRevision, deferredKeyword, kindFilter, selectionMode]);
     const queryScopeRef = useRef(queryScope);
@@ -242,8 +247,38 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: Pick<Props
         } finally { insertingRef.current = false; setInserting(false); }
     };
 
+    const insertLocalImages = async (files: File[]) => {
+        if (!files.length || !open || !ownerId || insertingRef.current) return;
+        const scope = uploadScope.current;
+        const epoch = uploadEpoch.current;
+        const isCurrent = () => uploadEpoch.current === epoch && uploadScope.current.open && uploadScope.current.ownerId === scope.ownerId && uploadScope.current.selectionMode === scope.selectionMode && useUserStore.getState().user?.id === scope.ownerId;
+        insertingRef.current = true;
+        setInserting(true);
+        setInsertError("");
+        try {
+            if (files.some(file => !file.type.startsWith("image/"))) throw new Error("请选择图片文件");
+            const payloads: InsertAssetPayload[] = [];
+            for (const file of selectionMode === "multiple-images" ? files : files.slice(0, 1)) {
+                const stored = await uploadImage(file);
+                if (!isCurrent()) return;
+                payloads.push({ kind: "image", dataUrl: stored.url, storageKey: stored.storageKey, title: file.name, originalFileName: file.name, mimeType: stored.mimeType, origin: "upload" });
+            }
+            if (selectionMode === "multiple-images") await onInsertMany?.(payloads);
+            else await onInsert?.(payloads[0]!);
+        } catch (error) {
+            if (isCurrent()) setInsertError(error instanceof Error ? error.message : "图片读取失败，请重新选择图片");
+        } finally {
+            if (uploadEpoch.current === epoch) { insertingRef.current = false; setInserting(false); }
+        }
+    };
+
     return (
-        <div className="flex max-h-[70dvh] min-h-80 flex-col gap-4">
+        <div className="flex max-h-[70dvh] min-h-0 flex-col gap-4">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <Button className="max-sm:!min-h-11" icon={<Upload className="size-4" />} disabled={!ownerId || inserting} loading={inserting} onClick={() => uploadInput.current?.click()}>{t("从相册 / 本机上传")}</Button>
+                <span className="text-xs text-muted-foreground">{t("直接添加到当前模块，无需先存入素材库")}</span>
+                <input ref={uploadInput} type="file" accept="image/*" multiple={selectionMode === "multiple-images"} className="hidden" aria-label={t("从相册或本机选择图片")} disabled={!ownerId || inserting} onChange={event => { const files = Array.from(event.currentTarget.files || []); event.currentTarget.value = ""; void insertLocalImages(files); }} />
+            </div>
             <div className="flex shrink-0 flex-wrap items-center gap-3">
                 <Input
                     className="w-56"
@@ -292,7 +327,7 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: Pick<Props
             <div ref={loadSentinel} className="h-1" aria-hidden />
             {nextCursor || visibleCount < filtered.length ? <Tooltip title={loading ? t("加载中…") : undefined}><Button block loading={loadingMore} disabled={loading} onClick={() => { if (visibleCount < filtered.length) setVisibleCount(value => value + PAGE_SIZE); else void loadMore(); }}>{t("加载更多素材")}</Button></Tooltip> : null}
             </div>
-            {insertError ? <Alert className="shrink-0" type="error" showIcon title={t("素材读取失败，请重试")} description={insertError} /> : null}
+            {insertError ? <Alert className="min-h-0 overflow-y-auto" type="error" showIcon title={t("素材读取失败，请重试")} description={insertError} /> : null}
             {selectionMode === "multiple-images" ? <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border pt-3"><span role="status" className="text-sm text-muted-foreground">{t("已选中 {count} 张图片", { count: selected.length })}</span><Tooltip title={inserting ? t("正在处理图片或项目，请稍候…") : !selected.length ? t("请先选择图片") : undefined}><Button type="primary" loading={inserting} disabled={!selected.length || inserting} onClick={() => void confirmMultiple()}>{t("加入")}{selected.length} {t(" 张参考图")}</Button></Tooltip></div> : null}
             {inserting ? <p role="status" className="text-sm text-muted-foreground">{t("正在读取素材详情…")}</p> : null}
         </div>

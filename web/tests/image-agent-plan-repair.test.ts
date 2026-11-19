@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { ImageAgentPlanningError, isImageAgentPlanningIssue } from "../../shared/image-agent-iteration";
 import { requestImageAgentPlanWithRepair } from "../src/lib/image-agent/planning-repair";
-import { compileImageAgentPrompt } from "../src/lib/image-agent/compile";
+import { compileImageAgentPrompt } from "../../shared/image-agent/compile";
 import { requestToolResponse } from "../src/services/api/image";
 import { defaultConfig } from "../src/stores/use-config-store";
 

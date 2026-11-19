@@ -16,25 +16,47 @@ export function verifySmokeEvidence(browser: Evidence, before: Evidence, after: 
         && Object.values(imageIds).every(value => /^sha256:[a-f0-9]{64}$/.test(value)), "candidate identity");
     for (const evidence of [browser, before, after]) requireEvidence(evidence.schema === 1 && evidence.project === project && evidence.paid === false, "isolated evidence identity");
     requireEvidence(browser.status === "passed" && same(browser.checks, SMOKE_CHECKS), "browser paths");
+    const conversation = browser.conversation;
+    requireEvidence(conversation !== null && typeof conversation === "object", "conversation runtime evidence");
     requireEvidence(same(before.calls, []), "provider was not fresh");
     requireEvidence(Array.isArray(after.calls), "provider calls");
     const calls = after.calls as Evidence[];
-    requireEvidence(calls.length >= 4 && calls.every((call, index) => call.sequence === index + 1), "provider sequence");
+    requireEvidence(calls.length >= 7 && calls.every((call, index) => call.sequence === index + 1), "provider sequence");
     const expected: Record<string, { path: string; model: string }> = {
         image: { path: "/v1/images/generations", model: "gpt-image-2" },
         video: { path: "/v1/videos/generations", model: "MiniMax-H3" },
-        chat: { path: "/v1/responses", model: "gpt-6-astra" },
+        chat: { path: "/v1/responses", model: "gpt-6.2-sol" },
+        "conversation-planner": { path: "/v1/responses", model: "gpt-6.2-sol" },
+        "conversation-image": { path: "/v1/images/generations", model: "gpt-image-2.6-flare" },
     };
     for (const [kind, value] of Object.entries(expected)) {
         const matching = calls.filter(call => call.kind === kind);
         requireEvidence(matching.length === 1 && matching[0]!.method === "POST" && matching[0]!.path === value.path && matching[0]!.model === value.model, `${kind} real adapter receipt`);
     }
     requireEvidence(calls.filter(call => call.kind === "video-poll").length >= 1, "real video polling");
-    requireEvidence(calls.every(call => Object.hasOwn(expected, call.kind) || (call.kind === "video-poll" && call.method === "GET" && /^\/v1\/tasks\/smoke-video-\d+$/.test(call.path) && call.model === null)), "unexpected upstream request");
+    requireEvidence(calls.filter(call => call.kind === "conversation-image-poll").length >= 1, "real conversation image polling");
+    requireEvidence(calls.find(call => call.kind === "conversation-planner")!.sequence < calls.find(call => call.kind === "conversation-image")!.sequence
+        && calls.find(call => call.kind === "conversation-image")!.sequence < calls.find(call => call.kind === "conversation-image-poll")!.sequence, "conversation planner-task-poll order");
+    requireEvidence(calls.every(call => Object.hasOwn(expected, call.kind)
+        || (call.kind === "video-poll" && call.method === "GET" && call.path === "/v1/tasks/smoke-video-1" && call.model === null)
+        || (call.kind === "conversation-image-poll" && call.method === "GET" && call.path === "/v1/tasks/smoke-conversation-image-1" && call.model === null)), "unexpected upstream request");
     requireEvidence(same(browser.taskPosts, ["image_generation", "video_generation"]) && browser.chatPosts === 1, "no duplicate browser submission");
     requireEvidence(["waiting", "processing"].includes(browser.refreshStatus), "refresh of an in-flight original task");
     const original = { bytes: upload.byteLength, sha256: createHash("sha256").update(upload).digest("hex"), width: 1024, height: 1024 };
     requireEvidence(original.bytes > 1024 * 1024 && same(browser.original, original) && same(after.image, original) && same(before.image, original), "unchanged original image bytes and dimensions");
+    requireEvidence(same(conversation.original, original), "conversation original bytes and dimensions");
+    const uuid = (value: unknown) => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value);
+    for (const field of ["id", "turnId", "taskId", "versionId", "assetId"]) requireEvidence(uuid(conversation[field]), `durable conversation ${field}`);
+    requireEvidence(conversation.state === "completed" && conversation.plannerStatus === "succeeded" && conversation.imageNo === 1
+        && Number.isInteger(conversation.stateRevision) && conversation.stateRevision > 0, "conversation projected result");
+    requireEvidence(["accepted", "planning", "queued", "generating"].includes(conversation.refreshState), "conversation in-flight refresh");
+    requireEvidence(Array.isArray(conversation.writes) && conversation.writes.length === 2
+        && conversation.writes[0]?.path === "/api/image-conversations"
+        && conversation.writes[1]?.path === `/api/image-conversations/${conversation.id}/turns`
+        && conversation.writes.every((write: Evidence) => typeof write.clientRequestId === "string" && write.clientRequestId.length > 0)
+        && conversation.writes[0].clientRequestId !== conversation.writes[1].clientRequestId, "no duplicate conversation submission");
+    requireEvidence(same(conversation.restored, { id: conversation.id, turnId: conversation.turnId, taskId: conversation.taskId,
+        versionId: conversation.versionId, assetId: conversation.assetId, state: "completed" }) && same(conversation.restoredWrites, []), "conversation fresh-browser GET recovery");
     requireEvidence(Number.isInteger(after.videoBytes) && after.videoBytes >= 1000, "real video fixture");
     requireEvidence(/^[A-Za-z0-9_-]{21}$/.test(browser.canvasId || ""), "durable canvasId");
     for (const field of ["imageTaskId", "videoTaskId", "uploadAssetId"]) requireEvidence(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(browser[field] || ""), `durable ${field}`);

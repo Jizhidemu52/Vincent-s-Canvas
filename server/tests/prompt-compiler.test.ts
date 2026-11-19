@@ -58,7 +58,7 @@ describe("prompt compiler lifecycle", () => {
   test.each([
     ["gpt-image-2.6-flare", 16], ["gpt-image-2.6-sunburst", 16], ["gpt-image-2.5-flare", 16],
     ["gpt-image-2", 15], ["gemini-3.1-flash-image-preview", 14], ["gemini-nano-banana-2.1", 16],
-    ["mai-image-2.6-flash", 5], ["grok-imagine-image-2.0", 3], ["midjourney", 16], ["midjourney-blend", 4], ["unknown-image-model", 8],
+    ["mai-image-2.6-flash", 5], ["mai-image-2.7-flash", 5], ["grok-imagine-image-2.0", 3], ["midjourney", 16], ["midjourney-blend", 4], ["unknown-image-model", 8],
   ])("%s accepts its actual reference budget %i and rejects overflow before source reads or optimization", async (modelId, limit) => {
     const f = await fixture();
     f.runtime.resolveTarget = async () => ({ id: "target", modelId, protocol: "apimart", fingerprint: modelId });

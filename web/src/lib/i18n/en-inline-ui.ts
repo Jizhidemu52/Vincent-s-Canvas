@@ -777,6 +777,7 @@ export default {
     "设计效能数据暂未更新": "Design efficiency data has not updated yet",
     "有效出图": "Valid image outputs",
     "今日使用人数": "People active today",
+    "日均使用人数": "Average daily users",
     "自然日均 / 活跃日均": "Average per calendar day / active day",
     "平均完成时长": "Average completion time",
     "设计师对比": "Designer comparison",

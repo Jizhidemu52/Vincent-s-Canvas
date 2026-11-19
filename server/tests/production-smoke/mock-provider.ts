@@ -3,6 +3,8 @@ import { spawnSync } from "node:child_process";
 
 export const SMOKE_PROVIDER_KEY = "canvas-smoke-local-only-no-paid-key";
 export const SMOKE_CHAT_REPLY = "Release smoke chat completed through the local provider.";
+export const SMOKE_CONVERSATION_PROMPT = "Create a synthetic blue square. Formal isolated conversation smoke.";
+export const SMOKE_CONVERSATION_REPLY = "The synthetic conversation image is ready for review.";
 export const SMOKE_PROJECT_PATTERN = /^(?:ci-release|canvas-staging)-[a-z0-9][a-z0-9-]{0,80}$/;
 export const SMOKE_VIDEO_SHA256 = "cd1b73171944a213925b013cc1a6ee0ef1533ff02cb7c82640733e866c0d85ad";
 export const SMOKE_VIDEO_META = { width: 160, height: 224, frames: 24, durationMs: 1000 };
@@ -92,6 +94,7 @@ export function createSmokeProvider(project: string, origin: string, media = cre
     resultOrigin.hostname = "mock-provider.example";
     const calls: Array<{ sequence: number; method: string; path: string; model: string | null; kind: string }> = [];
     const videos = new Set<string>();
+    const conversationImages = new Map<string, number>();
     return async (request: Request) => {
         const path = new URL(request.url).pathname;
         if (request.method === "GET" && path === "/health") return Response.json({ kind: "canvas-local-smoke-provider", project, paid: false });
@@ -100,10 +103,27 @@ export function createSmokeProvider(project: string, origin: string, media = cre
         if (request.method === "GET" && path === "/fixtures/result.mp4") return new Response(Uint8Array.from(media.video).buffer, { headers: { "content-type": "video/mp4" } });
         if (request.headers.get("authorization") !== `Bearer ${SMOKE_PROVIDER_KEY}`) return Response.json({ error: "Only the synthetic smoke key is accepted" }, { status: 403 });
         if (request.method === "POST" && ["/v1/images/generations", "/v1/chat/completions", "/v1/responses", "/v1/videos/generations"].includes(path)) {
-            const body = await request.json() as { model?: string };
+            const body = await request.json() as { model?: string; tools?: Array<{ name?: string }>; input?: Array<{ role?: string; content?: unknown }>; tool_choice?: unknown };
+            const planner = path === "/v1/responses" && body.model === "gpt-6.2-sol" && body.tools?.some(tool => tool.name === "plan_image_conversation");
+            if (planner) {
+                if (body.tool_choice !== "required" || body.input?.at(-1)?.role !== "user" || body.input.at(-1)?.content !== SMOKE_CONVERSATION_PROMPT) {
+                    return Response.json({ error: "Unexpected synthetic conversation request" }, { status: 400 });
+                }
+                calls.push({ sequence: calls.length + 1, method: "POST", path, model: body.model!, kind: "conversation-planner" });
+                const plan = { action: "generate_new", assistantText: SMOKE_CONVERSATION_REPLY, description: "Create a synthetic blue square.",
+                    requestedState: { schemaVersion: 1, goals: ["Create a synthetic blue square."], constraints: [] }, references: [],
+                    outputIntent: { purpose: "draft", complexity: "low" } };
+                return Response.json({ id: "smoke-planner-response", status: "completed", output: [{ type: "function_call", id: "smoke-planner-call", call_id: "smoke-planner-call", name: "plan_image_conversation", arguments: JSON.stringify({ plan }) }], usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20 } });
+            }
+            if (path === "/v1/images/generations" && body.model === "gpt-image-2.6-flare") {
+                const taskId = `smoke-conversation-image-${conversationImages.size + 1}`;
+                calls.push({ sequence: calls.length + 1, method: "POST", path, model: body.model, kind: "conversation-image" });
+                conversationImages.set(taskId, Date.now() + imageDelayMs);
+                return Response.json({ data: [{ task_id: taskId }] });
+            }
             const kind = path.includes("/images/") ? "image" : path.includes("/videos/") ? "video" : "chat";
             const expected = { image: "gpt-image-2", video: "MiniMax-H3", chat: "gpt-6-astra" }[kind];
-            if (body.model !== expected) return Response.json({ error: "Unexpected smoke model" }, { status: 400 });
+            if (body.model !== expected && !(kind === "chat" && path === "/v1/responses" && body.model === "gpt-6.2-sol" && !body.tools?.length)) return Response.json({ error: "Unexpected smoke model" }, { status: 400 });
             calls.push({ sequence: calls.length + 1, method: request.method, path, model: body.model, kind });
             if (kind === "image") {
                 // The formal browser smoke reloads an in-flight task, not only
@@ -117,6 +137,12 @@ export function createSmokeProvider(project: string, origin: string, media = cre
             const taskId = `smoke-video-${videos.size + 1}`;
             videos.add(taskId);
             return Response.json({ data: [{ task_id: taskId }] });
+        }
+        if (request.method === "GET" && path.startsWith("/v1/tasks/") && conversationImages.has(path.split("/").at(-1)!)) {
+            calls.push({ sequence: calls.length + 1, method: "GET", path, model: null, kind: "conversation-image-poll" });
+            return Date.now() < conversationImages.get(path.split("/").at(-1)!)!
+                ? Response.json({ data: { status: "processing" } })
+                : Response.json({ data: { status: "completed", result: { images: [{ url: [`${resultOrigin.origin}/fixtures/result.png`] }] } } });
         }
         if (request.method === "GET" && path.startsWith("/v1/tasks/") && videos.has(path.split("/").at(-1)!)) {
             calls.push({ sequence: calls.length + 1, method: "GET", path, model: null, kind: "video-poll" });

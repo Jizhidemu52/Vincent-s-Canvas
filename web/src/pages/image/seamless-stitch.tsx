@@ -13,7 +13,7 @@ import { useSearchParams } from "react-router-dom";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
-import { WorkbenchTasks, useWorkbenchTask, useWorkbenchTaskStatus } from "@/components/workbench-tasks";
+import { WorkbenchTasks, useWorkbenchTask } from "@/components/workbench-tasks";
 import { DEFAULT_WORKBENCH_TASK, matchesWorkbenchTask } from "@/lib/workbench-task-state";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { useToolConfig } from "@/hooks/use-tool-config";
@@ -111,7 +111,6 @@ export function SeamlessStitchWorkspace() {
     const estimatedUsage = estimate({ operationType: "seamless_stitch", toolKey: "seamless-stitch", modelId: config.model, quantity: 1 });
     const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const draftReady = configReady && sourceReady && presetReady && parametersReady;
-    useWorkbenchTaskStatus({ busy: running || readingSource, pending: historyPending, ready: draftReady && historyReady, label: result.status === "success" ? "已完成" : result.status === "failed" ? "已失败" : "草稿" });
 
     const refreshHistory = useCallback(async () => {
         if (historyBusyRef.current) return;

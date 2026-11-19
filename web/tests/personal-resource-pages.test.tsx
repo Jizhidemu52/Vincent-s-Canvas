@@ -73,7 +73,7 @@ function page(path: string, exportName: string, dependencies: Record<string, unk
     };
 }
 
-const dashboardData = (count: number) => ({ todayUsage: { date: "2026-11-12", timeZone: "Asia/Shanghai", users: 17 }, metrics: { validOutputs: count }, trend: [], directions: [], funnel: [], designers: [], failureReasons: [], tasks: [], assets: [], comparisons: null, options: { users: [], departments: [], groups: [] } });
+const dashboardData = (count: number, days = 4, dailyAverage: number | null = 17) => ({ periodUsage: { from: "2026-11-08T16:00:00Z", to: "2026-11-12T16:00:00Z", timeZone: "Asia/Shanghai", days, userDays: (dailyAverage ?? 0) * days, dailyAverage }, metrics: { validOutputs: count }, trend: [], directions: [], funnel: [], designers: [], failureReasons: [], tasks: [], assets: [], comparisons: null, options: { users: [], departments: [], groups: [] } });
 const countShown = (rendered: ReturnType<ReturnType<typeof page>["render"]>) => rendered.elements.find(element => element.props.label === "有效出图")?.props.value;
 
 test("performance keeps the newest filter result when earlier responses finish last", async () => {
@@ -84,10 +84,38 @@ test("performance keeps the newest filter result when earlier responses finish l
     const initial = h.render(); initial.elements.find(element => element.type === "Segmented")!.props.onChange("week"); h.render();
     pending[1].resolve(dashboardData(22)); await settle();
     expect(countShown(h.render())).toBe("22");
-    expect(h.render().elements.find(element => element.props.label === "今日使用人数")?.props.value).toBe("17");
+    expect(h.render().elements.find(element => element.props.label === "日均使用人数")?.props.value).toBe("17");
     expect(h.render().elements.some(element => ["成果下载率", "成果可用性均分", "返工率 / 按时交付率", "积分 / 人民币成本"].includes(element.props.label))).toBe(false);
     pending[0].resolve(dashboardData(99)); await settle();
     expect(countShown(h.render())).toBe("22");
+    h.unmount();
+});
+
+test("performance shows selected-period daily averages and only today uses the daily count label", async () => {
+    const requests: any[] = [];
+    const h = page("../src/pages/performance/dashboard.tsx", "PerformanceDashboard", {
+        "@/services/api/performance": { designDirectionLabels: {}, getPerformanceDashboard: async (filters: any) => {
+            requests.push(filters);
+            return filters.preset === "today" ? dashboardData(1, 1, 27)
+                : filters.preset === "week" ? dashboardData(1, 4, 9.25)
+                    : filters.preset === "month" ? dashboardData(1, 12, 7.5) : dashboardData(1, 0, null);
+        } },
+    });
+    h.render(); await settle();
+    const metric = () => h.render().elements.find(element => ["今日使用人数", "日均使用人数"].includes(element.props.label))!;
+    expect(metric().props).toMatchObject({ label: "日均使用人数", value: "7.5", sub: "北京时间 · 每日去重人数之和 ÷ 12 个自然日（含零使用日）" });
+    for (const [preset, label, value] of [["today", "今日使用人数", "27"], ["week", "日均使用人数", "9.25"]]) {
+        h.render().elements.find(element => element.type === "Segmented")!.props.onChange(preset);
+        h.render(); await settle();
+        expect(metric().props).toMatchObject({ label, value });
+    }
+    h.render().elements.find(element => element.type === "Segmented")!.props.onChange("custom");
+    const from = "2026-11-15T16:00:00Z", to = "2026-11-16T16:00:00Z";
+    h.render().elements.find(element => element.type === "RangePicker")!.props.onChange([{ toISOString: () => from }, { toISOString: () => to }]);
+    h.render(); await settle();
+    expect(requests.at(-1)).toEqual({ preset: "custom", from, to });
+    expect(metric().props).toMatchObject({ label: "日均使用人数", value: "—" });
+    expect(h.render().elements.some(element => element.props.label === "今日使用人数")).toBe(false);
     h.unmount();
 });
 
@@ -100,6 +128,23 @@ test("performance read failures remain visible with retry instead of becoming an
     expect(alert?.props.description).toContain("offline fixture");
     expect(alert?.props.action.props.onClick).toBeInstanceOf(Function);
     expect(rendered.elements.some(element => element.type === "Empty")).toBe(false);
+    h.unmount();
+});
+
+test("performance never relabels a previous period average as today's count after a filter request fails", async () => {
+    const h = page("../src/pages/performance/dashboard.tsx", "PerformanceDashboard", {
+        "@/services/api/performance": { designDirectionLabels: {}, getPerformanceDashboard: async ({ preset }: { preset: string }) => {
+            if (preset === "today") throw new Error("unavailable today");
+            return dashboardData(1, 12, 7.5);
+        } },
+    });
+    h.render(); await settle();
+    h.render().elements.find(element => element.type === "Segmented")!.props.onChange("today");
+    h.render(); await settle();
+    const rendered = h.render();
+    expect(rendered.elements.find(element => element.type === "Alert")?.props.description).toBe("unavailable today");
+    expect(rendered.elements.find(element => element.props.label === "日均使用人数")?.props.value).toBe("7.5");
+    expect(rendered.elements.some(element => element.props.label === "今日使用人数")).toBe(false);
     h.unmount();
 });
 

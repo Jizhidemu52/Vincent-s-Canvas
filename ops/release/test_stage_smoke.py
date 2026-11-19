@@ -91,6 +91,7 @@ class StageIsolationTests(unittest.TestCase):
         for name in ("api", "worker"):
             environment = config["services"][name]["environment"]
             self.assertEqual(environment["TASK_MOCK_MODE"], "false")
+            self.assertEqual(environment["IMAGE_CONVERSATIONS_ENABLED"], "true")
             self.assertEqual(environment["AUTH_ENABLED"], "true")
             self.assertEqual(environment["CANVAS_SMOKE_MODE"], "staging")
             self.assertIn("@postgres:5432/wireless_canvas", environment["DATABASE_URL"])
@@ -160,8 +161,12 @@ class StageIsolationTests(unittest.TestCase):
         api = copy.deepcopy(original)
         api["Mounts"] = api["Mounts"][:1]
         api["Config"]["Labels"]["com.docker.compose.service"] = "api"
-        api["Config"].update(Cmd=["bun", "src/index.ts"], Env=["NODE_ENV=production", "TASK_MOCK_MODE=false", "AUTH_ENABLED=true", "OA_LOGIN_ENABLED=false", "REDIS_URL=redis://redis:6379", "S3_ENDPOINT=http://minio:9000"])
+        api["Config"].update(Cmd=["bun", "src/index.ts"], Env=["NODE_ENV=production", "TASK_MOCK_MODE=false", "AUTH_ENABLED=true", "OA_LOGIN_ENABLED=false", "IMAGE_CONVERSATIONS_ENABLED=true", "REDIS_URL=redis://redis:6379", "S3_ENDPOINT=http://minio:9000"])
         self.assertEqual(stage.resource_matches(api, state, "container"), api["Id"])
+        disabled = copy.deepcopy(api)
+        disabled["Config"]["Env"].remove("IMAGE_CONVERSATIONS_ENABLED=true")
+        with self.assertRaisesRegex(stage.Rejected, "FORMAL"):
+            stage.resource_matches(disabled, state, "container")
         api["Config"]["Cmd"] = ["bun", "src/demo-server.ts"]
         with self.assertRaisesRegex(stage.Rejected, "FORMAL"):
             stage.resource_matches(api, state, "container")
@@ -251,7 +256,7 @@ class StageIsolationTests(unittest.TestCase):
             row.update(Id=str(index) * 64, Name="/" + state["project"] + "-" + role + "-1", Image=state["images"]["api" if role == "worker" else role], Mounts=[])
             row["Config"]["Labels"]["com.docker.compose.service"] = role
             if role in ("api", "worker"):
-                row["Config"].update(Cmd=["bun", "src/index.ts" if role == "api" else "src/worker.ts"], Env=["NODE_ENV=production", "TASK_MOCK_MODE=false", "AUTH_ENABLED=true", "OA_LOGIN_ENABLED=false", "REDIS_URL=redis://redis:6379", "S3_ENDPOINT=http://minio:9000"])
+                row["Config"].update(Cmd=["bun", "src/index.ts" if role == "api" else "src/worker.ts"], Env=["NODE_ENV=production", "TASK_MOCK_MODE=false", "AUTH_ENABLED=true", "OA_LOGIN_ENABLED=false", "IMAGE_CONVERSATIONS_ENABLED=true", "REDIS_URL=redis://redis:6379", "S3_ENDPOINT=http://minio:9000"])
             resources["containers"].append(row)
             resources["networks"][0]["Containers"][row["Id"]] = {}
         for suffix in ("redis-data", "minio-data"):

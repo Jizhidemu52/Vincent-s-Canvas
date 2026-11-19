@@ -8,7 +8,7 @@ import { SMOKE_PROVIDER_KEY } from "./mock-provider";
 
 const env = {
     CANVAS_SMOKE_PROJECT: "ci-release-123-1-amd64", CANVAS_SMOKE_ALLOW_SEED: "isolated-compose-only", CANVAS_SMOKE_SOURCE_ROOT: "/app/src",
-    NODE_ENV: "production", TASK_MOCK_MODE: "false", AUTH_ENABLED: "true", OA_LOGIN_ENABLED: "false",
+    NODE_ENV: "production", TASK_MOCK_MODE: "false", AUTH_ENABLED: "true", OA_LOGIN_ENABLED: "false", IMAGE_CONVERSATIONS_ENABLED: "true",
     DATABASE_URL: "postgres://wireless_canvas:synthetic-smoke-password@postgres:5432/wireless_canvas", REDIS_URL: "redis://redis:6379",
     S3_ENDPOINT: "http://minio:9000", S3_PUBLIC_ENDPOINT: "", S3_BUCKET: "canvas-ci", PROVIDER_ENCRYPTION_KEY: Buffer.alloc(32, 23).toString("base64"),
 };
@@ -20,6 +20,7 @@ test("smoke seed rejects production hosts, Demo/mock tasks and incomplete isolat
         { CANVAS_SMOKE_PROJECT: "production" }, { CANVAS_SMOKE_ALLOW_SEED: "" }, { CANVAS_SMOKE_SOURCE_ROOT: "../../src" },
         { DATABASE_URL: env.DATABASE_URL.replace("@postgres:", "@production:") }, { DATABASE_URL: `${env.DATABASE_URL}?host=production` },
         { NODE_ENV: "development" }, { TASK_MOCK_MODE: "true" }, { AUTH_ENABLED: "false" }, { OA_LOGIN_ENABLED: "true" },
+        { IMAGE_CONVERSATIONS_ENABLED: "false" }, { IMAGE_CONVERSATIONS_ENABLED: undefined },
         { REDIS_URL: "redis://127.0.0.1:6379" }, { S3_ENDPOINT: "https://storage.example" }, { S3_BUCKET: "production" },
         { S3_PUBLIC_ENDPOINT: "https://production.example" }, { PROVIDER_ENCRYPTION_KEY: "invalid" },
     ]) expect(() => assertSmokeSeedEnvironment({ ...env, ...patch })).toThrow();
@@ -34,7 +35,7 @@ sqlTest("formal smoke seed creates usable local-provider bindings and rejects re
         expect(user).toMatchObject({ role: "designer", must_change_password: false, credit_balance: 1000 });
         expect(await verifyPassword(user.password_hash, seed.password)).toBe(true);
         const providers = await state.db.query("SELECT base_url,encrypted_credentials FROM providers");
-        expect(providers.rows).toHaveLength(2);
+        expect(providers.rows).toHaveLength(3);
         for (const provider of providers.rows) {
             expect(provider.base_url).toBe("http://mock-provider:4180/v1");
             expect(JSON.parse(decryptSecret(provider.encrypted_credentials, env.PROVIDER_ENCRYPTION_KEY))).toEqual({ apiKey: SMOKE_PROVIDER_KEY });
@@ -42,17 +43,20 @@ sqlTest("formal smoke seed creates usable local-provider bindings and rejects re
         const models = await state.db.query(`SELECT m.id,m.model_id AS "modelId",m.capabilities,m.credit_cost,m.rmb_cost,m.concurrency_limit,
             p.id AS "providerId",p.name AS "providerName",p.base_url AS "providerBaseUrl",p.protocol
             FROM model_configs m JOIN providers p ON p.id=m.provider_id`);
-        expect(models.rows).toHaveLength(3);
-        expect(models.rows.every(isSelectableCreativeModel)).toBe(true);
+        expect(models.rows).toHaveLength(4);
+        expect(models.rows.filter(model => model.id !== seed.models.chat).every(isSelectableCreativeModel)).toBe(true);
         expect(models.rows.find(row => row.id === seed.models.image).capabilities).toEqual(["generate", "edit", "batch"]);
         expect(models.rows.find(row => row.id === seed.models.video).capabilities).toEqual(["video"]);
+        expect(models.rows.find(row => row.id === seed.models.chat)).toMatchObject({ modelId: "gpt-6.2-sol", protocol: "openai", capabilities: ["chat", "vision"] });
+        expect(models.rows.find(row => row.id === seed.models.conversationImage)).toMatchObject({ modelId: "gpt-image-2.6-flare", protocol: "apimart", providerId: "9567f5da-bb4d-4e4b-b680-c7184d00a001" });
         for (const model of models.rows) {
             expect(Number(model.credit_cost)).toBe(1);
             expect(Number(model.rmb_cost)).toBe(0);
             expect(model.concurrency_limit).toBe(2);
         }
         const bindings = await state.db.query("SELECT tool_key,model_config_id,allow_raw_prompt FROM tool_api_configurations WHERE model_config_id IS NOT NULL");
-        expect(bindings.rows).toHaveLength(10);
+        expect(bindings.rows).toHaveLength(11);
+        expect(bindings.rows.find(row => row.tool_key === "gpt-chat-image").model_config_id).toBe(seed.models.conversationImage);
         expect(bindings.rows.find(row => row.tool_key === "canvas-image").model_config_id).toBe(seed.models.image);
         expect(bindings.rows.find(row => row.tool_key === "video")).toMatchObject({ model_config_id: seed.models.video, allow_raw_prompt: true });
         for (const [toolKey, profile] of [["gpt-chat", "creative-chat"], ["canvas-chat", "canvas-assistant"]]) {

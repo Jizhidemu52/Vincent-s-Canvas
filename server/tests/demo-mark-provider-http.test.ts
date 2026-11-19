@@ -24,9 +24,9 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
   } });
   const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
   const port = reservation.port; reservation.stop(true);
-  const child = Bun.spawn([process.execPath, "src/demo-server.ts"], {
+  const child = Bun.spawn([process.execPath, "--no-env-file", "src/demo-server.ts"], {
     cwd: fileURLToPath(new URL("..", import.meta.url)), stdout: "ignore", stderr: "pipe",
-    env: { ...process.env, DEMO_STATE_PATH: ":memory:", DEMO_RECOVERY_FILE: "", DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1",
+    env: { ...process.env, DEMO_STATE_PATH: ":memory:", DEMO_RECOVERY_FILE: "", DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1", DEMO_SEEDREAM55_ENABLED: "false",
       OA_LOGIN_ENABLED: "false", AUTH_ENABLED: "true", CREDITS_ENABLED: "false", LOCAL_STANDALONE: "false", ROLE_PORTALS_ENABLED: "true", STANDALONE_WEB_DIR: "",
       OPENTOKEN_API_KEY: "", APIMART_API_KEY: "", GPT_IMAGE_2_API_KEY: "",
       MARK_IMAGE_BASE_URL: `http://127.0.0.1:${provider.port}/v1`, MARK_IMAGE_API_KEY: "fake-mark-http-key" },
@@ -47,8 +47,8 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     const models = catalog.models as Array<Record<string, any>>;
     expect(catalog.tools.find((tool: { toolKey: string }) => tool.toolKey === "seamless-stitch").modelConfigId).toBeNull();
     const imageCatalog = models.filter(model => model.modelIdentityHidden);
-    expect(imageCatalog.map(model => [model.id, model.name])).toEqual(MARK_PLATFORM_MODELS.flatMap((model, index) => model.defaultEnabled && (model.capabilities as readonly string[]).includes("generate")
-      ? [[`d5000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, model.name]] : []));
+    expect(imageCatalog.map(model => [model.id, model.name])).toEqual(MARK_PLATFORM_MODELS.flatMap(model => model.defaultEnabled && (model.capabilities as readonly string[]).includes("generate")
+      ? [[`d5000000-0000-4000-8000-${String(model.demoOrdinal).padStart(12, "0")}`, model.name]] : []));
     const images = imageCatalog.filter(model => MARK_IMAGE_MODELS.some(original => original.name === model.name));
     expect(images.map(model => [model.id, model.name])).toEqual(MARK_IMAGE_MODELS.map((model, index) => [`d5000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, model.name]));
     expect(images.map(model => model.imageParameterProfile)).toEqual(["quality-resolution", "quality-resolution", "resolution-1k"]);
@@ -71,12 +71,18 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     const disabled = await request("/api/tasks", "POST", { requestId: crypto.randomUUID(), projectId: "mark-fixture", operationType: "image_generation", modelConfigId: "d5000000-0000-4000-8000-000000000008", prompt: "disabled Grok cannot submit", parameters: { size: "1:1", resolution: "1k" } });
     expect(disabled.status).toBe(400);
     expect((await disabled.json()).error).toBe("MODEL_DISABLED");
-    for (const [index, maximum] of [[6, 4], [7, 15], [9, 14], [1, 16], [2, 16], [3, 16], [13, 5]]) {
+    for (const [index, maximum] of [[6, 4], [7, 15], [1, 16], [2, 16], [3, 16], [16, 5]]) {
       const rejected = await request("/api/tasks", "POST", { requestId: crypto.randomUUID(), projectId: "mark-fixture", operationType: "image_generation", modelConfigId: `d5000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
         prompt: "local reference count rejection", sourceUrls: Array(maximum! + 1).fill(sourceUrl), parameters: { size: "1:1", resolution: "1k" } });
       expect(rejected.status).toBe(400);
       const body = await rejected.json();
       expect(body.error).toBe("TOO_MANY_REFERENCES"); expect(body.message).toContain(String(maximum));
+    }
+    for (const ordinal of [9, 13]) {
+      const retiredChoice = await request("/api/tasks", "POST", { requestId: crypto.randomUUID(), projectId: "mark-fixture", operationType: "image_generation",
+        modelConfigId: `d5000000-0000-4000-8000-${String(ordinal).padStart(12, "0")}`, prompt: "retired manual selection", parameters: {} });
+      expect(retiredChoice.status).toBe(400);
+      expect((await retiredChoice.json()).error).toBe("MODEL_DISABLED");
     }
     expect(submissions).toHaveLength(0);
 
@@ -118,13 +124,14 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     for (let attempt = 0; attempt < 100 && submissions.length < 5; attempt++) await Bun.sleep(50);
     expect(submissions).toHaveLength(5);
     expect(submissions.slice(3).every(item => item.n === 1 && item.prompt === "batch independent edit")).toBe(true);
-    const mai = models.find(model => model.name === "aplmart-mai2.6-flash")!;
-    expect(mai).toMatchObject({ modelId: "d5000000-0000-4000-8000-000000000013", imageParameterProfile: "mai-image", imageSupportsMask: false });
+    const mai = models.find(model => model.name === "aplmart-mai2.7-flash")!;
+    expect(mai).toMatchObject({ modelId: "d5000000-0000-4000-8000-000000000016", imageParameterProfile: "mai-image-v2", imageSupportsMask: false });
+    for (const retiredName of ["aplmart-mai2.6-flash", "aplmart-grok2", "aplmart-nano2"]) expect(models.some(model => model.name === retiredName)).toBe(false);
     const quickInput = { requestId: crypto.randomUUID(), projectId: "mark-fixture", toolKey: "canvas-edit", operationType: "inpaint", sourceUrls: [sourceUrl], parameters: { quickImageAction: "remove-background", size: "4:1", resolution: "4k", quality: "high" } };
     const quickResponse = await request("/api/tasks", "POST", quickInput);
     expect(quickResponse.status).toBe(201);
     const quick = (await quickResponse.json()).task;
-    expect(quick.modelConfigId).toBe(mai.id);
+    expect(quick.modelConfigId).toBe("d5000000-0000-4000-8000-000000000013");
     expect(quick.parameters).not.toHaveProperty("size"); expect(quick.parameters).not.toHaveProperty("resolution");
     expect(quick.parameters.quickImage).toMatchObject({ action: "remove-background", recipeVersion: 2, configurationVersion: 0 });
     expect((await request("/api/tasks", "POST", quickInput).then(response => response.json())).task.id).toBe(quick.id);
@@ -135,6 +142,16 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     expect(submissions[5]!.prompt).toContain("finished full-color subject image");
     expect(submissions[5]!.prompt).not.toContain("Create a precise foreground alpha matte");
     expect(submissions[5]).not.toHaveProperty("size"); expect(submissions[5]).not.toHaveProperty("resolution"); expect(submissions[5]).not.toHaveProperty("quality");
+    const selectedInput = { requestId: crypto.randomUUID(), projectId: "mark-fixture", operationType: "image_generation", modelConfigId: mai.id, prompt: "Selected MAI 2.7 image", parameters: { size: "16:9", resolution: "2k" } };
+    const selectedResponse = await request("/api/tasks", "POST", selectedInput);
+    expect(selectedResponse.status).toBe(201);
+    const selectedTask = (await selectedResponse.json()).task;
+    expect(selectedTask.modelConfigId).toBe(mai.id);
+    expect((await request("/api/tasks", "POST", selectedInput).then(response => response.json())).task.id).toBe(selectedTask.id);
+    for (let attempt = 0; attempt < 100 && submissions.length < 7; attempt++) await Bun.sleep(50);
+    expect(submissions).toHaveLength(7);
+    expect(submissions[6]).toMatchObject({ model: "mai-image-2.7-flash", prompt: selectedInput.prompt, n: 1, size: "16:9", resolution: "2K" });
+    expect(submissions[6]).not.toHaveProperty("web_grounding");
   } finally {
     child.kill(); await child.exited; provider.stop(true);
   }
@@ -170,9 +187,9 @@ for (const downloadStatus of [503, 403]) test(`demo recovers the same Mark job a
   } });
   const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
   const port = reservation.port; reservation.stop(true);
-  const child = Bun.spawn([process.execPath, "--preload", "./tests/fixtures/demo-mark-result-preload.ts", "src/demo-server.ts"], {
+  const child = Bun.spawn([process.execPath, "--no-env-file", "--preload", "./tests/fixtures/demo-mark-result-preload.ts", "src/demo-server.ts"], {
     cwd: fileURLToPath(new URL("..", import.meta.url)), stdout: "ignore", stderr: "pipe",
-    env: { ...process.env, DEMO_STATE_PATH: ":memory:", DEMO_RECOVERY_FILE: "", DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1",
+    env: { ...process.env, DEMO_STATE_PATH: ":memory:", DEMO_RECOVERY_FILE: "", DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1", DEMO_SEEDREAM55_ENABLED: "false",
       OA_LOGIN_ENABLED: "false", AUTH_ENABLED: "true", CREDITS_ENABLED: "false", LOCAL_STANDALONE: "false", ROLE_PORTALS_ENABLED: "true", STANDALONE_WEB_DIR: "",
       OPENTOKEN_API_KEY: "", APIMART_API_KEY: "", GPT_IMAGE_2_API_KEY: "",
       MARK_IMAGE_BASE_URL: `http://127.0.0.1:${provider.port}/v1`, MARK_IMAGE_API_KEY: "fake-mark-recovery-key", DEMO_TEST_RESULT_FAILURE_ONCE: String(downloadStatus) },

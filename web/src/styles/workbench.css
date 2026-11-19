@@ -64,17 +64,6 @@
 .wb-primary-link { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border-radius: var(--ui-radius-control); padding: 12px 16px; background: var(--foreground); color: var(--card); font-size: 14px; font-weight: 500; cursor: pointer; }
 .wb-primary-link:hover { opacity: .82; color: var(--card); }
 .wb-primary-link:active { scale: .97; }
-.wb-task-bar { display: flex; align-items: center; flex-shrink: 0; min-width: 0; gap: 16px; min-height: 56px; padding: 8px 20px; border-bottom: 1px solid var(--border); background: var(--card); }
-.wb-task-new { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; border: 1px solid var(--input); border-radius: var(--ui-radius-control); background: var(--card); color: var(--foreground); font-size: var(--ui-text-body); font-weight: 600; }
-.wb-task-new:hover:not(:disabled) { background: var(--muted); border-color: var(--muted-foreground); }
-.wb-task-list { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; overflow-x: auto; scrollbar-width: thin; }
-.wb-task-item { position: relative; display: flex; flex-shrink: 0; align-items: center; border-radius: var(--ui-radius-control); }
-.wb-task-item:hover { background: var(--muted); }
-.wb-task-item.is-active { background: var(--muted); }
-.wb-task-item.is-active::after { content: ""; position: absolute; bottom: 0; left: 12px; right: 12px; height: 2px; background: var(--foreground); }
-.wb-task-tab { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 8px 12px; color: var(--muted-foreground); font-size: var(--ui-text-secondary); white-space: nowrap; }
-.wb-task-item.is-active .wb-task-tab { color: var(--foreground); font-weight: 600; }
-.wb-task-tab > span:last-child { font-size: var(--ui-text-caption); }
 .wb-sidebar nav { scrollbar-width: thin; scrollbar-color: var(--input) transparent; }
 .wb-app :where(.home-tool, .home-project, .creative-card, .wb-list-card) { animation: wb-card-enter var(--motion-normal) var(--motion-ease); }
 .wb-preview-image { background: var(--muted); }
@@ -86,7 +75,6 @@
     .wb-app *, .wb-app *::before, .wb-app *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 @media (max-width: 640px) {
-    .wb-task-bar { gap: 8px; padding: 8px 12px; }
     .wb-header { gap: 16px; margin-bottom: 20px; }
     .wb-toolbar { width: 100%; }
 }

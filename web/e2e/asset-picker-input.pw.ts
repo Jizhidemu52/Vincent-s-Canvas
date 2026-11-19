@@ -1,6 +1,7 @@
 import { test, expect, IMAGE } from "./fixtures";
 import type { Page } from "@playwright/test";
 import { toolDefinitions } from "../../shared/feature-catalog";
+import { activeWorkbench, workbenchPanes } from "./headless-workbench";
 
 const owner = "00000000-0000-4000-8000-000000000099";
 const imageId = "79000000-0000-4000-8000-000000000001";
@@ -167,14 +168,17 @@ for (const multiple of [false, true]) {
             await readStarted;
             if (boundary === "task") {
                 await dialog.getByRole("button", { name: "Close", exact: true }).click();
-                await page.getByRole("button", { name: "新建任务", exact: true }).click();
-                const active = page.getByRole("tabpanel");
-                await expect(page.getByRole("tab", { name: /^任务 2/ })).toHaveAttribute("aria-selected", "true");
+                await activeWorkbench(page).getByRole("tab", { name: /历史记录/ }).click();
+                await activeWorkbench(page).locator(".image-history-panel").getByRole("button", { name: "新建", exact: true }).click();
+                const active = activeWorkbench(page);
+                await expect(workbenchPanes(page)).toHaveCount(2);
+                await expect(workbenchPanes(page).nth(1)).toBeVisible();
                 release();
-                await expect(page.getByRole("tab", { name: /^任务 1/ })).not.toContainText("处理中");
+                await expect(workbenchPanes(page).first().locator('img[alt="延迟素材原件"]')).toHaveCount(1);
                 await expect(active.getByRole("region", { name: "参考图", exact: true }).getByRole("img")).toHaveCount(0);
-                await page.getByRole("tab", { name: /^任务 1/ }).click();
-                await expect(active.getByRole("region", { name: "参考图", exact: true }).getByRole("img", { name: "延迟素材原件", exact: true })).toBeVisible();
+                await page.reload();
+                await expect(workbenchPanes(page).first().locator('img[alt="延迟素材原件"]')).toHaveCount(1);
+                await expect(active.getByRole("region", { name: "参考图", exact: true }).getByRole("img")).toHaveCount(0);
             } else {
                 await context.route("**/api/auth/session", route => route.fulfill({ json: { user: { id: "00000000-0000-4000-8000-000000000088", username: "second", displayName: "第二员工", role: "designer", status: "active", creditBalance: 999 } } }));
                 await page.evaluate(() => window.dispatchEvent(new Event("focus")));

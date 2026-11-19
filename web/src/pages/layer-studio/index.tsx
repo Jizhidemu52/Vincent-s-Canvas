@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Select, Tooltip } from "antd";
 import { ChevronDown, ChevronUp, ImagePlus, Layers3, LoaderCircle, RefreshCw, Sparkles, X } from "lucide-react";
-import { WorkbenchTasks, useWorkbenchTask, useWorkbenchTaskStatus } from "@/components/workbench-tasks";
+import { WorkbenchTasks, useWorkbenchTask } from "@/components/workbench-tasks";
 import { useUserStore } from "@/stores/use-user-store";
 import { useModuleEnabled } from "@/stores/use-module-store";
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
@@ -20,7 +20,7 @@ import { DisplayText, DisplayTranslationPreview } from "@/hooks/use-display-text
 const control = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50";
 const smallButton = "min-h-8 rounded-md px-2 py-1 text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-40";
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="grid min-w-0 gap-2 text-sm font-medium">{label}{children}</label>; }
-const jobLabel = (job: LayerStudioJob) => job.phase === "complete" ? "已完成" : job.phase === "failed" ? "未完成" : job.phase === "uncertain" ? "待核查" : job.document ? "正在保存原件" : "处理中";
+const jobLabel = (job: LayerStudioJob) => job.phase === "complete" ? "生成成功" : job.document?.status === "partial" ? "保存失败" : job.phase === "failed" ? "生成失败" : job.phase === "uncertain" ? "暂未完成" : "处理中";
 
 function ReferencePreview({ reference, assertCurrent }: { reference: LayerStudioReference; assertCurrent: () => void }) {
     const t = useUiText();
@@ -67,7 +67,6 @@ function LayerStudioPane({ ownerId }: { ownerId: string }) {
     catch (caught) { validation = caught instanceof Error && !caught.message.startsWith("[") ? caught.message : "请检查尺寸、图层数量和参数组合。"; }
     const locked = !ready || busy || uploading || unresolved;
     const quote = estimate?.key === estimateKey ? estimate.value : null;
-    useWorkbenchTaskStatus({ ready, busy: busy || uploading || (!workspace.paused && state.jobs.some(job => job.phase === "pending" || job.phase === "submitting")), pending: unresolved, label: selected?.phase === "complete" ? t("已完成") : "" });
 
     useEffect(() => {
         setEstimateError("");
@@ -140,18 +139,24 @@ function LayerStudioPane({ ownerId }: { ownerId: string }) {
                     {!enabled ? <p className="text-sm text-muted-foreground">{t("功能暂未开放；已有结果仍可编辑和下载。")}</p> : validation ? <p className="text-sm text-muted-foreground">{layerStudioUiMessage(validation)}</p> : estimateError ? <div role="alert" className="text-sm text-destructive">{layerStudioUiMessage(estimateError)}<button type="button" className={smallButton} onClick={() => { setEstimate(null); setEstimateAttempt(value => value + 1); }}>{t("重新检查")}</button></div>
                         : !quote && <p className="text-sm text-muted-foreground">{t("正在检查任务配置…")}</p>}
                     <button type="button" aria-label={form.mode === "decompose" ? t("开始拆分") : t("生成图片")} aria-busy={busy} disabled={locked || !enabled || Boolean(validation || error || estimateError) || !quote} onClick={() => void workspace.submit()} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40">{busy ? <LoaderCircle size={16} className="animate-spin" /> : <Sparkles size={16} />}{busy ? t("处理中…") : form.mode === "decompose" ? t("开始拆分") : t("生成图片")}</button>
-                    {unresolved && <p className="text-[13px] text-muted-foreground">{t("此页签保留原任务；可新建独立任务，不要重复提交。")}</p>}
+                    {unresolved && <button type="button" className={`${smallButton} w-full`} disabled={!taskPane.ready || taskPane.creating} onClick={() => void taskPane.createNewTask()}>{t("继续创作")}</button>}
                 </div>
             </aside>
             <main className="min-h-[440px] min-w-0 space-y-4 p-4 lg:overflow-y-auto" aria-label={t("结果与图层编辑")}>
-                <details className="rounded-lg border border-border p-3" onToggle={event => setAccountHistoryOpen(event.currentTarget.open)}><summary className="cursor-pointer text-sm font-medium">{t("账号历史记录")}</summary><div className="mt-4"><GenerationAccountHistory board="layer-studio" active={accountHistoryOpen} /></div></details>
+                <div role="tablist" aria-label={t("结果与历史")} className="flex items-center gap-4 border-b border-border">
+                    <button type="button" role="tab" aria-selected={!accountHistoryOpen} className={`${smallButton} ${!accountHistoryOpen ? "border-b-2 border-foreground font-semibold" : "text-muted-foreground"}`} onClick={() => setAccountHistoryOpen(false)}>{t("本次结果")}</button>
+                    <button type="button" role="tab" aria-selected={accountHistoryOpen} className={`${smallButton} ${accountHistoryOpen ? "border-b-2 border-foreground font-semibold" : "text-muted-foreground"}`} onClick={() => setAccountHistoryOpen(true)}>{t("历史记录")}</button>
+                </div>
+                <div hidden={!accountHistoryOpen}><GenerationAccountHistory board="layer-studio" active={accountHistoryOpen} />
+                    {state.jobs.length > 0 && <Field label={t("本机历史记录")}><Select aria-label={t("本机历史记录")} value={selected?.requestId || undefined} onChange={selectedRequestId => { void update(previous => ({ ...previous, selectedRequestId })).then(() => setAccountHistoryOpen(false)).catch(() => {}); }} options={state.jobs.map(job => ({ value: job.requestId, label: `${new Date(job.createdAt).toLocaleString(locale === "en-US" ? "en-US" : undefined)} · ${t(jobLabel(job))}` }))} /></Field>}
+                </div>
+                <div hidden={accountHistoryOpen} className="space-y-3">
                 {error && <div role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm text-destructive">{layerStudioUiMessage(error)}<button type="button" className={smallButton} onClick={() => void workspace.retrySave().catch(() => {})}>{t("重试保存")}</button></div>}
-                {state.jobs.length > 0 && <Field label={t("任务记录")}><Select aria-label={t("任务记录")} value={selected?.requestId || undefined} onChange={selectedRequestId => void update(previous => ({ ...previous, selectedRequestId })).catch(() => {})} options={state.jobs.map(job => ({ value: job.requestId, label: `${new Date(job.createdAt).toLocaleString(locale === "en-US" ? "en-US" : undefined)} · ${t(jobLabel(job))} · ${job.submission.parameters.layer_decomposition ? t("图层拆分") : t("图片生成")}` }))} /></Field>}
-                {selected && <section className="space-y-2 rounded-lg border border-border p-3 text-sm" aria-label={t("原任务状态")}><div className="flex flex-wrap items-center justify-between gap-2"><strong>{t(jobLabel(selected))}</strong><span className="break-all text-[13px] text-muted-foreground">{t("请求编号：")}{selected.requestId}</span></div>{selected.notice && <p>{layerStudioUiMessage(selected.notice)}</p>}{selected.document && <p>{t("已保存 {saved} / {total} 份原件", { saved: selected.document.items.filter(item => item.state === "saved").length, total: selected.document.expectedOutputCount })}</p>}{unresolvedLayerStudioJob(selected) && <div className="flex flex-wrap gap-1"><button type="button" className={smallButton} disabled={busy} onClick={() => void workspace.refresh()}><RefreshCw size={12} className="mr-1 inline" />{t("查询原任务")}</button><button type="button" className={smallButton} disabled={busy || workspace.paused} onClick={workspace.pause}>{t("暂停自动查询")}</button>{selected.taskStatus === "paused" && selected.upstreamAccepted && <button type="button" className={smallButton} disabled={busy} onClick={() => void workspace.resume(selected)}>{t("恢复原任务查询 / 保存")}</button>}</div>}</section>}
-                {workspace.queryNotice && <p role="status" className="text-sm text-muted-foreground">{layerStudioUiMessage(workspace.queryNotice)}</p>}
+                {selected && <div className="flex items-center justify-between text-sm" aria-label={t("生成状态")}><strong>{t(jobLabel(selected))}</strong>{!selected.document && unresolvedLayerStudioJob(selected) && <button type="button" className={smallButton} disabled={busy} onClick={() => void workspace.refresh()}><RefreshCw size={12} className="mr-1 inline" />{t("刷新结果")}</button>}</div>}
+                {workspace.queryNotice && <p role="status" className="text-sm text-muted-foreground">{t("暂时无法获取结果，系统会继续更新。")}</p>}
                 {selected?.document ? <LayerStudioEditor key={selected.requestId} document={selected.document} value={selected.edit} recovering={busy} onRefresh={unresolvedLayerStudioJob(selected) ? workspace.refresh : undefined} onResume={unresolvedLayerStudioJob(selected) && selected.taskStatus === "paused" && selected.upstreamAccepted ? () => workspace.resume(selected) : undefined} onChange={edit => { void update(previous => ({ ...previous, jobs: previous.jobs.map(job => job.requestId === selected.requestId ? { ...job, edit } : job) })).catch(() => {}); }} />
                     : <div className="flex min-h-72 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground"><Layers3 size={36} strokeWidth={1} /><h2 className="text-sm font-medium text-foreground">{unresolved ? t("原任务处理中，结果会逐项保存") : t("从一张图片开始，也可以创造新画面")}</h2><p className="max-w-sm text-sm leading-relaxed">{t("结果保留为原始文件。拆分后可选择、移动、缩放、显隐与调整叠放顺序，再导出新的 PNG，不覆盖原件。")}</p></div>}
-                <p className="text-[13px] leading-relaxed text-muted-foreground">{t("已提交任务的提示词、参数与原件可在账号历史跨浏览器查看。未提交输入与编辑位置保存在此浏览器；刷新只查询既有任务，不会重新生成。")}</p>
+                </div>
             </main>
         </div>
     </div>;

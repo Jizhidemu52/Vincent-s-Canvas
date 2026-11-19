@@ -4,7 +4,7 @@ export type PromptScope = "personal" | "team" | "public";
 export type PromptLibraryScope = "all" | "general" | PromptScope;
 export type PromptTargetTool = "image-generation" | "detail-enhance" | "image-edit" | "angle-control" | "batch-edit" | "seamless-stitch" | "video" | "canvas";
 export const promptTargetLabels: Record<PromptTargetTool, string> = {
-    "image-generation": "图像生成", "detail-enhance": "细节增强", "image-edit": "图片编辑", "angle-control": "角度控制",
+    "image-generation": "图片编辑", "detail-enhance": "细节增强", "image-edit": "图片编辑", "angle-control": "角度控制",
     "batch-edit": "批量改图", "seamless-stitch": "无缝拼接", video: "视频生成", canvas: "自由画布",
 };
 export type PromptTemplate = {
@@ -206,7 +206,7 @@ export function promptDestination(targetTool: PromptTargetTool, reuseToken: stri
         params.set("promptTool", targetTool);
         return `/canvas?${params}`;
     }
-    if (targetTool !== "image-generation") params.set("tool", targetTool);
+    params.set("tool", targetTool === "image-generation" ? "image-edit" : targetTool);
     return `/image?${params}`;
 }
 

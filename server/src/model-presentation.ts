@@ -137,6 +137,7 @@ const anonymousProfiles = {
   "quality-resolution-v2": "quality-resolution-v2",
   "grok-image": "grok-image",
   "mai-image": "mai-image",
+  "mai-image-v2": "mai-image-v2",
   seedream55: "seedream55",
 } as const;
 
@@ -165,7 +166,7 @@ export function presentPublicModel(model: Record<string, unknown>, role: unknown
       ? model.displayOrder : 1000 + defaultModelOrder(model),
     imageParameterProfile: hidden ? anonymousProfiles[profile] : profile,
     ...(image && mark ? { imageSupportsMask: /^gpt-image-2\.[56]-(?:flare|sunburst)$/.test(mark.modelId) } : {}),
-    ...(studio || mark?.modelId === "gemini-3.1-flash-image-preview-official" ? { imageSupportsOfficialFallback: false } : {}),
+    ...(studio ? { imageSupportsOfficialFallback: false } : {}),
     ...(image ? { publicName: publicModelName(model), modelIdentityHidden: hidden } : {}),
     ...(label ? { publicDescription: label.description } : {}),
   };

@@ -3,21 +3,21 @@ import { readFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import { test, expect, IMAGE, fixturePng, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
+import { activeWorkbench as active, workbenchPanes, readWorkbenchRegistry, readWorkspaceRecords } from "./headless-workbench";
 
-const active = (page: Page) => page.getByRole("tabpanel");
-const tabs = (page: Page) => page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab");
-async function expectActiveTabVisible(page: Page) {
-    await expect.poll(async () => {
-        const strip = await page.getByRole("tablist", { name: "任务列表", exact: true }).boundingBox();
-        const selected = await tabs(page).filter({ has: page.locator(":scope[aria-selected=true]") }).boundingBox();
-        return Boolean(strip && selected && selected.x >= strip.x - 1 && selected.x + selected.width <= strip.x + strip.width + 1);
-    }).toBe(true);
-}
 async function openNext(page: Page, count: number) {
-    await page.getByRole("button", { name: "新建任务", exact: true }).click();
-    await expect(tabs(page)).toHaveCount(count);
-    await expect(tabs(page).nth(count - 1)).toHaveAttribute("aria-selected", "true");
+    await expect(active(page)).toBeVisible();
+    const continuation = active(page).getByRole("button", { name: "新建任务，继续创作", exact: true });
+    if (await continuation.isVisible()) await continuation.click();
+    else {
+        await active(page).getByRole("tab", { name: /^历史记录/ }).click();
+        await active(page).getByRole("button", { name: "新建", exact: true }).click();
+    }
+    await expect(workbenchPanes(page)).toHaveCount(count);
+    await expect(workbenchPanes(page).last()).toBeVisible();
 }
+const paneImage = (page: Page, index: number) => workbenchPanes(page).nth(index).getByRole("img", { name: "生成结果 1", exact: true, includeHidden: true });
+const panePrompt = (page: Page, index: number) => workbenchPanes(page).nth(index).getByRole("textbox", { name: "图像提示词", exact: true, includeHidden: true });
 async function upload(page: Page, name: string, buffer = IMAGE) {
     const chooser = page.waitForEvent("filechooser");
     await active(page).getByRole("button", { name: "上传图片", exact: true }).click();
@@ -33,8 +33,6 @@ function finish(api: MockCanvasApi, index: number, failed = false) {
 async function originalDigest(page: Page) {
     const image = active(page).getByRole("img", { name: "生成结果 1", exact: true });
     await expect(image).toBeVisible();
-    // The displayed thumbnail is not the original. The preview opens the source
-    // URL; the task's stored result bytes are verified independently below.
     return page.evaluate(async () => {
         const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
         const entries: any[] = [];
@@ -44,7 +42,7 @@ async function originalDigest(page: Page) {
 }
 
 for (const route of [
-    { path: "/image", button: "开始生成", prompt: true, reference: false },
+    { path: "/image", button: "开始编辑", prompt: true, reference: true },
     { path: "/image?tool=image-edit", button: "开始编辑", prompt: true, reference: true },
     { path: "/item-extract", button: "提取产品图", prompt: false, reference: true },
     { path: "/hd-upscale", button: "高清放大", prompt: false, reference: true },
@@ -69,7 +67,7 @@ for (const route of [
             const submit = active(page).getByRole("button", { name: route.button, exact: true });
             await expect(submit).toBeEnabled(); await submit.click();
             await expect.poll(() => api.submissions.length).toBe(index + 1);
-            await expect(tabs(page).nth(index)).toContainText("处理中");
+            await expect(active(page).getByRole("button", { name: "新建任务，继续创作", exact: true })).toBeEnabled();
             expect([...api.tasks.values()].every(task => task.status === "processing")).toBe(true);
         }
         expect(new Set(api.submissions.map(item => item.requestId)).size).toBe(6);
@@ -82,33 +80,30 @@ for (const route of [
                 expect(createHash("sha256").update(api.assetBytes.get(assetId)!).digest("hex")).toBe(createHash("sha256").update(IMAGE).digest("hex"));
             }
         }
-        // Finish the newest task first, with another task failing. Neither may
-        // replace a different tab's pending card or edit its frozen input.
         finish(api, 5); finish(api, 2, true);
-        await expect(tabs(page).nth(5)).toContainText("已完成");
-        await expect(tabs(page).nth(2)).toContainText("已失败");
-        await tabs(page).nth(0).click();
-        await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toHaveCount(0);
-        if (route.prompt) await expect(active(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("MULTI_0_独立款式，不改变其他任务");
+        await expect(paneImage(page, 5)).toBeVisible();
+        await expect(workbenchPanes(page).nth(2)).toContainText("隔离测试：已确认失败，不自动重试");
+        await expect(paneImage(page, 0)).toHaveCount(0);
+        if (route.prompt) await expect(panePrompt(page, 0)).toHaveValue("MULTI_0_独立款式，不改变其他任务");
         for (const index of [4, 1, 3, 0]) finish(api, index);
-        await expect(tabs(page).nth(0)).toContainText("已完成");
+        await expect(paneImage(page, 0)).toHaveCount(1);
         const logs = await originalDigest(page);
         const record = logs.find(log => log.sourceTaskId === [...api.tasks.keys()][0]);
         expect(record).toBeTruthy();
         if (route.reference) expect(record!.referenceNames).toEqual(["source-0.png"]);
         if (route.prompt) expect(record!.prompt).toBe(api.submissions[0].prompt);
         await page.reload();
-        await expect(tabs(page)).toHaveCount(6);
-        await expect(tabs(page).nth(0)).toHaveAttribute("aria-selected", "true");
+        await expect(workbenchPanes(page)).toHaveCount(6);
+        await expect(workbenchPanes(page).last()).toBeVisible();
         await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
         expect(api.submissions).toHaveLength(6);
-        await tabs(page).nth(5).click();
-        await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
         if (route.prompt) await expect(active(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("MULTI_5_独立款式，不改变其他任务");
+        await active(page).getByRole("tab", { name: /^历史记录/ }).click();
+        await expect(active(page).locator("button.image-history-card")).toHaveCount(5);
+        await active(page).locator("button.image-history-card").last().click();
+        await expect(active(page).getByRole("heading", { name: "历史预览", exact: true })).toBeVisible();
         await page.setViewportSize({ width: 390, height: 844 });
-        await expectActiveTabVisible(page);
-        // A desktop task tooltip may finish its exit animation after the resize.
-        // Keep the same overflow bound while waiting for that layout to settle.
+        await expect(page.getByRole("tablist", { name: "任务列表", exact: true })).toHaveCount(0);
         await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
         await page.screenshot({ path: testInfo.outputPath(`${route.button}-multi-mobile.png`), fullPage: true });
     });
@@ -123,23 +118,23 @@ for (const completion of ["before switching", "after switching"] as const) {
         await active(page).getByRole("button", { name: "提取产品图", exact: true }).click();
         await expect.poll(() => api.submissions.length).toBe(1);
         finish(api, 0);
-        await expect(tabs(page).nth(0)).toContainText("已完成");
+        await expect(paneImage(page, 0)).toBeVisible();
 
         await openNext(page, 2);
         await upload(page, "bag.png", sources[1]);
         await active(page).getByRole("button", { name: "提取产品图", exact: true }).click();
         await expect.poll(() => api.submissions.length).toBe(2);
-        await expect(tabs(page).nth(1)).toContainText("处理中");
+        await expect(active(page).getByRole("button", { name: "新建任务，继续创作", exact: true })).toBeEnabled();
         const taskIds = [...api.tasks.keys()];
         const requestIds = api.submissions.map(input => input.requestId);
         expect(new Set(requestIds).size).toBe(2);
         if (completion === "before switching") {
             finish(api, 1);
-            await expect(tabs(page).nth(1)).toContainText("已完成");
+            await expect(paneImage(page, 1)).toBeVisible();
         }
         await openNext(page, 3);
         if (completion === "after switching") finish(api, 1);
-        await expect(tabs(page).nth(1)).toContainText("已完成");
+        await expect(paneImage(page, 1)).toHaveCount(1);
         await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toHaveCount(0);
 
         const readCompleted = () => page.evaluate(async () => {
@@ -153,15 +148,15 @@ for (const completion of ["before switching", "after switching"] as const) {
         expect(storedBefore.find(log => log.sourceTaskId === taskIds[1])?.workspaceId).toMatch(/^item-extract:task:/);
 
         await page.reload();
-        await expect(tabs(page)).toHaveCount(3);
-        await expect(tabs(page).nth(2)).toHaveAttribute("aria-selected", "true");
-        await expect(tabs(page).nth(0)).toContainText("已完成");
-        await expect(tabs(page).nth(1)).toContainText("已完成");
-        await expect(tabs(page).nth(2)).toContainText("草稿");
+        await expect(workbenchPanes(page)).toHaveCount(3);
+        await expect(workbenchPanes(page).last()).toBeVisible();
+        await expect(paneImage(page, 0)).toHaveCount(1);
+        await expect(paneImage(page, 1)).toHaveCount(1);
         await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toHaveCount(0);
         for (const index of [1, 0]) {
-            await tabs(page).nth(index).click();
-            await expect(active(page).getByRole("img", { name: index ? "bag.png" : "knit.png", exact: true })).toBeVisible();
+            await expect(workbenchPanes(page).nth(index).getByRole("img", { name: index ? "bag.png" : "knit.png", exact: true, includeHidden: true })).toHaveCount(1);
+            await active(page).getByRole("tab", { name: /^历史记录/ }).click();
+            await active(page).locator("button.image-history-card").nth(1 - index).click();
             await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
             const downloadPromise = page.waitForEvent("download");
             await active(page).getByRole("button", { name: "下载", exact: true }).click();
@@ -181,30 +176,31 @@ for (const completion of ["before switching", "after switching"] as const) {
 
 test("refresh during two live tasks only queries the original IDs and cross-board work is not locked", async ({ page, api }) => {
     api.taskStatus = "processing";
-    await page.goto("/image");
+    await page.goto("/image?tool=image-edit");
+    await upload(page, "restore-A.png");
     await active(page).getByRole("textbox", { name: "图像提示词", exact: true }).fill("restore-A");
-    await active(page).getByRole("button", { name: "开始生成", exact: true }).click();
+    await active(page).getByRole("button", { name: "开始编辑", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
     await openNext(page, 2);
+    await upload(page, "restore-B.png");
     await active(page).getByRole("textbox", { name: "图像提示词", exact: true }).fill("restore-B");
-    await active(page).getByRole("button", { name: "开始生成", exact: true }).click();
+    await active(page).getByRole("button", { name: "开始编辑", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(2);
     const ids = [...api.tasks.keys()];
     await page.reload();
-    await expect(tabs(page)).toHaveCount(2);
+    await expect(workbenchPanes(page)).toHaveCount(2);
     await expect.poll(() => ids.every(id => api.taskReads.includes(`/api/tasks/${id}`))).toBe(true);
     await expect(active(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("restore-B");
     expect(api.submissions).toHaveLength(2);
-    await page.goto("/image?tool=image-edit");
+    await page.goto("/item-extract");
     await upload(page, "other-board.png");
-    await active(page).getByRole("textbox", { name: "图像提示词", exact: true }).fill("edit-C");
-    await active(page).getByRole("button", { name: "开始编辑", exact: true }).click();
+    await active(page).getByRole("button", { name: "提取产品图", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(3);
     for (const index of [2, 1, 0]) finish(api, index);
-    await expect(tabs(page).nth(0)).toContainText("已完成");
-    await page.goto("/image");
-    await expect(tabs(page)).toHaveCount(2);
-    await expect(tabs(page).nth(1)).toContainText("已完成");
+    await expect(paneImage(page, 0)).toBeVisible();
+    await page.goto("/image?tool=image-edit");
+    await expect(workbenchPanes(page)).toHaveCount(2);
+    await expect(paneImage(page, 1)).toBeVisible();
     expect(api.submissions).toHaveLength(3);
 });
 
@@ -219,7 +215,7 @@ for (const [route, button] of [["/item-extract", "提取产品图"], ["/remove-b
         await active(page).getByRole("button", { name: button, exact: true }).click();
         await expect.poll(() => api.submissions.length).toBe(1);
         const originalTask = [...api.tasks.keys()][0];
-        await expect(tabs(page).nth(1)).toContainText("处理中");
+        await expect(active(page).getByRole("button", { name: "新建任务，继续创作", exact: true })).toBeEnabled();
         await page.addInitScript(() => {
             const original = IDBObjectStore.prototype.openCursor;
             const success = Object.getOwnPropertyDescriptor(IDBRequest.prototype, "onsuccess")!;
@@ -250,16 +246,14 @@ for (const [route, button] of [["/item-extract", "提取产品图"], ["/remove-b
         await page.reload();
         await expect.poll(() => page.evaluate(() => (window as any).__pendingReadGate.count)).toBeGreaterThan(0);
         // A held native transaction also delays later store initialization on
-        // the shared database barrier. Verify preserved media after release,
-        // while checking that neither close nor submit can bypass the read.
+        // the shared database barrier. Submission must wait for that read.
         await expect(active(page).getByText("正在核对原任务记录…", { exact: true })).toBeVisible();
         await expect(active(page).getByRole("button", { name: button, exact: true })).toBeDisabled();
-        await expect(page.getByRole("button", { name: "关闭任务 2 页签", exact: true })).toBeDisabled();
+        await expect(page.getByRole("button", { name: /^关闭任务 \d+ 页签$/ })).toHaveCount(0);
         expect(api.submissions).toHaveLength(1);
         await page.evaluate(() => (window as any).__pendingReadGate.release());
-        // Restored tasks are observed, not newly running submissions. The tab
-        // stays pending while its original task is checked without another POST.
-        await expect(tabs(page).nth(1)).toContainText("待核查");
+        // Restored tasks are observed without issuing another POST.
+        await expect(workbenchPanes(page)).toHaveCount(2);
         await expect(active(page).getByText("原任务仍在处理中，完成后会自动取回结果；也可刷新状态。", { exact: true })).toBeVisible();
         await expect(active(page).getByRole("img", { name: "pending-original.png", exact: true })).toBeVisible();
         await expect.poll(() => api.taskReads.includes(`/api/tasks/${originalTask}`)).toBe(true);
@@ -269,20 +263,19 @@ for (const [route, button] of [["/item-extract", "提取产品图"], ["/remove-b
         await expect(readError).toBeVisible();
         await expect(active(page).getByRole("img", { name: "pending-original.png", exact: true })).toBeVisible();
         await expect(active(page).getByRole("button", { name: button, exact: true })).toBeDisabled();
-        await expect(page.getByRole("button", { name: "关闭任务 2 页签", exact: true })).toBeDisabled();
+        await expect(page.getByRole("button", { name: /^关闭任务 \d+ 页签$/ })).toHaveCount(0);
         expect(api.submissions).toHaveLength(1);
         await page.evaluate(() => (window as any).__pendingReadGate.release());
         await active(page).getByRole("button", { name: "重试读取原任务", exact: true }).click();
         await expect(readError).toHaveCount(0);
         await expect(active(page).getByRole("button", { name: "重试读取原任务", exact: true })).toHaveCount(0);
-        await expect(tabs(page).nth(1)).toContainText("待核查");
+        await expect(workbenchPanes(page)).toHaveCount(2);
         await expect(active(page).getByText("原任务仍在处理中，完成后会自动取回结果；也可刷新状态。", { exact: true })).toBeVisible();
         finish(api, 0);
         // The API fixture has no SSE event stream. Refocusing is a real,
         // read-only reconciliation trigger, not a new submission or recovery.
         await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-        await expect(tabs(page).nth(1)).toContainText("已完成");
-        await expect(page.getByRole("button", { name: "关闭任务 2 页签", exact: true })).toBeEnabled();
+        await expect(paneImage(page, 1)).toBeVisible();
         expect(api.submissions).toHaveLength(1);
         expect([...api.tasks.keys()]).toEqual([originalTask]);
         const sourceAssetId = api.submissions[0].sourceUrls[0].split("/")[3];
@@ -317,24 +310,25 @@ for (const scene of scenes) {
             await fillScene(page, scene, index);
             await active(page).locator(".cs-generate").click();
             await expect.poll(() => api.submissions.length).toBe(index + 1);
-            await expect(tabs(page).nth(index)).toContainText("处理中");
+            await expect(active(page).getByRole("button", { name: "新建任务，继续创作", exact: true })).toBeEnabled();
             expect(api.submissions[index].promptInput.fields.description).toBe(`SCENE_${scene}_${index}_仅本任务`);
         }
         expect(new Set(api.submissions.map(item => item.requestId)).size).toBe(3);
         finish(api, 2);
-        await expect(tabs(page).nth(2)).toContainText("已完成");
-        await tabs(page).nth(0).click();
-        await expect(active(page).getByRole("button", { name: "下载原图", exact: true })).toHaveCount(0);
+        await expect(active(page).getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
+        await expect(workbenchPanes(page).nth(0).getByRole("button", { name: "下载原图", exact: true, includeHidden: true })).toHaveCount(0);
         finish(api, 0); finish(api, 1);
-        await expect(tabs(page).nth(0)).toContainText("已完成");
+        await expect(workbenchPanes(page).nth(0).getByRole("button", { name: "下载原图", exact: true, includeHidden: true })).toHaveCount(1);
+        await expect.poll(async () => (await readWorkspaceRecords<any>(page, "creative_scene_workspaces")).filter(({ key, value }) => key.startsWith("history-record:") && value.successCount === 1).length).toBe(3);
         await page.reload();
-        await expect(tabs(page)).toHaveCount(3);
-        await expect(tabs(page).nth(0)).toContainText("已完成");
+        await expect(workbenchPanes(page)).toHaveCount(3);
         await expect(active(page).getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
-        await expect(active(page).locator(`textarea[id^="cs-${scene}-description-"]`)).toHaveValue(`SCENE_${scene}_0_仅本任务`);
-        await tabs(page).nth(2).click();
-        await expect(active(page).getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
+        await expect(workbenchPanes(page).nth(0).locator(`textarea[id^="cs-${scene}-description-"]`)).toHaveValue(`SCENE_${scene}_0_仅本任务`);
         await expect(active(page).locator(`textarea[id^="cs-${scene}-description-"]`)).toHaveValue(`SCENE_${scene}_2_仅本任务`);
+        await active(page).getByRole("button", { name: /^最近任务/ }).click();
+        await expect(active(page).locator("button.cs-history-item")).toHaveCount(3);
+        await active(page).locator("button.cs-history-item").last().click();
+        await expect(active(page).getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
         expect(api.submissions).toHaveLength(3);
     });
 }
@@ -353,18 +347,18 @@ test("MJ blend owns three pairs of references without a prompt or cross-task upl
         await expect.poll(() => api.submissions.length).toBe(index + 1);
         expect(api.submissions[index].sourceUrls).toHaveLength(2);
         expect(api.submissions[index].modelConfigId).toBe(model.id);
-        await expect(tabs(page).nth(index)).toContainText("处理中");
+        await expect(active(page).getByRole("button", { name: "新建任务，继续创作", exact: true })).toBeEnabled();
     }
     expect(new Set(api.submissions.flatMap(item => item.sourceUrls)).size).toBe(6);
     for (const index of [2, 0, 1]) finish(api, index);
-    await expect(tabs(page).nth(2)).toContainText("已完成");
-    await page.reload(); await expect(tabs(page)).toHaveCount(3);
+    await expect(paneImage(page, 2)).toBeVisible();
+    await page.reload(); await expect(workbenchPanes(page)).toHaveCount(3);
     await expect(active(page).getByRole("img", { name: "pair-2-first.png", exact: true })).toBeVisible();
     await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
     expect(api.submissions).toHaveLength(3);
 });
 
-test("a failed tab-registry write preserves the current draft and does not create an untracked task", async ({ page, api }) => {
+test("a failed workspace-registry write preserves the current draft and does not create an untracked task", async ({ page, api }) => {
     await page.addInitScript(() => {
         const original = IDBObjectStore.prototype.put;
         let failures = 1;
@@ -375,18 +369,18 @@ test("a failed tab-registry write preserves the current draft and does not creat
     });
     await page.goto("/image");
     await active(page).getByRole("textbox", { name: "图像提示词", exact: true }).fill("保存失败不能清掉的草稿");
-    await page.getByRole("button", { name: "新建任务", exact: true }).click();
+    await active(page).getByRole("tab", { name: /^历史记录/ }).click();
+    await active(page).getByRole("button", { name: "新建", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("隔离测试存储已满");
-    await expect(tabs(page)).toHaveCount(1);
+    await expect(workbenchPanes(page)).toHaveCount(1);
     await expect(active(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("保存失败不能清掉的草稿");
     await openNext(page, 2);
     await expect(active(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("");
-    await tabs(page).nth(0).click();
-    await expect(active(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("保存失败不能清掉的草稿");
+    await expect(panePrompt(page, 0)).toHaveValue("保存失败不能清掉的草稿");
     expect(api.submissions).toHaveLength(0);
 });
 
-test("corrupt tab identity fails closed and retry never overwrites the unresolved registry", async ({ page, api }) => {
+test("corrupt workspace identity fails closed and retry never overwrites the unresolved registry", async ({ page, api }) => {
     await page.goto("/image"); await openNext(page, 2);
     const receipt = await page.evaluate(async () => {
         const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
@@ -397,7 +391,7 @@ test("corrupt tab identity fails closed and retry never overwrites the unresolve
     });
     await page.reload();
     await expect(page.getByRole("alert")).toContainText("原任务和草稿未被覆盖");
-    await expect(page.getByRole("button", { name: "新建任务", exact: true })).toBeDisabled();
+    await expect(workbenchPanes(page)).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "图像提示词" })).toHaveCount(0);
     await page.getByRole("button", { name: "重试读取", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("原任务和草稿未被覆盖");
@@ -419,36 +413,33 @@ test("employee change hides every original task and never writes the old drafts 
     await expect(page.getByRole("heading", { name: "登录状态已变化，工作区已暂停", exact: true })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "图像提示词" })).toHaveCount(0);
     await page.reload();
-    await expect(tabs(page)).toHaveCount(1);
+    await expect(workbenchPanes(page)).toHaveCount(1);
     await expect(active(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("");
     changed = false; await page.reload();
-    await expect(tabs(page)).toHaveCount(2);
+    await expect(workbenchPanes(page)).toHaveCount(2);
     await expect(active(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("员工甲第二任务保留");
-    await tabs(page).nth(0).click();
-    await expect(active(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("员工甲第一任务保留");
+    await expect(panePrompt(page, 0)).toHaveValue("员工甲第一任务保留");
     expect(api.submissions).toHaveLength(0);
 });
 
 for (const route of ["/image", "/creative/text-to-style"]) {
-    test(`${route} twenty-four long drafts survive reverse switching, closing and reload without generation`, async ({ page, api }, info) => {
+    test(`${route} twenty-four long draft edits remain durable without generation or a top task strip`, async ({ page, api }, info) => {
         await page.goto(route);
         const prompt = () => active(page).getByRole("textbox", { name: route === "/image" ? "图像提示词" : "款式描述", exact: true });
         for (let index = 0; index < 24; index++) {
-            if (index) await openNext(page, index + 1);
+            if (index && route === "/image") await openNext(page, index + 1);
             await prompt().fill(`DRAFT_${index}_` + "保持原款纹理与比例。".repeat(120));
         }
-        for (let index = 23; index >= 0; index--) {
-            await tabs(page).nth(index).click();
-            await expect(prompt()).toHaveValue(`DRAFT_${index}_` + "保持原款纹理与比例。".repeat(120));
+        if (route === "/image") for (let index = 23; index >= 0; index--) {
+            await expect(panePrompt(page, index)).toHaveValue(`DRAFT_${index}_` + "保持原款纹理与比例。".repeat(120));
         }
-        await page.getByRole("button", { name: "关闭任务 24 页签", exact: true }).click();
-        await expect(tabs(page)).toHaveCount(23);
-        await page.reload(); await expect(tabs(page)).toHaveCount(23);
-        await expect(prompt()).toHaveValue("DRAFT_0_" + "保持原款纹理与比例。".repeat(120));
+        await expect(workbenchPanes(page)).toHaveCount(route === "/image" ? 24 : 1);
+        const registry = await readWorkbenchRegistry(page);
+        await page.reload(); await expect(workbenchPanes(page)).toHaveCount(route === "/image" ? 24 : 1);
+        await expect(prompt()).toHaveValue("DRAFT_23_" + "保持原款纹理与比例。".repeat(120));
+        expect(await readWorkbenchRegistry(page)).toEqual(registry);
         await page.setViewportSize({ width: 390, height: 844 });
-        await tabs(page).nth(22).click();
-        await expectActiveTabVisible(page);
-        await expect(prompt()).toHaveValue("DRAFT_22_" + "保持原款纹理与比例。".repeat(120));
+        await expect(page.getByRole("tablist", { name: "任务列表", exact: true })).toHaveCount(0);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
         await page.screenshot({ path: info.outputPath("twenty-four-drafts-mobile.png"), fullPage: true });
         expect(api.submissions).toHaveLength(0);

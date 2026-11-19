@@ -62,7 +62,7 @@ function chatPageHarness(initial: BusinessConfig, savedImageModelId?: string) {
         antd: { App: { useApp: () => app }, Button: "Button", Tooltip: "Tooltip", Popover: "Popover", Select: "Select", Checkbox: "Checkbox" },
         "lucide-react": new Proxy({}, { get: (_, name) => String(name) }),
         "react-router-dom": { useNavigate: () => () => undefined },
-        "@/lib/deployment-features": { deploymentFeatures: { oaLoginEnabled: true, creditsEnabled: false } },
+        "@/lib/deployment-features": { deploymentFeatures: { oaLoginEnabled: true, creditsEnabled: false, imageConversationsEnabled: false } },
         "@/lib/deferred-persist-queue": { createDeferredPersistQueue: () => ({ schedule() {}, flush() {}, clear() {} }) },
         "./chat-session-storage": { chatSessionStorage: { load: async () => [{ id: "session", title: "new", messages: [], updatedAt: "now", chatModelId: "saved-old-model", imageModelId: savedImageModelId }], save: async () => undefined } },
         "./chat-media": { chatMedia: { hydrateSession: async (value: unknown, assertCurrent: () => void) => { assertCurrent(); return value; } } },
@@ -80,7 +80,15 @@ function chatPageHarness(initial: BusinessConfig, savedImageModelId?: string) {
         { matchMedia: () => ({ matches: true }), addEventListener() {}, removeEventListener() {} },
         async () => { directModelReads++; throw new Error("Chat must use the shared model snapshot"); },
     );
-    const render = () => { cursor = 0; const root = module.exports.default(); for (const effect of pending.splice(0)) effect(); return root; };
+    const render = () => {
+        cursor = 0;
+        const boundary = module.exports.default();
+        expect(typeof boundary.type).toBe("function");
+        expect((boundary.type as Function).name).toBe("LegacyChatPage");
+        const root = (boundary.type as Function)(boundary.props) as ReactElement<any>;
+        for (const effect of pending.splice(0)) effect();
+        return root;
+    };
     return {
         set: (patch: Partial<State>) => { business = { ...business, ...patch }; },
         async settle() { let root = render(); for (let index = 0; index < 12; index++) { await Promise.resolve(); root = render(); } return elements(root); },

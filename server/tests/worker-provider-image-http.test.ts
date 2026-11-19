@@ -11,6 +11,7 @@ import { normalizeWorkflowOutputs, parsePromptVariables, readPath, renderTemplat
 import { toolDefinitions } from "../../shared/feature-catalog";
 import { validateSeedream55Reference } from "../src/seedream55-reference";
 import { seedream55PublicDocument } from "../src/seedream55-image";
+import { createConversationTaskSnapshot, validateConversationTaskBinding, validateConversationTaskSources } from "../src/image-conversation-task";
 
 const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAFUlEQVR4nGP8////fwYGBgYWEAHCAD4KBAICIHhuAAAAAElFTkSuQmCC", "base64");
 const origin = "http://ai.in-choice.com.cn";
@@ -26,7 +27,7 @@ function declaration(name: string) {
 // Execute the production dispatcher and request builders, not a test copy of their routing conditions.
 const executeCode = ["executeProvider", "executeApiMartImage", "executeWorkflow", "claimProviderSubmission",
   "isImageWorkflowTask", "isBuiltinSingleImageWorkflow", "singleImageWorkflowRequestBody", "joinUrl"].map(declaration).join("\n");
-const newTask = () => ({ id: "20000000-0000-4000-8000-000000000001", execution_token: "execution-owned", user_id: "30000000-0000-4000-8000-000000000001", model_id: "gpt-image-2.6-flare",
+const newTask = () => ({ id: "20000000-0000-4000-8000-000000000001", request_id: "ordinary-fixture-request", execution_token: "execution-owned", user_id: "30000000-0000-4000-8000-000000000001", model_id: "gpt-image-2.6-flare",
   base_url: "https://provider.invalid/v1", operation_type: "inpaint", prompt: "Keep the bag and change its colour", parameters: {} as Record<string, unknown>,
   source_urls: sources.map(source => `/api/assets/${source.assetId}/content`), upstream_task_id: null as string | null,
   upstream_submission_started_at: null as string | null, poll_deadline_at: null as string | null });
@@ -94,7 +95,7 @@ function harness(options: { origin?: string; failIssue?: boolean; realCacheFailu
       events.push("validate-quick"); if (options.failQuickValidation) throw new Error("Quick source invalid"); return validateQuickImageSource(...args);
     },
     VideoSubmissionClaimLost: class extends Error {}, TaskExecutionLost: class extends Error {}, ApiMartImageTaskPending, ApiMartImageQueryRetryable, preflightApiMartImageRequest,
-    validateSeedream55Reference, seedream55PublicDocument,
+    validateSeedream55Reference, seedream55PublicDocument, validateConversationTaskBinding, validateConversationTaskSources,
     stepApiMartImageTask: (input: ApiMartImageTaskInput) => stepApiMartImageTask(input, { fetch: fakeFetch, sleep: async () => { throw new Error("No polling sleep expected"); } }),
     fetchProviderResult: async () => { downloads++; return { bytes, mimeType: "image/png" }; },
   };
@@ -116,6 +117,57 @@ test("fresh Flare uses ordered HTTP references through the real provider adapter
   expect(h.events).toEqual(["load", "prepare", "grant", "grant", "grant", "persist", "fetch", "persist"]);
   expect(task.upstream_task_id).toBe("upstream-owned");
   expect(h.downloads()).toBe(0);
+});
+
+function conversationTask() {
+  const task = { ...providerTask(), request_id: "ic:70000000-0000-4000-8000-000000000001:image:1",
+    model_config_id: "70000000-0000-4000-8000-000000000002", provider_id: "70000000-0000-4000-8000-000000000003",
+    parameters: { n: 1, count: 1, quality: "high", resolution: "2k", complexity: "low", output_format: "png" } as Record<string, unknown> };
+  task.parameters.conversationInput = createConversationTaskSnapshot({ turnId: "70000000-0000-4000-8000-000000000001",
+    modelConfigId: task.model_config_id, providerId: task.provider_id, baseUrl: task.base_url,
+    prompt: task.prompt, operationType: task.operation_type, parameters: task.parameters, sourceUrls: task.source_urls, sources });
+  return task;
+}
+
+test("conversation original-byte snapshot reaches one provider POST without leaking the internal snapshot", async () => {
+  const h = harness(), task = conversationTask();
+  await expect(h.dispatch(task)).rejects.toBeInstanceOf(ApiMartImageTaskPending);
+  expect(h.calls.filter(call => call.method === "POST")).toHaveLength(1);
+  expect(h.calls[0]!.payload).not.toHaveProperty("conversationInput");
+  expect(h.calls[0]!.payload).toMatchObject({ model: "gpt-image-2.6-flare", n: 1, quality: "high", resolution: "2k" });
+});
+
+test.each(["model", "provider", "endpoint", "prompt", "parameters", "missing"])("conversation %s drift stops before source grants and provider submission", async change => {
+  const h = harness(), task = conversationTask();
+  if (change === "model") task.model_id = "mai-image-2.7-flash";
+  if (change === "provider") task.provider_id = "70000000-0000-4000-8000-000000000004";
+  if (change === "endpoint") task.base_url = "https://changed.invalid/v1";
+  if (change === "prompt") task.prompt += " changed";
+  if (change === "parameters") task.parameters.resolution = "4k";
+  if (change === "missing") delete task.parameters.conversationInput;
+  await expect(h.dispatch(task)).rejects.toThrow("会话");
+  expect(h.calls).toHaveLength(0);
+  expect(h.grants).toHaveLength(0);
+});
+
+test("same-size source mutation cannot replace a frozen conversation original", async () => {
+  const changed = sources.map(source => ({ ...source, bytes: Buffer.from(source.bytes) }));
+  changed[0]!.bytes[changed[0]!.bytes.length - 1] ^= 1;
+  const h = harness({ sourceAssets: changed });
+  await expect(h.dispatch(conversationTask())).rejects.toThrow("原件与已冻结输入不一致");
+  expect(h.calls).toHaveLength(0);
+  expect(h.grants).toHaveLength(0);
+});
+
+test("conversation receipt recovery only polls the original task and never rereads or submits originals", async () => {
+  const h = harness(), task = conversationTask();
+  task.upstream_task_id = "upstream-owned";
+  task.upstream_submission_started_at = new Date().toISOString();
+  task.poll_deadline_at = new Date(Date.now() + 60_000).toISOString();
+  await h.dispatch(task);
+  expect(h.calls.map(call => call.method)).toEqual(["GET"]);
+  expect(h.loaded()).toBe(0);
+  expect(h.grants).toHaveLength(0);
 });
 
 test.each(["image", "image-edit", "canvas-image", "canvas-batch", "creative-text-to-style"])("ordinary Seedream %s submits once using ten owned originals and checkpoints its result before downloading", async toolKey => {
@@ -164,14 +216,14 @@ test("an uncertain earlier submission cannot reload sources, publish references,
   expect(h.grants).toHaveLength(0); expect(h.calls).toHaveLength(0); expect(h.loaded()).toBe(0);
 });
 
-test.each(["gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "gpt-image-2.5-flare", "mai-image-2.6-flash"])(
+test.each(["gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "gpt-image-2.5-flare", "mai-image-2.6-flash", "mai-image-2.7-flash"])(
   "missing owned origin stops %s before granting, uploading or submitting", async model => {
   const h = harness({ origin: "", sourceAssets: [sources[0]!] }), task = { ...newTask(), model_id: model };
   await expect(h.execute(task)).rejects.toMatchObject({ code: "PROVIDER_IMAGE_ORIGIN_REQUIRED" });
   expect(h.grants).toHaveLength(0); expect(h.calls).toHaveLength(0); expect(h.queries).toHaveLength(0);
 });
 
-test.each(["gpt-image-2.6-sunburst", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "mai-image-2.6-flash", "gemini-nano-banana-2.1", "gpt-image-2", "gemini-3.1-flash-image-preview"])(
+test.each(["gpt-image-2.6-sunburst", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "mai-image-2.6-flash", "mai-image-2.7-flash", "gemini-nano-banana-2.1", "gpt-image-2", "gemini-3.1-flash-image-preview"])(
   "every standard APIMart image model %s uses the owned origin without a supplier upload", async model => {
   const h = harness({ sourceAssets: [sources[0]!] }), task = { ...newTask(), model_id: model };
   await expect(h.execute(task)).rejects.toBeInstanceOf(ApiMartImageTaskPending);
@@ -192,6 +244,7 @@ test.each([
   { model: "midjourney", bytes: 12 * 1024 * 1024 + 1, mime: "image/png" },
   { model: "gpt-image-2.5-flare", bytes: 20 * 1024 * 1024 + 1, mime: "image/png" },
   { model: "mai-image-2.6-flash", bytes: 128, mime: "image/tiff" },
+  { model: "mai-image-2.7-flash", bytes: 128, mime: "image/tiff" },
   { model: "gemini-3.1-flash-image-preview", bytes: 128, mime: "image/gif" },
 ])("owned URLs cannot bypass original model byte/MIME restrictions: %p", async scenario => {
   const h = harness({ sourceAssets: [{ ...sources[0]!, bytes: Buffer.alloc(scenario.bytes), mimeType: scenario.mime }] });
@@ -273,7 +326,7 @@ test("production text-only Flare generation does not issue reference grants or u
   expect(h.grants).toHaveLength(0);
 });
 
-test.each(["gpt-image-2.6-sunburst", "gpt-image-2.5-flare", "mai-image-2.6-flash", "gemini-nano-banana-2.1"])(
+test.each(["gpt-image-2.6-sunburst", "gpt-image-2.5-flare", "mai-image-2.6-flash", "mai-image-2.7-flash", "gemini-nano-banana-2.1"])(
   "production dispatcher uses actual model %s, not a tool name or stale UI model parameter", async model => {
     const h = harness({ sourceAssets: [sources[0]!] }), task = { ...providerTask(), model_id: model,
       source_urls: [providerTask().source_urls[0]!], parameters: { tool: "canvas-edit", model: "gpt-image-2.6-flare" } };

@@ -1,7 +1,7 @@
 import type { ReferenceImage } from "@/types/image";
 
 export type ImageOptionField = { key: string; label: string; type?: "number" | "boolean" | "json" | "image"; options?: string[]; min?: number; max?: number; step?: number; tip?: string };
-type Profile = { kind: string; outputFormats?: string[]; backgrounds?: string[]; supportsOfficialFallback?: boolean; supportsGif?: boolean; supportsMarkup?: boolean; supportsComplexity?: boolean };
+type Profile = { kind: string; mai27?: boolean; outputFormats?: string[]; backgrounds?: string[]; supportsOfficialFallback?: boolean; supportsGif?: boolean; supportsMarkup?: boolean; supportsComplexity?: boolean };
 const boolean = (key: string, label: string, tip?: string): ImageOptionField => ({ key, label, type: "boolean", tip });
 const number = (key: string, label: string, min: number, max: number, step = 1): ImageOptionField => ({ key, label, type: "number", min, max, step });
 const moderation = boolean("nsfw_check", "提交前内容检查", "额外调用渠道内容检查，可能增加费用与耗时；不改变模型自身的安全规则。");
@@ -14,7 +14,7 @@ function nativeImageOptionFields(profile: Profile): ImageOptionField[] {
         { key: "background", label: "背景", options: ["auto", "opaque", "transparent"] },
         { key: "output_format", label: "输出格式", options: ["png", "jpeg"], tip: "透明背景固定输出 PNG；不改变已上传的原图。" },
     ];
-    if (profile.kind === "mai-image") return [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k"] }, boolean("web_grounding", "联网参考", "默认关闭；开启后模型可使用联网信息辅助生成。")];
+    if (profile.kind === "mai-image") return [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k"] }, profile.mai27 ? moderation : boolean("web_grounding", "联网参考", "默认关闭；开启后模型可使用联网信息辅助生成。")];
     if (profile.kind === "grok-image") return [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k"] }, moderation];
     if (profile.kind === "standard" || profile.kind === "quality-resolution") return profile.outputFormats?.length ? [
         ...(profile.kind === "quality-resolution" ? [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k", "4k"] }] : []),

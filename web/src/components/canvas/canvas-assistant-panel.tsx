@@ -1,6 +1,6 @@
 import { staticUiText } from "@/lib/static-ui-copy";
 import { useUiText, uiText, useUiLocale } from "@/lib/i18n";
-import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import copyToClipboard from "copy-to-clipboard";
 import { Bot, Copy, Cpu, History, ImageIcon, Maximize2, MoreHorizontal, PanelLeft, PanelRightClose, Plus, Settings2, Trash2, Video, X } from "lucide-react";
 import { Button, Dropdown, Input, Modal, Popover, Segmented, Select as AntSelect, Switch, Tooltip } from "antd";
@@ -20,6 +20,7 @@ import { DisplayText, DisplayTranslationScope, useDisplayText } from "@/hooks/us
 import { useImageDrop } from "@/hooks/use-image-drop";
 import { getModelPickerOptions, resolveModelPickerSource } from "@/lib/model-picker-options";
 import { standaloneEdition } from "@/lib/standalone-edition";
+import { deploymentFeatures } from "@/lib/deployment-features";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
@@ -29,6 +30,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
 import { requestEdit, requestGeneration, requestImageQuestion, requestToolResponse, toolResponseToInput, type AiTextMessage, type ClaudeAssistantContent, type ResponseInputMessage, type ResponseToolCall, type ToolResponseResult } from "@/services/api/image";
 import { imageToDataUrl, uploadImage } from "@/services/image-storage";
+import { readMediaSource, readUploadedMedia, serverMediaId } from "@/services/canvas-media-links";
 import { requestVideoGeneration, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { serverAssetIdFromAsset, useAssetStore } from "@/stores/use-asset-store";
@@ -69,12 +71,12 @@ import { useChatBottomFollow } from "@/hooks/use-chat-bottom-follow";
 import { useCanvasPanelStore } from "@/stores/canvas/use-canvas-panel-store";
 import { canvasToolCallPreview, canvasToolCallsRequireConfirmation, expireCanvasToolConfirmations } from "@/lib/canvas/canvas-assistant-ux";
 import { canvasAgentUndoMessage } from "@/lib/canvas/canvas-agent-undo-report";
-import { buildImageAgentContext } from "@/lib/image-agent/context";
-import { resolveImageAgentFocus, resolveImageAgentBase, originalImageAgentImage, imageAgentVersion, imageAgentCandidateIds } from "@/lib/image-agent/focus";
+import { buildImageAgentContext } from "../../../../shared/image-agent/context";
+import { resolveImageAgentFocus, resolveImageAgentBase, originalImageAgentImage, imageAgentVersion, imageAgentCandidateIds } from "../../../../shared/image-agent/focus";
 import { canvasImageAgentCatalog, canvasImageAgentHistory, canvasImageAgentForReference, canvasImageAgentFocusId, canvasImageAgentSelectedSnapshot, canvasImageAgentResultOps, canvasImageAgentTaskSignature, canvasImageAgentReviewTarget, canvasImageAgentReviewFingerprint, canvasImageAgentReviewInputs, canvasImageAgentReviewMatches, canvasImageAgentCorrectionDraft, canvasImageAgentInspectionDetails, prepareCanvasImageAgentRepairPreviews, resolveCanvasImageAgentEdit, validateCanvasImageAgentPlan, type CanvasImageAgentImage, type CanvasImageAgentRecord } from "@/lib/canvas/canvas-image-agent";
 import { requestImageAgentReview } from "@/services/api/image-agent-inspection";
 import { requestImageAgentPlanWithRepair, type ImageAgentRepairBudget } from "@/lib/image-agent/planning-repair";
-import { imageAgentSpecText } from "@/lib/image-agent/compile";
+import { imageAgentSpecText } from "../../../../shared/image-agent/compile";
 import { parseImageAgentEditSpec, parseImageAgentReview, type ImageAgentPlanningIssue } from "../../../../shared/image-agent-iteration";
 import { prepareChatRegionEdit, restoreChatMaskResult, saveChatRegionSelection, type ImageAgentRegionSelection } from "@/lib/image-agent/mask";
 import { RegionSelectionDialog } from "@/pages/creative/region-selection-dialog";
@@ -136,7 +138,82 @@ function latestAssistantUserPrompt(messages: CanvasAssistantMessage[]) {
 
 export type { CanvasMediaWorkflowAction } from "@/lib/canvas/canvas-assistant-panel-render-stability";
 
-export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
+const ServerImageConversationPanel = lazy(() => import("@/components/image-conversation-panel").then(module => ({ default: module.ImageConversationPanel })));
+
+export const CanvasAssistantPanel = memo(function CanvasAssistantPanel(props: CanvasAssistantPanelRenderState) {
+    const legacyEchoes = useRef(new WeakMap<CanvasAssistantSession[], CanvasAssistantSession[]>());
+    const legacySessions = useMemo(() => legacyEchoes.current.get(props.sessions) || (props.sessions.some(session => session.serverConversationId) ? props.sessions.filter(session => !session.serverConversationId) : props.sessions), [props.sessions]);
+    const publishLegacySessions = useCallback((sessions: CanvasAssistantSession[], activeSessionId: string | null, options?: { flush: boolean }) => {
+        const pointers = props.sessions.filter(session => session.serverConversationId);
+        if (!pointers.length) return props.onSessionsChange(sessions, activeSessionId, options);
+        const merged = [...pointers, ...sessions]; legacyEchoes.current.set(merged, sessions);
+        return props.onSessionsChange(merged, activeSessionId, options);
+    }, [props.sessions, props.onSessionsChange]);
+    const legacyActiveSessionId = props.sessions.some(session => session.id === props.activeSessionId && session.serverConversationId) ? legacySessions[0]?.id || null : props.activeSessionId;
+    return deploymentFeatures.imageConversationsEnabled ? <ServerCanvasAssistantPanel {...props} /> : <LegacyCanvasAssistantPanel {...props} sessions={legacySessions} activeSessionId={legacyActiveSessionId} onSessionsChange={publishLegacySessions} />;
+}, canvasAssistantPanelPropsEqual);
+
+function ServerCanvasAssistantPanel(props: CanvasAssistantPanelRenderState) {
+    const theme = canvasThemes[useThemeStore(state => state.theme)];
+    const width = useCanvasPanelStore(state => state.chatWidth);
+    const localEnabled = useModuleEnabled("canvas-local-agent");
+    const reducedMotion = useReducedMotion();
+    const ownerId = useUserStore(state => state.user?.id);
+    const latest = useRef(props); latest.current = props;
+    const current = props.sessions.find(session => session.id === props.activeSessionId);
+    const conversationId = current?.serverConversationId || null;
+    const selectedImages = props.selectedNodes.filter(node => node.type === CanvasNodeType.Image);
+    const selected = selectedImages.length === 1 ? selectedImages[0] : undefined;
+    const candidate = selected?.metadata?.serverAssetId || selected?.metadata?.content?.match(/^\/api\/assets\/([0-9a-f-]{36})\/content(?:[?#].*)?$/i)?.[1];
+    const sourceKey = selected?.metadata?.storageKey || selected?.metadata?.content || "";
+    const selectionKey = `${ownerId}:${props.canvasExternalId}:${selected?.id}:${sourceKey}`;
+    const [savedSource, setSavedSource] = useState<{ key: string; assetId?: string }>({ key: "" });
+    useEffect(() => {
+        if (!ownerId || candidate || !sourceKey || conversationId) return;
+        let active = true;
+        void (async () => {
+            const source = selected?.metadata?.storageKey ? await readMediaSource(selected.metadata.storageKey) : null;
+            const stored = source || await readUploadedMedia(ownerId, sourceKey);
+            if (active && useUserStore.getState().user?.id === ownerId) setSavedSource({ key: selectionKey, assetId: stored ? serverMediaId(stored) || undefined : undefined });
+        })().catch(() => { if (active) setSavedSource({ key: selectionKey }); });
+        return () => { active = false; };
+    }, [ownerId, candidate, sourceKey, conversationId, selectionKey, selected?.metadata?.storageKey]);
+    const resolvedAssetId = candidate || (savedSource.key === selectionKey ? savedSource.assetId : undefined);
+    const initialAssetId = resolvedAssetId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resolvedAssetId) ? resolvedAssetId : undefined;
+    const changeConversation = async (id: string | null) => {
+        const host = latest.current;
+        const existing = id ? host.sessions.find(session => session.serverConversationId === id) : undefined;
+        const active = host.sessions.find(session => session.id === host.activeSessionId);
+        const reusable = active && !active.serverConversationId && active.messages.length === 0 ? active : undefined;
+        const session = existing || { ...(reusable || createSession()), ...(id ? { serverConversationId: id } : {}), messages: [], updatedAt: new Date().toISOString() };
+        const sessions = host.sessions.some(item => item.id === session.id) ? host.sessions.map(item => item.id === session.id ? session : item) : [...host.sessions, session];
+        await host.onSessionsChange(sessions, session.id, { flush: true });
+    };
+    const style = { width, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text,
+        "--background": theme.node.panel, "--foreground": theme.node.text, "--card": theme.node.panel, "--border": theme.node.stroke,
+        "--input": theme.node.stroke, "--muted": theme.toolbar.itemHover, "--muted-foreground": theme.node.muted } as CSSProperties;
+    return <motion.div className="flex min-h-0 shrink-0" data-canvas-shortcuts="ignore" initial={reducedMotion ? false : { width: 0, opacity: 0 }} animate={{ width: props.closing ? 0 : width + 1, opacity: props.closing ? 0 : 1 }} transition={{ duration: reducedMotion ? 0 : PANEL_MOTION_SECONDS, ease: [0.2, 0.7, 0.2, 1] }} style={{ overflow: "clip", pointerEvents: props.closing ? "none" : undefined }}>
+        <aside className="relative flex min-h-0 shrink-0 flex-col border-l" style={style}>
+            <header className="cw-tabs" role="tablist" aria-label="创作方式">
+                <button type="button" role="tab" aria-selected={false} onClick={props.onCollapse}>创建</button>
+                <button type="button" role="tab" aria-selected={true}>对话</button>
+                <div className="ml-auto flex items-center gap-1">
+                    {props.layout !== "wide" ? <CanvasPanelSizeControl kind="chat" /> : null}
+                    {props.onToggleLayout ? <button type="button" className="cw-icon" aria-label={props.layout === "wide" ? "切换为左侧窄栏" : "切换为宽屏对话"} onClick={props.onToggleLayout}>{props.layout === "wide" ? <PanelLeft className="size-4.5" /> : <Maximize2 className="size-4.5" />}</button> : null}
+                    <button type="button" className="cw-icon" aria-label="关闭对话面板" onClick={props.onCollapse}><X className="size-4" /></button>
+                </div>
+            </header>
+            {localEnabled ? <div className="flex shrink-0 justify-end px-3 py-1"><AgentModeSwitch value={props.agentMode} theme={theme} onChange={props.onAgentModeChange} /></div> : null}
+            {props.agentMode === "local" ? localEnabled ? <CanvasLocalAgentPanel embedded snapshotRef={props.snapshotRef} canUndoOps={props.canUndoOps} onApplyOps={props.onApplyOps} onUndoOps={props.onUndoOps} autoConnect={props.autoConnectLocal} /> : <p role="status" className="p-4 text-sm">本机 Agent 已停用，原有画布与对话仍保留。</p> : <>
+                {!conversationId && selectedImages.length > 1 ? <p role="status" className="px-4 py-2 text-xs">请只选择一张原图开始会话，或在对话中上传原图。</p> : null}
+                {!conversationId && selected && !initialAssetId ? <p role="status" className="px-4 py-2 text-xs">选中图片尚无服务端原图，请先在对话中上传图片原件；不会自动使用本地临时图片。</p> : null}
+                {props.canvasExternalId ? <Suspense fallback={<p role="status" className="p-4 text-sm">正在读取服务端会话…</p>}><ServerImageConversationPanel entrypoint="canvas" canvasExternalId={props.canvasExternalId} conversationId={conversationId} initialAssetId={conversationId ? undefined : initialAssetId} onConversationIdChange={changeConversation} onVersionCreated={props.onConversationVersionCreated} /></Suspense> : <p role="alert" className="p-4 text-sm">画布编号尚未就绪，未创建会话或发送请求。</p>}
+            </>}
+        </aside>
+    </motion.div>;
+}
+
+const LegacyCanvasAssistantPanel = memo(function LegacyCanvasAssistantPanel({
     selectedNodeIds,
     selectedNodes,
     snapshotRef,

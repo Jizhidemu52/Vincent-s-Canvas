@@ -20,7 +20,7 @@ const FailedImageCard = new Function("React", "Button", "GenerationDiagnostic", 
 
 test.each([undefined, "resume", "investigate"] as const)("postprocessing failure exposes saved originals and never offers resubmission/recovery: %s", recovery => {
     const html = renderToStaticMarkup(<FailedImageCard error={imageResultProcessingFailureMessage} diagnostic="code: IMAGE_RESULT_PROCESSING_FAILED" recovery={recovery ? { recovery } : undefined} taskId="original-task" requestId="original-request" onRetry={() => { throw new Error("must not retry"); }} />);
-    expect(html).toContain("图片后处理失败");
+    expect(html).toContain("图片保存失败");
     expect(html).toContain("查看素材库原件");
     expect(html).toContain('href="/assets"');
     expect(html).toContain("复制诊断信息");

@@ -4,7 +4,7 @@ import { canvasMaskEditImageSettings, readCanvasMaskImageSize } from "@/componen
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { imageToDataUrl, uploadImage } from "@/services/image-storage";
 import { createClientId } from "@/lib/client-id";
-import { IMAGE_AGENT_MAX_IMAGES } from "@/lib/image-agent/focus";
+import { IMAGE_AGENT_MAX_IMAGES } from "../../../../shared/image-agent/focus";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { readFileAsDataUrl } from "@/lib/image-utils";
 import { compositeSelectedImage, createSelectionGuide } from "@/pages/creative/image-processing-browser";

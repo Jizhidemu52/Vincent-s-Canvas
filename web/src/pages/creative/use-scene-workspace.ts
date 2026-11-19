@@ -1,5 +1,5 @@
 import { uiText } from "@/lib/i18n";
-import { useWorkbenchTask, useWorkbenchTaskStatus } from "@/components/workbench-tasks";
+import { useWorkbenchTask } from "@/components/workbench-tasks";
 import { DEFAULT_WORKBENCH_TASK, matchesWorkbenchTask } from "@/lib/workbench-task-state";
 import { deleteHistoryEntries } from "@/lib/history-batch-delete";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -173,6 +173,8 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     const observationControllers = useRef(new Set<AbortController>());
     const [observationStopped, setObservationStopped] = useState(false);
     const queryingResult = useRef(false);
+    const pendingHistoryWrites = useRef(new Map<string, SceneLog>());
+    const [historyWriteRevision, setHistoryWriteRevision] = useState(0);
     const [loadedScope, setLoadedScope] = useState<string | null>();
     const [draftReady, setDraftReady] = useState(false);
     const [form, setForm] = useState(() => createSceneForm(sceneId));
@@ -204,8 +206,6 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     const [resultActionBusy, setResultActionBusy] = useState(false);
     const resultActionGate = useRef(false);
     const loading = loadedScope !== scope || restoring;
-    useWorkbenchTaskStatus({ busy: running || restoring || uploadCount > 0 || resultActionBusy, pending: pendingLogIds.size > 0,
-        ready: loadedScope === scope && draftReady, label: results.some(canQuerySceneResult) ? "等待结果" : results.some(result => result.status === "success") ? "已完成" : results.some(result => result.status === "failed") ? "已失败" : results.some(result => result.status === "cancelled") ? "已取消" : "草稿" });
     const toolKey = `creative-${sceneId}` as ToolKey;
     const toolEnabled = useToolEnabled(toolKey);
     const selectionEnabled = useModuleEnabled("creative-selection");
@@ -253,6 +253,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
 
     useEffect(() => {
         const revision = ++epoch.current;
+        pendingHistoryWrites.current.clear();
         knownLogIds.current.clear(); setPendingLogIds(new Set()); setRecoveredRequestId(null);
         setObservationStopped(false);
         previewEpoch.current += 1;
@@ -390,7 +391,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             setImages(current => ({ ...current, [slot]: { id: nanoid(), name: asset.originalFileName || asset.title, originalFileName: asset.originalFileName,
                 imageName: asset.imageName, imageVersion: asset.imageVersion, sourceAssetId: asset.sourceAssetId, type: stored.mimeType, mimeType: stored.mimeType,
                 dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes } }));
-            setNotice(uiText("已从素材库加入{name}；原素材保持不变。", { name: asset.title }) + (slot === "primary" && imagesRef.current.primary ? uiText("请重新确认要处理的产品。") : ""));
+            setNotice((asset.origin === "upload" ? uiText("已加入参考图") : uiText("已从素材库加入{name}；原素材保持不变。", { name: asset.title })) + (slot === "primary" && imagesRef.current.primary ? uiText("请重新确认要处理的产品。") : ""));
         } catch (caught) {
             if (revision === epoch.current && useUserStore.getState().user?.id === expectedOwnerId) setError(uiText("素材读取失败：{value1}", { value1: uiText(errorText(caught)) }));
             throw caught;
@@ -714,25 +715,40 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
         if (!automatic) { returnToCurrentTask(); setObservationStopped(false); setRunning(true); setOptimizing(false); setError(null); setNotice(null); }
         try {
             assertCurrent();
-            let log = await history.read(originalId);
+            let log = pendingHistoryWrites.current.get(originalId) || await history.read(originalId);
             let currentResult = log.results.find(item => item.id === result.id);
             if (!currentResult) throw new Error("原结果记录已变化，请重新打开历史");
             assertCurrent();
-            if (!canQuerySceneResult(currentResult)) return;
-            const original = await readSceneRequest(log, currentResult, user.id, undefined, AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
-            assertCurrent();
-            const commit = async (next: SceneResult, patch: Partial<SceneLog> = {}) => {
+            const commit = async (next: SceneResult, patch: Partial<SceneLog> = {}, retainResult = false) => {
                 assertCurrent();
                 const results = log.results.map(item => item.id === next.id ? next : item);
                 log = { ...log, ...patch, results, images: results.flatMap(item => item.image ? [item.image] : []), successCount: results.filter(item => item.status === "success").length, failCount: results.filter(item => item.status === "failed" && item.failureKind !== "uncertain").length };
-                await history.save(serializeSceneLog(log)); assertCurrent(); currentResult = next;
+                let saveError: string | null = null;
+                try {
+                    await history.save(serializeSceneLog(log)); assertCurrent();
+                    if (pendingHistoryWrites.current.delete(log.id)) setHistoryWriteRevision(value => value + 1);
+                } catch (caught) {
+                    assertCurrent();
+                    if (!retainResult) throw caught;
+                    pendingHistoryWrites.current.set(log.id, log);
+                    setHistoryWriteRevision(value => value + 1);
+                    saveError = uiText("生成结果仍保留在页面，但本地记录保存失败：{value1}", { value1: errorText(caught) });
+                }
+                currentResult = next;
                 if (previewOnly) setHistoryPreviewLog(log);
                 else {
                     setActiveLog(log); setResults(results); setSelectedPrompt(log.prompt);
                     setHistoryPreviewLog(current => current?.id === log.id ? log : current);
                 }
-                rememberLog(log); setError(null);
+                rememberLog(log); setError(saveError);
             };
+            if (!canQuerySceneResult(currentResult)) {
+                log = await hydrateLog(log); assertCurrent();
+                await commit(log.results.find(item => item.id === result.id)!, {}, true);
+                return;
+            }
+            const original = await readSceneRequest(log, currentResult, user.id, undefined, AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
+            assertCurrent();
             const restoreSnapshot = async () => {
                 if (!log.selection) return { images: log.referenceImages, selection: null };
                 const restoredImages: SceneImages = Object.fromEntries(await Promise.all(Object.entries(log.referenceImages).map(async ([slot, image]) => [slot, await restoreLocalInput(image!)])));
@@ -752,7 +768,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                     if (!task.resultUrls[0]) throw new Error("原任务成功但未返回结果图片，请勿重新生成");
                     const snapshot = await restoreSnapshot(); assertCurrent();
                     const completed = await storeSceneResult({ ...currentResult, taskId: task.id, failureKind: undefined, recovery: undefined, error: undefined, compilationId: undefined }, { id: `${task.id}:0`, dataUrl: task.resultUrls[0], sourceTaskId: task.id, durationMs: completedTaskDurationMs(task), prompt: patch.prompt, userInput: patch.userInput, optimized: patch.optimized }, 0, sceneId, snapshot, text => setNotice(uiText(text)));
-                    await commit(completed, patch); setNotice(uiText("已找回原任务结果，没有重新生成。"));
+                    await commit(completed, patch, true); setNotice(uiText("已找回原任务结果，没有重新生成。"));
                 } else if (classifyTaskRecovery(task) === "terminal") {
                     await commit({ id: currentResult.id, ...sceneFailure(new QueuedTaskFailedError(task), true, task.id, task.requestId) }, patch);
                 } else if (task.status === "paused") {
@@ -802,6 +818,20 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     // generation or resumes a paused upstream task without an explicit action.
     const reconcileCurrentResults = useRef<(signal: AbortSignal) => Promise<void>>(async () => {});
     reconcileCurrentResults.current = async signal => {
+        const revision = epoch.current;
+        for (const log of pendingHistoryWrites.current.values()) {
+            signal.throwIfAborted();
+            if (!history || log.ownerId !== user?.id || useUserStore.getState().user?.id !== user?.id) return;
+            try { await history.save(serializeSceneLog(log)); }
+            catch { continue; }
+            signal.throwIfAborted();
+            if (revision !== epoch.current || useUserStore.getState().user?.id !== log.ownerId) return;
+            if (pendingHistoryWrites.current.get(log.id) !== log) continue;
+            pendingHistoryWrites.current.delete(log.id); setHistoryWriteRevision(value => value + 1);
+            rememberLog(log);
+            if (!pendingHistoryWrites.current.size) setError(current => current?.startsWith(uiText("生成结果仍保留在页面，但本地记录保存失败：{value1}", { value1: "" })) ? null : current);
+        }
+        if (!workbenchTask.active) return;
         const pending = [...results, ...(historyPreviewLog && historyPreviewLog.id !== activeLog?.id ? historyPreviewLog.results : [])].filter(canQuerySceneResult);
         for (const result of pending) {
             signal.throwIfAborted();
@@ -809,16 +839,18 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
         }
     };
     const previewPending = historyPreviewLog?.results.filter(canQuerySceneResult) || [];
-    const reconciliationKey = [activeLog ? `${activeLog.id}:${results.filter(canQuerySceneResult).map(result => `${result.id}:${result.taskId || ""}`).join("|")}` : "", previewPending.length ? `${historyPreviewLog!.id}:${previewPending.map(result => `${result.id}:${result.taskId || ""}`).join("|")}` : ""].join(";");
-    const autoObserving = Boolean(!observationStopped && !running && !loading && workbenchTask.active && user?.status === "active" && (results.some(canQuerySceneResult) || previewPending.length));
+    const reconciliationKey = [activeLog ? `${activeLog.id}:${results.filter(canQuerySceneResult).map(result => `${result.id}:${result.taskId || ""}`).join("|")}` : "", previewPending.length ? `${historyPreviewLog!.id}:${previewPending.map(result => `${result.id}:${result.taskId || ""}`).join("|")}` : "", historyWriteRevision].join(";");
+    const canReconcile = !observationStopped && !running && !loading && user?.status === "active";
+    const autoObserving = Boolean(canReconcile && workbenchTask.active && (results.some(canQuerySceneResult) || previewPending.length));
+    const reconciling = autoObserving || Boolean(canReconcile && pendingHistoryWrites.current.size);
     useEffect(() => {
-        if (!autoObserving || !reconciliationKey) return;
+        if (!reconciling || !reconciliationKey) return;
         const controller = new AbortController(); observationControllers.current.add(controller);
         void watchTaskReconciliation({ taskIds: [...results, ...previewPending].flatMap(result => canQuerySceneResult(result) && result.taskId ? [result.taskId] : []), signal: controller.signal,
             reconcile: () => reconcileCurrentResults.current(controller.signal),
         }).catch(() => { /* Unmount, stop, task switch and account changes dispose this observer. */ });
         return () => { controller.abort(); observationControllers.current.delete(controller); };
-    }, [scope, reconciliationKey, autoObserving, user?.id]);
+    }, [scope, reconciliationKey, reconciling, user?.id]);
 
     const resultAction = async (action: "saveAsset" | "canvas" | "reference", image: SceneImage) => {
         const sourceLog = historyPreviewLog || activeLog;

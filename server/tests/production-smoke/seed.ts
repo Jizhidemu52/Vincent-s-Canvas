@@ -15,7 +15,7 @@ export function assertSmokeSeedEnvironment(env: Environment) {
     if (env.CANVAS_SMOKE_ALLOW_SEED !== "isolated-compose-only"
         || env.CANVAS_SMOKE_SOURCE_ROOT !== "/app/src"
         || env.NODE_ENV !== "production" || env.TASK_MOCK_MODE !== "false"
-        || env.AUTH_ENABLED !== "true" || env.OA_LOGIN_ENABLED !== "false"
+        || env.AUTH_ENABLED !== "true" || env.OA_LOGIN_ENABLED !== "false" || env.IMAGE_CONVERSATIONS_ENABLED !== "true"
         || env.REDIS_URL !== "redis://redis:6379"
         || env.S3_ENDPOINT !== "http://minio:9000" || env.S3_BUCKET !== "canvas-ci"
         || env.S3_PUBLIC_ENDPOINT) throw new Error("Smoke seed requires the explicit isolated CI formal stack");
@@ -35,8 +35,8 @@ export function assertSmokeSeedEnvironment(env: Environment) {
 export async function seedSmokeDatabase(db: Database, env: Environment, security: SeedSecurity) {
     const project = assertSmokeSeedEnvironment(env);
     const identity = { userId: randomUUID(), username: `smoke-${project}`, password: `Smoke-9-${randomBytes(24).toString("base64url")}` };
-    const providers = { imageChat: randomUUID(), video: randomUUID() };
-    const models = { image: randomUUID(), video: randomUUID(), chat: randomUUID() };
+    const providers = { imageChat: randomUUID(), video: randomUUID(), conversation: "9567f5da-bb4d-4e4b-b680-c7184d00a001" };
+    const models = { image: randomUUID(), video: randomUUID(), chat: randomUUID(), conversationImage: randomUUID() };
     const client = await db.connect();
     try {
         await client.query("BEGIN");
@@ -51,16 +51,20 @@ export async function seedSmokeDatabase(db: Database, env: Environment, security
         // OpenToken is the existing image/chat catalog identity. The endpoint is
         // always our internal test service, not the real provider named here.
         await client.query(`INSERT INTO providers(id,name,protocol,base_url,encrypted_credentials) VALUES
-            ($1,'OpenToken','openai','http://mock-provider:4180/v1',$3),
-            ($2,'Isolated smoke video','apimart','http://mock-provider:4180/v1',$3)`, [providers.imageChat, providers.video, encrypted]);
+            ($1,'OpenToken','openai','http://mock-provider:4180/v1',$4),
+            ($2,'Isolated smoke video','apimart','http://mock-provider:4180/v1',$4),
+            ($3,'APIMart 平台','apimart','http://mock-provider:4180/v1',$4)`, [providers.imageChat, providers.video, providers.conversation, encrypted]);
         // Image-agent chat profiles require explicit vision even for text-only smoke prompts.
         await client.query(`INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,credit_cost,rmb_cost,concurrency_limit) VALUES
-            ($1,$4,'Smoke image','gpt-image-2',ARRAY['generate','edit','batch'],1,0,2),
-            ($2,$5,'Smoke video','MiniMax-H3',ARRAY['video'],1,0,2),
-            ($3,$4,'Smoke chat','gpt-6-astra',ARRAY['chat','vision'],1,0,2)`, [models.image, models.video, models.chat, providers.imageChat, providers.video]);
+            ($1,$5,'Smoke image','gpt-image-2',ARRAY['generate','edit','batch'],1,0,2),
+            ($2,$6,'Smoke video','MiniMax-H3',ARRAY['video'],1,0,2),
+            ($3,$5,'Smoke planner','gpt-6.2-sol',ARRAY['chat','vision'],1,0,2),
+            ($4,$7,'Smoke conversation image','gpt-image-2.6-flare',ARRAY['generate','edit','batch'],1,0,2)`,
+        [models.image, models.video, models.chat, models.conversationImage, providers.imageChat, providers.video, providers.conversation]);
         for (const [keys, model] of [
             [["image", "image-edit", "canvas-image", "canvas-edit", "canvas-mask-edit", "canvas-batch"], models.image],
             [["video", "canvas-video"], models.video], [["gpt-chat", "canvas-chat"], models.chat],
+            [["gpt-chat-image"], models.conversationImage],
         ] as const) {
             const result = await client.query(`UPDATE tool_api_configurations SET model_config_id=$1,enabled=true,
                 credit_cost_override=1,rmb_cost_override=0,configuration_version=configuration_version+1,

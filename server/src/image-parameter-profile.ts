@@ -9,6 +9,7 @@ export function imageParameterProfile(protocol: unknown, modelId: unknown, provi
   if (protocol !== "apimart") return model === "gemini-3.1-flash-image" ? "unverified"
     : model === "gpt-image-2.5-flare" || model === "gpt-image-2.5-sunburst" ? "standard-flex-plus"
       : model === "gpt-image-2" ? "standard-flex" : "standard";
+  if (model === "mai-image-2.7-flash") return "mai-image-v2";
   if (model === "mai-image-2.6-flash") return "mai-image";
   if (model === "seedream-5-5") return "seedream55";
   if (model.includes("midjourney-blend")) return "midjourney-blend";

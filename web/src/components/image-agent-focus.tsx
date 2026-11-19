@@ -3,7 +3,7 @@ import { ChevronDown, ChevronLeft, Image as ImageIcon, LockKeyhole, RotateCcw, S
 import { CanvasPersistedMediaPreview } from "@/components/canvas/canvas-persisted-media-preview";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useUiLocale } from "@/lib/i18n";
-import { getImageAgentVersions, imageAgentVersion, originalImageAgentImage, type ImageAgentImage } from "@/lib/image-agent/focus";
+import { getImageAgentVersions, imageAgentVersion, originalImageAgentImage, type ImageAgentImage } from "../../../shared/image-agent/focus";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { Tooltip } from "antd";
 import { useDisplayText } from "@/hooks/use-display-text";

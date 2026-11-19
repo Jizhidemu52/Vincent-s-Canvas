@@ -5,8 +5,8 @@ import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } fro
 import { canvasImageAgentCatalog, canvasImageAgentResultOps, prepareCanvasImageAgentRepairPreviews, resolveCanvasImageAgentEdit, type CanvasImageAgentImage, type CanvasImageAgentRecord } from "@/lib/canvas/canvas-image-agent";
 import { ImageAgentPlanningError } from "../../shared/image-agent-iteration";
 import { pendingOnlineAgentTask, recoverOnlineAgentTask, type PendingOnlineAgentTask } from "@/lib/canvas/canvas-online-task-recovery";
-import { originalImageAgentImage } from "@/lib/image-agent/focus";
-import { buildImageAgentContext } from "@/lib/image-agent/context";
+import { originalImageAgentImage } from "../../shared/image-agent/focus";
+import { buildImageAgentContext } from "../../shared/image-agent/context";
 import { CanvasNodeType, type CanvasAssistantSession, type CanvasNodeData } from "@/types/canvas";
 import { QueuedTaskFailedError, type QueuedTask } from "@/services/api/generation-tasks";
 

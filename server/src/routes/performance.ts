@@ -45,8 +45,9 @@ export function createPerformanceRouter(db: Database) {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
       const query = querySchema.parse(request.query);
-      const range = resolveRange(query.preset, query.from, query.to);
-      response.json(await getPerformanceDashboard(db, actor, { ...range, departmentId: query.departmentId, groupId: query.groupId, userId: query.userId }));
+      const now = new Date();
+      const range = resolveRange(query.preset, query.from, query.to, now);
+      response.json(await getPerformanceDashboard(db, actor, { ...range, departmentId: query.departmentId, groupId: query.groupId, userId: query.userId }, now));
     } catch (error) { next(error); }
   });
   router.patch("/assets/:id/direction", async (request, response, next) => {
@@ -95,9 +96,8 @@ export function createPerformanceRouter(db: Database) {
   return router;
 }
 
-export function resolveRange(preset: "today" | "week" | "month" | "custom", from?: string, to?: string) {
+export function resolveRange(preset: "today" | "week" | "month" | "custom", from?: string, to?: string, now = new Date()) {
   if (preset === "custom") return { from: from!, to: to! };
-  const now = new Date();
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
   const dayStart = new Date(`${parts}T00:00:00+08:00`);
   const end = new Date(dayStart.getTime() + 86_400_000);

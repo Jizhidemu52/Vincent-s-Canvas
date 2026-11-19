@@ -326,8 +326,10 @@ async function assertProviderSubmissionResponse(response: Response, label: strin
 
 import { openAiImageParameters } from "./openai-image-parameters";
 import { OPENAI_IMAGE_TIMEOUT_MS } from "./opentoken-image";
+import { validateConversationTaskBinding, validateConversationTaskSources } from "./image-conversation-task";
 
 async function executeProvider(task: WorkRow, timing: GenerationTiming) {
+  if (task.request_id?.startsWith("ic:")) validateConversationTaskBinding(task);
   // A completed, identity-bound receipt no longer needs provider credentials or
   // another status query. Invalid non-null documents fail closed in the reader.
   if (task.operation_type === "video_generation" && task.upstream_result_document != null)
@@ -473,6 +475,7 @@ async function executeApiMartImage(
     }
   }
   const sourceAssets = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadSourceAssets(task.source_urls, task.user_id, isSeedream55 ? 1 : 4, isSeedream55 ? 30 * 1024 * 1024 : undefined);
+  if (task.request_id?.startsWith("ic:") && !task.upstream_task_id && !task.upstream_submission_started_at) validateConversationTaskSources(task, sourceAssets);
   if (isSeedream55) for (const source of sourceAssets) await validateSeedream55Reference(source);
   const editInput = !isSeedream55 && sourceAssets.length ? await prepareImageEditInput(sourceAssets, task.parameters, {
     protocol: "apimart", modelId: task.model_id!, operationType: task.operation_type,

@@ -1,4 +1,7 @@
 export default {
+    "从相册 / 本机上传": "Upload from photos or this device",
+    "直接添加到当前模块，无需先存入素材库": "Add directly to this tool without saving to the asset library first",
+    "从相册或本机选择图片": "Choose images from photos or this device",
     "画布名称": "Canvas name",
     "{count} 个画布": "{count} canvases",
     "{nodes} 个节点 · {connections} 条连线": "{nodes} nodes · {connections} connections",
@@ -44,4 +47,7 @@ export default {
     "验证并清理缓存": "Verify and clear cache",
     "已清理 {count} 项缓存，释放 {size} MB；跳过 {skipped} 项。云端原件未删除。": "Cleared {count} cache items, freeing {size} MB; skipped {skipped}. Cloud originals were not deleted.",
     "缓存清理失败，原件保持不变。": "Cache cleanup failed. Originals are unchanged.",
+    "点击任一步运行本模板全部 {value1} 个配置，每项独立生成": "Click any step to run all {value1} configurations in this template independently",
+    "运行整套模板 · {value1} 项": "Run entire template · {value1} tasks",
+    "这套模板正在运行，请勿重复提交": "This template is running. Do not submit it again",
 } satisfies Record<string, string>;

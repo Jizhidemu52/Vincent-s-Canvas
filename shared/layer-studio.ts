@@ -1,6 +1,6 @@
 /** Public, provider-neutral result contract for the dedicated layer workspace. */
 export const LAYER_STUDIO_TOOL = "layer-studio" as const;
-export const LAYER_STUDIO_LABEL = "图层拆分与图片生成";
+export const LAYER_STUDIO_LABEL = "豆包生图";
 export type LayerStudioMode = "generate" | "decompose";
 export type LayerStudioBox = [number, number, number, number];
 export type LayerStudioBoundingBox = {

@@ -10,6 +10,10 @@ type SourceTask = {
     parameters?: Record<string, unknown>;
 };
 
+export function imageLogMatchesTool(recordTool: string, currentTool: string) {
+    return recordTool === currentTool || currentTool === "image-edit" && recordTool === "image-generation";
+}
+
 /** Read source identity, never infer a tool from a prompt, model or operation type. */
 export async function partitionImageLogs<T extends ImageLogOrigin>(
     records: T[],
@@ -26,7 +30,7 @@ export async function partitionImageLogs<T extends ImageLogOrigin>(
     for (const record of records) {
         if (record.ownerId && record.ownerId !== scope.ownerId) continue;
         if (record.tool) {
-            if (record.tool === scope.tool) logs.push(record);
+            if (imageLogMatchesTool(record.tool, scope.tool)) logs.push(record);
             continue;
         }
         // Existing records can be identified by their original task without rewriting them.
@@ -38,7 +42,7 @@ export async function partitionImageLogs<T extends ImageLogOrigin>(
         const tool = tools[0];
         if (typeof tool !== "string" || !tool || tools.some(value => value !== tool)) {
             unclassified.push(record);
-        } else if (tool === scope.tool) {
+        } else if (imageLogMatchesTool(tool, scope.tool)) {
             logs.push({ ...record, tool, ownerId: scope.ownerId });
         }
     }

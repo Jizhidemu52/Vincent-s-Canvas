@@ -26,7 +26,7 @@ describe("prompt template client", () => {
     });
 
     it("routes every reusable tool to its real workbench", () => {
-        expect(promptDestination("image-generation", "token one")).toBe("/image?reuseToken=token+one");
+        expect(promptDestination("image-generation", "token one")).toBe("/image?reuseToken=token+one&tool=image-edit");
         expect(promptDestination("detail-enhance", "t")).toBe("/image?reuseToken=t&tool=detail-enhance");
         expect(promptDestination("seamless-stitch", "t")).toBe("/image?reuseToken=t&tool=seamless-stitch");
         expect(promptDestination("video", "t")).toBe("/video?reuseToken=t");

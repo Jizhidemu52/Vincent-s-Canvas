@@ -111,6 +111,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
         return options.generate ? options.generate() : [{ id: "generated-image", dataUrl: "/api/assets/result/content" }];
     };
     const dependencies: Record<string, unknown> = {
+        "@/lib/deployment-features": { deploymentFeatures: { imageConversationsEnabled: false } },
         "@/hooks/use-display-text": { ...displayHooksHarness, DisplayText: ({ text }: { text: string }) => text, DisplayTranslationScope: ({ children }: { children: unknown }) => children },
         // Browser download/dialog effects are covered by their browser tests, not this planner dispatcher.
         "@/hooks/use-conversation-image-tools": { useConversationImageTools: () => ({ download: async () => undefined, compare: () => undefined, compareDialog: null }) },
@@ -223,13 +224,16 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
     const panelState = { closing: false, agentMode: "online" };
     const render = (): ReactElement<any> => {
         stateIndex = refIndex = memoIndex = effectIndex = 0;
-        const element = module.exports.CanvasAssistantPanel({
+        const boundary = module.exports.CanvasAssistantPanel({
             selectedNodeIds: new Set(snapshotRef.current.selectedNodeIds), selectedNodes: options.selected || [], snapshotRef,
             sessions, activeSessionId, onSelectNodeIds: () => undefined, onSessionsChange,
             onApplyOps: (ops: any[]) => snapshotRef.current = applyCanvasAgentOps(snapshotRef.current, ops),
             canUndoOps: false, onUndoOps: () => null, onPasteImage: () => undefined,
             ...panelState, onAgentModeChange: () => undefined, onCollapse: () => undefined,
         }) as ReactElement<any>;
+        expect(typeof boundary.type).toBe("function");
+        expect((boundary.type as Function).name).toBe("LegacyCanvasAssistantPanel");
+        const element = (boundary.type as Function)(boundary.props) as ReactElement<any>;
         for (const effect of pendingLayoutEffects.splice(0)) effect();
         for (const effect of pendingEffects.splice(0)) effect();
         return element;

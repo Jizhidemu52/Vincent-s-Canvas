@@ -44,6 +44,15 @@ test("document validation rejects missing structure, mismatched id and broken gr
     ]) expect(() => parseCanvasDocumentWrite("canvas-1", body)).toThrow(CanvasDocumentError);
 });
 
+test("server conversation pointers cannot store a second message history inside the canvas", () => {
+    const session = { ...project().chatSessions[0]!, messages: [], serverConversationId: "a0a0a0a0-bbbb-4ccc-8ddd-eeeeeeeeeeee" };
+    const document = { ...project(), chatSessions: [session] };
+    expect(parseCanvasDocumentWrite(document.id, { baseRevision: 0, document }).document).toEqual(document);
+    for (const invalid of [{ ...session, serverConversationId: "not-a-uuid" }, { ...session, serverConversationId: null }, { ...session, messages: project().chatSessions[0]!.messages }]) {
+        expect(() => parseCanvasDocumentWrite(document.id, { baseRevision: 0, document: { ...document, chatSessions: [invalid] } })).toThrow(CanvasDocumentError);
+    }
+});
+
 test("style-group validation accepts old documents and dangling member IDs but rejects malformed groups", () => {
     const group = { id: "style-a", title: "春季款 A", nodeIds: ["image-1", "deleted-node"], collapsed: true };
     const source = { ...project(), groups: [group] };

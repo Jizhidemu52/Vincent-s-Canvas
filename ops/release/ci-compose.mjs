@@ -25,7 +25,7 @@ export function releaseTestCompose(source, options) {
       service.pull_policy = 'never';
     }
     if (['api', 'worker'].includes(name)) {
-      service.environment = { ...(service.environment || {}), TASK_MOCK_MODE: 'false', AUTH_ENABLED: 'true', OA_LOGIN_ENABLED: 'false', CREDITS_ENABLED: 'true', ROLE_PORTALS_ENABLED: 'true' };
+      service.environment = { ...(service.environment || {}), TASK_MOCK_MODE: 'false', AUTH_ENABLED: 'true', OA_LOGIN_ENABLED: 'false', CREDITS_ENABLED: 'true', ROLE_PORTALS_ENABLED: 'true', IMAGE_CONVERSATIONS_ENABLED: 'true' };
       service.command = ['bun', name === 'api' ? 'src/index.ts' : 'src/worker.ts'];
     }
   }

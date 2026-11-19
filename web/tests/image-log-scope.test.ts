@@ -5,12 +5,12 @@ const tools = ["image-generation", "detail-enhance", "image-edit", "angle-contro
 const scope = (tool: string) => ({ tool, ownerId: "designer-a" });
 
 describe("image workbench history scope", () => {
-    test("all four tools, accounts and creative scenes keep independent histories", async () => {
+    test("image editing includes retired generation history without mixing other tools or accounts", async () => {
         const records = [...tools, "creative-local-restyle"].map(tool => ({ id: tool, tool, ownerId: "designer-a", images: [] }));
         records.push({ id: "other-owner", tool: "image-edit", ownerId: "designer-b", images: [] });
         for (const tool of [...tools, "creative-local-restyle"]) {
             const result = await partitionImageLogs(records, scope(tool), async () => { throw new Error("tagged logs need no server lookup"); });
-            expect(result.logs.map(log => log.id)).toEqual([tool]);
+            expect(result.logs.map(log => log.id)).toEqual(tool === "image-edit" ? ["image-generation", "image-edit"] : [tool]);
             expect(result.unclassified).toEqual([]);
         }
     });
@@ -22,7 +22,7 @@ describe("image workbench history scope", () => {
             calls.push(id);
             return { userId: "designer-a", parameters: { tool: id } };
         });
-        expect(result.logs).toEqual([{ ...records[2], ...scope("image-edit") }]);
+        expect(result.logs).toEqual([{ ...records[0], ...scope("image-generation") }, { ...records[2], ...scope("image-edit") }]);
         expect(calls).toEqual(tools);
         expect(records.every(record => !("tool" in record))).toBe(true);
     });

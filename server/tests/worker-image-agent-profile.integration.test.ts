@@ -7,7 +7,7 @@ import { imageAgentProviderPrompt, type ImageAgentProfile } from "../src/image-a
 import { postgresPromptRecipeStore } from "../src/prompt-recipe-postgres";
 import { createIsolatedPostgres } from "./helpers/isolated-postgres";
 import type { AgentDocumentCatalogEntry, DesignRequirements } from "../../shared/image-agent-documents";
-import { compileImageAgentPrompt } from "../../web/src/lib/image-agent/compile";
+import { compileImageAgentPrompt } from "../../shared/image-agent/compile";
 
 // The production entrypoint starts configured services. Extract only the same
 // real functions used by the existing Worker tests, with no config/.env import.

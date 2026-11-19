@@ -4,6 +4,7 @@ export const DESIGN_MODELS = [
     { publicName: "aplmart-nano2.1", label: "Nano 2.1" },
     { publicName: "aplmart-gpt2.6-flare", label: "GPT 2.6 Flare" },
     { publicName: "aplmart-gpt2.6-sunburst", label: "GPT 2.6 Sunburst" },
+    { publicName: "aplmart-mai2.7-flash", label: "MAI 2.7 Flash" },
     { publicName: "豆包生图", label: "豆包生图" },
 ];
 

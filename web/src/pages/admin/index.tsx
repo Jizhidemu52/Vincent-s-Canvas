@@ -262,7 +262,15 @@ export default function AdminPage() {
                 ) : null}
 
                 <div className="grid min-w-0 gap-5 lg:grid-cols-[180px_minmax(0,1fr)]">
-                <nav aria-label={staticUiText("管理板块")} className="wb-surface flex gap-4 overflow-x-auto p-3 lg:sticky lg:top-3 lg:block lg:self-start">
+                <nav aria-label={staticUiText("管理板块")} className="wb-surface min-w-0 p-3 lg:sticky lg:top-3 lg:self-start">
+                    <label className="flex min-w-0 items-center gap-3 lg:hidden">
+                        <span className="shrink-0 text-sm text-muted-foreground">{staticUiText("管理板块")}</span>
+                        <select aria-label={staticUiText("切换管理板块")} className="h-11 min-w-0 flex-1 rounded-lg border border-input bg-card px-3 text-base text-foreground" value={activeAdminTab} onChange={event => { const target = event.currentTarget.value; if (target.startsWith("/")) navigate(target); else changeAdminTab(target); }}>
+                            {adminTabOptions.map(tab => <option key={tab.key} value={tab.key}>{staticUiText(tab.label)}</option>)}
+                            {isAdmin && <option value="/admin/prompt-recipes">{staticUiText("提示词配方")}</option>}
+                            {isAdmin && deploymentFeatures.oaLoginEnabled && <option value="/admin/design-library">{staticUiText("设计灵感库管理")}</option>}
+                        </select>
+                    </label>
                     {[
                         { label: "成员管理", keys: ["accounts", "groups", "performance"] },
                         { label: "模型与服务", keys: ["api", "mark-images"] },
@@ -271,7 +279,7 @@ export default function AdminPage() {
                     ].map((group) => {
                         const tabs = adminTabOptions.filter((tab) => group.keys.includes(tab.key));
                         if (!tabs.length) return null;
-                        return <section key={group.label} className="min-w-[145px] lg:mb-4 lg:last:mb-0">
+                        return <section key={group.label} className="hidden min-w-0 lg:mb-4 lg:block lg:last:mb-0">
                             <h2 className="mb-1 px-3 text-xs font-medium text-[var(--muted-foreground)]">{staticUiText(group.label)}</h2>
                             {tabs.map((tab) => <Link key={tab.key} to={tab.key === "accounts" ? "/admin" : `/admin?tab=${tab.key}`} aria-current={activeAdminTab === tab.key ? "page" : undefined} className="wb-nav-link block rounded-xl px-3 py-2">{staticUiText(tab.label)}</Link>)}
                             {group.label === "内容" && isAdmin ? <><Link className="wb-nav-link block rounded-xl px-3 py-2" to="/admin/prompt-recipes">{staticUiText("提示词配方")}</Link>{deploymentFeatures.oaLoginEnabled ? <Link className="wb-nav-link block rounded-xl px-3 py-2" to="/admin/design-library">{staticUiText("设计灵感库管理")}</Link> : null}</> : null}

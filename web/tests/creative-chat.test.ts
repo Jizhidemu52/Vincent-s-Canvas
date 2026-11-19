@@ -4,7 +4,7 @@ import { assertCreativeChatReferenceSource, creativeChatPreviewSize, requestCrea
 import type { AiConfig } from "../src/stores/use-config-store";
 import type { ToolResponseResult } from "../src/services/api/image";
 import { ImageAgentPlanningError } from "../../shared/image-agent-iteration";
-import { IMAGE_AGENT_BASE_PRESERVATION } from "../src/lib/image-agent/compile";
+import { IMAGE_AGENT_BASE_PRESERVATION } from "../../shared/image-agent/compile";
 import { completeChatImageTask } from "../src/pages/chat/chat-image-tasks";
 import type { ChatSession } from "../src/pages/chat/chat-types";
 import type { PendingChatImageTask } from "../src/services/api/chat-image-recovery";
@@ -162,6 +162,24 @@ function previewFixture(onLoad?: (loaded: () => void, failed: () => void, source
 }
 
 describe("real planning service boundaries", () => {
+    test("waiting heartbeats update the planning phase without replacing the actual answer", async () => {
+        const fixture = previewFixture(), phases: string[] = [], deltas: string[] = [];
+        let calls = 0;
+        try {
+            fakeFetch(() => {
+                calls++;
+                return new Response([
+                    { type: "chat_waiting", message: "正在等待对话模型…" },
+                    { type: "chat_waiting", message: "上游仍在处理，本次没有重新发送。" },
+                    { type: "chat_result", result: result() },
+                ].map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""), { headers: { "content-type": "text/event-stream" } });
+            });
+            expect(await requestCreativeChatPlan(config, history, user("继续改图"), { onPhase: value => phases.push(value), onDelta: value => deltas.push(value) })).toMatchObject({ kind: "image", parentId: "v3" });
+            expect(calls).toBe(1);
+            expect(phases).toEqual(["正在理解需求与图片上下文…", "正在等待对话模型…", "上游仍在处理，本次没有重新发送。"]);
+            expect(deltas).toEqual(["好的，把颜色调浅。"]);
+        } finally { fixture.restore(); }
+    });
     test("one planning call already sees the latest result and emits an executable plan with originals", async () => {
         const fixture = previewFixture();
         const calls: any[] = [];

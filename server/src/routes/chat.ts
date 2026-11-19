@@ -22,6 +22,7 @@ import { chatUpstreamFailureMessage, readChatUpstreamFailure, type ChatUpstreamF
 import { createProductCandidatesRouter, type ProductCandidatesRouterOptions } from "./product-candidates";
 import { imageAgentVisionError } from "../../../shared/image-agent-capabilities";
 import { type ProviderChatImageAccess, supportsProviderChatImages } from "../provider-chat-images";
+import { acceptsChatResultWait, chatResultTimeoutMs, chatResultWaitHeaders, startChatResultWait, type ChatResultWaitClock } from "../chat-result-wait";
 
 type ResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 export type ResponseInput =
@@ -35,7 +36,7 @@ type ToolCall = { id: string; type: "function"; function: { name: string; argume
 export type ChatCompletionUsage = { inputTokens?: number; outputTokens?: number; actualCost?: number; currency?: string };
 export type ChatCompletionResult = { content: string; toolCalls: ToolCall[]; stopReason?: string; claudeAssistantContent?: Array<Record<string, unknown>>; responsesOutputItems?: Array<Record<string, unknown>>; usage?: ChatCompletionUsage };
 export type ChatCompletionInput = { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number }; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number }; privateProfile?: boolean;
-    providerImages?: { access: ProviderChatImageAccess; userId: string } };
+    waitForResult?: boolean; providerImages?: { access: ProviderChatImageAccess; userId: string } };
 type ChatModel = { model_id: string; base_url: string; protocol: string; encrypted_credentials: string | null };
 /** Shared by explicit administrator analysis selection and the execution adapter. */
 export const CHAT_COMPLETION_PROTOCOLS = ["openai", "custom", "apimart", "gemini", "anthropic", "openai-chat"] as const;
@@ -83,6 +84,15 @@ const schema = z.object({
 
 const CHAT_REQUEST_TIMEOUT_MESSAGE = "对话模型请求在 180 秒内未完成，已超时；本轮对话未完成，不会自动重新提交。";
 
+export function chatResultWaitFailure(error: unknown, timeoutMs: number) {
+    if (chatErrorMetadata(error).timeout) return { code: "CHAT_REQUEST_TIMEOUT", message: `对话模型请求在 ${timeoutMs / 1000} 秒内未完成，已超时；本轮对话未完成，不会自动重新提交。` };
+    if (error instanceof PromptOptimizationError) return { code: error.code, message: error.message, ...imageAgentRepairMetadata(error) };
+    if (error instanceof ChatProtocolError) return { code: error.code, message: error.message };
+    const diagnostics = readProviderSubmissionDiagnostics(error);
+    if (diagnostics?.phase === "initial_tls" || diagnostics?.phase === "preflight") return { code: "UPSTREAM_REQUEST_FAILED", message: "连接对话模型服务失败，模型业务请求尚未发送。请联系管理员检查服务端网络、代理或运行环境后再试。" };
+    return { code: "UPSTREAM_REQUEST_FAILED", message: "对话服务未完成此请求；请求可能已发出，结果待核查，不会自动重新提交。请联系管理员核查上游记录后，再决定是否重新发送。" };
+}
+
 /** Inspect only typed metadata, never messages; bounded traversal tolerates cyclic causes. */
 function chatErrorMetadata(error: unknown) {
     const metadata = { code: "UNCLASSIFIED_ERROR", name: "UnknownError", timeout: false };
@@ -103,11 +113,25 @@ function chatErrorMetadata(error: unknown) {
     return metadata;
 }
 
+export function chatFailureMetadata(error: unknown, elapsedMs: number, fallbackPhase: "request" | "response") {
+    const diagnostics = readProviderSubmissionDiagnostics(error);
+    const metadata = chatErrorMetadata(error);
+    return {
+        code: metadata.timeout ? metadata.code : diagnostics?.code || metadata.code,
+        name: metadata.name,
+        phase: diagnostics?.phase || fallbackPhase,
+        elapsedMs: Math.max(0, Math.round(elapsedMs)),
+        ...(error instanceof ChatProtocolError && error.upstreamStatus !== undefined ? { upstreamStatus: error.upstreamStatus } : {}),
+        ...(error instanceof ChatProtocolError && error.upstreamReason ? { upstreamReason: error.upstreamReason } : {}),
+    };
+}
+
 export type ChatRouterOptions = {
     providerImages?: ProviderChatImageAccess;
     loadProfileRules?: (profile: ChatPromptProfile, actor: AuthenticatedRequest["auth"]) => Promise<string>;
     validateProfileOutput?: (result: ChatCompletionResult, privateRules: readonly string[]) => void | Promise<void>;
     productCandidates?: ProductCandidatesRouterOptions;
+    waitClock?: ChatResultWaitClock;
 };
 
 export function createChatRouter(db: Database, config: AppConfig, options: ChatRouterOptions = {}) {
@@ -120,6 +144,8 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
         let usageRequestId: string | undefined;
         let billingReservationId: string | null = null;
         let providerInFlight = false;
+        let waiting: ReturnType<typeof startChatResultWait> | undefined;
+        let resultTimeoutMs = 180_000;
         const socket = request.socket;
         const hadRemoteAddress = Boolean(socket?.remoteAddress);
         // Bun 1.3.x can lose its native socket without setting destroyed or
@@ -169,6 +195,8 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
 
             const credentials = JSON.parse(decryptSecret(model.encrypted_credentials, config.PROVIDER_ENCRYPTION_KEY)) as Record<string, string>;
             input = imageAgentModelInput(model, input);
+            input = { ...input, waitForResult: acceptsChatResultWait(request.get("accept"), input.privateProfile) && !(isClaudeMessagesModel(model) && input.claude?.stream) };
+            resultTimeoutMs = chatResultTimeoutMs(model, input);
             billingReservationId = await beginChatBilling(db, {
                 requestId: input.requestId, userId: actor.id,
                 anonymous: (request as AuthenticatedRequest).allowsAnonymousCreation,
@@ -222,6 +250,12 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
                 response.end();
                 return;
             }
+            if (input.waitForResult) {
+                response.set(chatResultWaitHeaders);
+                response.flushHeaders();
+                waiting = startChatResultWait(value => { if (disconnected()) waiting?.close(); else response.write(value); }, options.waitClock);
+                response.once("close", waiting.close);
+            }
             let resultPayload = await requestChatCompletion(model, credentials, { ...input,
                 ...(options.providerImages ? { providerImages: { access: options.providerImages, userId: actor.id } } : {}) });
             providerInFlight = false;
@@ -246,7 +280,9 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
             await finishChatBilling(db, billingReservationId, !disconnected());
             billingReservationId = null;
             const { usage: _internalUsage, ...publicPayload } = resultPayload;
-            response.json(publicPayload);
+            if (waiting) {
+                if (!disconnected()) { waiting.complete(publicPayload); response.end(); }
+            } else response.json(publicPayload);
         } catch (error) {
             if (billingReservationId) await finishChatBilling(db, billingReservationId, false).catch((releaseError) => {
                 const { code, name } = chatErrorMetadata(releaseError);
@@ -255,15 +291,13 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
             if (usageRequestId) await finishUsageChat(db, usageRequestId, disconnected() ? "interrupted" : "failed").catch(() => undefined);
             const diagnostics = readProviderSubmissionDiagnostics(error);
             const metadata = chatErrorMetadata(error);
-            console.error("Chat request failed", {
-                code: metadata.timeout ? metadata.code : diagnostics?.code || metadata.code,
-                name: metadata.name,
-                phase: diagnostics?.phase || (response.headersSent ? "response" : "request"),
-                elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
-                ...(error instanceof ChatProtocolError && error.upstreamStatus !== undefined ? { upstreamStatus: error.upstreamStatus } : {}),
-                ...(error instanceof ChatProtocolError && error.upstreamReason ? { upstreamReason: error.upstreamReason } : {}),
-            });
+            console.error("Chat request failed", chatFailureMetadata(error, performance.now() - startedAt, response.headersSent ? "response" : "request"));
             if (disconnected()) return;
+            if (waiting) {
+                waiting.fail(chatResultWaitFailure(error, resultTimeoutMs));
+                response.end();
+                return;
+            }
             if (response.headersSent) {
                 const failure = metadata.timeout
                     ? { code: "CHAT_REQUEST_TIMEOUT", message: CHAT_REQUEST_TIMEOUT_MESSAGE }
@@ -295,6 +329,8 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
                 return;
             }
             next(error);
+        } finally {
+            waiting?.close();
         }
     });
 
@@ -308,18 +344,17 @@ export async function requestChatCompletion(
 ): Promise<ChatCompletionResult> {
     if (input.providerImages && supportsProviderChatImages(model)) {
         const { providerImages, ...requestInput } = input;
-        return providerImages.access.run(providerImages.userId, requestInput, prepared => requestChatCompletion(model, credentials, prepared));
+        return providerImages.access.run(providerImages.userId, requestInput, prepared => requestChatCompletion(model, credentials, prepared), chatResultTimeoutMs(model, input));
     }
     if (!(CHAT_COMPLETION_PROTOCOLS as readonly string[]).includes(model.protocol)) throw new ChatProtocolError("PROTOCOL_NOT_SUPPORTED", "当前对话入口暂不支持该 Provider 协议");
-    const usesResponses = model.protocol === "openai" || model.protocol === "custom" || (model.protocol === "apimart" && model.model_id === "gpt-6-astra");
+    const usesResponses = model.protocol === "openai" || model.protocol === "custom"
+        || (model.protocol === "apimart" && ["gpt-6-astra", "gpt-6.2-sol"].includes(model.model_id));
     if (!usesResponses && input.input.some(item => "type" in item && item.type === "responses_assistant"))
         throw new ChatProtocolError("CHAT_HISTORY_PROTOCOL_MISMATCH", "该会话包含 Responses 原生工具记录，请新建对话后切换接口协议。");
-    // GPT-6 Astra function tools require Responses on Mark. Choose before submission; never retry another endpoint.
-    if (model.protocol === "apimart" && model.model_id === "gpt-6-astra") return requestOpenAiCompletion(model, credentials, input);
+    if (usesResponses) return requestOpenAiCompletion(model, credentials, input);
     if (model.protocol === "gemini") return requestGeminiCompletion(model, credentials, input);
     if (isClaudeMessagesModel(model)) return requestClaudeCompletion(model, credentials, input);
     if (model.protocol === "openai-chat" || model.protocol === "apimart") return requestOpenAiChatCompletion(model, credentials, input);
-    if (model.protocol === "openai" || model.protocol === "custom") return requestOpenAiCompletion(model, credentials, input);
     throw new ChatProtocolError("PROTOCOL_NOT_SUPPORTED", "当前对话入口暂不支持该 Provider 协议");
 }
 
@@ -547,7 +582,7 @@ async function requestOpenAiCompletion(
             parallel_tool_calls: false,
             ...(model.protocol === "apimart" ? { stream: false, ...(input.tools.length ? { include: ["reasoning.encrypted_content"] } : {}) } : {}),
         }),
-        signal: AbortSignal.timeout(180000),
+        signal: AbortSignal.timeout(chatResultTimeoutMs(model, input)),
     });
     if (!upstream.ok) throw await upstreamError("对话 Provider", upstream, model.protocol === "apimart" || input.privateProfile);
     if (model.protocol === "apimart") return readApiMartResponses(await readApiMartChatPayload(upstream));
@@ -696,7 +731,7 @@ async function requestOpenAiChatCompletion(
                 parallel_tool_calls: false,
             } : {}),
         }),
-        signal: AbortSignal.timeout(180000),
+        signal: AbortSignal.timeout(chatResultTimeoutMs(model, input)),
     });
     if (!upstream.ok) throw await upstreamError("Chat Completions Provider", upstream, model.protocol === "apimart" || input.privateProfile);
     if (model.protocol === "apimart") return readApiMartChatChoices(await readApiMartChatPayload(upstream));
@@ -714,7 +749,7 @@ async function requestGeminiCompletion(
         method: "POST",
         headers: requestHeaders(credentials),
         body: JSON.stringify(buildGeminiRequestBody(input)),
-        signal: AbortSignal.timeout(180000),
+        signal: AbortSignal.timeout(chatResultTimeoutMs(model, input)),
     });
     if (!upstream.ok) throw await upstreamError("Gemini Provider", upstream, input.privateProfile);
 

@@ -215,7 +215,7 @@ test("prompt detail is complete without generation; publish refreshes and review
     await expect(page.getByRole("heading", { name: "隔离团队模板" })).toBeVisible();
     await page.getByRole("button", { name: "查看完整提示词：隔离团队模板" }).click();
     await expect(page.getByRole("dialog")).toContainText("完整提示词结尾标记");
-    await expect(page.getByRole("dialog").getByRole("button", { name: "填入 图像生成" })).toBeVisible();
+    await expect(page.getByRole("dialog").getByRole("button", { name: "填入 图片编辑" })).toBeVisible();
     expect(mutations).toEqual([]);
     await expect.poll(() => page.getByRole("dialog").evaluate(element => element.getBoundingClientRect().right <= window.innerWidth + 1)).toBe(true);
     await page.screenshot({ path: "../output/interaction-experience/admin/prompt-details-desktop.png", fullPage: true });

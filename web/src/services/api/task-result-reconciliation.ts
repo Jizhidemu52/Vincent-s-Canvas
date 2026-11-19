@@ -11,7 +11,7 @@ export function classifyTaskRecovery(task?: { status: string; upstreamTaskId?: s
     return ["success", "failed", "cancelled"].includes(task.status) ? "terminal" : "investigate";
 }
 
-export const submissionInvestigationMessage = "提交结果待核查，暂无法恢复上游查询。请联系管理员核对原任务；刷新状态不会重新生成，请勿重复提交。";
+export const submissionInvestigationMessage = "暂时无法获取生成结果，系统会继续更新。";
 
 /**
  * A view-scoped, read-only reconciler. One callback runs at a time; it shares

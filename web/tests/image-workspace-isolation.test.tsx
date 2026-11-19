@@ -62,7 +62,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     let root: ReactElement<any>;
     let mountedKey: string | null | undefined;
     let mountedType: unknown;
-    let params = new URLSearchParams("tool=image-generation");
+    let params = new URLSearchParams();
     let navigationSequence = 0;
     let navigationKey = "image-workspace-0";
     let urlInputKey: string | null = null;
@@ -78,8 +78,13 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     const requests: Array<{ kind: string; args: any[] }> = [];
     const errors: string[] = [];
     const warnings: string[] = [];
-    let reportedTaskStatus: { ready: boolean; pending: boolean } | undefined;
+    const successes: string[] = [];
+    const restoreRequests: string[] = [];
     let restoredDraft: Record<string, any> | undefined;
+    let failHistoryWrite = false;
+    let failPendingRemove = false;
+    let failImageWrite = false;
+    let historyWriteDelay: Promise<void> | undefined;
     const delayedMedia = new Map<string, Promise<string>>();
     const stored = new Map(initial.map(log => [log.id, structuredClone(log)]));
     const config: Record<string, any> = { model: "test-model", imageModel: "test-model", quality: "standard", size: "1024x1024", count: "1" };
@@ -102,7 +107,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         owner.mounted = false;
         owner.effects.forEach(effect => effect.cleanup?.());
     };
-    const message = { success() {}, info() {}, warning: (warning: string) => warnings.push(warning), error: (error: string) => errors.push(error) };
+    const message = { success: (success: string) => successes.push(success), info() {}, warning: (warning: string) => warnings.push(warning), error: (error: string) => errors.push(error) };
     const confirmations: Array<{ onOk?: () => unknown }> = [];
     const app = { message, modal: { confirm(options: { onOk?: () => unknown }) { confirmations.push(options); return { destroy() {} }; } } };
     const updateConfig = (key: string, value: unknown) => { config[key] = value; };
@@ -113,7 +118,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         async iterate(visitor: (value: StoredLog, key: string, index: number) => void) {
             [...stored.entries()].forEach(([key, value], index) => visitor(structuredClone(value), key, index + 1));
         },
-        async setItem(key: string, value: StoredLog) { stored.set(key, structuredClone(value)); return value; },
+        async setItem(key: string, value: StoredLog) { await historyWriteDelay; if (failHistoryWrite) throw new Error("isolated history write failure"); stored.set(key, structuredClone(value)); return value; },
         async getItem(key: string) { return stored.get(key) || null; },
         async removeItem(key: string) { stored.delete(key); },
     };
@@ -127,7 +132,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         },
         async setItem(key: string, value: any) { storedPending.set(key, structuredClone(value)); return value; },
         async getItem(key: string) { return storedPending.get(key) || null; },
-        async removeItem(key: string) { storedPending.delete(key); },
+        async removeItem(key: string) { if (failPendingRemove) throw new Error("isolated pending cleanup failure"); storedPending.delete(key); },
     };
     const request = async (kind: string, args: any[]) => {
         requests.push({ kind, args });
@@ -146,7 +151,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
             // async closures and give the new independent task fresh hook state.
             retainedWorkspaces.push(workspace); workspace = frame(); taskId = `new-task-${++sequence}`;
             return true;
-        }, urlInputKey, draftScope: (scope: string) => workbenchTaskScope(scope, taskId) }), useWorkbenchTaskStatus(status: { ready: boolean; pending: boolean }) { reportedTaskStatus = status; } },
+        }, urlInputKey, draftScope: (scope: string) => workbenchTaskScope(scope, taskId) }) },
         "@/lib/i18n": i18nHarness,
         "@/hooks/use-display-text": { ...displayHooksHarness, DisplayText: ({ text }: { text: string }) => text, DisplayTranslationPreview: () => null },
         react: {
@@ -196,12 +201,12 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         "@/services/api/image": { requestGeneration: (...args: any[]) => request("generate", args), requestEdit: (...args: any[]) => request("edit", args) },
         "@/services/image-storage": {
             resolveImageUrl: async (key: string, fallback: string) => delayedMedia.get(key) || (key ? `/stored/${key}` : fallback),
-            uploadImage: async (url: string) => ({ url, storageKey: `upload-${++sequence}`, width: 1024, height: 1024, bytes: 100, mimeType: "image/png" }),
+            uploadImage: async (url: string) => { if (failImageWrite) throw new Error("isolated image cache failure"); return { url, storageKey: `upload-${++sequence}`, width: 1024, height: 1024, bytes: 100, mimeType: "image/png" }; },
             deleteStoredImages: async () => undefined,
         },
         "@/lib/image-utils": { readImageMeta: async () => ({ width: 1024, height: 1024, mimeType: "image/png" }), getDataUrlByteSize: () => 100, formatBytes: String, formatDuration: String },
         "@/services/api/server-assets": { fetchServerAssetContent: async () => { throw new Error("Unexpected asset request"); }, recordServerAssetEvent() {} },
-        "@/services/api/generation-history": { restoreGenerationDraft: async () => { if (!restoredDraft) throw new Error("Unexpected restore request"); return restoredDraft; } },
+        "@/services/api/generation-history": { restoreGenerationDraft: async (id: string) => { restoreRequests.push(id); if (!restoredDraft) throw new Error("Unexpected restore request"); return restoredDraft; } },
         "@/services/api/generation-tasks": { QueuedTaskFailedError, QueuedTaskPausedError, QueuedTaskSubmissionUncertainError, getQueuedTaskByRequestId: async () => null, getQueuedTask: async () => { throw new Error("Unexpected legacy task lookup for explicitly scoped logs"); } },
         "@/services/api/task-result-reconciliation": { ...requireModule("@/services/api/task-result-reconciliation"), watchTaskReconciliation: async () => undefined },
         "@/services/api/prompts": { hydratePromptReuse: async () => { throw new Error("Unexpected reuse request"); }, savePromptFromTask() {} },
@@ -258,9 +263,13 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     const unmount = () => { cleanup(workspace); retainedWorkspaces.forEach(cleanup); cleanup(wrapper); };
     disposers.push(unmount);
     return {
-        boundary, render, stored, requests, errors, warnings, config, confirmations, navigations,
-        taskStatus() { render(); return reportedTaskStatus; },
+        boundary, render, stored, storedPending, requests, restoreRequests, errors, warnings, successes, config, confirmations, navigations,
         setRestoredDraft(value: Record<string, any>) { restoredDraft = value; },
+        setHistoryWriteFailure(value: boolean) { failHistoryWrite = value; },
+        setPendingRemoveFailure(value: boolean) { failPendingRemove = value; },
+        setImageWriteFailure(value: boolean) { failImageWrite = value; },
+        delayHistoryWrite(value: Promise<void>) { historyWriteDelay = value; },
+        storageWarnings() { return elements(render()).filter(item => typeof item.type === "function" && item.type.name === "DisplayText").map(item => item.props.text).filter(text => typeof text === "string" && text.includes("保存失败")); },
         navigate(tool: string, query = "") { params = new URLSearchParams(`tool=${tool}${query ? `&${query}` : ""}`); navigationKey = `image-workspace-${++navigationSequence}`; },
         setOwner(value: string) { ownerId = value; },
         setCreative(value?: object) { creativePreset = value; },
@@ -277,7 +286,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
             const imageIds = new Set(elements(render()).filter(item => typeof item.type === "function" && item.type.name === "ResultImageCard").map(item => item.props.image.id));
             const index = workspace.values.findIndex(value => Array.isArray(value) && value.some(item => item?.status === "success" && imageIds.has(item.image?.id)));
             if (index < 0) throw new Error("Legacy fixture requires a visible successful result");
-            workspace.values[index] = [...workspace.values[index], { id: "legacy-failed-slot", status: "failed", error, snapshot }];
+            workspace.values[index] = [...workspace.values[index], { id: "legacy-failed-slot", status: "failed", error, snapshot, origin: { tool: "image-generation", workspaceId: "default" } }];
         },
         delayMedia(key: string) { const pending = deferred<string>(); delayedMedia.set(key, pending.promise); return pending; },
         async settle() { for (let turn = 0; turn < 30; turn++) { render(); await Promise.resolve(); } return render(); },
@@ -293,6 +302,10 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         optimize() { return elements(render()).find(item => typeof item.type === "function" && item.type.name === "PromptOptimizeButton")!.props; },
         generate() { return elements(render()).find(item => item.type === "Button" && item.props.type === "primary" && item.props.block)!.props; },
     };
+}
+
+function addEditSource(page: ReturnType<typeof pageHarness>) {
+    page.references().onChange([{ id: "edit-source", name: "edit-source.png", type: "image/png", dataUrl: "data:image/png;base64,YQ==" }]);
 }
 
 describe("image workspace isolation", () => {
@@ -343,6 +356,7 @@ describe("image workspace isolation", () => {
         const completion = deferred<Image[]>();
         const page = pageHarness([old], () => completion.promise);
         await page.settle();
+        addEditSource(page);
         page.prompt().onChange({ target: { value: "Current task keeps its own prompt" } });
         page.generate().onClick(); await page.settle();
         expect(page.panels()[0].disabled).toBe(false);
@@ -374,21 +388,22 @@ describe("image workspace isolation", () => {
         });
     }
 
-    test.each(["item-extract", "remove-background", "hd-upscale"])("%s pending recovery blocks submission and closing until every original receipt is read", async tool => {
+    test.each(["item-extract", "remove-background", "hd-upscale"])("%s pending recovery blocks submission and preserves every original receipt until it is read", async tool => {
         const ready = deferred<void>();
         const pending = { id: "original-pending", requestId: "original-request", taskId: "original-task", ownerId: "designer-a", tool, createdAt: 1, stopped: true,
             snapshot: { text: "", config: { model: "", imageModel: "", size: "auto", quality: "", count: "1" }, references: [] } };
         const page = pageHarness([], async () => [{ id: "duplicate", dataUrl: "data:image/png;base64,YQ==" }], undefined, { ready: ready.promise, records: [pending] });
         page.navigate(tool); await page.settle();
         page.references().onChange([{ id: "source", name: "source.png", type: "image/png", dataUrl: "data:image/png;base64,YQ==" }]);
-        expect(page.taskStatus()?.ready).toBe(false);
+        expect(textContent(page.render())).toContain("正在核对原任务记录…");
         expect(page.generate().disabled).toBe(true);
         page.generate().onClick(); await page.settle();
         expect(page.requests).toHaveLength(0);
         ready.resolve(); await page.settle();
-        expect(page.taskStatus()).toMatchObject({ ready: true, pending: true });
+        expect(textContent(page.render())).not.toContain("正在核对原任务记录…");
         expect(page.generate().disabled).toBe(true);
         expect(page.failedCards()[0]?.props.recovery).toMatchObject({ id: pending.id, requestId: pending.requestId });
+        expect([...page.storedPending.values()]).toEqual([pending]);
         expect(page.requests).toHaveLength(0);
     });
 
@@ -398,7 +413,6 @@ describe("image workspace isolation", () => {
             { ready: async () => { if (++reads === 1) throw new Error("isolated-pending-read-failed"); }, records: [] });
         page.navigate("item-extract"); await page.settle();
         page.references().onChange([{ id: "source", name: "source.png", type: "image/png", dataUrl: "data:image/png;base64,YQ==" }]);
-        expect(page.taskStatus()?.ready).toBe(false);
         expect(page.generate().disabled).toBe(true);
         expect(textContent(page.render())).toContain("isolated-pending-read-failed");
         page.generate().onClick(); await page.settle();
@@ -406,18 +420,41 @@ describe("image workspace isolation", () => {
         elements(page.render()).find(element => element.props.children === "重试读取原任务")!.props.onClick();
         await page.settle();
         expect(reads).toBe(2);
-        expect(page.taskStatus()).toMatchObject({ ready: true, pending: false });
+        expect(textContent(page.render())).not.toContain("isolated-pending-read-failed");
+        expect(page.failedCards()).toHaveLength(0);
+        expect(page.storedPending.size).toBe(0);
         expect(page.generate().disabled).toBe(false);
         await page.generate().onClick(); await page.settle();
         expect(page.requests).toHaveLength(1);
         expect(page.images().map(image => image.id)).toEqual(["after-recovery"]);
     });
 
-    test.each(["image", "image-generation"])("history restoration accepts %s as the image entry and restores user input without generating", async archivedTool => {
+    test.each(["image", "image-generation"])("legacy %s generation history stays viewable without restoring it into the edit draft", async archivedTool => {
         const log = storedLog("image-generation", "optimized", 10);
         Object.assign(log.images[0]!, { sourceTaskId: "original-task" });
         const page = pageHarness([log]);
         page.setRestoredDraft({ prompt: "original user input", finalPrompt: "optimized final prompt", userInput: { scene: "free-optimize", userText: "original user input", fields: {}, referenceRoles: [], mode: "generate" }, config: { ...page.config, systemPrompt: "", imageOptions: "" }, references: [], operationType: "image_generation", tool: archivedTool, parameters: {} });
+        await page.settle();
+        addEditSource(page);
+        page.prompt().onChange({ target: { value: "current edit draft" } });
+        page.panels()[0].onPreviewLog(page.panels()[0].logs[0]);
+        await page.settle();
+        expect(page.images().map(image => image.id)).toEqual(["optimized-image"]);
+        expect(elements(page.render()).some(element => element.props.children === "恢复为草稿继续改")).toBe(false);
+        expect(page.errors).toEqual([]);
+        expect(page.prompt().value).toBe("current edit draft");
+        expect(page.prompt().value).not.toBe("optimized final prompt");
+        expect(page.references().references.map((reference: { id: string }) => reference.id)).toEqual(["edit-source"]);
+        expect(page.restoreRequests).toEqual([]);
+        expect(page.stored.get(log.id)).toEqual(log);
+        expect(page.requests).toHaveLength(0);
+    });
+
+    test("image-edit history restores the original user input without generating", async () => {
+        const log = storedLog("image-edit", "optimized-edit", 10);
+        Object.assign(log.images[0]!, { sourceTaskId: "original-edit-task" });
+        const page = pageHarness([log]);
+        page.setRestoredDraft({ prompt: "original edit instruction", finalPrompt: "optimized edit prompt", userInput: { scene: "free-optimize", userText: "original edit instruction", fields: {}, referenceRoles: [], mode: "edit" }, config: { ...page.config, systemPrompt: "", imageOptions: "" }, references: [], operationType: "inpaint", tool: "image-edit", parameters: {} });
         await page.settle();
         page.panels()[0].onPreviewLog(page.panels()[0].logs[0]);
         await page.settle();
@@ -425,16 +462,17 @@ describe("image workspace isolation", () => {
         await page.confirmations.at(-1)?.onOk?.();
         await page.settle();
         expect(page.errors).toEqual([]);
-        expect(page.prompt().value).toBe("original user input");
-        expect(page.prompt().value).not.toBe("optimized final prompt");
+        expect(page.prompt().value).toBe("original edit instruction");
+        expect(page.prompt().value).not.toBe("optimized edit prompt");
+        expect(page.restoreRequests).toEqual(["original-edit-task"]);
         expect(page.requests).toHaveLength(0);
     });
 
     test("history restoration still rejects a genuinely different image tool without changing the draft", async () => {
-        const log = storedLog("image-generation", "other-tool", 10);
+        const log = storedLog("image-edit", "other-tool", 10);
         Object.assign(log.images[0]!, { sourceTaskId: "original-task" });
         const page = pageHarness([log]);
-        page.setRestoredDraft({ prompt: "must not apply", config: { ...page.config }, references: [], operationType: "inpaint", tool: "image-edit", parameters: {} });
+        page.setRestoredDraft({ prompt: "must not apply", config: { ...page.config }, references: [], operationType: "inpaint", tool: "angle-control", parameters: {} });
         await page.settle();
         page.panels()[0].onPreviewLog(page.panels()[0].logs[0]);
         await page.settle();
@@ -444,6 +482,7 @@ describe("image workspace isolation", () => {
         await page.settle();
         expect(page.errors[0]).toContain("请先切换到历史原工具");
         expect(page.prompt().value).toBe(before);
+        expect(page.restoreRequests).toEqual(["original-task"]);
         expect(page.requests).toHaveLength(0);
     });
 
@@ -453,6 +492,7 @@ describe("image workspace isolation", () => {
             snapshot: { text: "older request", config: { model: "test-model", imageModel: "test-model", size: "1024x1024", quality: "standard", count: "1" }, references: [] } };
         const page = pageHarness([], async () => [{ id: "new-result", dataUrl: "data:image/png;base64,bmV3" }], undefined, { ready: ready.promise, records: [pending] });
         await page.settle();
+        addEditSource(page);
         page.prompt().onChange({ target: { value: "newer request" } });
         expect(page.generate().disabled).toBe(true);
         await page.generate().onClick();
@@ -478,6 +518,7 @@ describe("image workspace isolation", () => {
             snapshot: { text: "older request", config: { model: "test-model", imageModel: "test-model", size: "1024x1024", quality: "standard", count: "1" }, references: [] } };
         const page = pageHarness([], () => generation.promise, undefined, { ready: ready.promise, records: [pending] });
         await page.settle();
+        addEditSource(page);
         page.prompt().onChange({ target: { value: "new in-flight request" } });
         page.generate().onClick();
         expect(page.requests).toHaveLength(0);
@@ -497,7 +538,8 @@ describe("image workspace isolation", () => {
         const page = pageHarness();
         const keys = tools.map(tool => { page.navigate(tool); return page.boundary().key; });
         expect(keys.every(Boolean)).toBe(true);
-        expect(new Set(keys).size).toBe(4);
+        expect(new Set(keys).size).toBe(3);
+        expect(keys[0]).toBe(keys[1]);
         page.navigate("image-generation", "prompt=changed&model=other&reuseToken=token&sourceAssetId=asset");
         expect(page.boundary().key).toBe(keys[0]);
         page.navigate("unrecognized");
@@ -513,21 +555,23 @@ describe("image workspace isolation", () => {
         expect(page.boundary().key).not.toBe(creativeKey);
     });
 
-    for (const tool of tools) test(`${tool} renders only its own history and latest successful result`, async () => {
+    for (const tool of tools) test(`${tool} renders only its compatible history and latest successful result`, async () => {
         const logs = tools.flatMap((entry, index) => [storedLog(entry, `${entry}-older`, 10 + index), storedLog(entry, `${entry}-newer`, 100 + index)]);
         const page = pageHarness(logs);
         page.navigate(tool);
         await page.settle();
+        const compatibleTools = tool === "image-generation" || tool === "image-edit" ? ["image-generation", "image-edit"] : [tool];
+        const expectedLogs = logs.filter(log => compatibleTools.includes(log.tool)).toSorted((left, right) => right.createdAt - left.createdAt);
         expect(page.panels()).toHaveLength(1);
-        for (const panel of page.panels()) expect(panel.logs.map((log: StoredLog) => log.id)).toEqual([`${tool}-newer`, `${tool}-older`]);
-        expect(page.images().map(image => image.id)).toEqual([`${tool}-newer-image`]);
-        expect(page.images()[0].dataUrl).toBe(`/stored/${tool}-newer-stored`);
+        for (const panel of page.panels()) expect(panel.logs.map((log: StoredLog) => log.id)).toEqual(expectedLogs.map(log => log.id));
+        expect(page.images().map(image => image.id)).toEqual([`${expectedLogs[0].id}-image`]);
+        expect(page.images()[0].dataUrl).toBe(`/stored/${expectedLogs[0].id}-stored`);
         expect(page.requests).toHaveLength(0);
         expect(page.errors).toEqual([]);
     });
 
     test("route changes clear visible selection, preview, and references before loading the next tool", async () => {
-        const page = pageHarness([storedLog("image-generation", "a", 10), storedLog("image-edit", "b", 20)]);
+        const page = pageHarness([storedLog("image-generation", "a", 10), storedLog("detail-enhance", "b", 20)]);
         await page.settle();
         page.panels()[0].onSelectedLogIdsChange(["a"]);
         page.panels()[0].onPreviewLog(page.panels()[0].logs[0]);
@@ -535,13 +579,13 @@ describe("image workspace isolation", () => {
         await page.settle();
         expect(page.panels()[0].activeLogId).toBe("a");
         expect(page.prompt().value).toBe("");
-        page.navigate("image-generation", "prompt=new-prompt");
+        page.navigate("image-edit", "prompt=new-prompt");
         page.render();
         expect(page.prompt().value).toBe("new-prompt");
-        expect(page.navigations).toEqual([{ destination: { pathname: "/image", search: "tool=image-generation", hash: "" }, options: { replace: true, state: null } }]);
+        expect(page.navigations).toEqual([{ destination: { pathname: "/image", search: "tool=image-edit", hash: "" }, options: { replace: true, state: null } }]);
         expect(page.references().references).toHaveLength(1);
         expect(page.panels()[0].selectedLogIds).toEqual(["a"]);
-        page.navigate("image-edit");
+        page.navigate("detail-enhance");
         page.render();
         expect(page.images()).toEqual([]);
         expect(page.panels()[0].logs).toEqual([]);
@@ -568,11 +612,11 @@ describe("image workspace isolation", () => {
     });
 
     test("a delayed history preview cannot overwrite the next tool's prompt or result", async () => {
-        const page = pageHarness([storedLog("image-generation", "a-old", 10), storedLog("image-generation", "a-new", 20), storedLog("image-edit", "b", 30)]);
+        const page = pageHarness([storedLog("image-generation", "a-old", 10), storedLog("image-generation", "a-new", 20), storedLog("detail-enhance", "b", 30)]);
         await page.settle();
         const pending = page.delayMedia("a-old-stored");
         page.panels()[0].onPreviewLog(page.panels()[0].logs.find((log: StoredLog) => log.id === "a-old"));
-        page.navigate("image-edit");
+        page.navigate("detail-enhance");
         await page.settle();
         page.prompt().onChange({ target: { value: "B's own draft" } });
         pending.resolve("/stored/a-old-stored");
@@ -608,6 +652,7 @@ describe("image workspace isolation", () => {
         const pending = deferred<Image[]>();
         const page = pageHarness([storedLog("detail-enhance", "b", 20)], () => pending.promise);
         await page.settle();
+        addEditSource(page);
         page.prompt().onChange({ target: { value: "generate only for A" } });
         expect(page.generate().disabled).toBe(false);
         page.generate().onClick();
@@ -620,8 +665,8 @@ describe("image workspace isolation", () => {
         expect(page.images().map(image => image.id)).toEqual(["b-image"]);
         expect(page.panels()[0].logs.map((log: StoredLog) => log.id)).toEqual(["b"]);
         const saved = [...page.stored.values()].find(log => log.images.some(image => image.id === "completed-a"));
-        expect(saved).toMatchObject({ ownerId: "designer-a", tool: "image-generation" });
-        page.navigate("image-generation");
+        expect(saved).toMatchObject({ ownerId: "designer-a", tool: "image-edit" });
+        page.navigate("image-edit");
         await page.settle();
         expect(page.images().map(image => image.id)).toEqual(["completed-a"]);
         expect(page.panels()[0].logs).toHaveLength(1);
@@ -633,10 +678,12 @@ describe("image workspace isolation", () => {
         const pending = deferred<Image[]>();
         const page = pageHarness([], () => pending.promise);
         await page.settle();
+        addEditSource(page);
         page.prompt().onChange({ target: { value: "queue progress" } });
         page.generate().onClick();
         expect(page.queueProgress()).toMatchObject({ taskId: null, active: true });
-        await page.requests[0]!.args[2].onSubmitted(["task-accepted"]);
+        expect(page.requests[0]!.kind).toBe("edit");
+        await page.requests[0]!.args[4].onSubmitted(["task-accepted"]);
         expect(page.queueProgress()).toMatchObject({ taskId: "task-accepted", active: true });
         expect(page.requests).toHaveLength(1);
         pending.resolve([{ id: "result", dataUrl: "data:image/png;base64,YQ==", sourceTaskId: "task-accepted" }]);
@@ -646,26 +693,106 @@ describe("image workspace isolation", () => {
         expect(page.requests).toHaveLength(1);
     });
 
+    test("a completed page result remains visible while history is unavailable and explicit save retry sends no new task", async () => {
+        const pending = deferred<Image[]>();
+        const page = pageHarness([], () => pending.promise);
+        await page.settle(); addEditSource(page);
+        page.prompt().onChange({ target: { value: "preserve the successful original" } });
+        page.setHistoryWriteFailure(true);
+        page.generate().onClick(); await page.settle();
+        await page.requests[0]!.args[4].onSubmitted(["accepted-original"]);
+        pending.resolve([{ id: "completed-image", dataUrl: "data:image/png;base64,YQ==", sourceTaskId: "accepted-original" }]);
+        await page.settle();
+        expect(page.images().map(image => image.id)).toEqual(["completed-image"]);
+        expect(page.storageWarnings()).toEqual([expect.stringContaining("本地记录保存失败")]);
+        expect(page.successes).toEqual(["生成完成"]);
+        expect(page.failedCards()).toHaveLength(0);
+        expect(page.stored.size).toBe(0);
+        expect(page.storedPending.size).toBe(1);
+        page.setHistoryWriteFailure(false);
+        const retrySave = elements(page.render()).find(item => item.type === "Button" && textContent(item) === "重试保存");
+        expect(retrySave).toBeDefined();
+        await retrySave!.props.onClick(); await page.settle();
+        expect(page.images().map(image => image.id)).toEqual(["completed-image"]);
+        expect(page.stored.size).toBe(1);
+        expect(page.storedPending.size).toBe(0);
+        expect(page.requests).toHaveLength(1);
+        expect(page.storageWarnings()).toEqual([]);
+    });
+
+    test("a slow history write does not delay the authoritative image", async () => {
+        const historyWrite = deferred<void>();
+        const page = pageHarness([], async () => [{ id: "completed-image", dataUrl: "data:image/png;base64,YQ==" }]);
+        await page.settle(); addEditSource(page);
+        page.prompt().onChange({ target: { value: "slow history" } });
+        page.delayHistoryWrite(historyWrite.promise);
+        page.generate().onClick(); await page.settle();
+        expect(page.images().map(image => image.id)).toEqual(["completed-image"]);
+        expect(page.stored.size).toBe(0);
+        expect(page.storedPending.size).toBe(1);
+        historyWrite.resolve(); await page.settle();
+        expect(page.stored.size).toBe(1);
+        expect(page.storedPending.size).toBe(0);
+        expect(page.requests).toHaveLength(1);
+    });
+
+    test("a pending cleanup failure keeps the image and retries the same history identity", async () => {
+        const page = pageHarness([], async () => [{ id: "completed-image", dataUrl: "data:image/png;base64,YQ==" }]);
+        await page.settle(); addEditSource(page);
+        page.prompt().onChange({ target: { value: "pending cleanup" } });
+        page.setPendingRemoveFailure(true);
+        page.generate().onClick(); await page.settle();
+        expect(page.images().map(image => image.id)).toEqual(["completed-image"]);
+        expect(page.storageWarnings()).toEqual([expect.stringContaining("本地记录保存失败")]);
+        const originalLog = [...page.stored.keys()];
+        expect(originalLog).toHaveLength(1);
+        expect(page.storedPending.size).toBe(1);
+        page.setPendingRemoveFailure(false);
+        await elements(page.render()).find(item => item.type === "Button" && textContent(item) === "重试保存")!.props.onClick();
+        await page.settle();
+        expect([...page.stored.keys()]).toEqual(originalLog);
+        expect(page.storedPending.size).toBe(0);
+        expect(page.storageWarnings()).toEqual([]);
+        expect(page.requests).toHaveLength(1);
+    });
+
+    test("an unavailable image cache preserves the original source in the visible result and history", async () => {
+        const source = "https://example.test/original.png";
+        const page = pageHarness([], async () => [{ id: "completed-image", dataUrl: source }]);
+        await page.settle(); addEditSource(page);
+        page.prompt().onChange({ target: { value: "image cache failure" } });
+        page.setImageWriteFailure(true);
+        page.generate().onClick(); await page.settle();
+        expect(page.images()[0]).toMatchObject({ id: "completed-image", dataUrl: source });
+        expect(page.images()[0]!.storageKey).toBeUndefined();
+        expect(page.storageWarnings()).toEqual([expect.stringContaining("本地图片缓存保存失败")]);
+        expect([...page.stored.values()][0]!.images[0]!.dataUrl).toBe(source);
+        expect(page.storedPending.size).toBe(0);
+        expect(page.requests).toHaveLength(1);
+        expect(page.successes).toEqual(["生成完成"]);
+    });
+
     test("returning to A before its pending task finishes receives the new result in the remounted workspace", async () => {
         const pending = deferred<Image[]>();
         const page = pageHarness([storedLog("image-generation", "a-old", 10), storedLog("detail-enhance", "b", 20)], () => pending.promise);
         await page.settle();
+        addEditSource(page);
         page.prompt().onChange({ target: { value: "new A request" } });
         page.generate().onClick();
         page.navigate("detail-enhance");
         await page.settle();
-        page.navigate("image-generation");
+        page.navigate("image-edit");
         await page.settle();
         expect(page.images()).toEqual([]);
         expect(page.failedCards()).toHaveLength(1);
         expect(page.failedCards()[0]!.props.recovery).toMatchObject({
-            requestId: page.requests[0]!.args[2].requestId,
-            ownerId: "designer-a", tool: "image-generation",
+            requestId: page.requests[0]!.args[4].requestId,
+            ownerId: "designer-a", tool: "image-edit",
         });
         pending.resolve([{ id: "new-a", dataUrl: "data:image/png;base64,YQ==", sourceTaskId: "task-new-a" }]);
         await page.settle();
         expect(page.images().map(image => image.id)).toEqual(["new-a"]);
-        expect(page.panels()[0].logs[0]).toMatchObject({ ownerId: "designer-a", tool: "image-generation", prompt: "new A request" });
+        expect(page.panels()[0].logs[0]).toMatchObject({ ownerId: "designer-a", tool: "image-edit", prompt: "new A request" });
         expect(page.requests).toHaveLength(1);
         expect(page.errors).toEqual([]);
     });
@@ -674,6 +801,7 @@ describe("image workspace isolation", () => {
         const pending = deferred<Image[]>();
         const page = pageHarness([storedLog("image-generation", "owner-b", 20, "designer-b")], () => pending.promise);
         await page.settle();
+        addEditSource(page);
         page.prompt().onChange({ target: { value: "A's pending request" } });
         page.generate().onClick();
         page.setOwner("designer-b");
@@ -691,11 +819,12 @@ describe("image workspace isolation", () => {
         const pending = deferred<Image[]>();
         const page = pageHarness([storedLog("image-generation", "a-old", 10), storedLog("image-generation", "a-newer", 20)], () => pending.promise);
         await page.settle();
+        addEditSource(page);
         page.prompt().onChange({ target: { value: "background request" } });
         page.generate().onClick();
         page.navigate("angle-control");
         await page.settle();
-        page.navigate("image-generation");
+        page.navigate("image-edit");
         await page.settle();
         page.prompt().onChange({ target: { value: "new draft kept while browsing" } });
         page.panels()[0].onPreviewLog(page.panels()[0].logs.find((log: StoredLog) => log.id === "a-old"));
@@ -713,11 +842,12 @@ describe("image workspace isolation", () => {
         const pending = deferred<Image[]>();
         const page = pageHarness([storedLog("image-generation", "a-old", 10)], () => pending.promise);
         await page.settle();
+        addEditSource(page);
         page.prompt().onChange({ target: { value: "previous request" } });
         page.generate().onClick();
-        page.navigate("image-edit");
+        page.navigate("detail-enhance");
         await page.settle();
-        page.navigate("image-generation");
+        page.navigate("image-edit");
         await page.settle();
         page.panels()[0].onCreateTask();
         page.prompt().onChange({ target: { value: "fresh draft" } });
@@ -741,6 +871,7 @@ describe("image workspace isolation", () => {
         const page = pageHarness([legacy], async () => [{ id: "single-new-image", dataUrl: "data:image/png;base64,YQ==" }]);
         await page.settle();
         expect(page.images().map(image => image.id)).toEqual(["legacy-multi-image", "second-old-image"]);
+        addEditSource(page);
         page.config.count = legacyCount;
         page.prompt().onChange({ target: { value: "one new image from legacy settings" } });
         page.generate().onClick();
@@ -782,30 +913,33 @@ describe("image workspace isolation", () => {
         expect(page.stored.get("legacy-partial")).toEqual(legacy);
         expect(page.requests).toHaveLength(1);
         expect(page.requests[0]!.args[0].count).toBe("1");
+        expect(page.requests[0]!.kind).toBe("generate");
+        expect(page.requests[0]!.args[2]).toMatchObject({ operationType: "image_generation", tool: "image-generation" });
         expect(page.errors).toEqual([]);
     });
 });
 
 describe("image optimization uses the workspace operation", () => {
     const references = [{ id: "reference", name: "source.png", type: "image/png", dataUrl: "data:image/png;base64,YQ==" }];
-    const compiled = { scene: "free-optimize", userText: "make it blue", fields: {}, mode: "generate", referenceRoles: ["source.png"], compilationId: "11111111-1111-4111-8111-111111111111" };
+    const compiled = { scene: "free-optimize", userText: "make it blue", fields: {}, mode: "edit", referenceRoles: ["source.png"], compilationId: "11111111-1111-4111-8111-111111111111" };
     const makePage = () => pageHarness([], async () => [{ id: "result", dataUrl: "data:image/png;base64,YQ==" }]);
 
-    test("reference-guided image generation keeps generation mode from optimizer to task", async () => {
+    test("the default image-edit entry keeps editing mode and references from optimizer to task", async () => {
         const page = makePage(); await page.settle();
         page.references().onChange(references);
         page.prompt().onChange({ target: { value: "make it blue" } });
-        expect(page.optimize().operationType).toBe("image_generation");
+        expect(page.optimize().operationType).toBe("inpaint");
         page.optimize().onApply("optimized blue", {}, compiled);
         page.generate().onClick(); await page.settle();
         expect(page.requests).toHaveLength(1);
-        expect(page.requests[0]!.kind).toBe("generate");
-        expect(page.requests[0]!.args[2]).toMatchObject({ operationType: "image_generation", promptInput: compiled });
-        expect(page.requests[0]!.args[3]).toHaveLength(1);
+        expect(page.requests[0]!.kind).toBe("edit");
+        expect(page.requests[0]!.args[4]).toMatchObject({ operationType: "inpaint", tool: "image-edit", promptInput: compiled });
+        expect(page.requests[0]!.args[2]).toHaveLength(1);
     });
 
     test("changing models discards an old manual compilation but preserves the visible prompt", async () => {
         const page = makePage(); await page.settle();
+        addEditSource(page);
         page.prompt().onChange({ target: { value: "make it blue" } });
         page.optimize().onApply("optimized blue", {}, { ...compiled, referenceRoles: [] });
         page.config.imageModel = page.config.model = "replacement-model";
@@ -814,7 +948,8 @@ describe("image optimization uses the workspace operation", () => {
         // Returning to the original model must not resurrect the invalidated binding.
         page.config.imageModel = page.config.model = "test-model";
         page.generate().onClick(); await page.settle();
-        expect(page.requests[0]!.args[2].promptInput).toBeUndefined();
+        expect(page.requests[0]!.kind).toBe("edit");
+        expect(page.requests[0]!.args[4].promptInput).toBeUndefined();
         expect(page.requests[0]!.args[1]).toBe("optimized blue");
     });
 
@@ -847,6 +982,7 @@ describe("image failure diagnostics", () => {
     test("a confirmed failed task remains identifiable after its recovery record is removed", async () => {
         const page = pageHarness([], async () => { throw new QueuedTaskFailedError({ id: "failed-task", requestId: "failed-request:0", status: "failed", resultUrls: [], failureReason: "provider rejected the original request" }); });
         await page.settle();
+        addEditSource(page);
         page.prompt().onChange({ target: { value: "a blue dress" } });
         page.generate().onClick(); await page.settle();
         const card = page.failedCards()[0]!;
@@ -858,8 +994,9 @@ describe("image failure diagnostics", () => {
     });
 
     test("refreshing an unknown image submission preserves its original diagnostic and never resubmits", async () => {
-        const page = pageHarness([], async () => { throw new QueuedTaskSubmissionUncertainError(`${page.requests[0]!.args[2].requestId}:0`, undefined, new Error("original optimizer diagnostic")); });
+        const page = pageHarness([], async () => { throw new QueuedTaskSubmissionUncertainError(`${page.requests[0]!.args[4].requestId}:0`, undefined, new Error("original optimizer diagnostic")); });
         await page.settle();
+        addEditSource(page);
         page.prompt().onChange({ target: { value: "a blue dress" } });
         page.generate().onClick(); await page.settle();
         expect(page.failedCards()[0]!.props.diagnostic).toContain("original optimizer diagnostic");
@@ -867,7 +1004,7 @@ describe("image failure diagnostics", () => {
         const refreshed = page.failedCards()[0]!;
         expect(refreshed.props.error).toContain("原任务尚未查到");
         expect(refreshed.props.diagnostic).toContain("original optimizer diagnostic");
-        expect(refreshed.props.requestId).toBe(`${page.requests[0]!.args[2].requestId}:0`);
+        expect(refreshed.props.requestId).toBe(`${page.requests[0]!.args[4].requestId}:0`);
         expect(page.requests).toHaveLength(1);
     });
 });
@@ -917,17 +1054,20 @@ describe("Blend entry semantics", () => {
         } else expect(page.errors).toContain("当前合成模型需要 2–4 张参考图。");
     });
 
-    test("ordinary image and edit entries retain prompt and single-reference guidance", async () => {
+    test("default and legacy image routes retain editing prompt and single-reference requirements", async () => {
         const page = pageHarness();
         await page.settle();
         expect(textContent(page.render())).toContain("第一张作品，从一句描述开始");
         expect(page.generate().disabled).toBe(true);
-        page.prompt().onChange({ target: { value: "A normal image prompt" } });
-        expect(page.generate().disabled).toBe(false);
-        page.navigate("image-edit");
-        await page.settle();
         expect(textContent(page.render())).toContain("至少一张参考图");
-        page.prompt().onChange({ target: { value: "A normal edit prompt" } });
+        page.prompt().onChange({ target: { value: "A normal image prompt" } });
+        expect(page.generate().disabled).toBe(true);
+        const originalKey = page.boundary().key;
+        page.navigate("image-generation");
+        await page.settle();
+        expect(page.boundary().key).toBe(originalKey);
+        expect(textContent(page.render())).toContain("至少一张参考图");
+        expect(page.prompt().value).toBe("A normal image prompt");
         page.references().onChange(references(1));
         expect(page.generate().disabled).toBe(false);
         expect(page.references().validation).toMatchObject({ minimum: 0, maximum: 16, valid: true });

@@ -30,7 +30,7 @@ export function validateQuickImageConfiguration(action: QuickImageAction, raw: Q
   const input = quickImageConfigurationSchema.parse(raw);
   if (!isQuickImageEligibleModel(model)) throw new ToolConfigurationError("QUICK_IMAGE_MODEL_UNSUPPORTED", "请选择已启用、支持单图编辑的 APIMart 标准图片模型");
   const kind = apiMartImageModel(model.modelId)!;
-  const allowed = kind === "mai-image-2.6-flash" ? ["web_grounding"]
+  const allowed = kind === "mai-image-2.7-flash" ? ["nsfw_check", "background"] : kind === "mai-image-2.6-flash" ? ["web_grounding"]
     : kind === "grok-imagine-image-2.0" ? ["size", "aspect_ratio", "resolution", "nsfw_check"]
     : kind === "gemini-nano-banana-2.1" ? ["size", "resolution"]
     : kind.startsWith("gpt-image-2.5-") || kind.startsWith("gpt-image-2.6-")

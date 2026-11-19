@@ -2,12 +2,12 @@ import { readFileSync } from "node:fs";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { test, expect, fixturePng, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
+import { activeWorkbench, workbenchPanes, readWorkspaceRecords } from "./headless-workbench";
 
 const videoBytes = readFileSync(new URL("./media/video.mp4", import.meta.url));
 const otherVideoBytes = readFileSync(new URL("./media/video-control.mp4", import.meta.url));
 const videoModel = { id: "10000000-0000-4000-8000-000000000003", name: "测试视频模型", modelId: "wan2.7", capabilities: ["video"], creditCost: 0, rmbCost: 0 };
-const active = (page: Page) => page.getByRole("tabpanel");
-const taskTabs = (page: Page) => page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab");
+const active = activeWorkbench;
 
 async function mockVideo(context: BrowserContext, api: MockCanvasApi) {
     await context.route("**/api/models", route => route.fulfill({ json: { models: [videoModel], prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: videoModel.id, configurationVersion: 1 })) } }));
@@ -88,7 +88,7 @@ test("video history browsing stays separate while the current submitted task com
     await expect(prompt).toHaveValue("当前视频 CURRENT_VIDEO_B");
     const task = api.tasks.get(currentId)!;
     task.status = "success"; task.resultUrls = [`/api/assets/${currentId}/content`];
-    await expect(taskTabs(page).first()).toContainText("已完成");
+    await expect.poll(async () => (await readWorkspaceRecords<any>(page, "video_generation_logs")).filter(item => item.value.video).length).toBe(2);
     await expect(active(page).locator("video")).toHaveCount(1);
     await expect(active(page).locator("video")).toHaveAttribute("src", oldPreview!);
     await active(page).getByRole("tab", { name: "本次结果", exact: true }).click();
@@ -113,22 +113,23 @@ test("seamless can browse history and create a second real workspace while A run
     await expect(active(page).getByRole("img", { name: "无缝拼接结果", exact: true })).toHaveAttribute("src", new RegExp(oldId));
     await expect(active(page).getByRole("button", { name: "上传", exact: true })).toBeEnabled();
     await active(page).getByRole("button", { name: "新建任务，继续创作", exact: true }).click();
-    await expect(taskTabs(page)).toHaveCount(2);
+    await expect(workbenchPanes(page)).toHaveCount(2);
     await expect(active(page).getByRole("img", { name: "source-A.png", exact: true })).toHaveCount(0);
     await upload("source-B.png", 210);
     await active(page).getByRole("button", { name: "开始无缝拼接", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(2);
     expect(api.tasks.get(aId)?.status).toBe("processing");
-    await taskTabs(page).first().click();
+    const original = workbenchPanes(page).first();
     const a = api.tasks.get(aId)!;
     a.status = "success"; a.resultUrls = [`/api/assets/${aId}/content`];
-    await expect(taskTabs(page).first()).toContainText("已完成");
-    await expect(active(page).getByRole("img", { name: "无缝拼接结果", exact: true })).toHaveAttribute("src", new RegExp(oldId));
-    await active(page).getByRole("tab", { name: "本次结果", exact: true }).click();
-    await expect(active(page).getByRole("img", { name: "无缝拼接结果", exact: true })).toBeVisible();
-    await expect(active(page).getByRole("img", { name: "source-A.png", exact: true })).toBeVisible();
+    await expect(original.locator('button[aria-label="开始无缝拼接"]')).toHaveText("开始无缝拼接");
+    await expect(original.locator('img[alt="无缝拼接结果"]')).toHaveAttribute("src", new RegExp(oldId));
+    await expect(original.locator('img[alt="source-A.png"]')).toHaveCount(1);
     expect(new Set(api.submissions.map(item => item.requestId)).size).toBe(2);
-    await taskTabs(page).nth(1).click();
+    await expect(active(page).getByRole("img", { name: "source-B.png", exact: true })).toBeVisible();
+    await page.reload();
+    await expect.poll(async () => (await readWorkspaceRecords<any>(page, "seamless_stitch_tasks")).find(item => item.value.taskId === aId)?.value).toMatchObject({ taskId: aId, workspaceId: "default", pending: false });
+    await expect(original.locator('img[alt="无缝拼接结果"]')).toHaveAttribute("src", new RegExp(oldId));
     await expect(active(page).getByRole("img", { name: "source-B.png", exact: true })).toBeVisible();
     expect(api.submissions).toHaveLength(2);
 });
@@ -186,12 +187,10 @@ test("late history restoration preserves a newer uploaded video draft and the ar
 test("wrapped tooltips remain available on disabled motion options and preserve theme and task actions", async ({ page, context, api }) => {
     await mockVideo(context, api);
     await page.goto("/video");
-    const newTask = page.getByRole("region", { name: "多任务工作区", exact: true }).getByRole("button", { name: "新建任务", exact: true });
-    await newTask.hover();
-    await expect(page.getByRole("tooltip", { name: "开始独立任务，当前任务继续处理", exact: true })).toBeVisible();
-    await expect(newTask).not.toHaveAttribute("title");
+    await expect(page.getByRole("tablist", { name: "任务列表", exact: true })).toHaveCount(0);
+    const newTask = active(page).getByRole("button", { name: "新建任务，继续创作", exact: true });
     await newTask.click();
-    await expect(taskTabs(page)).toHaveCount(2);
+    await expect(workbenchPanes(page)).toHaveCount(2);
     const motions = active(page).getByTestId("video-motion-panel");
     await motions.locator("summary").click();
     const actions = motions.getByRole("group", { name: "主体动作 · 最多选 2 项", exact: true });

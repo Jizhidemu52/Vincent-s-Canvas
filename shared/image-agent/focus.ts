@@ -8,6 +8,7 @@ export type ImageAgentImage = {
     name?: string;
     parentId?: string;
     workId?: string;
+    versionNo?: number;
     note?: ImageAgentWorkNote;
     /** Requirements for this exact version, never evidence of visual correctness. */
     designBrief?: string;
@@ -29,7 +30,10 @@ export function resolveImageAgentFocus<T extends ImageAgentImage>(images: readon
     const explicit = selection.explicitImageIds?.[0];
     if (explicit) return findImage(images, explicit);
     if (selection.focusId) return findImage(images, selection.focusId);
-    const latest = images.findLast(item => item.kind === "generated") || images.at(-1);
+    let latest = images.at(-1);
+    for (let index = images.length - 1; index >= 0; index--) {
+        if (images[index]!.kind === "generated") { latest = images[index]; break; }
+    }
     return latest ? findImage(images, latest.id) : undefined;
 }
 
@@ -120,6 +124,11 @@ export function getImageAgentVersions<T extends ImageAgentImage>(images: readonl
 }
 
 export function imageAgentVersion(images: readonly ImageAgentImage[], imageId: string): number {
+    const persisted = images.find(image => image.id === imageId)?.versionNo;
+    if (persisted !== undefined) {
+        if (!Number.isSafeInteger(persisted) || persisted < 1) throw new Error("图片版本编号无效，请刷新版本记录。");
+        return persisted;
+    }
     return getImageAgentVersions(images, imageId).findIndex(item => item.id === imageId) + 1;
 }
 
@@ -161,7 +170,7 @@ export function imageAgentCandidateIds(content: string, images: readonly ImageAg
         const versions = getImageAgentVersions(images, focus.id);
         for (const match of content.matchAll(/(?<![A-Za-z0-9_])[vV]\s*(\d+)(?![A-Za-z0-9_])|第\s*(\d+)\s*版/gu)) {
             const version = Number(match[1] || match[2]);
-            const image = Number.isSafeInteger(version) && version > 0 ? versions[version - 1] : undefined;
+            const image = Number.isSafeInteger(version) && version > 0 ? versions.find(item => imageAgentVersion(versions, item.id) === version) : undefined;
             if (available(image)) candidates.add(image.id);
         }
     }

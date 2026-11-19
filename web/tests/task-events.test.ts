@@ -71,6 +71,32 @@ test("healthy stream waits for push, disconnect enables bounded read-only fallba
     watch.close();
 });
 
+test("a healthy active stream bounds a lost completion notification to a fresh snapshot", async () => {
+    const f = fixture();
+    const watch = f.stream.subscribe(["one"], { background: true });
+    await Bun.sleep(45);
+    f.connections[0]!.emit(["one"]);
+    const controller = new AbortController();
+    const scheduled: number[] = [];
+    const originalTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = ((handler: TimerHandler, ms?: number, ...args: unknown[]) => {
+        scheduled.push(ms || 0);
+        return originalTimeout(handler, ms, ...args);
+    }) as typeof setTimeout;
+    let pending: Promise<void> | undefined;
+    try {
+        pending = watch.next(watch.version, 15 * 60_000, controller.signal).catch(error => {
+            if (!controller.signal.aborted) throw error;
+        });
+        expect(scheduled).toEqual([15_000]);
+    } finally {
+        globalThis.setTimeout = originalTimeout;
+        controller.abort();
+        await pending;
+        watch.close();
+    }
+});
+
 test("hidden tabs close the stream, avoid GETs and resnapshot when visible", async () => {
     const f = fixture();
     f.hidden(true);

@@ -20,7 +20,7 @@ import "./home.css";
 
 const entries = [
     { path: "/canvas", flag: "canvas" as const, icon: LayoutGrid, title: "自由画布", description: "把灵感放在一起，自由编排与创作", action: "打开画布", preview: "knit-sketch" },
-    { path: "/image", flag: "image" as const, icon: ImagePlus, title: "图像生成", description: "描述一个想法，把它变成图片", action: "开始生图", preview: "womenswear-source" },
+    { path: "/image?tool=image-edit", flag: "image-edit" as const, icon: ImagePlus, title: "图片编辑", description: "上传图片，修改细节与设计", action: "开始编辑", preview: "womenswear-source" },
     { path: "/video", flag: "video" as const, icon: Video, title: "视频生成", description: "从文字或图片，生成一段视频", action: "制作视频", preview: "model-natural-source" },
     { path: "/chat", flag: "gpt-chat" as const, icon: MessageSquareText, title: "对话改图", description: "发送图片，接着聊、接着改", action: "开始对话", preview: "hat" },
 ];

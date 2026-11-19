@@ -31,6 +31,7 @@ import { resolveCanvasImageConfig } from "@/lib/canvas/canvas-generation-model";
 type CanvasConfigNodePanelProps = {
     node: CanvasNodeData;
     isRunning: boolean;
+    templateTaskCount?: number;
     linkedTaskCount?: number;
     linkedTaskHasImages?: boolean;
     inputImageTaskCount?: number;
@@ -45,7 +46,7 @@ type CanvasConfigNodePanelProps = {
     workflow?: { status?: string; stepStatus?: string; onRun: () => void; onStop: () => void; onRunStep?: (onlyStep: boolean) => void };
 };
 
-export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, linkedTaskHasImages = false, inputSummary, inputImageTaskCount = inputSummary.imageCount, inputs = [], imageReferences, onConfigChange, onGenerate, onRetryFailed, onStop, workflow }: CanvasConfigNodePanelProps) {
+export function CanvasConfigNodePanel({ node, isRunning, templateTaskCount = 0, linkedTaskCount = 0, linkedTaskHasImages = false, inputSummary, inputImageTaskCount = inputSummary.imageCount, inputs = [], imageReferences, onConfigChange, onGenerate, onRetryFailed, onStop, workflow }: CanvasConfigNodePanelProps) {
     const t = useUiText();
     const [optimizing, setOptimizing] = useState(false);
     const composerRef = useRef<CanvasConfigComposerHandle>(null);
@@ -181,6 +182,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
             </div>
 
             <div className="mb-2 text-xs leading-4" style={{ color: theme.node.muted }}>
+                {templateTaskCount > 1 ? <div role="status">{t("点击任一步运行本模板全部 {value1} 个配置，每项独立生成", { value1: templateTaskCount })}</div> : null}
                 {showInputMode ? <div className="mb-1 cursor-default" onMouseDown={event => event.stopPropagation()}>
                     <Segmented block size="small" aria-label={t("图片执行方式")} disabled={isRunning}
                         value={separateImages ? "per-image" : "combined"}
@@ -242,7 +244,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                     ) : (
                         <>
                             <Play className="size-4" />
-                            <span>{taskCount > 0 ? t("执行 {value1} 个任务", { value1: taskCount }) : showInputMode ? t("合并参考生成 1 张") : t("开始生成")}</span>
+                            <span>{templateTaskCount > 1 ? t("运行整套模板 · {value1} 项", { value1: templateTaskCount }) : taskCount > 0 ? t("执行 {value1} 个任务", { value1: taskCount }) : showInputMode ? t("合并参考生成 1 张") : t("开始生成")}</span>
                         </>
                     )}
                 </span>

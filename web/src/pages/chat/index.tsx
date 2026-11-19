@@ -17,7 +17,7 @@ import { pastedConversationImageFiles } from "@/lib/conversation-image-clipboard
 import { CHAT_ATTACHMENT_ACCEPT, openChatAttachmentPicker, parseChatAttachment } from "@/lib/chat-attachments";
 import { assertCreativeChatImageSelection, buildCreativeImageCatalog, type CreativeChatImageSelection, type CreativeImageCatalogEntry } from "@/lib/creative-chat";
 import { conversationImageLabel, type ConversationImageAction, type ConversationImageItem } from "@/components/conversation-image-controls";
-import { imageAgentWorkNoteText } from "@/lib/image-agent/work-note";
+import { imageAgentWorkNoteText } from "../../../../shared/image-agent/work-note";
 import { useConversationImageTools } from "@/hooks/use-conversation-image-tools";
 import { useImageDrop } from "@/hooks/use-image-drop";
 import { useChatBottomFollow } from "@/hooks/use-chat-bottom-follow";
@@ -45,7 +45,7 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useModuleEnabled } from "@/stores/use-module-store";
 import { isClaudeModel, requestEdit, requestGeneration } from "@/services/api/image";
 import { requestCreativeChatPlan } from "@/services/api/creative-chat";
-import { imageAgentSpecText } from "@/lib/image-agent/compile";
+import { imageAgentSpecText } from "../../../../shared/image-agent/compile";
 import { requestImageAgentReview } from "@/services/api/image-agent-inspection";
 import { prepareChatImageCorrection } from "./chat-image-review";
 import { resolveToolModel } from "@/services/api/business-config";
@@ -82,6 +82,7 @@ type ChatComposerDraft = {
 };
 const emptyComposerDraft = (): ChatComposerDraft => ({ draft: "", editing: null, attachments: [], imageTarget: null, referenceImageIds: [], regionImage: null, regionSelection: null });
 const RegionSelectionDialog = lazy(() => import("@/pages/creative/region-selection-dialog").then(module => ({ default: module.RegionSelectionDialog })));
+const ServerImageConversationPanel = lazy(() => import("@/components/image-conversation-panel").then(module => ({ default: module.ImageConversationPanel })));
 function createSession(): ChatSession {
     return { id: createClientId(), title: "新对话", messages: [], updatedAt: new Date().toISOString() };
 }
@@ -106,6 +107,12 @@ function dataUrlBytes(dataUrl: string) {
 }
 
 export default function ChatPage() {
+    return deploymentFeatures.imageConversationsEnabled
+        ? <Suspense fallback={<div role="status" className="p-6">正在读取服务端会话…</div>}><ServerImageConversationPanel entrypoint="standalone" /></Suspense>
+        : <LegacyChatPage />;
+}
+
+function LegacyChatPage() {
     useUiText();
     const { message, modal } = App.useApp();
     const navigate = useNavigate();
@@ -910,12 +917,13 @@ export default function ChatPage() {
                             <div className="hidden size-12 place-items-center rounded-2xl bg-muted text-foreground [@media(min-height:850px)]:grid"><WandSparkles className="size-6" /></div>
                             <h2 className="mt-2 text-xl font-semibold text-foreground sm:text-2xl">{uiText("有什么想法，直接说。")}</h2>
                             <p>{uiText("问问题、生成图片，或上传图片和文件，接着聊、接着改。")}</p>
-                        </div> : <div className="space-y-8 sm:space-y-10">{activeSession.messages.map((item) => <ChatBubble key={item.id} message={item} imageLabels={imageLabels} imageCatalog={imageCatalog} actionsDisabled={imageActionsDisabled} onImageAction={imageAction} onMask={id => void openRegionSelection(id)} onPlaceOnCanvas={(image) => void placeImageOnCanvas(image)} onReview={image => void reviewImage(image)} onCorrect={prepareCorrection} reviewingImageIds={reviewingImageIds} onEdit={() => editMessage(item)} onRegenerate={chatSourceTurn(activeSession, item.id) ? () => void send({ messageId: item.id }) : undefined} checkingTask={taskRecovery.checking.has(item.id) || Boolean(item.pendingImageTask && activeImageRequestIds.has(item.pendingImageTask.requestId))} onQueryTask={() => taskRecovery.query(item)} onStopWaiting={item.pendingImageTask && activeImageRequestIds.has(item.pendingImageTask.requestId) ? () => stopImageWaiting(item) : undefined} />)}{isSending ? <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{sendPhase}</div> : null}</div>}
+                        </div> : <div className="space-y-8 sm:space-y-10">{activeSession.messages.map((item) => <ChatBubble key={item.id} message={item} imageLabels={imageLabels} imageCatalog={imageCatalog} actionsDisabled={imageActionsDisabled} onImageAction={imageAction} onMask={id => void openRegionSelection(id)} onPlaceOnCanvas={(image) => void placeImageOnCanvas(image)} onReview={image => void reviewImage(image)} onCorrect={prepareCorrection} reviewingImageIds={reviewingImageIds} onEdit={() => editMessage(item)} onRegenerate={chatSourceTurn(activeSession, item.id) ? () => void send({ messageId: item.id }) : undefined} checkingTask={taskRecovery.checking.has(item.id) || Boolean(item.pendingImageTask && activeImageRequestIds.has(item.pendingImageTask.requestId))} onQueryTask={() => taskRecovery.query(item)} onStopWaiting={item.pendingImageTask && activeImageRequestIds.has(item.pendingImageTask.requestId) ? () => stopImageWaiting(item) : undefined} />)}</div>}
                         </div>
                     </div>
                     {chatFollow.hasNewMessages ? <div className="flex shrink-0 justify-center pb-1"><button type="button" onClick={chatFollow.scrollToBottom} className="rounded-full border border-border bg-background px-3 py-2 text-xs text-muted-foreground shadow-sm hover:text-foreground">↓ {uiText("新消息")}</button></div> : null}
                     <div data-testid="chat-composer-dock" className="shrink-0 bg-background px-3 pb-3 pt-2 sm:px-6 sm:pb-4">
                         <div className="mx-auto w-full max-w-3xl">
+                            {isSending ? <div role="status" aria-live="polite" data-testid="chat-send-phase" className="mb-2 flex items-start gap-2 text-sm leading-5 text-muted-foreground"><LoaderCircle className="mt-0.5 size-4 shrink-0 animate-spin" /><span className="min-w-0 break-words">{sendPhase}</span></div> : null}
                             <ConversationExamples className="mb-2 text-muted-foreground" />
                             {editing ? <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>{uiText("编辑后将从这条消息创建新分支，原会话和附件保留；发送会重新调用模型。")}</span><Button size="small" disabled={isSending} onClick={() => setEditing(null)}>{uiText("取消编辑")}</Button></div> : null}
                             <div className="relative rounded-xl border border-input bg-card p-3 transition-colors focus-within:border-ring motion-reduce:transition-none sm:p-4">
@@ -934,8 +942,8 @@ export default function ChatPage() {
                                         {selectedClaude ? <Popover trigger="click" placement="topLeft" title={uiText("模型设置")} content={<div className="max-w-[min(360px,80vw)]"><ClaudeChatControls model={selectedParameterModel} stream={config.claudeStream !== "false"} thinking={config.claudeThinking === "true"} maxTokens={config.claudeMaxTokens} onStreamChange={(value) => updateConfig("claudeStream", String(value))} onThinkingChange={(value) => updateConfig("claudeThinking", String(value))} onMaxTokensChange={(value) => updateConfig("claudeMaxTokens", value)} /></div>}><button type="button" aria-label={uiText("模型设置")} className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted"><Settings2 className="size-4" /></button></Popover> : null}
                                         <Popover trigger="click" placement="topRight" title={uiText("出图设置")} content={<div className="grid w-[min(300px,75vw)] gap-3">
                                             <label className="grid gap-1 text-xs text-muted-foreground">{uiText("出图模型")}<Select data-usage-control="model" aria-label={uiText("出图模型")} value={preferredImageModel?.modelId} placeholder={modelsLoading ? uiText("正在读取模型") : uiText("暂无可用模型")} disabled={!sessionsReady || modelsLoading || isSending || !imageModels.length || Boolean(imageBinding?.modelConfigId)} onChange={modelId => { if (activeSession && imageModels.some(model => model.modelId === modelId)) updateSession(activeSession.id, session => ({ ...session, ...selectChatImageModel(modelId, session) })); }} options={imageModels.map(model => ({ value: model.modelId, label: modelLabelWithUsage(model.name, model.publicDescription) }))} /></label>
-                                            <label className="grid gap-1 text-xs text-muted-foreground">{uiText("画幅比例 / 尺寸")}<Select aria-label={uiText("图片尺寸")} data-testid="chat-image-size" value={activeSession?.imageSize || CHAT_AUTO_IMAGE_SIZE} disabled={imageReferenceParametersAutomatic || !sessionsReady || modelsLoading || isSending || !preferredImageModel} onChange={value => { if (activeSession) updateSession(activeSession.id, session => ({ ...session, imageSize: value === CHAT_AUTO_IMAGE_SIZE ? undefined : value })); }} options={chatImageSizeOptions(qualityProfile).map(option => ({ ...option, label: uiText(option.label) }))} /></label>
-                                            <p role={imageReferenceParametersAutomatic ? "status" : undefined} className="text-xs text-muted-foreground">{uiText(imageReferenceParametersAutomatic ? automaticReferenceSizeNotice : "默认自动选择画幅，也可手动指定比例。")}</p>
+                                            <label className="grid gap-1 text-xs text-muted-foreground">{uiText("画幅比例 / 尺寸")}<Select aria-label={uiText("图片尺寸")} data-testid="chat-image-size" value={activeSession?.imageSize || (qualityProfile.mai27 ? "1:1" : CHAT_AUTO_IMAGE_SIZE)} disabled={imageReferenceParametersAutomatic || !sessionsReady || modelsLoading || isSending || !preferredImageModel} onChange={value => { if (activeSession) updateSession(activeSession.id, session => ({ ...session, imageSize: value === CHAT_AUTO_IMAGE_SIZE ? undefined : value })); }} options={chatImageSizeOptions(qualityProfile).map(option => ({ ...option, label: uiText(option.label) }))} /></label>
+                                            <p role={imageReferenceParametersAutomatic ? "status" : undefined} className="text-xs text-muted-foreground">{uiText(imageReferenceParametersAutomatic ? automaticReferenceSizeNotice(qualityProfile) : qualityProfile.mai27 ? "默认使用 1:1 画幅，可手动指定比例；带参考图时由模型决定尺寸。" : "默认自动选择画幅，也可手动指定比例。")}</p>
                                             {imageQualitySettings.independentResolution ? <label className="grid gap-1 text-xs text-muted-foreground">{uiText("清晰度")}<Select data-usage-control="resolution" aria-label={uiText("图片分辨率")} data-testid="chat-image-resolution" value={imageQualitySettings.resolution} disabled={imageReferenceParametersAutomatic || !sessionsReady || modelsLoading || isSending || !preferredImageModel} onChange={value => { if (activeSession && preferredImageModel) updateSession(activeSession.id, session => ({ ...session, imageModelId: preferredImageModel.modelId, imageResolution: value })); }} options={imageQualitySettings.resolutionOptions.map(option => ({ ...option, label: uiText(option.label) }))} /></label> : null}
                                             {qualityProfile.kind !== "mai-image" ? <label className="grid gap-1 text-xs text-muted-foreground">{uiText(imageQualitySettings.label || "")}<Select data-usage-control={imageQualitySettings.independentResolution ? "quality" : "resolution"} aria-label={imageQualitySettings.independentResolution ? uiText("图片质量") : uiText("图片清晰度")} data-testid="chat-image-quality" value={imageQualitySettings.quality} disabled={!sessionsReady || modelsLoading || isSending || !preferredImageModel || !imageQualitySettings.adjustable} onChange={value => { if (activeSession && preferredImageModel) updateSession(activeSession.id, session => ({ ...session, imageModelId: preferredImageModel.modelId, imageQuality: value })); }} options={imageQualitySettings.options.map(option => ({ ...option, label: uiText(option.label) }))} /></label> : null}
                                             {imageBinding?.modelConfigId ? <p className="text-xs text-muted-foreground">{uiText("当前出图模型由管理员固定，无需选择。")}</p> : null}
@@ -994,7 +1002,7 @@ const ChatBubble = memo(function ChatBubble({ message, imageLabels, imageCatalog
     return (
         <div data-message-id={message.id} data-message-role={message.role} className={cn("flex min-w-0", isUser ? "justify-end" : "justify-start")}>
             <div className={cn("min-w-0 text-[14px] leading-7 [overflow-wrap:anywhere] sm:text-base", isUser ? "max-w-[90%] rounded-3xl bg-muted px-4 py-3 text-foreground sm:max-w-[85%] sm:px-5" : message.role === "error" ? "w-full rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200" : "w-full text-foreground")}>
-                {message.content ? message.role === "error" ? <GenerationDiagnostic error={message.content} /> : <ChatMarkdown>{message.content}</ChatMarkdown> : null}
+                {message.content ? message.role === "error" ? <GenerationDiagnostic error={message.content} displayContext="chat" /> : <ChatMarkdown>{message.content}</ChatMarkdown> : null}
                 {message.stopped ? <p className="mt-2 text-[13px] opacity-70">{uiText("已停止接收；已有内容已保留，不代表服务端执行已取消。")}</p> : null}
                 {message.generatedImages?.length ? <div className={cn("grid min-w-0 grid-cols-1 gap-5", message.content && "mt-4", message.generatedImages.length > 1 && "sm:grid-cols-2")}>{message.generatedImages.map((item) => <div key={item.id} className="min-w-0">
                     <ChatImage image={item} label={imageLabels.get(item.id) || uiText("生成结果")} {...imageControls(item.id)} onPlace={() => onPlaceOnCanvas(item)} />

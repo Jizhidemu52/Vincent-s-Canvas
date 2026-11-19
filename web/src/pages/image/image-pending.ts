@@ -26,7 +26,10 @@ export function snapshotImageRequest(snapshot: ImageRequestSnapshot): ImageReque
 }
 
 export function pendingImagesForWorkspace(records: PendingImage[], ownerId: string, tool: string, workspaceId = DEFAULT_WORKBENCH_TASK) {
-    return records.filter(record => record.ownerId === ownerId && record.tool === tool && matchesWorkbenchTask(record, workspaceId)).sort((a, b) => a.createdAt - b.createdAt);
+    return records.filter(record => record.ownerId === ownerId && (
+        record.tool === tool && matchesWorkbenchTask(record, workspaceId)
+        || tool === "image-edit" && workspaceId === DEFAULT_WORKBENCH_TASK && record.tool === "image-generation"
+    )).sort((a, b) => a.createdAt - b.createdAt);
 }
 
 /** Every recovery is a lookup. A missing response must never become a new POST. */

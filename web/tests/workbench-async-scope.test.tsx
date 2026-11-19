@@ -110,7 +110,7 @@ function harness(kind: "image" | "video", options: { logs?: any[]; readLogs?: ()
     const find = (name: string) => elements(render()).find(element => element.type?.name === name)!;
     return { render, find, drafts, writes, assets, notices, confirmations, userState, unmount,
         currentDraft: (field: string) => { if (kind === "video") return drafts.get(workbenchTaskScope(field, taskId)); const [scope, ...parts] = field.split(":"); return drafts.get(`${workbenchTaskScope(scope, taskId)}:${parts.join(":")}`); },
-        references: () => drafts.get(kind === "video" ? workbenchTaskScope("video:references", taskId) : `${workbenchTaskScope("image-generation", taskId)}:references`),
+        references: () => drafts.get(kind === "video" ? workbenchTaskScope("video:references", taskId) : `${workbenchTaskScope("image-edit", taskId)}:references`),
         selectTask: (id: string) => { if (!taskFrames.has(id)) throw new Error(`Unknown workspace ${id}`); taskId = id; return render(); },
         createSession: () => { const props = find("LogPanel").props; (props.onCreateTask || props.onCreateSession)(); render(); },
         clipboard: () => kind === "image" ? find("ReferenceImageTray").props.onRequestClipboard() : elements(render()).find(element => element.props.children === "剪切板")!.props.onClick(),
@@ -195,7 +195,7 @@ for (const kind of ["image", "video"] as const) {
     test(`${kind}: restoring historical inputs rejects an upload started for the previous draft`, async () => {
         const upload = Promise.withResolvers<any>();
         const app = harness(kind, { upload: () => upload.promise }); app.render(); await settle();
-        const log = { ...videoLog, status: "成功", references: [{ ...image, storageKey: "image:restored" }], task: undefined, images: [{ ...image, sourceTaskId: "old-task" }], ownerId: "owner", tool: "image-generation" };
+        const log = { ...videoLog, status: "成功", references: [{ ...image, storageKey: "image:restored" }], task: undefined, images: [{ ...image, sourceTaskId: "old-task" }], ownerId: "owner", tool: "image-edit" };
         await app.find("LogPanel").props.onPreviewLog(log); await settle(); app.clipboard(); await settle();
         elements(app.render()).find(element => element.props.children === "恢复为草稿继续改")!.props.onClick();
         await app.confirmations.at(-1).onOk(); await settle();

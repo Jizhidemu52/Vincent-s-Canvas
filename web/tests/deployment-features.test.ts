@@ -4,7 +4,7 @@ import { loadDeploymentFeatures, normalizeDeploymentFeatures } from "@/lib/deplo
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
-const openFeatures = { authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false };
+const openFeatures = { authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false, imageConversationsEnabled: false };
 
 describe("deployment switches", () => {
     test("opens creative workspaces without account or credit gates by default", () => {
@@ -16,6 +16,11 @@ describe("deployment switches", () => {
     });
     test("does not show credit quotas for anonymous use", () => {
         expect(normalizeDeploymentFeatures({ authenticationEnabled: false, creditsEnabled: true, rolePortalsEnabled: true })).toMatchObject({ authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false });
+    });
+    test("server conversations require authentication and an explicit enable flag", () => {
+        expect(normalizeDeploymentFeatures({ imageConversationsEnabled: true }).imageConversationsEnabled).toBe(false);
+        expect(normalizeDeploymentFeatures({ authenticationEnabled: true, imageConversationsEnabled: true }).imageConversationsEnabled).toBe(true);
+        expect(normalizeDeploymentFeatures({ authenticationEnabled: true }).imageConversationsEnabled).toBe(false);
     });
     test("startup still fails closed on missing or invalid deployment responses", async () => {
         for (const response of [new Response("offline", { status: 503 }), Response.json({}), Response.json(null), Response.json({ ...openFeatures, authenticationEnabled: "false" })]) {

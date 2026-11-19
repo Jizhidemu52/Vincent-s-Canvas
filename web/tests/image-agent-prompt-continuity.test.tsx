@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ImageAgentKeepControls } from "@/components/image-agent-keep-controls";
-import { compileImageAgentPrompt } from "@/lib/image-agent/compile";
-import { imageAgentKeepRevocationDraft, imageAgentKeepRevocations, resolveImageAgentWorkNote } from "@/lib/image-agent/work-note";
+import { compileImageAgentPrompt } from "../../shared/image-agent/compile";
+import { imageAgentKeepRevocationDraft, imageAgentKeepRevocations, resolveImageAgentWorkNote } from "../../shared/image-agent/work-note";
 import { parseCreativeChatPlan } from "@/lib/creative-chat";
 import { resolveCanvasImageAgentEdit } from "@/lib/canvas/canvas-image-agent";
 import { CanvasNodeType } from "@/types/canvas";

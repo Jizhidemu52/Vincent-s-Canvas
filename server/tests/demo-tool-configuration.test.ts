@@ -42,7 +42,7 @@ describe("demo formal tool configuration", () => {
   test("catalog includes formal AI slots, promoted design tools and no unfinished placeholders", () => {
     expect(toolDefinitions).toHaveLength(31);
     expect(toolDefinitions.filter(tool => tool.toolKey !== "layer-studio")).toHaveLength(30);
-    expect(toolDefinitions.find(tool => tool.toolKey === "layer-studio")).toEqual({ toolKey: "layer-studio", label: "图层拆分与图片生成", group: "AI 工作台", operationType: "image_generation", operations: ["image_generation"], capabilities: ["generate"], parent: null });
+    expect(toolDefinitions.find(tool => tool.toolKey === "layer-studio")).toEqual({ toolKey: "layer-studio", label: "豆包生图", group: "AI 工作台", operationType: "image_generation", operations: ["image_generation"], capabilities: ["generate"], parent: null });
     expect(moduleKeys).toHaveLength(48);
     expect(new Set(moduleKeys).size).toBe(48);
     expect(moduleKeys).toContain("canvas-design-chat");

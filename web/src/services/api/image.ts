@@ -41,7 +41,7 @@ export type ResponseFunctionTool = {
 export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: Array<Record<string, unknown>> };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-type RequestOptions = ImageAgentGenerationOptions & { quickImageAction?: QuickImageAction; exactPrompt?: boolean; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; chatProfile?: "creative-chat" | "canvas-assistant"; profileContext?: Record<string, unknown>; requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
+type RequestOptions = ImageAgentGenerationOptions & { quickImageAction?: QuickImageAction; exactPrompt?: boolean; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; chatProfile?: "creative-chat" | "canvas-assistant"; profileContext?: Record<string, unknown>; requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatWaiting?: (message: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "responses_assistant"; output: Array<Record<string, unknown>> } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
@@ -292,7 +292,7 @@ async function requestServerResponse(config: AiConfig, input: ResponseInputItem[
     const response = await fetch("/api/chat/responses", {
         method: "POST",
         credentials: "include",
-        headers: { "content-type": "application/json", ...workspaceOwnerHeaders() },
+        headers: { "content-type": "application/json", ...(options?.chatProfile ? { Accept: "text/event-stream" } : {}), ...workspaceOwnerHeaders() },
         body: JSON.stringify({ requestId, toolKey: resolved.toolKey, modelId, input, tools, toolChoice, ...(options?.chatProfile ? { profile: options.chatProfile, profileContext: options.profileContext || {} } : {}), webSearch: options?.webSearch === true, ...(claude ? { claude } : {}) }),
         signal: options?.signal,
     });
@@ -300,7 +300,7 @@ async function requestServerResponse(config: AiConfig, input: ResponseInputItem[
         const payload: unknown = await response.json().catch(() => ({}));
         throw chatResponseError(payload, `对话请求失败：${response.status}`, response.status === 422 && permitsPlanningRepair(options));
     }
-    if (response.headers.get("content-type")?.includes("text/event-stream")) return readClaudeSseResponse(response, onDelta, options?.onToolCallStart, { strictProfile: Boolean(options?.chatProfile), allowPlanningRepair: permitsPlanningRepair(options) });
+    if (response.headers.get("content-type")?.includes("text/event-stream")) return readClaudeSseResponse(response, onDelta, options?.onToolCallStart, { strictProfile: Boolean(options?.chatProfile), allowPlanningRepair: permitsPlanningRepair(options), onChatWaiting: options?.onChatWaiting });
     return response.json() as Promise<ToolResponseResult>;
 }
 
@@ -319,9 +319,9 @@ export function toolResponseToInput(result: Pick<ToolResponseResult, "toolCalls"
     return result.toolCalls.map((call) => ({ type: "function_call", call_id: call.id, name: call.function.name, arguments: call.function.arguments, ...(call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {}) }));
 }
 
-type ClaudeSseState = { buffer: string; content: string; stopReason?: string; ended: boolean; blocks: Map<number, { block: Record<string, unknown>; inputJson: string }> };
+type ClaudeSseState = { buffer: string; content: string; stopReason?: string; ended: boolean; waiting?: boolean; result?: ToolResponseResult; blocks: Map<number, { block: Record<string, unknown>; inputJson: string }> };
 
-export async function readClaudeSseResponse(response: Response, onDelta?: (text: string) => void, onToolCallStart?: (name: string) => void, options: { strictProfile?: boolean; allowPlanningRepair?: boolean } = {}): Promise<ToolResponseResult> {
+export async function readClaudeSseResponse(response: Response, onDelta?: (text: string) => void, onToolCallStart?: (name: string) => void, options: { strictProfile?: boolean; allowPlanningRepair?: boolean; onChatWaiting?: (message: string) => void } = {}): Promise<ToolResponseResult> {
     if (!response.body) throw new Error("Claude 流式响应为空");
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -333,13 +333,18 @@ export async function readClaudeSseResponse(response: Response, onDelta?: (text:
         state.buffer = state.buffer.replace(/\r\n/g, "\n");
         let boundary = state.buffer.indexOf("\n\n");
         while (boundary >= 0) {
-            consumeClaudeSseEvent(state.buffer.slice(0, boundary), state, onDelta, onToolCallStart, options.allowPlanningRepair);
+            consumeClaudeSseEvent(state.buffer.slice(0, boundary), state, onDelta, onToolCallStart, options.allowPlanningRepair, options.onChatWaiting);
             state.buffer = state.buffer.slice(boundary + 2);
             boundary = state.buffer.indexOf("\n\n");
         }
+        if (state.result) {
+            await reader.cancel().catch(() => undefined);
+            return state.result;
+        }
         if (done) break;
     }
-    if (state.buffer.trim()) consumeClaudeSseEvent(state.buffer, state, onDelta, onToolCallStart, options.allowPlanningRepair);
+    if (state.buffer.trim()) consumeClaudeSseEvent(state.buffer, state, onDelta, onToolCallStart, options.allowPlanningRepair, options.onChatWaiting, false);
+    if (state.waiting) throw new Error("对话流未完整返回，本轮未完成，不会自动重新提交。");
     if (options.strictProfile && !state.ended) throw new Error("对话流未完整返回，本轮未完成，不会自动重新提交。");
     const blocks: ClaudeAssistantContent = Array.from(state.blocks.entries()).sort(([left], [right]) => left - right).map(([, item]) => {
         const input = !item.inputJson ? undefined : item.block.type === "tool_use" && item.block.name === "create_image" ? parseCreateImageArguments(item.inputJson)
@@ -365,13 +370,53 @@ export async function readClaudeSseResponse(response: Response, onDelta?: (text:
     }
 }
 
-function consumeClaudeSseEvent(event: string, state: ClaudeSseState, onDelta?: (text: string) => void, onToolCallStart?: (name: string) => void, allowPlanningRepair = false) {
+function readChatResult(value: unknown): ToolResponseResult {
+    const invalid = () => new Error("对话结果格式不完整，本轮未完成，不会自动重新提交。");
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid();
+    const result = value as Record<string, unknown>;
+    if (typeof result.content !== "string" || !Array.isArray(result.toolCalls)) throw invalid();
+    const ids = new Set<string>();
+    const toolCalls: ResponseToolCall[] = result.toolCalls.map(value => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid();
+        const call = value as Record<string, unknown>;
+        const fn = call.function as Record<string, unknown> | undefined;
+        if (typeof call.id !== "string" || !call.id.trim() || ids.has(call.id) || call.type !== "function" || !fn || typeof fn !== "object" || Array.isArray(fn)
+            || typeof fn.name !== "string" || !fn.name.trim() || typeof fn.arguments !== "string" || !fn.arguments.trim()
+            || (call.thoughtSignature !== undefined && typeof call.thoughtSignature !== "string")) throw invalid();
+        ids.add(call.id);
+        return { id: call.id, type: "function", function: { name: fn.name, arguments: fn.arguments }, ...(call.thoughtSignature !== undefined ? { thoughtSignature: call.thoughtSignature as string } : {}) };
+    });
+    if (!result.content.trim() && !toolCalls.length) throw invalid();
+    if (result.stopReason !== undefined && (typeof result.stopReason !== "string" || ["max_tokens", "length", "incomplete", "error", "content_filter"].includes(result.stopReason))) throw invalid();
+    const records = (value: unknown) => Array.isArray(value) && value.every(item => item && typeof item === "object" && !Array.isArray(item));
+    if (result.claudeAssistantContent !== undefined && !records(result.claudeAssistantContent)) throw invalid();
+    if (result.responsesOutputItems !== undefined && !records(result.responsesOutputItems)) throw invalid();
+    return { content: result.content, toolCalls,
+        ...(result.stopReason !== undefined ? { stopReason: result.stopReason as string } : {}),
+        ...(result.claudeAssistantContent !== undefined ? { claudeAssistantContent: result.claudeAssistantContent as ClaudeAssistantContent } : {}),
+        ...(result.responsesOutputItems !== undefined ? { responsesOutputItems: result.responsesOutputItems as Array<Record<string, unknown>> } : {}),
+    };
+}
+
+function consumeClaudeSseEvent(event: string, state: ClaudeSseState, onDelta?: (text: string) => void, onToolCallStart?: (name: string) => void, allowPlanningRepair = false, onChatWaiting?: (message: string) => void, complete = true) {
     const raw = event.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
     if (!raw || raw === "[DONE]") return;
-    let payload: { type?: string; index?: number; content_block?: Record<string, unknown>; delta?: { type?: string; text?: string; thinking?: string; signature?: string; partial_json?: string; stop_reason?: string | null }; error?: unknown };
+    let payload: { type?: string; index?: number; content_block?: Record<string, unknown>; delta?: { type?: string; text?: string; thinking?: string; signature?: string; partial_json?: string; stop_reason?: string | null }; error?: unknown; message?: unknown; result?: unknown };
     payload = parseStrictJson(raw) as typeof payload;
+    if (payload.type === "chat_waiting") {
+        if (state.result || state.content || state.blocks.size || state.ended) throw new Error("对话流包含不一致的结果，本轮未完成，不会自动重新提交。");
+        state.waiting = true;
+        if (complete && typeof payload.message === "string" && payload.message.trim() && payload.message.length <= 300) onChatWaiting?.(payload.message);
+        return;
+    }
+    if (payload.type === "chat_result") {
+        if (!complete || state.result || state.content || state.blocks.size || state.ended) throw new Error("对话流包含不完整或重复结果，本轮未完成，不会自动重新提交。");
+        state.result = readChatResult(payload.result);
+        return;
+    }
     const index = payload.index ?? 0;
     if (payload.type === "error") throw chatResponseError(payload.error, "Claude 流式响应失败", allowPlanningRepair);
+    if ((state.waiting || state.result) && ["message_start", "message_delta", "message_stop", "content_block_start", "content_block_delta", "content_block_stop"].includes(payload.type || "")) throw new Error("对话流包含不一致的结果，本轮未完成，不会自动重新提交。");
     if (payload.type === "message_stop") { state.ended = true; return; }
     if (payload.type === "content_block_start") {
         state.blocks.set(index, { block: { ...payload.content_block }, inputJson: "" });

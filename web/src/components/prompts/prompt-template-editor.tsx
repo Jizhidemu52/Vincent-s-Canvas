@@ -81,7 +81,7 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
             size: stringValue(initial.parameters.size), quality: stringValue(initial.parameters.quality), quantity: numberValue(initial.parameters.quantity) ?? numberValue(initial.parameters.count) ?? 1,
             imageOptions: typeof initial.parameters.imageOptions === "string" ? initial.parameters.imageOptions : "{}",
             category: initial.category, tags: initial.tags, referenceAssetIds: initial.referenceAssetIds, notes: initial.notes,
-        } : { targetTool: "image-generation", quantity: 1, quality: "auto", imageOptions: "{}", tags: [], referenceAssetIds: [] });
+        } : { targetTool: "image-edit", quantity: 1, quality: "auto", imageOptions: "{}", tags: [], referenceAssetIds: [] });
         return () => { active = false; controller.abort(); };
     }, [form, initial, open]);
 
@@ -115,7 +115,7 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
             <Form form={form} layout="vertical" className="pt-3" disabled={saving || optionsLoading}>
                 <div className="grid gap-x-4 md:grid-cols-2">
                     <Form.Item name="title" label={t("模板名称")} rules={[{ required: true, whitespace: true, max: 120 }]}><Input maxLength={120} showCount placeholder={t("例如：女装白底商品图")} /></Form.Item>
-                    <Form.Item name="targetTool" label={t("适用板块")} rules={[{ required: true }]}><Select options={Object.entries(promptTargetLabels).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item>
+                    <Form.Item name="targetTool" label={t("适用板块")} rules={[{ required: true }]}><Select options={Object.entries(promptTargetLabels).filter(([value]) => value !== "image-generation" || initial?.targetTool === value).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item>
                 </div>
                 <Form.Item name="prompt" label={t("完整提示词")} rules={[{ required: true, whitespace: true, max: 20_000 }]}><Input.TextArea rows={7} maxLength={20_000} showCount placeholder={t("保存可以直接复用的完整提示词")} /></Form.Item>
                 <div className="grid gap-x-4 md:grid-cols-2">

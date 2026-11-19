@@ -12,7 +12,7 @@ export function proposalSubmission(value) {
 
 export function proposalSubmissionMessage(value) {
     const receipt = proposalSubmission(value);
-    const label = ({ waiting: "服务器排队中", processing: "模型处理中", success: "任务已完成", failed: "提交失败", uncertain: "提交待确认", submitting: "提交待确认", paused: "任务已暂停", cancelled: "任务已取消" })[receipt.status] || "请求已记录，状态待核实";
+    const label = ({ waiting: "服务器排队中", processing: "模型处理中", success: "任务已完成", failed: "提交失败", uncertain: "提交待确认", submitting: "提交待确认", paused: "任务已暂停", cancelled: "任务已取消", needs_input: "需要补充设计要求", detached: "已停止采用结果" })[receipt.status] || "请求已记录，状态待核实";
     return label + (receipt.failureReason ? `：${receipt.failureReason}` : "");
 }
 

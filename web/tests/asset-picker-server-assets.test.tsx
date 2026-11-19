@@ -42,7 +42,7 @@ function elements(node: unknown): ReactElement<any>[] {
 
 // Execute the real component, API and access rules with per-instance hooks/fetch.
 // No process-global module or fetch mocks can leak into unrelated regression tests.
-function harness(localAssets: Asset[] = [], initialMode: "single" | "single-image" | "multiple-images" = "single", initiallyOpen = true, authenticationEnabled = true, resolveOriginal = async (_key?: string, fallback = "") => fallback) {
+function harness(localAssets: Asset[] = [], initialMode: "single" | "single-image" | "multiple-images" = "single", initiallyOpen = true, authenticationEnabled = true, resolveOriginal = async (_key?: string, fallback = "") => fallback, uploadLocal = async (file: File) => ({ url: `blob:${file.name}`, storageKey: `image:${file.name}`, mimeType: file.type })) {
     type Frame = { values: any[]; effects: Array<{ dependencies?: DependencyList; cleanup?: ReturnType<EffectCallback> }>; pending: Array<() => void>; cursor: number; mounted: boolean };
     const frame = (): Frame => ({ values: [], effects: [], pending: [], cursor: 0, mounted: true });
     let active = frame();
@@ -101,7 +101,7 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "single-imag
         "@/lib/utils": { cn: (...values: unknown[]) => values.filter(Boolean).join(" ") },
         "@/lib/server-asset-local": { isSupportedServerAsset, serverAssetToLocal },
         "@/lib/canvas/canvas-asset-preview": {},
-        "@/services/image-storage": { resolveImageUrl: resolveOriginal }, "@/services/file-storage": { resolveMediaUrl: resolveOriginal },
+        "@/services/image-storage": { resolveImageUrl: resolveOriginal, uploadImage: uploadLocal }, "@/services/file-storage": { resolveMediaUrl: resolveOriginal },
         "@/services/api/server-assets": apiModule.exports,
         "@/stores/use-asset-store": { ...permissions, useAssetStore: (select: Function) => select({ assets: localAssets }) },
         "@/stores/use-user-store": { useUserStore: userStore },
@@ -133,6 +133,7 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "single-imag
         loadMore: () => buttons().find(node => node.props.children === "加载更多素材")!.props.onClick(),
         confirm: () => buttons().find(node => node.props.type === "primary")!.props,
         search: (keyword: string) => nodes().find(node => node.type === "Input")!.props.onChange({ target: { value: keyword } }),
+        upload: (files: File[]) => nodes().find(node => node.type === "input" && node.props.type === "file")!.props.onChange({ currentTarget: { files, value: "chosen" } }),
         setOwner: (value: string | null) => { ownerId = value; },
         setOpen: (value: boolean) => { open = value; },
         setMode: (value: typeof selectionMode) => { selectionMode = value; },
@@ -314,6 +315,53 @@ describe("shared asset picker server-backed materials", () => {
             else picker.search("other");
             picker.render(); release("/original"); await picker.settle();
             expect(picker.inserted).toEqual([]);
+        }
+    });
+
+    test("gallery files use the active module callback and retain upload provenance", async () => {
+        for (const mode of ["single-image", "multiple-images"] as const) {
+            const picker = harness([], mode);
+            picker.render(); picker.requests[0]!.succeed([]); await picker.settle();
+            picker.upload([new File(["first"], "first.png", { type: "image/png" }), new File(["second"], "second.png", { type: "image/png" })]);
+            await picker.settle();
+            const payloads = mode === "multiple-images" ? picker.batches[0] : picker.inserted;
+            expect(payloads).toHaveLength(mode === "multiple-images" ? 2 : 1);
+            expect(payloads[0]).toMatchObject({ kind: "image", title: "first.png", originalFileName: "first.png", storageKey: "image:first.png", origin: "upload" });
+        }
+    });
+
+    test("failed gallery reads keep the picker retryable without reporting an insertion", async () => {
+        let fail = true;
+        const picker = harness([], "single-image", true, true, undefined, async file => {
+            if (fail) throw new Error("图片无法读取");
+            return { url: "blob:retry", storageKey: "image:retry", mimeType: file.type };
+        });
+        picker.render(); picker.requests[0]!.succeed([]); await picker.settle();
+        const file = new File(["fixture"], "retry.png", { type: "image/png" });
+        picker.upload([file]); await picker.settle();
+        expect(picker.inserted).toEqual([]);
+        expect(picker.nodes().find(node => node.type === "Alert")?.props.description).toBe("图片无法读取");
+        fail = false; picker.upload([file]); await picker.settle();
+        expect(picker.inserted).toMatchObject([{ title: "retry.png" }]);
+    });
+
+    test("late gallery reads cannot enter another account or a reopened picker", async () => {
+        for (const boundary of ["owner", "reopen"] as const) {
+            let release!: () => void;
+            const pending = new Promise<void>(resolve => { release = resolve; });
+            const picker = harness([], "single-image", true, true, undefined, async file => {
+                if (file.name === "old.png") await pending;
+                return { url: `blob:${file.name}`, storageKey: `image:${file.name}`, mimeType: file.type };
+            });
+            picker.render(); picker.requests[0]!.succeed([]); await picker.settle();
+            picker.upload([new File(["old"], "old.png", { type: "image/png" })]); await picker.settle();
+            if (boundary === "owner") picker.setOwner("employee-b");
+            else { picker.setOpen(false); picker.render(); picker.setOpen(true); }
+            await picker.settle();
+            picker.upload([new File(["fresh"], "fresh.png", { type: "image/png" })]); await picker.settle();
+            release(); await picker.settle();
+            expect(picker.inserted).toMatchObject([{ title: "fresh.png" }]);
+            expect(picker.inserted).toHaveLength(1);
         }
     });
 

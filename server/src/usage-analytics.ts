@@ -113,7 +113,7 @@ export async function beginUsageChat(db: Database, input: { userId: string; mode
   await db.query("INSERT INTO usage_chat_requests(id,user_id,model_config_id,board_key,prompt,prompt_redacted) VALUES($1,$2,$3,$4,$5,$6)", [id, input.userId, input.modelConfigId, input.boardKey, prompt.text, prompt.redacted]);
   return id;
 }
-export async function finishUsageChat(db: Database, id: string, status: "success" | "failed" | "interrupted") {
+export async function finishUsageChat(db: Pick<Database, "query">, id: string, status: "success" | "failed" | "interrupted") {
   await db.query("UPDATE usage_chat_requests SET status=$2,updated_at=now() WHERE id=$1 AND status='processing'", [id, status]);
 }
 

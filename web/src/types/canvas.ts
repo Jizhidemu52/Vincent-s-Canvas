@@ -69,10 +69,13 @@ export type CanvasGenerationRecord = {
 };
 
 export type CanvasNodeMetadata = {
+    imageConversation?: { conversationId: string; versionId: string; assetId: string; turnId: string | null };
+    designTask?: { requestId: string; status: string; label: string };
+    designExecutionId?: string;
     designProposal?: { title: string; features: string[]; rationale: string; references: Array<{ title: string; image: string }> };
     quickImageAction?: "remove-background" | "hd-upscale" | "item-extract";
     locked?: boolean;
-    imageAgent?: { parentNodeId?: string; workId: string; version: number; note: import("@/lib/image-agent/work-note").ImageAgentWorkNote; spec?: import("../../../shared/image-agent-iteration").ImageAgentEditSpec };
+    imageAgent?: { parentNodeId?: string; workId: string; version: number; note: import("../../../shared/image-agent/work-note").ImageAgentWorkNote; spec?: import("../../../shared/image-agent-iteration").ImageAgentEditSpec };
     maskAdaptation?: import("@/lib/canvas/canvas-mask-adaptation").CanvasMaskAdaptation;
     promptInput?: import("../../../shared/prompt-contracts").PromptInputData;
     userInput?: import("../../../shared/prompt-contracts").PromptInputData;
@@ -293,6 +296,7 @@ export type CanvasAssistantMessage = {
 
 export type CanvasAssistantSession = {
     id: string;
+    serverConversationId?: string;
     title: string;
     messages: CanvasAssistantMessage[];
     createdAt: string;

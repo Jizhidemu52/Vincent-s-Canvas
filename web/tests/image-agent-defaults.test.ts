@@ -9,6 +9,7 @@ test.each([
     ["nano", "resolution-1k", "2k", undefined],
     ["grok", "grok-image", "medium", "2k"],
     ["mai-image-2.6-flash", undefined, "auto", "2k"],
+    ["mai-image-2.7-flash", undefined, "auto", "2k"],
     ["midjourney", undefined, "relax", undefined],
 ] as const)("agent default for %s uses only supported 2K / high parameters", (modelId, imageParameterProfile, quality, resolution) => {
     const profile = imageModelProfile(modelId, imageParameterProfile ? [{ id: modelId, modelId, name: modelId, capabilities: ["generate"], imageParameterProfile, creditCost: 0, rmbCost: 0 }] : []);

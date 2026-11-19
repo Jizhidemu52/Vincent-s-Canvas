@@ -56,7 +56,7 @@ export function CanvasQuickQualityOptions({ config, profile, referenceCount, onC
     const resolution = profile.resolutions.includes(options.resolution || "") ? options.resolution! : "1k";
     const exactPixels = profile.resolutions.length > 0 && /^[1-9]\d*x[1-9]\d*$/.test(settings.size);
     const referenceQualityDisabled = profile.kind === "grok-image" && referenceCount > 0;
-    if (imageReferenceSizeIsAutomatic(profile, referenceCount)) return <p role="status">{t(automaticReferenceSizeNotice)}</p>;
+    if (imageReferenceSizeIsAutomatic(profile, referenceCount)) return <p role="status">{t(automaticReferenceSizeNotice(profile))}</p>;
     return <div className="cw-quality-options">
         {profile.resolutions.length > 0 && !gif ? <section>
             <h4>{t("清晰度 / 分辨率")}</h4>
@@ -141,7 +141,7 @@ export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceC
     const referenceQualityDisabled = profile.kind === "grok-image" && referenceCount > 0;
     const automaticReferenceSize = imageReferenceSizeIsAutomatic(profile, referenceCount);
     const exactPixels = profile.resolutions.length > 0 && /^[1-9]\d*x[1-9]\d*$/.test(settings.size);
-    const qualitySummary = gif ? qualityLabel(settings.quality) : automaticReferenceSize ? t("约 100 万像素") : !profile.verified ? t("默认") : profile.resolutions.length
+    const qualitySummary = gif ? qualityLabel(settings.quality) : automaticReferenceSize ? profile.mai27 ? "PNG" : t("约 100 万像素") : !profile.verified ? t("默认") : profile.resolutions.length
         ? `${exactPixels ? t("像素") : resolution.toUpperCase()}${referenceQualityDisabled || profile.kind === "mai-image" || profile.kind === "seedream55" ? "" : ` · ${qualityLabel(settings.quality)}`}` : qualityLabel(settings.quality);
     const hasAdvanced = profile.customSize || profile.customAspect || imageOptionFields(profile).some(field => field.key !== "resolution");
     const style = { "--cw-parameter-text": theme.node.text, "--cw-parameter-muted": theme.node.muted, "--cw-parameter-border": theme.node.stroke,
@@ -151,7 +151,7 @@ export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceC
         if (!disabled && (config.imageOptions || "{}") !== normalizedOptions) onConfigNormalize("imageOptions", normalizedOptions);
     }, [config.imageOptions, disabled, normalizedOptions, onConfigNormalize]);
     const common = { active, onActiveChange: setActive, style };
-    const parameterDisabledReason = disabled ? disabledReason : automaticReferenceSize ? t(automaticReferenceSizeNotice) : !profile.verified ? t("当前模型暂未提供可调整的参数。") : undefined;
+    const parameterDisabledReason = disabled ? disabledReason : automaticReferenceSize ? t(automaticReferenceSizeNotice(profile)) : !profile.verified ? t("当前模型暂未提供可调整的参数。") : undefined;
     return <div ref={parameterRow} className="cw-parameter-row" data-open={active || undefined} aria-label={t("生成参数")} style={style}>
         <ParameterPopover {...common} anchor={parameterRow} id="size" label={t("宽高比")} summary={automaticReferenceSize ? t("模型决定尺寸") : sizeLabel(settings.size)} icon={<RatioOutline value={settings.size} />} disabled={disabled || !profile.verified || automaticReferenceSize} disabledReason={parameterDisabledReason}>
             <CanvasQuickRatioOptions profile={ratioProfile} value={settings.size} onChange={value => { onConfigChange("size", value); setActive(null); }}
@@ -162,6 +162,6 @@ export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceC
             <CanvasQuickQualityOptions config={config} profile={profile} referenceCount={referenceCount} onConfigChange={onConfigChange} />
         </ParameterPopover>
         <AdvancedSettingsDialog {...common} id="advanced" config={config} profile={profile} theme={theme} referenceCount={referenceCount} uploadContextKey={uploadContextKey} onConfigChange={onConfigChange} onConfigNormalize={onConfigNormalize} disabled={disabled || !hasAdvanced} disabledReason={disabled ? disabledReason : t("当前模型没有可调整的高级设置。")} />
-        {automaticReferenceSize ? <span className="sr-only" role="status">{t(automaticReferenceSizeNotice)}</span> : null}
+        {automaticReferenceSize ? <span className="sr-only" role="status">{t(automaticReferenceSizeNotice(profile))}</span> : null}
     </div>;
 }

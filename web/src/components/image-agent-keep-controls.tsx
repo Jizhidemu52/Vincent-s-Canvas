@@ -1,6 +1,6 @@
 import { staticUiText } from "@/lib/static-ui-copy";
 import { useUiLocale } from "@/lib/i18n";
-import { imageAgentKeepRevocationDraft, imageAgentKeepRevocations } from "@/lib/image-agent/work-note";
+import { imageAgentKeepRevocationDraft, imageAgentKeepRevocations } from "../../../shared/image-agent/work-note";
 
 /** Draft-only controls: cancelling a draft never changes this version's saved locks. */
 export function ImageAgentKeepControls({ keep, draft, onChange, disabled }: { keep: readonly string[]; draft: string; onChange: (value: string) => void; disabled?: boolean }) {

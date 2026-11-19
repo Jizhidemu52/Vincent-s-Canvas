@@ -1,25 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { MARK_IMAGE_PROVIDER_ID, MARK_PLATFORM_MODELS } from "../../shared/mark-image-models";
-import { quickImageModelId } from "../../shared/quick-image-tools";
+import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { apiMartImageModel, buildApiMartImageRequest, stepApiMartImageTask } from "../src/apimart-image";
-import { presentPublicModel, selectCreativeModels } from "../src/model-presentation";
+import { imageParameterProfile } from "../src/image-parameter-profile";
+import { selectCreativeModels } from "../src/model-presentation";
 
 const base = { baseUrl: "https://provider.example/v1", apiKey: "fixture-secret", modelId: "mai-image-2.6-flash" as const, prompt: "Restore this product", parameters: {} };
 const reference = "https://images.example/reference.png";
 const json = (value: unknown) => Response.json(value);
 
 describe("MAI Image 2.6 Flash independent contract", () => {
-  test("catalog appends MAI without replacing Nano or changing public opaque identifiers", () => {
-    expect(MARK_PLATFORM_MODELS[2]!.modelId).toBe("gemini-nano-banana-2.1");
-    expect(MARK_PLATFORM_MODELS[12]!.modelId).toBe(base.modelId);
+  test("retired MAI 2.6 keeps its exact historical adapter without remaining a creation choice", () => {
     expect(apiMartImageModel(base.modelId)).toBe(base.modelId);
     expect(apiMartImageModel("mai-image-2.6")).toBeNull();
     const model = { id: "mai-uuid", modelId: base.modelId, providerId: MARK_IMAGE_PROVIDER_ID, protocol: "apimart", capabilities: ["generate", "edit", "batch"], rmbCost: 0 };
-    expect(selectCreativeModels([model])).toEqual([model]);
-    for (const role of ["designer", "super_admin"]) expect(presentPublicModel(model, role)).toMatchObject({ modelId: "mai-uuid", name: "aplmart-mai2.6-flash", imageParameterProfile: "mai-image", imageSupportsMask: false, rmbCost: 0 });
-    expect(presentPublicModel(model, "designer")).not.toHaveProperty("imageCost");
-    expect(quickImageModelId("remove-background")).toBe(base.modelId);
-    expect(quickImageModelId("hd-upscale")).toBe("gemini-nano-banana-2.1");
+    expect(selectCreativeModels([model])).toEqual([]);
+    expect(imageParameterProfile("apimart", base.modelId, MARK_IMAGE_PROVIDER_ID)).toBe("mai-image");
   });
 
   test("text-to-image permits only documented 1K/2K, ratios and exact pixels", () => {

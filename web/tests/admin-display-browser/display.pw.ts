@@ -12,10 +12,10 @@ const translations: Record<string, string> = {
     [markdown]: "# Report overview\n\nKeep the original report.", "报告独立标题": "Independent report title",
     "针织开发部": "Knitwear development", "帽子开发组": "Hat development", "员工甲": "Employee A", "样例项目": "Sample project", "成果提示原文": "Original output prompt",
     "提交 4 张": "4 images submitted", "成功 3 / 失败 1 / 取消 0": "Succeeded 3 / failed 1 / canceled 0", "批量完成率 75%": "Batch completion 75%",
-    "北京时间今日 · 按账号去重，不随日期筛选变化": "Today in Beijing time · unique accounts, independent of date filters", "活跃日为至少有一张有效成果": "An active day has at least one valid output",
+    "北京时间今日 · 按账号去重": "Today in Beijing time · unique accounts", "活跃日为至少有一张有效成果": "An active day has at least one valid output",
 };
 const performance = {
-    period: { from: "2026-11-01T00:00:00Z", to: "2026-11-08T00:00:00Z" }, todayUsage: { date: "2026-11-13", timeZone: "Asia/Shanghai", users: 1 },
+    period: { from: "2026-11-01T00:00:00Z", to: "2026-11-08T00:00:00Z" }, periodUsage: { from: "2026-11-01T00:00:00Z", to: "2026-11-08T00:00:00Z", timeZone: "Asia/Shanghai", days: 8, userDays: 8, dailyAverage: 1 },
     metrics: { requestedOutputs: 4, validOutputs: 3, naturalDailyAverage: 0.43, activeDailyAverage: 3, successCount: 3, failedCount: 1, cancelledCount: 0, successRate: 75, batchCompletionRate: 75, averageDurationSeconds: 15, reworkRate: 0, onTimeDeliveryRate: 100, totalCredits: 0, totalRmbCost: 0, averageCreditsPerOutput: 0, averageCostPerOutput: 0, averageCostPerAdopted: 0, downloadRate: 66.67, averageUsabilityScore: 60 },
     trend: [], directions: [{ direction: "apparel", count: 3, rate: 100 }], funnel: [],
     designers: [{ userId: "employee-1", userName: "员工甲", departmentName: "针织开发部", groupName: "帽子开发组", outputs: 3, successRate: 75, downloadRate: 66.67, reuseRate: 0, adoptionRate: 0, deliveryRate: 0, usabilityScore: 60, credits: 0, rmbCost: 0, topDirection: "apparel" }],
@@ -137,6 +137,7 @@ test("department and group display translates while direction saves its original
     await page.goto(`${base}?view=performance`);
     const designer = page.locator('[data-row-key="employee-1"]');
     await expect(designer).toContainText("Knitwear development / Hat development");
+    await expect(page.getByText("Average daily users", { exact: true })).toBeVisible();
     await expect(page.getByText("15 s", { exact: true })).toBeVisible();
     await expect(page.getByText("4 images submitted", { exact: true })).toBeVisible();
     const direction = page.locator('[data-row-key="asset-1"] .ant-select');
@@ -148,5 +149,39 @@ test("department and group display translates while direction saves its original
     await page.getByRole("button", { name: "中文", exact: true }).click();
     await expect(designer).toContainText("针织开发部 / 帽子开发组");
     await expect(page.getByText("15 秒", { exact: true })).toBeVisible();
+    expect(state.errors).toEqual([]);
+});
+
+test("performance switches today and elapsed-period daily user averages", async ({ page, context }) => {
+    const state = await setup(context), selected: string[] = [];
+    const evidence = resolve(import.meta.dirname, "../../../output/performance-daily-users-20261118");
+    await context.route("**/api/performance?**", async route => {
+        const preset = new URL(route.request().url()).searchParams.get("preset")!;
+        selected.push(preset);
+        const usage = preset === "today" ? { days: 1, userDays: 27, dailyAverage: 27 }
+            : preset === "week" ? { days: 4, userDays: 37, dailyAverage: 9.25 }
+                : { days: 18, userDays: 135, dailyAverage: 7.5 };
+        return route.fulfill({ json: { ...performance, periodUsage: { ...performance.periodUsage, ...usage } } });
+    });
+    await page.goto(`${base}?view=performance&locale=zh`);
+    const metric = () => page.getByText("日均使用人数", { exact: true }).locator("..");
+    await expect(metric()).toContainText("7.5");
+    await expect(metric()).toContainText("18 个自然日（含零使用日）");
+    await expect(page.getByText("今日使用人数", { exact: true })).toHaveCount(0);
+    await expect(page.locator(".ant-spin-blur")).toHaveCount(0);
+    await page.screenshot({ path: resolve(evidence, "month.png"), fullPage: false, animations: "disabled" });
+    await page.getByText("本周", { exact: true }).click();
+    await expect(page.getByRole("radio", { name: "本周", exact: true })).toBeChecked();
+    await expect(metric()).toContainText("9.25");
+    await expect(metric()).toContainText("4 个自然日（含零使用日）");
+    await expect(page.locator(".ant-spin-blur")).toHaveCount(0);
+    await page.screenshot({ path: resolve(evidence, "week.png"), fullPage: false, animations: "disabled" });
+    await page.getByText("今日", { exact: true }).click();
+    await expect(page.getByRole("radio", { name: "今日", exact: true })).toBeChecked();
+    await expect(page.getByText("今日使用人数", { exact: true }).locator("..")).toContainText("27");
+    await expect(page.getByText("日均使用人数", { exact: true })).toHaveCount(0);
+    await expect(page.locator(".ant-spin-blur")).toHaveCount(0);
+    await page.screenshot({ path: resolve(evidence, "today.png"), fullPage: false, animations: "disabled" });
+    expect(selected).toEqual(["month", "week", "today"]);
     expect(state.errors).toEqual([]);
 });

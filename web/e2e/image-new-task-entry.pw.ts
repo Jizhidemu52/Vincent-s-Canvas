@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
 import type { Page } from "@playwright/test";
 import { test, expect, fixturePng, type MockCanvasApi } from "./fixtures";
+import { activeWorkbench as active, workbenchPanes, readWorkbenchRegistry, readWorkspaceRecords } from "./headless-workbench";
 
-const active = (page: Page) => page.getByRole("tabpanel");
-const tabs = (page: Page) => page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab");
 const prompt = (page: Page) => active(page).getByRole("textbox", { name: "图像提示词", exact: true });
-const sidebarNew = (page: Page) => page.getByRole("button", { name: "新建任务", exact: true });
+const historyNew = (page: Page) => active(page).locator(".image-history-panel").getByRole("button", { name: "新建", exact: true });
 const sourceA = fixturePng(31), sourceB = fixturePng(213);
 const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
@@ -21,15 +20,19 @@ async function submitA(page: Page, api: MockCanvasApi) {
     await page.goto("/image");
     await upload(page, "A-original.png", sourceA);
     await prompt(page).fill("ENTRY_A_绿色圆形包，仅用A原件");
-    await active(page).getByRole("button", { name: "开始生成", exact: true }).click();
+    await active(page).getByRole("button", { name: "开始编辑", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
-    await expect(tabs(page).nth(0)).toContainText("处理中");
+    await expect(active(page).getByRole("button", { name: /正在生成，请稍候/ })).toBeDisabled();
     return [...api.tasks.keys()][0];
 }
 
 async function expectFreshB(page: Page) {
-    await expect(tabs(page)).toHaveCount(2);
-    await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
+    await expect(workbenchPanes(page)).toHaveCount(2);
+    await expect(workbenchPanes(page).nth(0)).toBeHidden();
+    await expect(workbenchPanes(page).nth(1)).toBeVisible();
+    const registry = await readWorkbenchRegistry(page);
+    expect(registry[0].value.activeId).toBe(registry[0].value.tasks[1].id);
+    await expect(page.getByRole("tablist", { name: "任务列表", exact: true })).toHaveCount(0);
     await expect(prompt(page)).toHaveValue("");
     await expect(active(page).getByRole("img", { name: "A-original.png", exact: true })).toHaveCount(0);
     await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toHaveCount(0);
@@ -54,21 +57,22 @@ async function storedLogs(page: Page) {
             if (!blob) throw new Error("Completed task has no stored original");
             const bytes = await blob.arrayBuffer();
             const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), byte => byte.toString(16).padStart(2, "0")).join("");
-            return { workspaceId: log.workspaceId, prompt: log.prompt, references: log.references.map((item: any) => item.name), taskId: log.images[0]?.sourceTaskId, resultBytes: blob.size, resultSha256: sha256 };
+            return { createdAt: log.createdAt, workspaceId: log.workspaceId, prompt: log.prompt, references: log.references.map((item: any) => item.name), taskId: log.images[0]?.sourceTaskId, resultBytes: blob.size, resultSha256: sha256 };
         }));
     });
 }
 
-test("sidebar New submits B while A remains processing and keeps reverse-completed originals separate", async ({ page, api }) => {
+test("history New submits B while A remains processing and keeps reverse-completed originals separate", async ({ page, api }) => {
     const aId = await submitA(page, api);
-    await expect(sidebarNew(page)).toBeEnabled();
-    await sidebarNew(page).click();
+    await active(page).getByRole("tab", { name: /历史记录/ }).click();
+    await expect(historyNew(page)).toBeEnabled();
+    await historyNew(page).click();
     await expectFreshB(page);
     expect(api.tasks.get(aId)?.status).toBe("processing");
     await upload(page, "B-original.png", sourceB);
     await prompt(page).fill("ENTRY_B_橙色三角包，仅用B原件");
     // Two clicks in one event turn must still create only B, not a duplicate.
-    await active(page).getByRole("button", { name: "开始生成", exact: true }).evaluate(button => { button.click(); button.click(); });
+    await active(page).getByRole("button", { name: "开始编辑", exact: true }).evaluate(button => { button.click(); button.click(); });
     await expect.poll(() => api.submissions.length).toBe(2);
     const bId = [...api.tasks.keys()][1];
     expect(api.tasks.get(aId)?.status).toBe("processing");
@@ -85,24 +89,34 @@ test("sidebar New submits B while A remains processing and keeps reverse-complet
     expect(api.submissions).toHaveLength(2);
 
     finish(api, bId);
-    await expect(tabs(page).nth(1)).toContainText("已完成");
+    await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
     expect(api.tasks.get(aId)?.status).toBe("processing");
-    await tabs(page).nth(0).click();
-    await expect(prompt(page)).toHaveValue("ENTRY_A_绿色圆形包，仅用A原件");
-    await expect(active(page).getByRole("img", { name: "A-original.png", exact: true })).toBeVisible();
-    await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toHaveCount(0);
+    await expect(workbenchPanes(page).first().locator('textarea[aria-label="图像提示词"]')).toHaveValue("ENTRY_A_绿色圆形包，仅用A原件");
+    await expect(workbenchPanes(page).first().locator('img[alt="A-original.png"]')).toHaveCount(1);
+    await expect(workbenchPanes(page).first().locator('img[alt="生成结果 1"]')).toHaveCount(0);
     finish(api, aId);
-    await expect(tabs(page).nth(0)).toContainText("已完成");
+    await expect.poll(async () => (await storedLogs(page)).length).toBe(2);
     const logs = await storedLogs(page);
     expect(logs).toHaveLength(2);
     expect(logs.find(log => log.taskId === aId)).toMatchObject({ workspaceId: "default", prompt: api.submissions[0].prompt, references: ["A-original.png"], resultBytes: api.assetBytes.get(aId)!.length, resultSha256: digest(api.assetBytes.get(aId)!) });
     expect(logs.find(log => log.taskId === bId)).toMatchObject({ prompt: api.submissions[1].prompt, references: ["B-original.png"], resultBytes: api.assetBytes.get(bId)!.length, resultSha256: digest(api.assetBytes.get(bId)!) });
     expect(logs.find(log => log.taskId === aId)?.resultSha256).not.toBe(logs.find(log => log.taskId === bId)?.resultSha256);
-    expect(logs.find(log => log.taskId === bId)?.workspaceId).toMatch(/^image-generation:task:/);
+    expect(logs.find(log => log.taskId === bId)?.workspaceId).toMatch(/^image-edit:task:/);
+    await active(page).getByRole("tab", { name: /历史记录/ }).click();
+    const aHistoryIndex = logs.toSorted((left, right) => right.createdAt - left.createdAt).findIndex(log => log.taskId === aId);
+    expect(aHistoryIndex).toBeGreaterThanOrEqual(0);
+    await expect(active(page).locator(".image-history-card")).toHaveCount(2);
+    await active(page).locator(".image-history-card").nth(aHistoryIndex).click();
+    await expect(active(page).getByRole("heading", { name: "历史预览", exact: true })).toBeVisible();
+    const downloadedOriginal = page.waitForEvent("download");
+    await active(page).getByRole("button", { name: "下载", exact: true }).click();
+    const chunks: Buffer[] = [];
+    for await (const chunk of (await (await downloadedOriginal).createReadStream())!) chunks.push(Buffer.from(chunk));
+    expect(digest(Buffer.concat(chunks))).toBe(digest(api.assetBytes.get(aId)!));
+    await expect(prompt(page)).toHaveValue("ENTRY_B_橙色三角包，仅用B原件");
     await page.reload();
-    await expect(tabs(page)).toHaveCount(2);
-    await expect(prompt(page)).toHaveValue("ENTRY_A_绿色圆形包，仅用A原件");
-    await tabs(page).nth(1).click();
+    await expect(workbenchPanes(page)).toHaveCount(2);
+    await expect(workbenchPanes(page).first().locator('textarea[aria-label="图像提示词"]')).toHaveValue("ENTRY_A_绿色圆形包，仅用A原件");
     await expect(prompt(page)).toHaveValue("ENTRY_B_橙色三角包，仅用B原件");
     await expect(active(page).getByRole("img", { name: "B-original.png", exact: true })).toBeVisible();
     await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
@@ -116,8 +130,8 @@ test("running footer creates only one independent B when activated twice", async
     await create.evaluate(button => { button.click(); button.click(); });
     await expectFreshB(page);
     expect(api.tasks.get(aId)?.status).toBe("processing");
-    await tabs(page).nth(0).click();
-    await expect(prompt(page)).toHaveValue("ENTRY_A_绿色圆形包，仅用A原件");
+    await expect(workbenchPanes(page).first().locator('textarea[aria-label="图像提示词"]')).toHaveValue("ENTRY_A_绿色圆形包，仅用A原件");
+    await expect(workbenchPanes(page).first().locator('img[alt="A-original.png"]')).toHaveCount(1);
     expect(api.submissions).toHaveLength(1);
 });
 
@@ -131,16 +145,16 @@ test("mobile history New switches to an independent B while A keeps running", as
     await history.getByRole("button", { name: "新建", exact: true }).click();
     await expectFreshB(page);
     await expect(history).toBeHidden();
+    await upload(page, "B-original.png", sourceB);
     await prompt(page).fill("MOBILE_B_新任务保持独立");
-    await active(page).getByRole("button", { name: "开始生成", exact: true }).click();
+    await active(page).getByRole("button", { name: "开始编辑", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(2);
     expect(api.tasks.get(aId)?.status).toBe("processing");
-    await tabs(page).nth(0).click();
-    await expect(prompt(page)).toHaveValue("ENTRY_A_绿色圆形包，仅用A原件");
+    await expect(workbenchPanes(page).first().locator('textarea[aria-label="图像提示词"]')).toHaveValue("ENTRY_A_绿色圆形包，仅用A原件");
     await expect(history).toBeHidden();
 });
 
-test("a failed sidebar registry write preserves running A and its pending record", async ({ page, api }) => {
+test("a failed history New registry write preserves running A and its pending record", async ({ page, api }) => {
     await page.addInitScript(() => {
         const original = IDBObjectStore.prototype.put;
         let failures = 1;
@@ -150,32 +164,38 @@ test("a failed sidebar registry write preserves running A and its pending record
         };
     });
     const aId = await submitA(page, api);
-    await expect(sidebarNew(page)).toBeEnabled();
-    await sidebarNew(page).click();
-    await expect(page.getByRole("region", { name: "多任务工作区", exact: true }).getByRole("alert")).toContainText("入口测试注册表写入失败");
-    await expect(tabs(page)).toHaveCount(1);
+    await active(page).getByRole("tab", { name: /历史记录/ }).click();
+    await expect(historyNew(page)).toBeEnabled();
+    await historyNew(page).click();
+    await expect(page.getByRole("region", { name: "创作工作区", exact: true }).getByRole("alert")).toContainText("入口测试注册表写入失败");
+    await expect(workbenchPanes(page)).toHaveCount(1);
     await expect(prompt(page)).toHaveValue("ENTRY_A_绿色圆形包，仅用A原件");
     await expect(active(page).getByRole("img", { name: "A-original.png", exact: true })).toBeVisible();
-    await expect(tabs(page).nth(0)).toContainText("处理中");
+    await expect(active(page).getByRole("button", { name: /正在生成，请稍候/ })).toBeDisabled();
+    expect((await readWorkspaceRecords<{ taskId?: string }>(page, "image_pending_tasks")).some(record => record.value.taskId === aId)).toBe(true);
     expect(api.tasks.get(aId)?.status).toBe("processing");
     expect(api.submissions).toHaveLength(1);
-    await sidebarNew(page).click();
+    await historyNew(page).click();
     await expectFreshB(page);
     finish(api, aId);
-    await expect(tabs(page).nth(0)).toContainText("已完成");
+    await expect.poll(async () => (await storedLogs(page)).length).toBe(1);
     await expect(prompt(page)).toHaveValue("");
     await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toHaveCount(0);
     expect(api.submissions).toHaveLength(1);
 });
 
-test("idle sidebar New preserves the previous draft as an independent task", async ({ page, api }) => {
+test("idle history New preserves the previous draft as an independent task", async ({ page, api }) => {
     await page.goto("/image");
     await upload(page, "A-original.png", sourceA);
     await prompt(page).fill("未提交的旧草稿必须保留");
-    await sidebarNew(page).click();
+    await active(page).getByRole("tab", { name: /历史记录/ }).click();
+    await historyNew(page).click();
     await expectFreshB(page);
-    await tabs(page).nth(0).click();
-    await expect(prompt(page)).toHaveValue("未提交的旧草稿必须保留");
-    await expect(active(page).getByRole("img", { name: "A-original.png", exact: true })).toBeVisible();
+    await expect(workbenchPanes(page).first().locator('textarea[aria-label="图像提示词"]')).toHaveValue("未提交的旧草稿必须保留");
+    await expect(workbenchPanes(page).first().locator('img[alt="A-original.png"]')).toHaveCount(1);
+    await page.reload();
+    await expectFreshB(page);
+    await expect(workbenchPanes(page).first().locator('textarea[aria-label="图像提示词"]')).toHaveValue("未提交的旧草稿必须保留");
+    await expect(workbenchPanes(page).first().locator('img[alt="A-original.png"]')).toHaveCount(1);
     expect(api.submissions).toHaveLength(0);
 });

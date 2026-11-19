@@ -42,7 +42,7 @@ test("layer studio binding stays explicit without financial controls while ordin
     await expect(studioCard).not.toContainText("继承 / 用户选择");
     await expect(studioCard).not.toContainText(/积分|成本|费率/);
     await studioCard.getByRole("button", { name: "配置本板块", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "配置图层拆分与图片生成", exact: true });
+    const dialog = page.getByRole("dialog", { name: "配置豆包生图", exact: true });
     const binding = dialog.getByRole("combobox", { name: "本板块模型绑定", exact: true });
     await expect(dialog.getByRole("switch", { name: "本板块 API 启用", exact: true })).not.toBeChecked();
     await expect(dialog).toContainText("前台不显示模型名称或选择器");

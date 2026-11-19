@@ -20,6 +20,7 @@ export const CanvasConfigNodeContent = memo(function CanvasConfigNodeContent({ n
 }) {
     return <CanvasConfigNodePanel node={node}
         isRunning={isRunning || snapshot.workflowRunning}
+        templateTaskCount={snapshot.templateTaskCount}
         workflow={snapshot.workflow ? { status: snapshot.workflow.status, stepStatus: snapshot.workflow.stepStatus,
             onRun: () => { void actions.imageSequence.runFromNode(node.id); }, onRunStep: (onlyStep) => { void actions.imageSequence.rerunStep(node.id, onlyStep); }, onStop: () => actions.imageSequence.stop(snapshot.workflow?.groupId, node.id) } : undefined}
         inputSummary={snapshot.inputSummary} inputs={snapshot.inputs}

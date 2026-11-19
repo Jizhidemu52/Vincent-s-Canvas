@@ -23,6 +23,13 @@ test("layer UI dictionary preserves placeholders and has no untranslated Chinese
             if (ts.isCallExpression(node) && ["t", "uiText"].includes(node.expression.getText(ast)) && ts.isStringLiteral(node.arguments[0]) && /\p{Script=Han}/u.test(node.arguments[0].text)) {
                 expect(layerEnglish[node.arguments[0].text], node.arguments[0].text).toBeDefined();
             }
+            if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "jobLabel" && node.initializer) {
+                const visitLabel = (label: ts.Node) => {
+                    if (ts.isStringLiteral(label) && /\p{Script=Han}/u.test(label.text)) expect(layerEnglish[label.text], label.text).toBeDefined();
+                    ts.forEachChild(label, visitLabel);
+                };
+                visitLabel(node.initializer);
+            }
             if (ts.isJsxText(node)) expect(node.text).not.toMatch(/\p{Script=Han}/u);
             ts.forEachChild(node, visit);
         };

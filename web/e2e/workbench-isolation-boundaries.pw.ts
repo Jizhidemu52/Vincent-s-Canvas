@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import type { BrowserContext, Page } from "@playwright/test";
 import { test, expect, IMAGE, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
+import { activeWorkbench, workbenchPanes } from "./headless-workbench";
 
 const videoBytes = readFileSync(new URL("./media/video.mp4", import.meta.url));
 const imageModel = { id: "10000000-0000-4000-8000-000000000001", name: "E2E Image", modelId: "gpt-image-2", capabilities: ["generate", "edit", "batch"], creditCost: 0, rmbCost: 0 };
@@ -14,8 +15,15 @@ const boards = [
     { kind: "image", path: "/image?tool=image-edit", submit: "开始编辑" },
 ] as const;
 type Board = typeof boards[number];
-const pane = (page: Page) => page.getByRole("tabpanel");
-const tabs = (page: Page) => page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab");
+const pane = activeWorkbench;
+
+async function createDraft(page: Page, board: Board) {
+    if (board.kind === "image") {
+        await pane(page).getByRole("tab", { name: /^历史记录/ }).click();
+        await pane(page).locator(".image-history-panel").getByRole("button", { name: "新建", exact: true }).click();
+    } else await pane(page).getByRole("button", { name: "新建任务，继续创作", exact: true }).click();
+    await expect(workbenchPanes(page)).toHaveCount(2);
+}
 
 async function mockModelsAndMedia(context: BrowserContext, api: MockCanvasApi) {
     await context.route("**/api/models", route => route.fulfill({ json: {
@@ -75,7 +83,7 @@ test("boundary: video initial history delay and failure block new submission unt
     await pane(page).getByRole("button", { name: "生成视频", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
     const originalTask = [...api.tasks.values()][0]!;
-    await expect(tabs(page).first()).toContainText("处理中");
+    await expect(pane(page).getByRole("status", { name: "视频生成中", exact: true })).toBeVisible();
     await page.addInitScript(() => {
         const original = IDBObjectStore.prototype.openCursor;
         const success = Object.getOwnPropertyDescriptor(IDBRequest.prototype, "onsuccess")!;
@@ -108,7 +116,7 @@ test("boundary: video initial history delay and failure block new submission unt
     await pane(page).getByRole("textbox", { name: "视频提示词", exact: true }).press("Control+Enter");
     expect(api.submissions).toHaveLength(1);
     await page.evaluate(() => (window as any).__videoHistoryGate.release());
-    await expect(tabs(page).first()).toContainText("处理中");
+    await expect(pane(page).getByRole("status", { name: "视频生成中", exact: true })).toBeVisible();
     await expectInput(page, boards[0], "ORIGINAL_VIDEO_HISTORY_GATE");
     await expect(pane(page).getByRole("button", { name: "继续生成新视频", exact: true })).toBeEnabled();
     await expect.poll(() => api.taskReads.includes(`/api/tasks/${originalTask.id}`)).toBe(true);
@@ -162,8 +170,7 @@ for (const viewport of [{ width: 1800, height: 1200 }, { width: 390, height: 844
             try {
                 await page.goto(`/${kind}`);
                 const prompt = pane(page).getByRole("textbox", { name: kind === "image" ? "图像提示词" : "视频提示词", exact: true });
-                await prompt.fill(`POINTER_${kind}_${viewport.width}`);
-                const originalTabId = await tabs(page).first().getAttribute("id");
+                await fill(page, kind === "image" ? boards[2] : boards[0], `POINTER_${kind}_${viewport.width}`);
                 const submit = pane(page).locator(".generation-submit .ant-btn-primary");
                 await expect(submit).toBeEnabled();
                 await submit.scrollIntoViewIfNeeded();
@@ -179,9 +186,8 @@ for (const viewport of [{ width: 1800, height: 1200 }, { width: 390, height: 844
                 // Holding the POST keeps this distinct from a deliberate later generation.
                 await page.mouse.dblclick(before.x + before.width / 2, before.y + before.height / 2, { delay: 80 });
                 await expect.poll(() => attempts).toBe(1);
-                await expect(tabs(page)).toHaveCount(1);
-                await expect(tabs(page).first()).toHaveAttribute("id", originalTabId!);
-                await expect(tabs(page).first()).toHaveAttribute("aria-selected", "true");
+                await expect(workbenchPanes(page)).toHaveCount(1);
+                await expect(workbenchPanes(page).first()).toBeVisible();
                 await expect(prompt).toHaveValue(`POINTER_${kind}_${viewport.width}`);
                 expect(await page.evaluate(() => (window as any).__submitPointerTargets)).not.toEqual(expect.arrayContaining([expect.stringMatching(/新建任务|停止.*查询/)]));
                 const during = (await submit.boundingBox())!;
@@ -189,7 +195,6 @@ for (const viewport of [{ width: 1800, height: 1200 }, { width: 390, height: 844
                 releaseSubmission();
                 await expect.poll(() => api.submissions.length).toBe(1);
                 const original = [...api.tasks.values()][0]!;
-                await expect(tabs(page).first()).toContainText("处理中");
                 const oldReads = api.taskReads.filter(path => path === `/api/tasks/${original.id}`).length;
                 await expect.poll(() => api.taskReads.filter(path => path === `/api/tasks/${original.id}`).length).toBeGreaterThan(oldReads);
                 await expect(pane(page).getByRole("button", { name: "停止本页查询（不取消服务端任务）", exact: true })).toBeVisible();
@@ -214,9 +219,9 @@ for (const completion of ["before-navigation", "after-navigation"] as const) {
             await fill(page, board, `BOARD_${board.kind}`);
             await pane(page).getByRole("button", { name: board.submit, exact: true }).dblclick();
             await expect.poll(() => api.submissions.length).toBe(index + 1);
-            await expect(tabs(page).first()).toContainText("处理中");
-            await expect(tabs(page)).toHaveCount(1);
-            await expect(tabs(page).first()).toHaveAttribute("aria-selected", "true");
+            await expect(workbenchPanes(page)).toHaveCount(1);
+            await expect(workbenchPanes(page).first()).toBeVisible();
+            expect(api.submissions[index].prompt || api.submissions[index].sourceUrls.length).toBeTruthy();
         }
         const ids = [...api.tasks.keys()];
         expect(ids).toHaveLength(3);
@@ -229,7 +234,6 @@ for (const completion of ["before-navigation", "after-navigation"] as const) {
         for (const task of api.tasks.values()) { task.status = "success"; task.resultUrls = [`/api/assets/${task.id}/content`]; }
         if (completion === "before-navigation") {
             await expect(pane(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
-            await expect(tabs(page).first()).toContainText("已完成");
         }
         for (const board of boards) {
             await page.goto(board.path);
@@ -267,21 +271,19 @@ for (const board of boards) {
             return route.fulfill({ status: 404, json: { error: "FIXTURE_OTHER_OWNER" } });
         });
         await page.goto(board.path);
-        await page.getByRole("button", { name: "新建任务", exact: true }).click();
-        await expect(tabs(page)).toHaveCount(2);
+        await createDraft(page, board);
         await fill(page, board, `EMPLOYEE_A_${board.kind}`);
         await pane(page).getByRole("button", { name: board.submit, exact: true }).click();
         await expect.poll(() => api.submissions.length).toBe(1);
-        await expect(tabs(page).nth(1)).toContainText("处理中");
+        await expect(workbenchPanes(page).nth(1)).toBeVisible();
         secondOwner = true;
         await page.evaluate(() => window.dispatchEvent(new Event("focus")));
         await expect(page.getByRole("heading", { name: "登录状态已变化，工作区已暂停", exact: true })).toBeVisible();
-        await expect(page.getByRole("tabpanel")).toHaveCount(0);
+        await expect(workbenchPanes(page)).toHaveCount(0);
         const original = [...api.tasks.values()][0]!;
         original.status = "success"; original.resultUrls = [`/api/assets/${original.id}/content`];
         await page.reload();
-        await expect(tabs(page)).toHaveCount(1);
-        await expect(tabs(page).first()).toContainText("草稿");
+        await expect(workbenchPanes(page)).toHaveCount(1);
         if (board.kind === "video") await expect(pane(page).getByRole("textbox", { name: "视频提示词", exact: true })).toHaveValue("");
         if (board.kind === "image") await expect(pane(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("");
         await expect(pane(page).getByText(`EMPLOYEE_A_${board.kind}`, { exact: true })).toHaveCount(0);
@@ -298,12 +300,12 @@ for (const board of boards) {
         }, { kind: board.kind })).toBe(`EMPLOYEE_B_${board.kind}`);
         secondOwner = false;
         await page.reload();
-        await expect(tabs(page)).toHaveCount(2);
+        await expect(workbenchPanes(page)).toHaveCount(2);
         await expectInput(page, board, `EMPLOYEE_A_${board.kind}`);
         await expectOriginalResult(page, board);
         secondOwner = true;
         await page.reload();
-        await expect(tabs(page)).toHaveCount(1);
+        await expect(workbenchPanes(page)).toHaveCount(1);
         await expectInput(page, board, `EMPLOYEE_B_${board.kind}`);
         expect(api.submissions).toHaveLength(1);
         expect(secondOwnerTaskReads.filter(path => path.includes(original.id) || path.includes(original.requestId))).toEqual([]);

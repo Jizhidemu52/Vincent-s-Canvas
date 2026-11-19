@@ -1,33 +1,27 @@
-import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
+import { activeWorkbench as active, readWorkspaceRecords, workbenchPanes } from "./headless-workbench";
+import type { Page } from "@playwright/test";
 
-const active = (page: Page) => page.getByRole("tabpanel");
-const tabs = (page: Page) => page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab");
 const prompt = (page: Page) => active(page).getByRole("textbox", { name: "款式描述", exact: true });
-const closeSecond = (page: Page) => page.getByRole("button", { name: "关闭任务 2 页签", exact: true });
 
-async function secondTask(page: Page) {
+async function openWorkspace(page: Page) {
     await page.goto("/creative/text-to-style");
-    await page.getByRole("button", { name: "新建任务", exact: true }).click();
-    await expect(tabs(page)).toHaveCount(2);
     await expect(prompt(page)).toBeEnabled();
 }
 
 for (const viewChange of ["clear", "successful-history"] as const) {
-    test(`creative unresolved tab cannot close after ${viewChange} replaces its visible results`, async ({ page, api }) => {
+    test(`creative unresolved original survives ${viewChange} and reconciles through history without resubmission`, async ({ page, api }) => {
         await page.route("**/api/prompt-compilations/by-request/*", route => route.fulfill({ status: 404, json: { error: "NOT_FOUND" } }));
-        await secondTask(page);
+        await openWorkspace(page);
         await prompt(page).fill("FIRST_COMPLETED_INPUT");
         await active(page).locator("button.cs-generate").click();
-        await expect(tabs(page).nth(1)).toContainText("已完成");
-        await expect(closeSecond(page)).toBeEnabled();
+        await expect(active(page).getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
         api.taskStatus = "processing";
         await prompt(page).fill("SECOND_PENDING_INPUT");
         await active(page).locator("button.cs-generate").click();
         await expect.poll(() => api.submissions.length).toBe(2);
         await active(page).getByRole("button", { name: "暂停获取进度", exact: true }).click();
-        await expect(tabs(page).nth(1)).toContainText("待核查");
-        await expect(closeSecond(page)).toBeDisabled();
+        const requestIds = api.submissions.map(input => input.requestId);
         if (viewChange === "clear") {
             await active(page).getByRole("button", { name: "清空当前草稿", exact: true }).click();
             await expect(prompt(page)).toHaveValue("");
@@ -36,8 +30,8 @@ for (const viewChange of ["clear", "successful-history"] as const) {
             await active(page).locator("button.cs-history-item").last().click();
             await expect(active(page).getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
         }
-        await expect(closeSecond(page)).toBeDisabled();
-        await expect(tabs(page).nth(1)).toContainText("待核查");
+        await expect(page.getByRole("button", { name: /^关闭任务 \d+ 页签$/ })).toHaveCount(0);
+        await expect.poll(async () => (await readWorkspaceRecords<any>(page, "creative_scene_workspaces")).filter(({ key, value }) => key.startsWith("history-record:") && value.results.some((result: any) => result.status === "pending" || result.failureKind === "uncertain")).length).toBe(1);
         expect(api.submissions).toHaveLength(2);
         const pending = [...api.tasks.values()][1];
         expect(pending.status).toBe("processing");
@@ -45,31 +39,29 @@ for (const viewChange of ["clear", "successful-history"] as const) {
         pending.resultUrls = [`/api/assets/${pending.id}/content`];
         await active(page).getByRole("button", { name: /^最近任务/ }).click();
         await active(page).locator("button.cs-history-item").first().click();
-        // Selecting the unresolved history now starts a GET-only reconciliation.
         await expect(active(page).getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
-        await expect(closeSecond(page)).toBeEnabled();
+        await expect.poll(() => api.taskReads.includes(`/api/tasks/${pending.id}`)).toBe(true);
+        await expect.poll(async () => (await readWorkspaceRecords<any>(page, "creative_scene_workspaces")).filter(({ key, value }) => key.startsWith("history-record:") && value.results.some((result: any) => result.status === "pending" || result.failureKind === "uncertain")).length).toBe(0);
         expect(api.submissions).toHaveLength(2);
-        await closeSecond(page).click();
-        await expect(tabs(page)).toHaveCount(1);
         await page.reload();
-        await expect(tabs(page)).toHaveCount(1);
-        expect(api.submissions).toHaveLength(2);
+        await expect(workbenchPanes(page)).toHaveCount(1);
+        expect(api.submissions.map(input => input.requestId)).toEqual(requestIds);
     });
 }
 
 test("a missing latest creative result never disables persistence of its valid draft", async ({ page, api }) => {
-    await secondTask(page);
+    await openWorkspace(page);
     await prompt(page).fill("VALID_DRAFT_BEFORE_MISSING_PREVIEW");
     await active(page).locator("button.cs-generate").click();
-    await expect(tabs(page).nth(1)).toContainText("已完成");
+    await expect(active(page).getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
     const stored = await page.evaluate(async () => {
         const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
         const storage = createWorkspaceStorage("creative_scene_workspaces");
         let draftKey = "", recordKey = "";
         let original: any;
         await storage.iterate((value: any, key) => {
-            if (key.startsWith("draft:") && key.includes(":task:")) draftKey = key;
-            if (key.startsWith("history-record:") && value.workspaceId?.includes(":task:")) { recordKey = key; original = value; }
+            if (key.startsWith("draft:")) draftKey = key;
+            if (key.startsWith("history-record:")) { recordKey = key; original = value; }
         });
         if (!draftKey || !recordKey) throw new Error("Expected isolated creative task draft and record");
         const broken = structuredClone(original);

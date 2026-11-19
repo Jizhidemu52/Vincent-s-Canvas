@@ -626,6 +626,7 @@ function LoadingContent({ node, theme, onStopObservation }: Pick<NodeContentRend
 function ErrorContent({ node, theme, onRetry, onReload }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry"> & { onReload?: () => void }) {
     const t = useUiText();
     const videoRecovery = node.type === CanvasNodeType.Video && Boolean(node.metadata?.videoTaskId);
+    const designExecution = !onReload && Boolean(node.metadata?.designTask);
     const rawError = node.metadata?.errorDetails || t("生成失败");
     const postprocess = !onReload && node.type === CanvasNodeType.Image
         && (node.metadata?.imageTask?.postprocessFailed || isImageResultProcessingFailure(rawError));
@@ -638,7 +639,8 @@ function ErrorContent({ node, theme, onRetry, onReload }: Pick<NodeContentRender
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
             <div className="max-w-full text-xs leading-5" style={{ color: theme.node.muted }}>{onReload ? t("图片读取失败") : <GenerationDiagnostic error={error} details={details} />}</div>
-            {!postprocess && <button
+            {designExecution && <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{t("请在「创作任务」中查询或继续原请求。")}</p>}
+            {!postprocess && !designExecution && <button
                 type="button"
                 aria-label={onReload ? t("重新加载图片") : undefined}
                 disabled={videoRecovery && node.metadata?.videoTaskCanRecover === false}

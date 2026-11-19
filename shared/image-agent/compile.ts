@@ -1,6 +1,6 @@
-import { ImageAgentPlanningError, parseImageAgentEditSpec, type ImageAgentEditSpec } from "../../../../shared/image-agent-iteration";
-import { designRequirementsText, type DesignRequirements } from "../../../../shared/image-agent-documents";
-import { assertImagePromptInvariantCoverage } from "../../../../shared/image-prompt-invariants";
+import { ImageAgentPlanningError, parseImageAgentEditSpec, type ImageAgentEditSpec } from "../image-agent-iteration";
+import { designRequirementsText, type DesignRequirements } from "../image-agent-documents";
+import { assertImagePromptInvariantCoverage } from "../image-prompt-invariants";
 
 /** Code-owned scope protection, separate from the user's explicit keep-list provenance. */
 export const IMAGE_AGENT_BASE_PRESERVATION = "除本次明确修改外，其余保持底图不变。";

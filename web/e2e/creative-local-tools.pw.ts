@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { test, expect, IMAGE, type MockCanvasApi } from "./fixtures";
+import { activeWorkbench } from "./headless-workbench";
 
-const pane = (page: Page) => page.getByRole("tabpanel");
+const pane = activeWorkbench;
 const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 const dialog = (page: Page, title: string) => page.getByRole("dialog", { name: title, exact: true });
 

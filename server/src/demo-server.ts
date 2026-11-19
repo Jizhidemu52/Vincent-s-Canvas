@@ -30,7 +30,8 @@ import { DEMO_STREAM_IDLE_TIMEOUT_SECONDS } from "./demo-server-config";
 import { resolveDemoHost } from "./demo-network-config";
 import { isOpenTokenImageModel, runOpenTokenImage, type OpenTokenImageModel } from "./opentoken-image";
 import { createGenerationTiming } from "./generation-timing";
-import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, ChatProtocolError, chatFunctionToolsSchema, imageAgentModelInput, isClaudeMessagesModel, readClaudeResponse, readGeminiResponse, requestChatCompletion, requestClaudeStream } from "./routes/chat";
+import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, ChatProtocolError, chatFailureMetadata, chatFunctionToolsSchema, chatResultWaitFailure, imageAgentModelInput, isClaudeMessagesModel, readClaudeResponse, readGeminiResponse, requestChatCompletion, requestClaudeStream } from "./routes/chat";
+import { acceptsChatResultWait, chatResultTimeoutMs, chatResultWaitResponse } from "./chat-result-wait";
 import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "./provider-submission-transport";
 import { chatUpstreamFailureMessage } from "./chat-upstream-failure";
 import { normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
@@ -1041,6 +1042,7 @@ Bun.serve({
         tools: applyDefaultChatModel(demoToolConfigurations),
       });
     if (path === "/api/chat/responses" && request.method === "POST") {
+      const chatStartedAt = performance.now();
       const input = (await request.json()) as {
         modelId?: string;
         toolKey?: string;
@@ -1070,11 +1072,20 @@ Bun.serve({
           const model = { model_id: selectedModel, base_url: String(provider.baseUrl), protocol: String(provider.protocol), encrypted_credentials: null };
           const chatInput = imageAgentModelInput(model, {
             ...prepared.input,
+            waitForResult: acceptsChatResultWait(request.headers.get("accept"), prepared.input.privateProfile),
             claude: { ...prepared.input.claude, maxTokens: Math.max(1, Math.min(16_384, Math.floor(prepared.input.claude?.maxTokens || 2048))) },
           });
           if (isClaudeMessagesModel(model) && chatInput.claude?.stream) {
             return imageAgentClaudeStream(await requestClaudeStream(model, { apiKey }, chatInput), prepared.privateRules, chatInput.tools);
           }
+          if (chatInput.waitForResult) return chatResultWaitResponse(async () => {
+            const result = validateChatProfileOutput(await requestChatCompletion(model, { apiKey }, chatInput), prepared.privateRules);
+            if (!result.content.trim() && !result.toolCalls.length) throw new ChatProtocolError("CHAT_RESPONSE_EMPTY", "模型未返回有效回复；不会自动重新提交。");
+            return result;
+          }, error => {
+            console.error("Chat request failed", chatFailureMetadata(error, performance.now() - chatStartedAt, "response"));
+            return chatResultWaitFailure(error, chatResultTimeoutMs(model, chatInput));
+          });
           const result = await requestChatCompletion(model, { apiKey }, chatInput);
           const { usage: _internalUsage, ...payload } = validateChatProfileOutput(result, prepared.privateRules);
           if (!payload.content.trim() && !payload.toolCalls.length) return json({ error: "CHAT_RESPONSE_EMPTY", message: "模型未返回有效回复；不会自动重新提交。" }, 502, { "cache-control": "no-store" });
@@ -1466,7 +1477,7 @@ Bun.serve({
           (item) =>
             item.id === input.modelConfigId &&
             typeof item.modelId === "string" &&
-            isSelectableCreativeModel(item) &&
+            (Boolean(input.parameters.quickImageAction) || isSelectableCreativeModel(item)) &&
             ((Boolean(openTokenApiKey) &&
               item.providerId === openTokenProviderId &&
               isOpenTokenImageModel(item.modelId)) ||
@@ -1524,7 +1535,7 @@ Bun.serve({
         const isGptImage2 = imageModelId.startsWith("gpt-image-2") || apiMartModel === "gpt-image-2";
         const maximumReferences = imageModelId === "midjourney-blend" ? 4
           : imageModelId === "seedream-5-5" ? 10
-          : imageModelId === "mai-image-2.6-flash" ? 5
+          : imageModelId === "mai-image-2.6-flash" || imageModelId === "mai-image-2.7-flash" ? 5
           : imageModelId === "grok-imagine-image-2.0" ? 3
           : apiMartModel === "gpt-image-2" ? 15
           : isGptImage2 || imageModelId === "gemini-nano-banana-2.1" ? 16

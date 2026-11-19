@@ -60,7 +60,7 @@ export function ImagePrimarySettings({ config, profile, referenceCount = 0, mode
     useUiLocale();
     const primary = imagePrimaryControls(config, profile, referenceCount);
     const noticeId = useId();
-    const reason = primary.automatic ? automaticReferenceSizeNotice : primary.exactPixels
+    const reason = primary.automatic ? automaticReferenceSizeNotice(profile) : primary.exactPixels
         ? uiText("当前精确像素 {size} 优先，分辨率档位暂不生效；改选上方宽高比或自适应后启用。图片质量仍独立生效。", { size: primary.size.replace("x", " × ") })
         : !profile.verified ? profile.tip : "";
     return <section className="image-primary-settings" aria-label={uiText("常用参数")}>
@@ -141,7 +141,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
         const candidate = Math.round(Number(input.value));
         const value = Number.isSafeInteger(candidate) && candidate > 0 ? candidate : dimensions[index] || 1024;
         const next = [...dimensions];
-        next[index] = snapToStep ? Math.ceil(value / snapStep) * snapStep : value;
+        next[index] = snapToStep ? (profile.mai27 ? Math.max(768, Math.floor(value / snapStep) * snapStep) : Math.ceil(value / snapStep) * snapStep) : value;
         input.value = String(next[index]);
         onConfigChange("size", next.join("x"));
     };
@@ -169,7 +169,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
             onMouseDown={event => event.stopPropagation()}>
             {showTitle ? <div className="ip-title">{uiText("图像设置")}</div> : null}
             {sizeNotice ? <p role="status" className="mb-2 text-xs" style={{ color: theme.node.muted }}><DisplayText text={sizeNotice} /></p> : null}
-            {automaticReferenceSize ? <p role="status" className="mb-2 text-xs leading-5" style={{ color: theme.node.muted }}>{uiText(automaticReferenceSizeNotice)}</p> : null}
+            {automaticReferenceSize ? <p role="status" className="mb-2 text-xs leading-5" style={{ color: theme.node.muted }}>{uiText(automaticReferenceSizeNotice(profile))}</p> : null}
             {profile.kind === "mai-image" ? <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("固定输出 PNG，不支持透明背景参数与蒙版。")}</p> : null}
             {profile.kind === "midjourney-blend" ? <>
                 <div className="ip-row"><span className="ip-label">{uiText("比例预设")}</span><Select className="ip-select" aria-label={uiText("比例预设")} value={options.dimensions || "SQUARE"} onChange={value => updateOption("dimensions", value)} options={[{ value: "SQUARE", label: uiText("方形 1:1") }, { value: "PORTRAIT", label: uiText("竖向 2:3") }, { value: "LANDSCAPE", label: uiText("横向 3:2") }]} /></div>
@@ -192,7 +192,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
                         <span className="ip-dimension-input"><input aria-label={uiText("自定义{label}", { label: uiText(label) })} type="number" min={gif ? 16 : profile.sizeConstraints?.minEdge || 1} step={snapToStep ? snapStep : 1} defaultValue={dimensions[index]} onBlur={event => commitDimension(index, event.currentTarget)} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} /><span aria-hidden>px</span></span>
                     </label>)}
                 </div>
-                <label className="ip-snap-control"><input type="checkbox" checked={snapToStep} onChange={event => setSnapToStep(event.target.checked)} /><span><strong>{uiText(profile.kind === "mai-image" ? "32 倍数对齐" : "16 倍数对齐")}</strong><span>{uiText(profile.kind === "mai-image" ? "调整尺寸时向上对齐到最近的 32 像素倍数。" : "调整尺寸时向上对齐到最近的 16 像素倍数。")}</span></span></label>
+                <label className="ip-snap-control"><input type="checkbox" checked={snapToStep} onChange={event => setSnapToStep(event.target.checked)} /><span><strong>{uiText(profile.kind === "mai-image" ? "32 倍数对齐" : "16 倍数对齐")}</strong><span>{uiText(profile.mai27 ? "调整尺寸时向下对齐到最近的 32 像素倍数，最小为 768。" : profile.kind === "mai-image" ? "调整尺寸时向上对齐到最近的 32 像素倍数。" : "调整尺寸时向上对齐到最近的 16 像素倍数。")}</span></span></label>
             </section> : !automaticReferenceSize && profile.customSize ? <details className="ip-details" open={compact || undefined}>
                 <summary>{uiText("自定义像素")}<ChevronDown size={13} /></summary>
                 {profile.sizeConstraintMessage ? <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText(gif ? gifSizeNotice : profile.sizeConstraintMessage)}</p> : null}

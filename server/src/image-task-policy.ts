@@ -8,7 +8,7 @@ export function promptImageReferenceLimit(target: { modelId: string; protocol: s
   if (target.protocol === "apimart") {
     const model = apiMartImageModel(target.modelId);
     if (model === "seedream-5-5") return 10;
-    if (model === "mai-image-2.6-flash") return 5;
+    if (model === "mai-image-2.6-flash" || model === "mai-image-2.7-flash") return 5;
     if (model === "grok-imagine-image-2.0") return 3;
     if (model === "midjourney-blend") return 4;
     if (model === "gpt-image-2") return 15;

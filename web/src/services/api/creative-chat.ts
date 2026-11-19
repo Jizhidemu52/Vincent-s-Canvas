@@ -4,7 +4,7 @@ import { requestToolResponse, toolResponseToInput } from "@/services/api/image";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
-import { resolveImageAgentFocus, selectImageAgentWorkingSet } from "@/lib/image-agent/focus";
+import { resolveImageAgentFocus, selectImageAgentWorkingSet } from "../../../../shared/image-agent/focus";
 import type { AgentDocument, DesignRequirements } from "../../../../shared/image-agent-documents";
 import { parseAgentDocumentTool } from "@/lib/image-agent/document-tools";
 import { requestImageAgentPlanWithRepair } from "@/lib/image-agent/planning-repair";
@@ -118,6 +118,7 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
         tool: "gpt-chat",
         chatProfile: "creative-chat" as const,
         signal: options.signal,
+        onChatWaiting: options.onPhase,
         onToolCallStart: (name: string) => {
             if (name === "edit_image") options.onPhase?.("正在整理图片修改要求…");
             else if (name === "look_at_images") options.onPhase?.("正在查看较早的图片…");

@@ -23,10 +23,9 @@ function harness(saved = new Map<string, unknown>(), initialLog?: SceneLog) {
     const code = ts.transpileModule(readFileSync(path, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext } }).outputText;
     const states: any[] = [], refs: any[] = [], effects: any[] = [], pendingEffects: Array<() => void> = [];
     const calls: string[] = [], submissions: any[] = [], observations: any[] = [];
-    let stateIndex = 0, refIndex = 0, effectIndex = 0, ownerId = "owner";
-    let taskStatus: { busy: boolean; pending: boolean; ready: boolean };
+    let stateIndex = 0, refIndex = 0, effectIndex = 0, ownerId = "owner", active = true;
     let resolveImage = async (key: string, fallback: string) => fallback || key;
-    let failReadOnce = "";
+    let failReadOnce = "", failWritePrefix = "";
     let originalTask: QueuedTask | null = null, originalCompilation: PublicPromptCompilation | null = compilation;
     let queryTask: (() => Promise<QueuedTask | null>) | undefined;
     let submit = async (options: any) => {
@@ -42,12 +41,12 @@ function harness(saved = new Map<string, unknown>(), initialLog?: SceneLog) {
     const dependencies: Record<string, any> = {
         "@/services/api/generation-tasks": { ...requireModule("@/services/api/generation-tasks"), recoverQueuedTask: async (id: string) => { calls.push(`RECOVER ${id}`); return { ...originalTask, status: "processing" }; } },
         "@/services/api/task-result-reconciliation": { ...requireModule("@/services/api/task-result-reconciliation"), watchTaskReconciliation: (options: any) => { observations.push(options); return new Promise<void>(resolve => options.signal.addEventListener("abort", () => resolve(), { once: true })); } },
-        "@/components/workbench-tasks": { useWorkbenchTask: () => ({ id: "default", active: true, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus(status: typeof taskStatus) { taskStatus = status; } },
+        "@/components/workbench-tasks": { useWorkbenchTask: () => ({ id: "default", active, draftScope: (scope: string) => scope }) },
         react: { ...React, useState: (initial: any) => { const index = stateIndex++; if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial; return [states[index], (next: any) => { states[index] = typeof next === "function" ? next(states[index]) : next; }]; },
             useRef: (initial: any) => refs[refIndex++] ||= { current: initial }, useMemo: (factory: Function) => factory(),
             useEffect: (effect: Function, deps?: any[]) => { const index = effectIndex++, prior = effects[index]; if (prior && deps?.every((value, i) => Object.is(value, prior.deps?.[i]))) return; pendingEffects.push(() => { prior?.cleanup?.(); effects[index] = { deps, cleanup: effect() }; }); },
         },
-        "@/lib/workspace-storage": { createWorkspaceStorage: () => ({ getItem: async (key: string) => { if (failReadOnce && key.startsWith(failReadOnce)) { failReadOnce = ""; throw new Error("essential-storage-read-failed"); } return structuredClone(saved.get(key) ?? null); }, setItem: async (key: string, value: unknown) => { saved.set(key, structuredClone(value)); } }) },
+        "@/lib/workspace-storage": { createWorkspaceStorage: () => ({ getItem: async (key: string) => { if (failReadOnce && key.startsWith(failReadOnce)) { failReadOnce = ""; throw new Error("essential-storage-read-failed"); } return structuredClone(saved.get(key) ?? null); }, setItem: async (key: string, value: unknown) => { if (failWritePrefix && key.startsWith(failWritePrefix)) throw new Error("isolated-history-write-failed"); saved.set(key, structuredClone(value)); } }) },
         "@/lib/submission-gate": { workbenchSubmissions: { acquire: () => () => {} } },
         "@/stores/use-config-store": { ...requireModule("@/stores/use-config-store"), useEffectiveConfig: () => config },
         "@/stores/use-user-store": { useUserStore: userStore },
@@ -64,9 +63,9 @@ function harness(saved = new Map<string, unknown>(), initialLog?: SceneLog) {
     const module = { exports: {} as any };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name] || requireModule(name), module, module.exports);
     const render = () => { stateIndex = refIndex = effectIndex = 0; const value = module.exports.useSceneWorkspace("text-to-style"); pendingEffects.splice(0).forEach(effect => effect()); return value; };
-    return { render, saved, calls, submissions, status: () => taskStatus, observations, reconcile: async () => { const observer = observations.findLast(item => !item.signal.aborted); expect(observer).toBeDefined(); await observer.reconcile(); }, setReadFailure: (prefix: string) => { failReadOnce = prefix; }, setResolveImage: (resolve: typeof resolveImage) => { resolveImage = resolve; }, initialize: async () => { render(); await tick(); render(); await tick(); return render(); },
+    return { render, saved, calls, submissions, observations, reconcile: async () => { const observer = observations.findLast(item => !item.signal.aborted); expect(observer).toBeDefined(); await observer.reconcile(); }, setReadFailure: (prefix: string) => { failReadOnce = prefix; }, setWriteFailure: (prefix: string) => { failWritePrefix = prefix; }, setResolveImage: (resolve: typeof resolveImage) => { resolveImage = resolve; }, initialize: async () => { render(); await tick(); render(); await tick(); return render(); },
         setTask: (task: QueuedTask | null) => { originalTask = task; }, setCompilation: (value: PublicPromptCompilation | null) => { originalCompilation = value; },
-        setTaskQuery: (query: () => Promise<QueuedTask | null>) => { queryTask = query; }, setSubmit: (fn: typeof submit) => { submit = fn; }, changeOwner: () => { ownerId = "other"; }, unmount: () => effects.forEach(effect => effect?.cleanup?.()) };
+        setTaskQuery: (query: () => Promise<QueuedTask | null>) => { queryTask = query; }, setSubmit: (fn: typeof submit) => { submit = fn; }, setActive: (value: boolean) => { active = value; }, changeOwner: () => { ownerId = "other"; }, unmount: () => effects.forEach(effect => effect?.cleanup?.()) };
 }
 
 test("history can be previewed during generation without replacing the running scene's slots", async () => {
@@ -92,7 +91,7 @@ test("history can be previewed during generation without replacing the running s
     app.render().returnToCurrentTask();
     expect(app.render().results[0].image.id).toBe("current-image");
     expect(app.render().activeLog.id).not.toBe("old-log");
-    expect(app.status().busy).toBe(false);
+    expect(app.render().running).toBe(false);
     app.unmount();
 });
 
@@ -111,12 +110,12 @@ test("history viewing does not cancel a pending original scene reconciliation", 
     app.render().returnToCurrentTask();
     expect(app.render().results[0].status).toBe("success");
     expect(app.render().results[0].taskId).toBe("late-task");
-    expect(app.status().pending).toBe(false);
+    expect(app.render().autoObserving).toBe(false);
     expect(app.submissions).toHaveLength(0);
     app.unmount();
 });
 
-test("creative unresolved records beyond the first history page protect their tab after clear and history preview", async () => {
+test("creative unresolved records beyond the first history page survive clear and history preview without resubmission", async () => {
     const completed: SceneLog[] = Array.from({ length: 21 }, (_, index) => ({ ...structuredClone(pendingLog), id: `completed-${index}`, createdAt: index + 2,
         results: [{ id: `done-${index}`, status: "success" }], successCount: 1 }));
     const otherWorkspace: SceneLog = { ...structuredClone(pendingLog), id: "other-workspace", workspaceId: "other-task", createdAt: 30 };
@@ -124,18 +123,18 @@ test("creative unresolved records beyond the first history page protect their ta
     const app = harness(saved); const ws = await app.initialize();
     expect(ws.logs).toHaveLength(20);
     expect(ws.logs.some((log: SceneLog) => log.id === pendingLog.id)).toBe(false);
-    expect(app.status().pending).toBe(true);
+    const savedPending = () => app.saved.get("history-record:owner:text-to-style:pending-log") as SceneLog;
+    expect(savedPending().results.some(canQuerySceneResult)).toBe(true);
     ws.reset(); app.render();
-    expect(app.status().pending).toBe(true);
+    expect(savedPending().results.some(canQuerySceneResult)).toBe(true);
     await app.render().previewLog(ws.logs.find((log: SceneLog) => log.id.startsWith("completed-"))); app.render();
-    expect(app.status().pending).toBe(true);
+    expect(savedPending().results.some(canQuerySceneResult)).toBe(true);
     await app.render().previewLog(pendingLog); const pending = app.render();
     app.setTask({ id: "late-task", requestId: "original-request:0", userId: "owner", status: "success", resultUrls: ["/original.png"], failureReason: null });
     await pending.queryResult(pending.results[0]); app.render();
-    // A different workspace's unresolved record must not pin this completed tab.
-    expect(app.status().pending).toBe(false);
+    expect(savedPending().results.some(canQuerySceneResult)).toBe(false);
     await app.render().previewLog(otherWorkspace); app.render();
-    expect(app.status().pending).toBe(false);
+    expect(savedPending().results.some(canQuerySceneResult)).toBe(false);
     expect(app.submissions).toHaveLength(0);
     app.unmount();
 });
@@ -148,9 +147,79 @@ test("creative automatically reconciles a restored original request through succ
     app.setTask({ id: "late-task", requestId: "original-request:0", status: "success", userId: "owner", resultUrls: ["/original.png"], failureReason: null });
     await app.reconcile();
     expect(app.render().results[0].status).toBe("success");
-    expect(app.status().pending).toBe(false);
+    expect(app.render().autoObserving).toBe(false);
     expect(app.submissions).toHaveLength(0);
     expect(app.calls.every(call => call.startsWith("GET"))).toBe(true);
+    app.unmount();
+});
+
+test.each(["history-record:", "history-index:"])("successful creative results remain visible while a failed %s write is repaired locally", async failedWrite => {
+    const app = harness(new Map(), pendingLog); await app.initialize();
+    app.setTask({ id: "late-task", requestId: "original-request:0", status: "success", userId: "owner", resultUrls: ["/original.png"], failureReason: null });
+    app.setWriteFailure(failedWrite);
+    await app.reconcile();
+    const visible = app.render();
+    expect(visible.results[0]).toMatchObject({ status: "success", taskId: "late-task", requestId: "original-request:0", image: { dataUrl: "/original.png", sourceTaskId: "late-task" } });
+    expect(visible.error).toContain("本地记录保存失败");
+    expect(visible.autoObserving).toBe(false);
+    const readsBeforeRepair = app.calls.length;
+    await app.reconcile();
+    expect(app.render().results[0].status).toBe("success");
+    expect(app.calls).toHaveLength(readsBeforeRepair);
+    app.setWriteFailure("");
+    await app.reconcile();
+    expect(app.render().autoObserving).toBe(false);
+    expect(app.render().error).toBeNull();
+    expect(app.calls).toHaveLength(readsBeforeRepair);
+    expect(app.saved.get("history-record:owner:text-to-style:pending-log")).toMatchObject({ successCount: 1, results: [{ status: "success", taskId: "late-task", requestId: "original-request:0" }] });
+    expect(app.saved.get("history-index:owner:text-to-style")).toMatchObject({ entries: [{ id: "pending-log", unresolvedCount: 0, successCount: 1 }] });
+    expect(app.submissions).toHaveLength(0);
+    app.unmount();
+    const reloaded = harness(app.saved); const restored = await reloaded.initialize();
+    expect(restored.results[0]).toMatchObject({ status: "success", taskId: "late-task", image: { sourceTaskId: "late-task" } });
+    expect(restored.autoObserving).toBe(false);
+    expect(reloaded.submissions).toHaveLength(0);
+    reloaded.unmount();
+});
+
+test("a terminal scene record with a stale pending index is installed instead of skipped", async () => {
+    const app = harness(new Map(), pendingLog); await app.initialize();
+    const image = { id: "saved-image", name: "original.png", storageKey: "saved-image-bytes", dataUrl: "", width: 100, height: 100, bytes: 20, mimeType: "image/png", type: "image/png", sourceTaskId: "late-task" };
+    app.saved.set("history-record:owner:text-to-style:pending-log", { ...pendingLog, results: [{ ...pendingLog.results[0], status: "success", taskId: "late-task", image }], images: [image], successCount: 1 });
+    await app.reconcile();
+    expect(app.render().results[0]).toMatchObject({ status: "success", taskId: "late-task", image: { id: "saved-image", dataUrl: "saved-image-bytes", sourceTaskId: "late-task" } });
+    expect(app.render().autoObserving).toBe(false);
+    expect(app.saved.get("history-index:owner:text-to-style")).toMatchObject({ entries: [{ unresolvedCount: 0, successCount: 1 }] });
+    expect(app.calls).toEqual([]);
+    expect(app.submissions).toHaveLength(0);
+    app.unmount();
+});
+
+test("queued creative history repair never writes across an employee change", async () => {
+    const app = harness(new Map(), pendingLog); await app.initialize();
+    app.setTask({ id: "late-task", requestId: "original-request:0", status: "success", userId: "owner", resultUrls: ["/original.png"], failureReason: null });
+    app.setWriteFailure("history-index:");
+    await app.reconcile(); app.render();
+    const savedIndex = structuredClone(app.saved.get("history-index:owner:text-to-style"));
+    app.setWriteFailure(""); app.changeOwner();
+    await app.reconcile();
+    expect(app.saved.get("history-index:owner:text-to-style")).toEqual(savedIndex);
+    expect(app.calls).toEqual(["GET task"]);
+    expect(app.submissions).toHaveLength(0);
+    app.unmount();
+});
+
+test("a hidden creative pane repairs its completed history without querying or generating again", async () => {
+    const app = harness(new Map(), pendingLog); await app.initialize();
+    app.setTask({ id: "late-task", requestId: "original-request:0", status: "success", userId: "owner", resultUrls: ["/original.png"], failureReason: null });
+    app.setWriteFailure("history-index:");
+    await app.reconcile(); app.render();
+    app.setActive(false); app.setWriteFailure(""); app.render();
+    await app.reconcile();
+    expect(app.render().autoObserving).toBe(false);
+    expect(app.saved.get("history-index:owner:text-to-style")).toMatchObject({ entries: [{ successCount: 1, unresolvedCount: 0 }] });
+    expect(app.calls).toEqual(["GET task"]);
+    expect(app.submissions).toHaveLength(0);
     app.unmount();
 });
 
@@ -162,7 +231,7 @@ test("automatic compilation recovery closes confirmed failure but never continue
     app.setCompilation({ ...compilation, status: "failed", message: "提示词准备失败，未提交图片。" });
     await app.reconcile();
     expect(app.render().results[0].failureKind).toBe("local");
-    expect(app.status().pending).toBe(false);
+    expect(app.render().autoObserving).toBe(false);
     expect(app.submissions).toHaveLength(0);
     app.unmount();
 });
@@ -196,7 +265,7 @@ test.each([
     expect(ws.results[0].recovery).toBeUndefined();
     expect(ws.results[0].image).toBeUndefined();
     expect(ws.results[0].error).toContain("原件已保存到素材库");
-    expect(app.status().pending).toBe(false);
+    expect(app.render().autoObserving).toBe(false);
     expect(app.observations.every(item => item.signal.aborted)).toBe(true);
     await ws.queryResult(ws.results[0], true);
     expect(app.calls).toEqual(["GET task"]);
@@ -247,7 +316,7 @@ test("missing latest preview preserves draft readiness and subsequent input writ
     app.setResolveImage(async () => "");
     const ws = await app.initialize();
     expect(ws.error).toContain("本地文件已不可用");
-    expect(app.status().ready).toBe(true);
+    expect(ws.loading).toBe(false);
     ws.setForm({ ...ws.form, description: "仍需保存的修改" }); app.render(); await tick();
     expect((app.saved.get("draft:owner:text-to-style") as any).form.description).toBe("仍需保存的修改");
     expect(app.saved.get("history-record:owner:text-to-style:pending-log")).toEqual(latest);
@@ -262,7 +331,7 @@ for (const failedRead of ["draft:", "history-index:"]) {
         app.setReadFailure(failedRead);
         const ws = await app.initialize();
         expect(ws.error).toContain("essential-storage-read-failed");
-        expect(app.status().ready).toBe(false);
+        expect(ws.validation).toContain("读取失败");
         ws.setForm(form); const edited = app.render(); await tick();
         await edited.generate();
         expect(app.submissions).toHaveLength(0);

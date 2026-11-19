@@ -4,6 +4,7 @@ import type { BrowserContext, Page, TestInfo } from "@playwright/test";
 import { test, expect, fixturePng, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
 import { seedRetiredRecipes, snapshotRetiredRecipes, expectRecipeRetired } from "./retired-recipe-fixtures";
+import { activeWorkbench as active, workbenchPanes, readWorkbenchRegistry } from "./headless-workbench";
 
 // Each pressure case performs up to ten independent uploads, submissions,
 // reconciliations and original-byte checks. Keep this bounded when the main CI
@@ -14,8 +15,6 @@ type Source = { name: string; mimeType: string; buffer: Buffer; width?: number; 
 type Expected = { marker: string; sources: Source[] };
 type Receipt = { title: string; startedAt: string; started: number; peakInflight: number; events: Array<Record<string, unknown>>; inputs: Array<Record<string, unknown>>; verifiedResults: Array<Record<string, unknown>>; rejections: string[]; queryFailures: number; controls: string[]; expected: Map<string, Expected>; failReads: Map<string, number> };
 const receipts = new WeakMap<MockCanvasApi, Receipt>();
-const active = (page: Page) => page.getByRole("tabpanel");
-const tabs = (page: Page) => page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab");
 const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 const owner = "00000000-0000-4000-8000-000000000099";
 const imageModel = { id: "10000000-0000-4000-8000-000000000001", name: "Pressure GPT Image", modelId: "gpt-image-2", capabilities: ["generate", "edit", "batch"], creditCost: 0, rmbCost: 0 };
@@ -113,8 +112,7 @@ async function upload(page: Page, sources: Source[], video = false) {
     for (const source of sources) await expect(active(page).getByRole("img", { name: source.name, exact: true })).toBeVisible();
 }
 
-async function select(page: Page, index: number) { await tabs(page).nth(index).click(); await expect(tabs(page).nth(index)).toHaveAttribute("aria-selected", "true"); }
-async function next(page: Page, count: number, entry: "history" | "footer" | "top" | "mobile" = "top") {
+async function next(page: Page, count: number, entry: "history" | "footer" | "mobile" = "footer") {
     if (entry === "mobile" && new URL(page.url()).pathname === "/video") { await active(page).getByRole("button", { name: "记录", exact: true }).click(); const drawer = page.getByRole("dialog", { name: "生成记录", exact: true }); await drawer.getByRole("button", { name: "新建", exact: true }).click(); await expect(drawer).toHaveCount(0); }
     else if (entry === "history" || entry === "mobile") {
         // The synthetic double-submit leaves the pointer over the prior result
@@ -124,9 +122,8 @@ async function next(page: Page, count: number, entry: "history" | "footer" | "to
         await active(page).getByRole("tab", { name: /^历史记录/ }).click();
         await active(page).getByRole("button", { name: "新建", exact: true }).click();
     }
-    else if (entry === "footer") await active(page).getByRole("button", { name: "新建任务，继续创作", exact: true }).click();
-    else await page.getByRole("button", { name: "新建任务", exact: true }).click();
-    await expect(tabs(page)).toHaveCount(count); await expect(tabs(page).last()).toHaveAttribute("aria-selected", "true");
+    else await active(page).getByRole("button", { name: "新建任务，继续创作", exact: true }).click();
+    await expect(workbenchPanes(page)).toHaveCount(count); await expect(workbenchPanes(page).last()).toBeVisible();
 }
 
 function sourceProof(api: MockCanvasApi, r: Receipt, marker: string, sources: Source[]) {
@@ -185,36 +182,39 @@ async function verifyResults(page: Page, api: MockCanvasApi, r: Receipt, kind: "
 for (const kind of ["image", "video"] as const) for (let round = 0; round < 5; round++) {
     test(`pressure ${kind} round ${round + 1}: ten mixed inputs, live new-entry, reverse completion, durable isolation`, async ({ page, context, api }, info) => {
         const r = await setup(context, api, info), pool = await fixtures(page), ids: string[] = [], markers: string[] = [];
-        await page.goto(`/${kind}`);
+        await page.goto(kind === "image" ? "/image?tool=image-edit" : "/video");
         for (let index = 0; index < 10; index++) {
             const mobile = round === 4 && index >= 8;
             if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-            if (index) await next(page, index + 1, mobile ? "mobile" : round === 1 ? "footer" : round === 3 ? "top" : "history");
+            if (index) await next(page, index + 1, mobile ? "mobile" : round === 1 || round === 3 ? "footer" : "history");
             const input = active(page).getByRole("textbox", { name: kind === "image" ? "图像提示词" : "视频提示词", exact: true });
             await expect(input).toHaveValue("");
             const marker = `${kind.toUpperCase()}_R${round + 1}_T${index + 1}_`, text = marker + promptCases[(index + round) % promptCases.length]; markers.push(text);
-            const sources = index === 0 && round === 0 ? [] : sourcesFor(pool, marker, index + round, kind === "video");
+            const sources = kind === "video" && index === 0 && round === 0 ? [] : sourcesFor(pool, marker, index + round, kind === "video");
             if (sources.length) await upload(page, sources, kind === "video"); await input.fill(text);
-            await active(page).getByRole("button", { name: kind === "image" ? "开始生成" : "生成视频", exact: true }).evaluate(button => { button.click(); button.click(); });
-            await expect.poll(() => api.submissions.length).toBe(index + 1); await expect(tabs(page).nth(index)).toContainText("处理中");
+            await active(page).getByRole("button", { name: kind === "image" ? "开始编辑" : "生成视频", exact: true }).evaluate(button => { button.click(); button.click(); });
+            await expect.poll(() => api.submissions.length).toBe(index + 1);
             expect(api.submissions.at(-1)!.prompt).toContain(text.trim()); ids.push(sourceProof(api, r, marker, sources));
-            if (index > 0 && index % 3 === 0) { await select(page, 0); await expect(active(page).getByRole("textbox", { name: kind === "image" ? "图像提示词" : "视频提示词", exact: true })).toHaveValue(markers[0]); await select(page, index); }
+            if (index > 0 && index % 3 === 0) await expect(workbenchPanes(page).nth(0).getByRole("textbox", { name: kind === "image" ? "图像提示词" : "视频提示词", exact: true, includeHidden: true })).toHaveValue(markers[0]);
             expect([...api.tasks.values()].every(task => ["queued", "processing"].includes(task.status))).toBe(true);
         }
         expect(r.peakInflight).toBe(10); expect(new Set(api.submissions.map(input => input.requestId)).size).toBe(10);
-        await expect(page.getByRole("button", { name: "关闭任务 10 页签", exact: true })).toBeDisabled();
+        await expect(page.getByRole("tablist", { name: "任务列表", exact: true })).toHaveCount(0);
         if (round >= 2) {
-            await page.reload(); await expect(tabs(page)).toHaveCount(10);
+            await page.reload(); await expect(workbenchPanes(page)).toHaveCount(10);
             await expect.poll(() => ids.every(id => api.taskReads.includes(`/api/tasks/${id}`))).toBe(true);
             expect(api.submissions).toHaveLength(10);
         }
         const failed = new Set(round === 1 || round === 3 ? [ids[2], ids[7]] : []);
         for (const index of [9, 7, 5, 3, 1, 8, 6, 4, 2, 0]) finish(api, r, ids[index], failed.has(ids[index]));
-        for (let index = 0; index < 10; index++) await expect(tabs(page).nth(index)).toContainText(failed.has(ids[index]) ? "已失败" : "已完成");
         await verifyResults(page, api, r, kind, ids.filter(id => !failed.has(id)));
-        await select(page, 9); await expect(active(page).getByRole("textbox", { name: kind === "image" ? "图像提示词" : "视频提示词", exact: true })).toHaveValue(markers[9]);
-        await page.getByRole("button", { name: "关闭任务 10 页签", exact: true }).click(); await expect(tabs(page)).toHaveCount(9);
-        await page.reload(); await expect(tabs(page)).toHaveCount(9); expect(api.submissions).toHaveLength(10); expect(r.controls).toEqual([]);
+        for (let index = 0; index < 10; index++) await expect(workbenchPanes(page).nth(index).getByRole("textbox", { name: kind === "image" ? "图像提示词" : "视频提示词", exact: true, includeHidden: true })).toHaveValue(markers[index]);
+        await expect(active(page).getByRole("textbox", { name: kind === "image" ? "图像提示词" : "视频提示词", exact: true })).toHaveValue(markers[9]);
+        await active(page).getByRole("tab", { name: /^历史记录/ }).click();
+        await expect(active(page).getByRole("heading", { name: "生成记录", exact: true })).toBeVisible();
+        const registry = await readWorkbenchRegistry(page);
+        await page.reload(); await expect(workbenchPanes(page)).toHaveCount(10); expect(api.submissions).toHaveLength(10); expect(r.controls).toEqual([]);
+        expect(await readWorkbenchRegistry(page)).toEqual(registry);
         expect((await readResults(page, kind)).length).toBe(10 - failed.size);
     });
 }
@@ -237,17 +237,18 @@ for (const [sceneIndex, scene] of scenes.entries()) test(`pressure creative ${sc
         if (scene === "local-restyle") await active(page).getByRole("textbox", { name: "要改成什么样", exact: true }).fill(`${marker}圆领改V领`);
         if (scene === "sketch-to-photo") { await active(page).getByRole("textbox", { name: "材质方向", exact: true }).fill("棉针织，纹理可见"); await active(page).getByRole("textbox", { name: "颜色方向", exact: true }).fill("海军蓝 / navy"); }
         await active(page).locator(".cs-generate").evaluate(button => { button.click(); button.click(); });
-        await expect.poll(() => api.submissions.length).toBe(index + 1); await expect(tabs(page).nth(index)).toContainText("处理中");
+        await expect.poll(() => api.submissions.length).toBe(index + 1);
         expect(api.submissions.at(-1)!.promptInput.fields.description).toBe(marker + promptCases[index + 2]); ids.push(sourceProof(api, r, marker, sources));
     }
     expect(r.peakInflight).toBe(3);
-    finish(api, r, ids[2]); await expect(tabs(page).nth(2)).toContainText("已完成");
-    await select(page, 0); await expect(active(page).getByRole("button", { name: "下载原图", exact: true })).toHaveCount(0);
+    finish(api, r, ids[2]); await expect(active(page).getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
+    await expect(workbenchPanes(page).nth(0).getByRole("button", { name: "下载原图", exact: true, includeHidden: true })).toHaveCount(0);
     finish(api, r, ids[0]); finish(api, r, ids[1]);
-    for (let index = 0; index < 3; index++) await expect(tabs(page).nth(index)).toContainText("已完成");
     await verifyResults(page, api, r, "creative", ids);
-    await page.reload(); await expect(tabs(page)).toHaveCount(3); await select(page, 2);
+    await page.reload(); await expect(workbenchPanes(page)).toHaveCount(3);
     await expect(active(page).locator(`textarea[id^="cs-${scene}-description-"]`)).toHaveValue(`CREATIVE_${scene}_2_` + promptCases[4]);
+    await active(page).getByRole("button", { name: /^最近任务/ }).click();
+    await expect(active(page).locator("button.cs-history-item")).toHaveCount(3);
     expect(api.submissions).toHaveLength(3); expect(r.controls).toEqual([]);
 });
 
@@ -263,10 +264,14 @@ for (const tool of [
         await active(page).getByRole("button", { name: tool.button, exact: true }).click(); await expect.poll(() => api.submissions.length).toBe(index + 1); ids.push(sourceProof(api, r, marker, sources));
     }
     expect(r.peakInflight).toBe(3); for (const index of [2, 0, 1]) finish(api, r, ids[index]);
-    for (let index = 0; index < 3; index++) await expect(tabs(page).nth(index)).toContainText("已完成");
+    await expect.poll(async () => (await readResults(page, "image")).length).toBe(3);
     const records = await readResults(page, "image"); expect(records.map(record => record.taskId).sort()).toEqual([...ids].sort());
     for (const record of records) { expect(record.sha256).toBe(hash(api.assetBytes.get(record.taskId)!)); expect(record.references).toEqual(r.expected.get(record.taskId)!.sources.map(source => source.name)); r.verifiedResults.push(record); }
-    await page.reload(); await expect(tabs(page)).toHaveCount(3); await select(page, 0); await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
+    await page.reload(); await expect(workbenchPanes(page)).toHaveCount(3); await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
+    await active(page).getByRole("tab", { name: /^历史记录/ }).click();
+    await expect(active(page).locator("button.image-history-card")).toHaveCount(3);
+    await active(page).locator("button.image-history-card").last().click();
+    await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
     expect(api.submissions).toHaveLength(3); expect(r.controls).toEqual([]);
 });
 
@@ -295,11 +300,12 @@ test("pressure seamless: six independent pending sources survive reload and reve
         await active(page).locator('input[type="file"]').setInputFiles(source); await expect(active(page).getByRole("img", { name: source.name, exact: true })).toBeVisible();
         await active(page).getByRole("button", { name: "开始无缝拼接", exact: true }).click(); await expect.poll(() => api.submissions.length).toBe(index + 1); ids.push(sourceProof(api, r, marker, [source]));
     }
-    expect(r.peakInflight).toBe(6); await page.reload(); await expect(tabs(page)).toHaveCount(6);
+    expect(r.peakInflight).toBe(6); await page.reload(); await expect(workbenchPanes(page)).toHaveCount(6);
     for (const index of [5, 2, 4, 1, 3, 0]) finish(api, r, ids[index]);
     for (let index = 0; index < 6; index++) {
-        await select(page, index); const source = r.expected.get(ids[index])!.sources[0]; await expect(active(page).getByRole("img", { name: source.name, exact: true })).toBeVisible();
-        const image = active(page).getByRole("img", { name: "无缝拼接结果", exact: true }); await expect(image).toBeVisible();
+        const pane = workbenchPanes(page).nth(index), source = r.expected.get(ids[index])!.sources[0];
+        await expect(pane.getByRole("img", { name: source.name, exact: true, includeHidden: true })).toHaveCount(1);
+        const image = pane.getByRole("img", { name: "无缝拼接结果", exact: true, includeHidden: true }); await expect(image).toHaveCount(1);
         const originalUrl = await image.getAttribute("src"); expect(originalUrl).toBe(api.tasks.get(ids[index])!.resultUrls[0]);
         // Native same-origin <a download> bypasses this local HTTP-route double.
         // Verify the exact original bound by the real result UI, not a thumbnail;
@@ -311,6 +317,8 @@ test("pressure seamless: six independent pending sources survive reload and reve
         expect(original.sha256).toBe(hash(api.assetBytes.get(ids[index])!)); expect(original.bytes).toBe(api.assetBytes.get(ids[index])!.length);
         r.verifiedResults.push({ taskId: ids[index], originalUrl, ...original });
     }
+    await active(page).getByRole("tab", { name: /^历史记录/ }).click();
+    await expect(active(page).getByRole("img", { name: "无缝拼接历史结果", exact: true })).toHaveCount(1);
     expect(api.submissions).toHaveLength(6); expect(r.controls).toEqual([]);
 });
 
@@ -337,11 +345,11 @@ test("input boundary: video rejects GIF, empty, oversized, corrupt and excessive
 test("input boundary: model-specific GIF/size/count policy and missing image remain fail-closed", async ({ page, context, api }, info) => {
     const grok = { ...imageModel, modelId: "grok-imagine-image", imageParameterProfile: "grok-image", name: "Pressure Grok" };
     const r = await setup(context, api, info, grok), pool = await fixtures(page);
-    await page.goto("/image"); const input = active(page).getByRole("textbox", { name: "图像提示词", exact: true });
-    await input.fill(" \n "); await expect(active(page).getByRole("button", { name: "开始生成", exact: true })).toBeDisabled(); r.rejections.push("empty/whitespace image prompt");
-    await input.fill("GROK_UNSUPPORTED_GIF"); await upload(page, [pool[5]]); await expect(active(page).getByRole("button", { name: "开始生成", exact: true })).toBeDisabled();
+    await page.goto("/image?tool=image-edit"); const input = active(page).getByRole("textbox", { name: "图像提示词", exact: true });
+    await input.fill(" \n "); await expect(active(page).getByRole("button", { name: "开始编辑", exact: true })).toBeDisabled(); r.rejections.push("empty/whitespace image prompt");
+    await input.fill("GROK_UNSUPPORTED_GIF"); await upload(page, [pool[5]]); await expect(active(page).getByRole("button", { name: "开始编辑", exact: true })).toBeDisabled();
     await expect(active(page).getByRole("region", { name: "参考图", exact: true }).getByText(/格式不支持，请使用 JPEG、PNG 或 WebP/)).toBeVisible(); r.rejections.push("Grok valid GIF unsupported");
-    await next(page, 2); await input.fill("GROK_EXCESS_REFERENCES"); await upload(page, pool.slice(0, 4)); await expect(active(page).getByRole("button", { name: "开始生成", exact: true })).toBeDisabled(); r.rejections.push("Grok 4 references exceeds maximum 3");
+    await next(page, 2, "history"); await input.fill("GROK_EXCESS_REFERENCES"); await upload(page, pool.slice(0, 4)); await expect(active(page).getByRole("button", { name: "开始编辑", exact: true })).toBeDisabled(); r.rejections.push("Grok 4 references exceeds maximum 3");
     await page.goto("/item-extract"); await expect(active(page).getByRole("button", { name: "提取产品图", exact: true })).toBeDisabled(); r.rejections.push("missing product source");
     expect(api.submissions).toHaveLength(0); expect(r.controls).toEqual([]);
 });

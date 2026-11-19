@@ -26,10 +26,13 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { audioMetadata, buildAudioGenerationMetadata, buildGenerationConfig, buildImageGenerationMetadata, createCanvasNode, getGenerationCount, isGenerationCanceled, videoMetadata, videoTaskErrorMetadata, type CanvasGenerationOutput, type CanvasGenerationResult } from "./canvas-project-utils";
 import type { SharedGenerationExecution } from "./canvas-shared-generation-runtime";
 import { useCanvasGenerationRuntime } from "./use-canvas-generation-runtime";
+import { canvasDesignTemplateBatch } from "@/lib/canvas/canvas-design-template-batch";
+import type { CanvasNodeGroup } from "@/types/canvas";
 type CanvasGenerationOptions = {
     projectId: string;
     nodesRef: RefObject<CanvasNodeData[]>;
     connectionsRef: RefObject<CanvasConnection[]>;
+    groupsRef?: RefObject<CanvasNodeGroup[]>;
     designProjectIdRef: RefObject<string>;
     projectSaveQueueRef: RefObject<{ flush(): void } | null>;
     runtime: ReturnType<typeof useCanvasGenerationRuntime>;
@@ -41,7 +44,7 @@ type CanvasGenerationOptions = {
     resultStackExcludedNodeIds?: () => ReadonlySet<string>;
 };
 
-export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, designProjectIdRef, projectSaveQueueRef, runtime, setDialogNodeId, focusCanvasArea, handleMissingModelConfig, isAiConfigReady, flushPendingHistory, resultStackExcludedNodeIds }: CanvasGenerationOptions) {
+export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, groupsRef, designProjectIdRef, projectSaveQueueRef, runtime, setDialogNodeId, focusCanvasArea, handleMissingModelConfig, isAiConfigReady, flushPendingHistory, resultStackExcludedNodeIds }: CanvasGenerationOptions) {
     const { message, modal } = App.useApp();
     const effectiveConfig = useEffectiveConfig("canvas");
     const addAsset = useAssetStore(state => state.addAsset);
@@ -472,7 +475,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
         },
         [createOptions, effectiveConfig, finishGenerationRequest, flushPendingHistory, handleMissingModelConfig, isAiConfigReady, message, projectId, recoverPending, resultStackExcludedNodeIds, retryScope, startGenerationRequest, waitForWriteAccess, isObservationCurrent],
     );
-    const handleGenerateNode = useCallback(async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void, sequenceLock?: string, sequenceSignal?: AbortSignal, retryFailedOnly = false) => {
+    const generateNode = useCallback(async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void, sequenceLock?: string, sequenceSignal?: AbortSignal, retryFailedOnly = false) => {
         if (!sequenceLock && connectionsRef.current.some(edge => edge.kind === "config-sequence" && (edge.fromNodeId === nodeId || edge.toNodeId === nodeId))) {
             message.info(uiText("请从配置节点的“运行工作流”按钮启动相连步骤")); return;
         }
@@ -509,6 +512,24 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
             releaseDispatch?.();
         }
     }, [effectiveConfig, executeGenerateNode, finishGenerationRequest, isAiConfigReady, message, recoverPending, startGenerationRequest, waitForWriteAccess]);
+
+    const handleGenerateNode = useCallback(async (...args: Parameters<typeof generateNode>) => {
+        const [nodeId, , , , sequenceLock, , retryFailedOnly] = args;
+        const batch = !sequenceLock && !retryFailedOnly ? canvasDesignTemplateBatch(nodeId, nodesRef.current, groupsRef?.current || [], connectionsRef.current) : null;
+        if (!batch) return generateNode(...args);
+        const ownerId = useUserStore.getState().user?.id;
+        const isCurrent = () => retryScope.active && isObservationCurrent() && designProjectIdRef.current === projectId && useUserStore.getState().user?.id === ownerId;
+        try {
+            const { runCanvasTemplateGeneration } = await import("./canvas-shared-generation-runtime");
+            if (!isCurrent() || !await waitForWriteAccess() || !isCurrent()) return;
+            return await runCanvasTemplateGeneration(batch, args, generationDispatchLocksRef.current, generateNode, message);
+        } catch (error) {
+            if (!isCurrent()) return;
+            const detail = error instanceof Error ? error.message : "加载失败";
+            message.error(displayNotice(detail));
+            args[3]?.({ mode: args[1], outputs: [{ nodeId, status: "failed", error: detail }] });
+        }
+    }, [generateNode, groupsRef, message, retryScope, projectId, isObservationCurrent, waitForWriteAccess]);
 
     const handleRetryFailedTargets = useCallback((nodeId: string) => {
         const node = nodesRef.current.find(item => item.id === nodeId);

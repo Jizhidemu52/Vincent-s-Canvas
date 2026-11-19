@@ -1,4 +1,7 @@
-import type { AiTextMessage } from "@/services/api/image";
+export type ImageAgentContextMessage = {
+    role: "system" | "user" | "assistant";
+    content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+};
 import { selectImageAgentWorkingSet, type ImageAgentImage } from "./focus";
 import { imageAgentWorkNoteText, type ImageAgentWorkNote } from "./work-note";
 
@@ -51,7 +54,7 @@ function earlierConversation(history: readonly ImageAgentHistoryMessage[], image
         const text = historyText(item, images);
         return `${item.role === "assistant" ? "助手建议/回复" : "用户反馈/要求"}：${text.length > maximum ? `${text.slice(0, maximum)}\n[本条较长，后续内容未带入，不能据此推断完整方案]` : text}`;
     }).join("\n\n");
-    for (const group of groups.toReversed()) {
+    for (const group of [...groups].reverse()) {
         let text = render(group, Number.POSITIVE_INFINITY);
         if (text.length + 2 > remaining) {
             if (excerpts.length) break;
@@ -68,17 +71,17 @@ function earlierConversation(history: readonly ImageAgentHistoryMessage[], image
     return excerpts.length ? prefix + excerpts.join("\n\n") : "";
 }
 
-export function imageAgentHistoryMessages(history: readonly ImageAgentHistoryMessage[], images: readonly ImageAgentImage[]): AiTextMessage[] {
+export function imageAgentHistoryMessages(history: readonly ImageAgentHistoryMessage[], images: readonly ImageAgentImage[]): ImageAgentContextMessage[] {
     const eligible = history.filter(item => item.role === "user" || item.role === "assistant");
     let remaining = IMAGE_AGENT_HISTORY_CHARACTERS;
-    const recent = eligible.slice(-IMAGE_AGENT_HISTORY_MESSAGES).toReversed().flatMap(item => {
+    const recent = eligible.slice(-IMAGE_AGENT_HISTORY_MESSAGES).reverse().flatMap(item => {
         if (remaining <= 0) return [];
         const text = item.text.slice(0, Math.min(12_000, remaining));
         remaining -= text.length;
         return [{ ...item, text: text + (text.length < item.text.length ? "\n[较长历史已节选]" : "") }];
     }).reverse();
     const older = eligible.slice(0, eligible.length - recent.length);
-    const messages: AiTextMessage[] = [];
+    const messages: ImageAgentContextMessage[] = [];
     if (older.length) {
         const excerpt = earlierConversation(older, images);
         if (excerpt) messages.push({ role: "user", content: excerpt });
@@ -103,7 +106,7 @@ export async function buildImageAgentContext<T extends ImageAgentImage>(options:
     note?: ImageAgentWorkNote;
 }) {
     const workingSet = selectImageAgentWorkingSet(options.images, options);
-    const content: Exclude<AiTextMessage["content"], string> = [];
+    const content: Exclude<ImageAgentContextMessage["content"], string> = [];
     let bytes = 0;
     const previews: Array<{ id: string; dataUrl: string }> = [];
     for (const image of workingSet) {
@@ -121,12 +124,12 @@ export async function buildImageAgentContext<T extends ImageAgentImage>(options:
     // The user's actual instruction is always the last message, after all pixels.
     messages.push({ role: "user", content: options.currentText });
     const priority = new Set([...workingSet.map(image => image.id), ...(options.focusId ? [options.focusId] : [])]);
-    const catalogIds = new Set([...new Set([...priority, ...options.images.toReversed().map(image => image.id)])].slice(0, 40));
+    const catalogIds = new Set([...new Set([...priority, ...[...options.images].reverse().map(image => image.id)])].slice(0, 40));
     const briefs = new Map<string, string>();
     let briefBudget = IMAGE_AGENT_CATALOG_BRIEF_CHARACTERS;
     // Keep full working-version excerpts first, followed by small older-version
     // cues. All identities remain in the table even when prose is omitted.
-    const briefOrder = [...options.images.filter(image => priority.has(image.id)), ...options.images.toReversed().filter(image => !priority.has(image.id))];
+    const briefOrder = [...options.images.filter(image => priority.has(image.id)), ...[...options.images].reverse().filter(image => !priority.has(image.id))];
     for (const image of briefOrder) {
         if (!catalogIds.has(image.id) || !image.designBrief) continue;
         const brief = boundedVersionBrief(image.designBrief, briefBudget, priority.has(image.id) ? 1600 : 200);

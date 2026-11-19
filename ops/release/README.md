@@ -34,6 +34,24 @@ API 默认命令仅 `bun src/index.ts`，Worker 默认仅 `bun src/worker.ts`。
 
 旧 fingerprinted 静态资源从同一已核验 Web 容器的 `/usr/share/nginx/html/assets` 与其已有只读兼容挂载合并到新审计目录，连续发布继续保留旧页依赖，不扫描任意历史宿主目录。同名同字节去重，异字节拒绝；拒绝 symlink、HTML、JSON、map、env 和未带 hash 的文件。仅这些公开副本显式设为 `0644`、叶资源目录为 `0755`，避免私有审计的 `umask 077` 使 Nginx 无法读取；私有祖先目录和源文件权限不变，新 Web 仍只读挂载兼容目录。其他旧源码挂载只删除实例明确列出的只读代码挂载；未知或可写代码挂载直接拒绝。
 
+## 054/055 服务端图片对话与 MAI 2.7 的独立准备
+
+`image-conversations-054-055.py` 只接受已精确登记至 053、统计处理停用、五张新对话表和指定 Provider 下 MAI 2.7 记录均不存在的实例。054 只新增五张空表；055 只从固定 APIMart Provider 下唯一的 `mai-image-2.6-flash` 记录复制原有价格、积分、并发、启用状态和创建人，新增 `mai-image-2.7-flash`，不改动原模型或任何旧业务行。生产缺少 MAI 2.6 源配置时拒绝，不猜费率；普通空库初始化中 055 可以无新增记录。对话功能开关、GPT-6.2 Sol 规划器配置、凭据和模型绑定不由此工具启用或改变。
+
+```sh
+python3 -B /absolute/package/ops/release/image-conversations-054-055.py preflight /absolute/instance.json /absolute/package
+python3 -B /absolute/package/ops/release/image-conversations-054-055.py migrate /absolute/instance.json /absolute/package /absolute/054-055-preflight-audit
+# 原容器及正常入口恢复后，重新取得零变更发布预检。
+bash /absolute/package/ops/deploy.sh preflight /absolute/instance.json /absolute/package
+bash /absolute/package/ops/deploy.sh apply /absolute/instance.json /absolute/package /absolute/new-deploy-preflight-audit
+```
+
+预检绑定同一实例、包清单、两份 SQL、catalog、状态查询及运行工具的哈希，有效期 15 分钟，并在实际 SQL 前再次复查。执行复用既有部署锁、维护门、排空、原容器停止/恢复和私有备份；单事务锁定全部旧 public 表、复查停机基线，只接受五张精确空表、一条精确复制的模型记录和两条迁移登记。所有旧表完整内容、原模型、价格、Provider、约束、函数、触发器及其他序列均核对不变；原容器 ID、健康、数据库结果与统计停用状态再次通过后才恢复入口。
+
+唯一允许的原生序列变化是新模型使用 `model_public_number_seq` 分配一个编号。PostgreSQL 的 `nextval` 不随事务回滚；失败后业务行和 DDL 可以全部回滚，但编号可能留下空缺。工具明确记录这一边界，不禁用触发器、不手填编号、不重置序列、不自动重试或 restore。055 的 `NOT EXISTS` 在 INSERT 前阻止已存在目标再次消费编号；受保护的生产工具仍拒绝已登记、部分升级或目标已存在状态。断线或结果未知时先检查审计阶段、迁移登记、目标模型、序列和原容器，不重放迁移。
+
+本地 PGlite 与维护生命周期模拟只证明各自覆盖的逻辑；正式发布还需同一冻结 commit 的 PostgreSQL 17 事务/回滚用例与目标同镜像隔离验收。正常发布器仍要求零待执行迁移，不借此扩大到任意 SQL、自动 bootstrap、旧 053 重跑或隐式业务配置。
+
 ## 053 自由画布设计讨论的独立准备
 
 `canvas-design-chat-053.py` 只适用于已登记至 052、统计处理仍停用的实例。它精确扩展两个工具键 CHECK，新增 `canvas-design-chat` 模块与独立工具记录，并绑定当前指定 APIMart Provider 下已启用、具备服务端凭据、无工作流且支持 chat 的 `gemini-4-carbon`。模型 UUID 来自目标当前只读快照，不使用 Demo UUID；缺失、禁用或未配置时预检拒绝，不创建/启用 Provider，不修改旧 `gpt-chat`/`canvas-chat`、模型、价格或积分。

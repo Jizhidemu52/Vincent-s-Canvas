@@ -238,7 +238,6 @@ function SessionEditor({ document: result, value, onChange, onRefresh, onResume,
                 <button type="button" onClick={reset} disabled={busy || !group?.size}>{t("复位当前组")}</button>
                 <button type="button" className="layer-editor-primary" onClick={exportPng} disabled={busy || !canExport}>{busy ? t("处理中…") : t("导出合成 PNG")}</button></div>
         </header>
-        {result.status !== "ready" && <div className="layer-editor-warning" role="status">{t("原件仍在保存或部分保存失败。已保存图层可编辑、单独下载；完整合成暂不可导出。请在任务区查询同一原任务，不要重新生成。")}</div>}
         {failure && <div role="alert" className="layer-editor-warning">{layerStudioUiMessage(failure)}</div>}
         {notice && <div role="status" className="layer-editor-notice">{layerStudioUiMessage(notice)}</div>}
         <div className="layer-editor-layout"><div className="layer-editor-workspace">
@@ -254,13 +253,12 @@ function SessionEditor({ document: result, value, onChange, onRefresh, onResume,
                     <span title={locale === "en-US" ? selectedItem?.name : undefined}>{selectedItem && label(selectedItem, t, display)}</span><div className="layer-editor-handle" role="button" aria-label={t("拖动缩放选中图层")} tabIndex={-1} onPointerDown={event => begin(event, "scale")} /></div>}
             </div> : <p className="layer-editor-muted">{t("底图原件或尺寸尚未就绪，未猜测画布尺寸。可查询原任务后继续。")}</p>}</div>
             <footer className="layer-editor-canvas-status"><span>{group?.size ? `${group.size.width} × ${group.size.height} px` : t("等待底图尺寸")}{rendering ? t(" · 预览更新中") : ""}</span><span>{t("拖动移动 · 角点缩放 · 方向键微调")}</span></footer>
-            {(renderIssues.length > 0 || savedCount < result.expectedOutputCount) && <div className="layer-editor-warning" aria-label={t("图层原件恢复")}>
-                <p>{savedCount < result.expectedOutputCount ? t("已保存 {saved} / {total} 份原件；未保存的图层暂不能显示，重新读取预览不会补存。", { saved: savedCount, total: result.expectedOutputCount }) : t("当前预览有 {count} 个图层未显示。编辑已保留。", { count: renderIssues.length })}</p>
-                {renderIssues.length > 0 && <ul>{renderIssues.map(issue => <li key={issue.index}>{label(result.items.find(item => item.index === issue.index), t, display)}{t("：")}{layerStudioUiMessage(issue.message)}</li>)}</ul>}
+            {(renderIssues.length > 0 || savedCount < result.expectedOutputCount) && <div className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm text-destructive" aria-label={t("图片保存状态")}>
+                <p>{savedCount < result.expectedOutputCount ? t(result.status === "persisting" ? "正在保存图片（{saved}/{total}）" : "部分图片保存失败（{saved}/{total}）", { saved: savedCount, total: result.expectedOutputCount }) : t("图片预览加载失败")}</p>
                 <div className="layer-editor-actions">
-                    {onResume && <button type="button" className="layer-editor-primary" disabled={busy || recovering} onClick={resumeOriginals}>{t("继续保存缺失图层（不重新生成）")}</button>}
-                    {onRefresh && <button type="button" disabled={busy || recovering} onClick={refreshOriginals}>{t("查询原任务并更新图层")}</button>}
-                    {renderIssues.some(issue => result.items.find(item => item.index === issue.index)?.state === "saved") && <button type="button" disabled={busy || recovering} onClick={() => { setFailure(""); setReload(value => value + 1); }}>{t("重新读取已保存原件")}</button>}
+                    {onResume ? <button type="button" disabled={busy || recovering} onClick={resumeOriginals}>{t("重试保存")}</button>
+                        : onRefresh && <button type="button" disabled={busy || recovering} onClick={refreshOriginals}>{t("刷新结果")}</button>}
+                    {renderIssues.some(issue => result.items.find(item => item.index === issue.index)?.state === "saved") && <button type="button" disabled={busy || recovering} onClick={() => { setFailure(""); setReload(value => value + 1); }}>{t("重新加载预览")}</button>}
                 </div>
             </div>}
         </div><aside className="layer-editor-sidebar" aria-label={t("图层设置")}><h4>{t("图层 ")}<span>{group?.items.length || 0}</span></h4>

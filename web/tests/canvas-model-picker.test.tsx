@@ -11,6 +11,7 @@ import { imageModelProfile } from "@/lib/image-model-settings";
 import { referencePolicyForModel } from "@/lib/image-reference-policy";
 import { defaultConfig } from "@/stores/use-config-store";
 import type { PublicModel } from "@/services/api/business-config";
+import { toolDefinitions } from "../../shared/feature-catalog";
 
 function elements(node: unknown): ReactElement<any>[] {
     if (Array.isArray(node)) return node.flatMap(elements);
@@ -132,12 +133,20 @@ describe("canvas model presentation", () => {
 });
 
 describe("canvas picker integration contracts", () => {
-    test("MAI stays selectable under Microsoft even when it is not a featured model", () => {
-        const model = imageModel("mai-opaque-uuid", "aplmart-mai2.6-flash", "mai-image");
+    test.each(toolDefinitions.filter(tool => tool.capabilities.some(value => ["generate", "edit", "batch"].includes(value)) && !["canvas-mask-edit", "midjourney-blend", "layer-studio"].includes(tool.toolKey)).map(tool => [tool.toolKey]))("MAI 2.7 is available in the unbound %s image selector", toolKey => {
+        const model = imageModel("mai-opaque-uuid", "aplmart-mai2.7-flash", "mai-image-v2");
+        const result = picker([model], { variant: "canvas", toolKey });
+        expect(result.root.props.options.map((option: CanvasModelOption) => option.value)).toContain(model.modelId);
+        const incompatible = picker([model], { variant: "canvas", toolKey: "canvas-mask-edit" });
+        expect(incompatible.root.props.options).toEqual([]);
+    });
+
+    test("MAI 2.7 stays selectable under Microsoft even when it is not a featured model", () => {
+        const model = imageModel("mai-opaque-uuid", "aplmart-mai2.7-flash", "mai-image-v2");
         const { root, selected } = picker([model]);
         expect(root.props.options).toHaveLength(1);
         const option = root.props.options[0] as CanvasModelOption;
-        expect(option).toMatchObject({ value: model.modelId, name: "MAI Image 2.6 Flash", family: "Microsoft", isFeatured: false });
+        expect(option).toMatchObject({ value: model.modelId, name: "MAI Image 2.7 Flash", family: "Microsoft", isFeatured: false });
         expect(commonCanvasModels(root.props.options)).toEqual([]);
         expect(canvasModelGroups(root.props.options)).toEqual([{ name: "Microsoft", models: [option] }]);
         root.props.onValueChange(model.modelId);
