@@ -23,7 +23,7 @@ beforeEach(() => {
     const owner = `gpt26-archive-${++ownerSequence}`;
     useUserStore.setState({ user: { id: owner, status: "active", role: "designer" } as never, status: "authenticated" });
     useBusinessConfigStore.setState({ models: [], tools: [] });
-    globals.window = { location: { pathname: "/canvas/gpt26-archive" } };
+    globals.window = Object.assign(new EventTarget(), { location: { pathname: "/canvas/gpt26-archive" } });
     globals.FileReader = class {
         result = ""; onload?: () => void;
         readAsDataURL(blob: Blob) { void blob.arrayBuffer().then(bytes => { this.result = `data:${blob.type};base64,${Buffer.from(bytes).toString("base64")}`; this.onload?.(); }); }

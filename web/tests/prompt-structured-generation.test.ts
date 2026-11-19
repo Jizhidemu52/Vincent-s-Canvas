@@ -14,7 +14,7 @@ const model = { id: "model-config", modelId: "gpt-image-2", name: "GPT Image", c
 const promptInput = { scene: "local-restyle" as const, fields: { restyleArea: "领口", change: "荷叶领", preserve: "袖口不变" }, userText: "荷叶领", mode: "edit" as const, referenceRoles: ["服装主图"], hasMask: true, maskReferenceIndex: 1 };
 const task = { id: "task-original", requestId: "client-original:0", prompt: "Final server optimized prompt", userInput: promptInput, optimized: true, status: "success", resultUrls: ["/api/assets/result/content"], failureReason: null,
     queuedAt: "2026-11-10T07:50:48.000Z", completedAt: "2026-11-10T07:59:32.500Z" };
-beforeEach(() => { useUserStore.setState({ user: { id: "employee-a", role: "designer", status: "active" } as never, status: "authenticated", hydrateSession: async () => {} }); (globalThis as any).window = { location: { pathname: "/image" } }; });
+beforeEach(() => { useUserStore.setState({ user: { id: "employee-a", role: "designer", status: "active" } as never, status: "authenticated", hydrateSession: async () => {} }); (globalThis as any).window = Object.assign(new EventTarget(), { location: { pathname: "/image" } }); });
 afterEach(() => { globalThis.fetch = originalFetch; useUserStore.setState(previousUser); (globalThis as any).window = previousWindow; });
 
 test("structured input is a task sibling; mask remains last and source order is unchanged", () => {

@@ -23,7 +23,7 @@ const paths = ["image", "batch", "recovery"] as const;
 type Path = typeof paths[number];
 
 beforeEach(() => {
-    globals.window = { location: { pathname: "/canvas/project-1" }, setTimeout, clearTimeout };
+    globals.window = Object.assign(new EventTarget(), { location: { pathname: "/canvas/project-1" }, setTimeout, clearTimeout });
     Object.assign(deploymentFeatures, { oaLoginEnabled: true, creditsEnabled: false });
     useUserStore.getState().updateUser(employee);
 });

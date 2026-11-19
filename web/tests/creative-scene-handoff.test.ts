@@ -106,12 +106,26 @@ test("scene asset selection preserves original storage and metadata, resets prod
     app.unmount();
 });
 
-test("cloud-only scene assets are persisted before exposing a recoverable reference", async () => {
+test("remote scene assets without a durable identity are persisted before exposing a recoverable reference", async () => {
     const app = harness(new Map(), null); let ws = await app.initialize();
-    await ws.setAsset("primary", { ...pickedAsset, storageKey: undefined, dataUrl: "/api/assets/original/content" }); ws = app.render();
-    expect(ws.images.primary).toMatchObject({ storageKey: "image:asset-copy", dataUrl: "blob:asset-copy", sourceAssetId: "server-original", originalFileName: "original.png" });
+    await ws.setAsset("primary", { ...pickedAsset, storageKey: undefined, sourceAssetId: undefined, dataUrl: "https://fixture.invalid/original.png" }); ws = app.render();
+    expect(ws.images.primary).toMatchObject({ storageKey: "image:asset-copy", dataUrl: "blob:asset-copy", sourceAssetId: undefined, originalFileName: "original.png" });
     expect(app.calls.filter(call => call === "persist original asset")).toHaveLength(1);
     expect(app.calls.some(call => call.startsWith("paid"))).toBe(false); app.unmount();
+});
+
+test("cloud-only scene assets retain their server identity without duplicate persistence and survive draft reload", async () => {
+    const assetId = "71000000-0000-4000-8000-000000000001";
+    const url = `/api/assets/${assetId}/content`;
+    const app = harness(new Map(), null); let ws = await app.initialize();
+    await ws.setAsset("primary", { ...pickedAsset, storageKey: undefined, sourceAssetId: assetId, dataUrl: url }); ws = app.render();
+    expect(ws.images.primary).toMatchObject({ storageKey: "", dataUrl: url, sourceAssetId: assetId, originalFileName: "original.png", bytes: 15, width: 256, height: 128 });
+    expect(app.calls.filter(call => call === "fetch original asset")).toHaveLength(1);
+    expect(app.calls).not.toContain("persist original asset");
+    expect(app.calls.some(call => call.startsWith("paid"))).toBe(false); app.unmount();
+    const refreshed = harness(app.saved, null); ws = await refreshed.initialize();
+    expect(ws.images.primary).toMatchObject({ storageKey: "", dataUrl: url, sourceAssetId: assetId, originalFileName: "original.png" });
+    expect(refreshed.calls.some(call => call.startsWith("paid") || call === "persist original asset")).toBe(false); refreshed.unmount();
 });
 
 test("invalid scene asset bytes keep the previous reference and show failure instead of success", async () => {

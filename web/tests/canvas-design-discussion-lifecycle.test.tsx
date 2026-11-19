@@ -34,6 +34,7 @@ function harness(options: { tasks?: Data[]; savedSession?: Data; upload?: (url: 
     const layouts: Array<() => void> = [], queued: Array<() => void> = [];
     const timers = new Set<() => Promise<unknown> | void>();
     const events = new Map<string, Set<(event: Data) => void>>();
+    const document = Object.assign(new EventTarget(), { visibilityState: "visible" });
     const downloads: Array<{ url: string; video: boolean }> = [], starts: Data[] = [], histories: string[] = [], locations: string[][] = [];
     const writes: Array<{ key: string; value: Data }> = [], runtime: Data[] = [];
     const records = new Map<string, Data>();
@@ -112,9 +113,9 @@ function harness(options: { tasks?: Data[]; savedSession?: Data; upload?: (url: 
     };
     const props = { writable: { current: true }, getCanvasCenter: () => ({ x: 0, y: 0 }), onBeforeChange: () => { if (historyError) throw new Error("fixture canvas history unavailable"); histories.push(currentProject); }, onLocate: (ids: string[]) => locations.push(ids) };
     const module = { exports: {} as Data };
-    new Function("require", "module", "exports", "window", "setInterval", "clearInterval", code)(
+    new Function("require", "module", "exports", "window", "document", "navigator", "setInterval", "clearInterval", code)(
         (name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), module, module.exports,
-        { addEventListener(name: string, listener: (event: Data) => void) { if (!events.has(name)) events.set(name, new Set()); events.get(name)!.add(listener); }, removeEventListener(name: string, listener: (event: Data) => void) { events.get(name)?.delete(listener); } }, (callback: () => void) => { timers.add(callback); return callback; }, (callback: () => void) => timers.delete(callback),
+        { addEventListener(name: string, listener: (event: Data) => void) { if (!events.has(name)) events.set(name, new Set()); events.get(name)!.add(listener); }, removeEventListener(name: string, listener: (event: Data) => void) { events.get(name)?.delete(listener); } }, document, { onLine: true }, (callback: () => void) => { timers.add(callback); return callback; }, (callback: () => void) => timers.delete(callback),
     );
     const render = () => {
         cursor = 0;

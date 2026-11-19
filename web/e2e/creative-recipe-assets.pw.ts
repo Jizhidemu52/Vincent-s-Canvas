@@ -58,9 +58,12 @@ test("creative two-role assets keep independent originals, metadata and previews
     expect(await bytes(page.getByRole("img", { name: "pattern-original.png", exact: true }))).toEqual(fixturePng(40));
     await expect.poll(async () => (await stored(page, "creative_scene_workspaces", `draft:${owner}:accessory-design`))?.images.secondary?.sourceAssetId).toBe(secondaryId);
     const draft = await stored(page, "creative_scene_workspaces", `draft:${owner}:accessory-design`);
-    expect(draft.images.primary).toMatchObject({ storageKey: expect.stringMatching(/^image:/), originalFileName: "primary-original.png", imageName: "原底图", imageVersion: 2, sourceAssetId: primaryId });
+    expect(draft.images.primary).toMatchObject({ storageKey: "", dataUrl: `/api/assets/${primaryId}/content`, originalFileName: "primary-original.png", imageName: "原底图", imageVersion: 2, sourceAssetId: primaryId });
+    expect(draft.images.secondary).toMatchObject({ storageKey: "", dataUrl: `/api/assets/${secondaryId}/content`, originalFileName: "pattern-original.png", imageName: "原图案", imageVersion: 2, sourceAssetId: secondaryId });
     await page.reload(); await expect(page.getByRole("img", { name: "pattern-original.png", exact: true })).toBeVisible();
     expect(await bytes(page.getByRole("img", { name: "primary-original.png", exact: true }))).toEqual(IMAGE);
+    expect(await bytes(page.getByRole("img", { name: "pattern-original.png", exact: true }))).toEqual(fixturePng(40));
+    expect([...api.assets.keys()]).toEqual([primaryId, secondaryId]);
     await page.screenshot({ path: info.outputPath("creative-two-roles.png"), fullPage: true });
     await page.setViewportSize({ width: 760, height: 1000 });
     await expect(page.getByRole("button", { name: "从素材库选择辅料图", exact: true })).toBeVisible();

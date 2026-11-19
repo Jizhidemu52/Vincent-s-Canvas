@@ -13,7 +13,7 @@ const files = () => [{ file: new File(["png"], "one.png", { type: "image/png" })
 let calls: Array<{ path: string; method: string; body: any }>;
 beforeEach(() => {
     calls = [];
-    globals.window = { location: { pathname: "/canvas/current-later-project" }, setTimeout, clearTimeout };
+    globals.window = Object.assign(new EventTarget(), { location: { pathname: "/canvas/current-later-project" }, setTimeout, clearTimeout });
     Object.assign(deploymentFeatures, { authenticationEnabled: true, oaLoginEnabled: true, creditsEnabled: false });
     useUserStore.setState({ user: { id: "owner", role: "designer", status: "active" } as never, status: "authenticated", hydrateSession: async () => {} });
 });

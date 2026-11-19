@@ -50,6 +50,7 @@ test("placement language switches translate marked names without changing origin
     await expect(page.locator("[data-layer-count]")).toHaveText("2 / 30");
     await dropImage(page.locator('[data-action="upload-base"]'), "原始服装底图.png");
     await expect(page.locator(".placement-base-name")).toHaveText("原始服装底图.png");
+    await expect.poll(() => api.assetBytes.size).toBe(2);
     const title = page.locator("[data-controls] > .section-title"), layer = page.locator(".placement-layer-select").first();
     await expect(title).toHaveText(artworkName); await expect(layer).toHaveText(artworkName);
     const original = await exportProject(page), pixels = await canvasPixels(page.locator(".placement-demo canvas"));
@@ -69,7 +70,8 @@ test("placement language switches translate marked names without changing origin
     await expect(page.locator('[data-workbench-select="project"] option:checked')).toHaveText("中文本地工程");
     expect(await exportProject(page)).toEqual(original);
     expect(sources).toContain(artworkName);
-    expect(api.submissions).toEqual([]); expect(api.batchSubmissions).toEqual([]); expect(api.assetBytes.size).toBe(0);
+    expect(api.submissions).toEqual([]); expect(api.batchSubmissions).toEqual([]);
+    expect([...api.assetBytes.values()]).toEqual([IMAGE, IMAGE]);
 });
 
 test("repeat display names switch reversibly while original exports and canvas pixels remain exact", async ({ page, context, api }) => {
@@ -80,6 +82,7 @@ test("repeat display names switch reversibly while original exports and canvas p
     await page.goto("/creative/pattern-repeat");
     await expect(page.locator('[data-workbench-select="project"]')).toBeEnabled();
     await dropImage(page.locator(".local-workbench-host"), artworkName);
+    await expect.poll(() => api.assetBytes.size).toBe(1);
     const layer = page.locator('[data-role="layers"] button').last(), selection = page.locator('[data-role="selection-name"]');
     await expect(layer).toHaveText(`8 ${repeatName}`);
     await expect(selection).toContainText(repeatName);
@@ -97,7 +100,8 @@ test("repeat display names switch reversibly while original exports and canvas p
     await expect(layer).toHaveText(`8 ${repeatName}`); await expect(selection).toContainText(repeatName);
     expect(await exportProject(page)).toEqual(original);
     expect(sources).toContain(`8 ${repeatName}`);
-    expect(api.submissions).toEqual([]); expect(api.batchSubmissions).toEqual([]); expect(api.assetBytes.size).toBe(0);
+    expect(api.submissions).toEqual([]); expect(api.batchSubmissions).toEqual([]);
+    expect([...api.assetBytes.values()]).toEqual([IMAGE]);
 });
 
 test("placement asset load failure remains translatable after the early return", async ({ page, context, api }) => {

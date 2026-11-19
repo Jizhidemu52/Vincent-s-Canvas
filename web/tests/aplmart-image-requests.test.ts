@@ -26,7 +26,7 @@ beforeEach(() => {
     let batchTasks: Array<{ id: string; itemIndex: number; status: string; resultUrls: string[] }> = [];
     let uploadedAssetCount = 0;
     const uploadedAssetIds = new Set<string>();
-    globals.window = { location: { pathname: "/canvas/aplmart-request-test" } };
+    globals.window = Object.assign(new EventTarget(), { location: { pathname: "/canvas/aplmart-request-test" } });
     useUserStore.setState({ user: { id: "qa-user", status: "active", role: "designer" } as never, status: "authenticated" });
     // Empty UI cache: request profile and mask policy must come from the fresh server snapshot.
     useBusinessConfigStore.setState({ models: [], tools: [] });

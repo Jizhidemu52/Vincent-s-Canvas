@@ -15,7 +15,7 @@ const reference = { id: "source", name: "source.png", type: "image/png", dataUrl
 const compilation = { id: "11111111-1111-4111-8111-111111111111", status: "success" as const, prompt: "Optimized blue dress", optimized: true };
 
 beforeEach(() => {
-    globalThis.window = { location: { pathname: "/image" }, setTimeout, clearTimeout } as Window & typeof globalThis;
+    globalThis.window = Object.assign(new EventTarget(), { location: { pathname: "/image" }, setTimeout, clearTimeout }) as Window & typeof globalThis;
     useUserStore.setState({ user: { id: "operation-test", status: "active", role: "designer" } as never, status: "authenticated", hydrateSession: async () => undefined });
     globalThis.fetch = (async () => { throw new Error("Unexpected unmocked transport"); }) as typeof fetch;
 });

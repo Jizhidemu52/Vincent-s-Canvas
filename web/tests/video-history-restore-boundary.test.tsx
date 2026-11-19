@@ -76,6 +76,7 @@ function harness() {
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: any) => select({ status: "ready", models: [{ id: "video-model", modelId: config.videoModel, capabilities: ["video"] }], tools: [{ toolKey: "video", allowRawPrompt: true }], estimate: () => ({ credits: 0, configured: true }) }) },
         "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: false } },
         "@/services/image-storage": { resolveImageUrl: async (key: string) => key === "image:old" ? delayedRead : `blob:${key}`, uploadImage: async () => ({ ...image, id: "new-image", url: "blob:new-image", storageKey: "image:new" }) },
+        "@/services/user-image-upload": { uploadUserImage: async () => ({ ...image, id: "new-image", url: "blob:new-image", storageKey: "image:new" }) },
         "@/services/file-storage": { resolveMediaUrl: async (key: string) => `blob:${key}`, uploadMediaFile: async (_file: File, kind: "video" | "audio") => media(kind, "new") },
         "@/lib/video-reference-files": { readReferenceMediaFile: async (file: File) => ({ ...media(file.type.startsWith("video") ? "video" : "audio", "new"), name: file.name }) },
         "@/services/api/video": { createVideoGenerationTask: (...args: unknown[]) => { submissions.push(args); throw new Error("No generation allowed in restore tests"); } },

@@ -41,7 +41,11 @@ async function openCloudRecords(page: Page, api: MockCanvasApi, media: "image" |
     const records = history.getByRole("button", { name: /^查看云端记录：/ });
     await expect(records).toHaveCount(api.tasks.size);
     for (const [index, task] of [...api.tasks.values()].entries()) {
-        await records.nth(index).click();
+        const title = (task.userInput?.userText || task.prompt).slice(0, 80);
+        const status = task.status === "success" ? "已完成" : "失败";
+        const record = history.getByRole("button", { name: `查看云端记录：${title}`, exact: true }).filter({ hasText: status });
+        await expect(record).toHaveCount(1);
+        await record.click();
         const detail = page.getByRole("dialog", { name: "云端任务详情", exact: true });
         await detail.getByText("查看输入、参数和任务编号", { exact: true }).click();
         await expect(detail.locator("pre")).toContainText(task.id);

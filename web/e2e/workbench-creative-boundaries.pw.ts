@@ -65,8 +65,8 @@ test("a missing latest creative result never disables persistence of its valid d
         });
         if (!draftKey || !recordKey) throw new Error("Expected isolated creative task draft and record");
         const broken = structuredClone(original);
-        for (const image of broken.images) { image.storageKey = "isolated-missing-result"; image.dataUrl = ""; }
-        for (const result of broken.results) if (result.image) { result.image.storageKey = "isolated-missing-result"; result.image.dataUrl = ""; }
+        for (const image of broken.images) { image.storageKey = "isolated-missing-result"; image.dataUrl = ""; delete image.sourceAssetId; }
+        for (const result of broken.results) if (result.image) { result.image.storageKey = "isolated-missing-result"; result.image.dataUrl = ""; delete result.image.sourceAssetId; }
         await storage.setItem(recordKey, broken);
         return { draftKey, recordKey, original, broken };
     });

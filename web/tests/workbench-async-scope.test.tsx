@@ -37,6 +37,7 @@ function harness(kind: "image" | "video", options: { logs?: any[]; readLogs?: ()
     const draftSetters = new Map<string, (next: any) => void>();
     const storedLogs = new Map((options.logs || []).map(log => [log.id, log]));
     const writes: any[] = [], assets: any[] = [], confirmations: any[] = [], notices: any[] = [];
+    const originalUploads: Array<{ input: Blob; source: string; ownerId: string }> = [];
     const searchParams = new URLSearchParams(options.query);
     let urlInputKey: string | null = null;
     const location = { pathname: `/${kind}`, search: searchParams.size ? `?${searchParams}` : "", hash: "", state: null, key: `${kind}-async-scope` };
@@ -81,6 +82,10 @@ function harness(kind: "image" | "video", options: { logs?: any[]; readLogs?: ()
         "@/stores/use-theme-store": { useThemeStore: (select: any) => select({ theme: "light" }) },
         "@/lib/clipboard-images": { pastedImageFiles: () => [], readClipboardImages: async () => [new Blob(["png"], { type: "image/png" })] },
         "@/services/image-storage": { resolveImageUrl: async (_key: string, fallback: string) => fallback, uploadImage: options.upload || (async () => ({ ...image, url: image.dataUrl })) },
+        "@/services/user-image-upload": { uploadUserImage: (input: Blob, uploadOptions: { source: string; ownerId: string }) => {
+            originalUploads.push({ input, ...uploadOptions });
+            return options.upload?.() || Promise.resolve({ ...image, url: image.dataUrl });
+        } },
         "@/services/file-storage": { resolveMediaUrl: async (_key: string, fallback: string) => fallback, uploadMediaFile: options.media || (async () => ({ url: "blob:old-media", storageKey: "media:old" })), deleteStoredMedia: async () => undefined },
         "@/lib/video-reference-files": { readReferenceMediaFile: async (file: File) => ({ id: file.name, name: file.name, type: file.type, bytes: file.size, url: "", durationMs: 4000, width: 1280, height: 720, fps: 24 }) },
         "@/services/api/generation-tasks": { ...requireModule("@/services/api/generation-tasks"), waitForTasks: options.wait || (async () => { throw new Error("Unexpected polling"); }) },
@@ -108,7 +113,7 @@ function harness(kind: "image" | "video", options: { logs?: any[]; readLogs?: ()
     const unmount = () => taskFrames.forEach(owner => owner.effects.forEach(effect => effect.cleanup?.()));
     cleanups.push(unmount);
     const find = (name: string) => elements(render()).find(element => element.type?.name === name)!;
-    return { render, find, drafts, writes, assets, notices, confirmations, userState, unmount,
+    return { render, find, drafts, writes, assets, notices, confirmations, originalUploads, userState, unmount,
         currentDraft: (field: string) => { if (kind === "video") return drafts.get(workbenchTaskScope(field, taskId)); const [scope, ...parts] = field.split(":"); return drafts.get(`${workbenchTaskScope(scope, taskId)}:${parts.join(":")}`); },
         references: () => drafts.get(kind === "video" ? workbenchTaskScope("video:references", taskId) : `${workbenchTaskScope("image-edit", taskId)}:references`),
         selectTask: (id: string) => { if (!taskFrames.has(id)) throw new Error(`Unknown workspace ${id}`); taskId = id; return render(); },
@@ -178,6 +183,12 @@ for (const kind of ["image", "video"] as const) {
         expect(app.references()).toEqual([]);
         app.clipboard(); await settle(); app.render();
         expect(app.references()).toMatchObject([{ storageKey: "image:current" }]);
+        expect(app.originalUploads).toHaveLength(2);
+        const source = kind === "image" ? "image-clipboard" : "video-image-clipboard";
+        expect(app.originalUploads.map(({ source, ownerId, input }) => ({ source, ownerId, type: input.type }))).toEqual([
+            { source, ownerId: "owner", type: "image/png" },
+            { source, ownerId: "owner", type: "image/png" },
+        ]);
         if (kind === "video") { app.selectTask("default"); expect(app.references()).toMatchObject([{ dataUrl: "blob:old" }]); }
     });
 

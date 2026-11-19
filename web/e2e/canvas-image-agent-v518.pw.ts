@@ -27,7 +27,11 @@ function historicalBranch(api: MockCanvasApi) {
     const parent = (version: number) => version === 2 || version === 5 ? 1 : 2;
     const note = (version: number) => ({ summary: `版本${version}`, keep: version === 3 ? ["森林绿包身和肩带", "浅暖灰背景"] : [`其他分支${version}`] });
     const bytes = Array.from({ length: 5 }, (_, index) => fixturePng(20 + index * 40));
-    for (const [index, data] of bytes.entries()) api.assetBytes.set(assetId(index + 1), data);
+    for (const [index, data] of bytes.entries()) {
+        const id = assetId(index + 1);
+        api.assetBytes.set(id, data);
+        api.assets.set(id, { id, ownerUserId: "00000000-0000-4000-8000-000000000099", kind: "image", status: "ready", mimeType: "image/png", contentUrl: url(index + 1) });
+    }
     const nodes = Array.from({ length: 5 }, (_, index) => {
         const version = index + 1;
         return { id: nodeId(version), type: "image", title: `包版本${version}`, position: { x: index * 230, y: 50 }, width: 180, height: 180,

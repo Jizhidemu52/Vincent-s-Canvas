@@ -12,7 +12,7 @@ let missing = "", swapped = false, changeOwnerAt = "", responseStatus = 200;
 beforeEach(() => {
     assets = new Map(); requests = []; task = undefined; missing = ""; swapped = false; changeOwnerAt = ""; responseStatus = 200;
     useUserStore.setState({ user: { id: "employee-a", role: "designer", status: "active" } as never, status: "authenticated", hydrateSession: async () => {} });
-    (globalThis as any).window = { location: { pathname: "/image" } };
+    (globalThis as any).window = Object.assign(new EventTarget(), { location: { pathname: "/image" } });
     (globalThis as any).FileReader = class {
         result = ""; onload?: () => void;
         readAsDataURL(blob: Blob) { void blob.arrayBuffer().then(bytes => { this.result = `data:${blob.type};base64,${Buffer.from(bytes).toString("base64")}`; this.onload?.(); }); }

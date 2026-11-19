@@ -5,14 +5,20 @@ import { toolDefinitions } from "../../shared/feature-catalog";
 const catalog = { models: [{ id: "10000000-0000-4000-8000-000000000001", modelId: "10000000-0000-4000-8000-000000000001", name: "豆包生图", publicName: "豆包生图", imageParameterProfile: "seedream55", capabilities: ["generate", "edit"] }], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: null, configurationVersion: 1 })) };
 
 for (const imageConversationsEnabled of [false, true]) test(`idle discussion does no periodic auth or storage scan (conversations=${imageConversationsEnabled})`, async ({ page, context, api }) => {
-    let auth = 0;
+    let auth = 0, executionReads = 0;
     await context.route("**/api/deployment", route => route.fulfill({ json: { authenticationEnabled: true, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false, imageConversationsEnabled } }));
     await context.route("**/api/auth/session", route => { auth++; return route.fallback(); });
+    await context.route(url => url.pathname === "/api/image-conversations/design-executions", route => {
+        if (route.request().method() !== "GET") return route.fallback();
+        executionReads++;
+        return route.fulfill({ json: { code: "OK", data: { items: [], nextCursor: null }, msg: "" } });
+    });
     await context.route("**/api/models", route => route.fulfill({ json: catalog }));
     await newCanvas(page);
     await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
     const panel = page.getByRole("complementary", { name: "设计讨论面板" });
     await expect(panel.getByRole("button", { name: "发送讨论", exact: true })).toBeEnabled();
+    await expect.poll(() => executionReads).toBe(imageConversationsEnabled ? 1 : 0);
     await panel.getByRole("button", { name: "收起讨论面板" }).click();
     await page.evaluate(() => {
         const original = IDBObjectStore.prototype.openCursor;
@@ -23,6 +29,7 @@ for (const imageConversationsEnabled of [false, true]) test(`idle discussion doe
     await page.clock.install();
     await page.clock.runFor(12_100);
     expect(auth).toBe(before);
+    expect(executionReads).toBe(imageConversationsEnabled ? 1 : 0);
     expect(await page.evaluate(() => (window as any).discussionScans)).toBe(0);
     expect(api.submissions).toHaveLength(0);
 });

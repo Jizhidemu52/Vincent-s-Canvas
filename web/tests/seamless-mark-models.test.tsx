@@ -29,7 +29,7 @@ const binding = (modelConfigId: string | null, enabled = true): PublicToolConfig
 const config = (model: string) => ({ ...defaultConfig, model, imageModel: model, quality: "max", size: "4:3", count: "7", imageOptions: '{"resolution":"4k","output_format":"webp","output_compression":"88","google_search":"true"}' });
 
 beforeEach(() => {
-    globals.window = { location: { pathname: "/image" } };
+    globals.window = Object.assign(new EventTarget(), { location: { pathname: "/image" } });
     useUserStore.setState({ user: { id: "employee-a", status: "active", role: "designer" } as never, status: "authenticated" });
 });
 afterEach(() => {
@@ -89,14 +89,20 @@ test("Nano seamless stitching discards unsupported GPT and legacy workflow param
 
 test("reusing an uploaded seamless reference rechecks its owner and original bytes without uploading again", async () => {
     const calls = mockServer([flare]);
-    await requestSeamlessStitch(reference, DEFAULT_SEAMLESS_STITCH_PARAMETERS, config(flare.id));
+    const unseenReference = { ...reference, dataUrl: `data:image/png;base64,${Buffer.from("seamless-notification-original").toString("base64")}` };
+    const notifications: Array<{ ownerId: string }> = [];
+    (globals.window as EventTarget).addEventListener("canvas-assets-changed", event => notifications.push((event as CustomEvent<{ ownerId: string }>).detail));
+    await requestSeamlessStitch(unseenReference, DEFAULT_SEAMLESS_STITCH_PARAMETERS, config(flare.id));
+    expect(calls.filter(call => call.path === "/api/assets/upload-request")).toHaveLength(1);
+    expect(notifications).toEqual([{ ownerId: "employee-a" }]);
     const firstCallCount = calls.length;
-    await requestSeamlessStitch(reference, DEFAULT_SEAMLESS_STITCH_PARAMETERS, config(flare.id));
+    await requestSeamlessStitch(unseenReference, DEFAULT_SEAMLESS_STITCH_PARAMETERS, config(flare.id));
     const repeated = calls.slice(firstCallCount);
     expect(repeated.filter(call => call.path === "/api/assets/source-asset")).toHaveLength(1);
     expect(repeated.filter(call => call.path === "/api/assets/source-asset/content")).toHaveLength(1);
     expect(repeated.filter(call => call.path === "/api/assets/upload-request")).toHaveLength(0);
     expect(repeated.filter(call => call.path === "/api/tasks" && call.body)).toHaveLength(1);
+    expect(notifications).toEqual([{ ownerId: "employee-a" }]);
 });
 
 test.each(["gpt", "grok-image"] as const)("new %s uses image controls and single-reference parameters, not internal workflow knobs", async kind => {

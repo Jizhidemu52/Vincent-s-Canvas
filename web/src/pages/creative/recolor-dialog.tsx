@@ -2,6 +2,7 @@ import { uiText, useUiText } from "@/lib/i18n";
 import { Alert, Button, Modal, Slider, Tooltip } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { editorPngBlob } from "@/lib/canvas/image-editor-document";
+import { createClientUuid } from "@/lib/client-uuid";
 import { canvasPixels, loadProcessingImage, pixelsCanvas } from "./image-processing-browser";
 import { rgbHex, suggestPalette, type PixelImage, type RecolorRule } from "./image-processing";
 import { processImageInWorker } from "./image-processing-client";
@@ -78,7 +79,7 @@ export function RecolorDialog({ source, onClose, onSave }: {
             const blob = await editorPngBlob(pixelsCanvas(result));
             if (controller.signal.aborted) return;
             const identity = JSON.stringify([source.id, rules, tolerance]);
-            if (operation.current?.identity !== identity) operation.current = { identity, id: crypto.randomUUID() };
+            if (operation.current?.identity !== identity) operation.current = { identity, id: createClientUuid() };
             await onSave(blob, description, { clientOperationId: operation.current.id, operation: "recolor", recolor: { rules: rules.map(rule => ({ ...rule })), tolerance } });
             if (!controller.signal.aborted) onClose();
         } catch (caught) { if (!controller.signal.aborted) setSaveError(caught instanceof Error ? uiText(caught.message) : uiText("换色保存失败")); }

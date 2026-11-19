@@ -192,7 +192,7 @@ export class MockCanvasApi {
             this.submissions.push(input);
             const id = randomUUID(), task = { ...input, id, userId: OWNER, status: this.taskStatus, resultUrls: this.taskStatus === "success" ? [`/api/assets/${id}/content`] : [], failureReason: null, createdAt: new Date().toISOString() };
             this.assetBytes.set(id, fixturePng(40 + this.tasks.size * 40));
-            this.assets.set(id, { id, ownerUserId: OWNER, status: "ready", mimeType: "image/png", contentUrl: `/api/assets/${id}/content` });
+            this.assets.set(id, { id, ownerUserId: OWNER, kind: "image", status: "ready", mimeType: "image/png", contentUrl: `/api/assets/${id}/content` });
             this.tasks.set(id, task);
             return json({ task }, 201);
         }

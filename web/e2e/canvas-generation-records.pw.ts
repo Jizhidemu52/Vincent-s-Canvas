@@ -24,11 +24,16 @@ async function select(page: Page, id: string, force = false) {
     await editor(page).blur();
 }
 async function scene(page: Page, api: MockCanvasApi, legacy = false, referenceCount = 1) {
-    for (const [index, id] of Object.values(ASSETS).entries()) api.assetBytes.set(id, performanceRaster(index, 256, 256));
+    const seedAsset = (id: string, index: number) => {
+        const bytes = performanceRaster(index, 256, 256);
+        api.assetBytes.set(id, bytes);
+        api.assets.set(id, { id, ownerUserId: "00000000-0000-4000-8000-000000000099", kind: "image", status: "ready", mimeType: "image/png", byteSize: bytes.length, deletedAt: null, contentUrl: `/api/assets/${id}/content` });
+    };
+    for (const [index, id] of Object.values(ASSETS).entries()) seedAsset(id, index);
     const references = Array.from({ length: referenceCount }, (_, index) => {
         const retained = index === referenceCount - 1, id = retained ? "original-reference" : `removed-reference-${index + 1}`;
         const assetId = retained ? ASSETS.source : `72000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
-        if (!retained) api.assetBytes.set(assetId, performanceRaster(index + 3, 256, 256));
+        if (!retained) seedAsset(assetId, index + 3);
         return { id, referenceKey: `node:${id}`, name: retained ? "原始参考.png" : `已离画布参考${index + 1}.png`, type: "image/png",
             content: `/api/assets/${assetId}/content`, sourceNodeId: id, origin: "canvas", order: index };
     });
@@ -525,13 +530,23 @@ test("toolbar undo flushes a sub-180ms draft before undoing and preserves the pr
     await expect(undo).toBeEnabled();
     const undoBox = await undo.boundingBox();
     if (!undoBox) throw new Error("Undo button is missing");
+    const inputSession = await page.context().newCDPSession(page);
+    await editor(page).focus();
+    await page.keyboard.press("Control+a");
     await page.evaluate(() => {
         const sample = { input: 0, undo: 0 }; (window as any).__draftUndoSample = sample;
         document.addEventListener("input", event => { if ((event.target as Element).matches("textarea.cw-prompt")) sample.input = performance.now(); }, true);
         document.addEventListener("click", event => { if ((event.target as Element).closest('[data-usage-control="undo"]')) sample.undo = performance.now(); }, true);
     });
-    await editor(page).fill("不到180毫秒就撤销的新草稿");
-    await page.mouse.click(undoBox.x + undoBox.width / 2, undoBox.y + undoBox.height / 2);
+    try {
+        await Promise.all([
+            inputSession.send("Input.insertText", { text: "不到180毫秒就撤销的新草稿" }),
+            inputSession.send("Input.dispatchMouseEvent", { type: "mousePressed", x: undoBox.x + undoBox.width / 2, y: undoBox.y + undoBox.height / 2, button: "left", clickCount: 1 }),
+            inputSession.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: undoBox.x + undoBox.width / 2, y: undoBox.y + undoBox.height / 2, button: "left", clickCount: 1 }),
+        ]);
+    } finally {
+        await inputSession.detach();
+    }
     const elapsed = await page.evaluate(() => { const sample = (window as any).__draftUndoSample; return sample.undo - sample.input; });
     expect(elapsed).toBeGreaterThan(0); expect(elapsed).toBeLessThan(180);
     // Allow the old draft/history timer to settle; DOM checks do not depend on the longer cloud-save debounce.

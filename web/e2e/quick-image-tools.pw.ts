@@ -13,7 +13,7 @@ async function managedQuickTask(page: Page, api: MockCanvasApi) {
         const task = { ...input, id, userId: "00000000-0000-4000-8000-000000000099", status: api.taskStatus, prompt: PRIVATE_RECIPE,
             resultUrls: api.taskStatus === "success" ? [`/api/assets/${id}/content`] : [], failureReason: null, createdAt: new Date().toISOString() };
         api.submissions.push(input); api.tasks.set(id, task); api.assetBytes.set(id, IMAGE);
-        api.assets.set(id, { id, ownerUserId: task.userId, status: "ready", mimeType: "image/png", contentUrl: `/api/assets/${id}/content` });
+        api.assets.set(id, { id, ownerUserId: task.userId, kind: "image", status: "ready", mimeType: "image/png", contentUrl: `/api/assets/${id}/content` });
         await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ task }) });
     });
 }

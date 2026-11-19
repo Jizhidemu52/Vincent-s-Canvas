@@ -146,7 +146,7 @@ function uploadHarness(failUpload = false) {
         message: { error: (detail: string) => { messages.push(detail); } },
         assertCanvasImageUploadSize, createImageReferenceItem, dedupeImageReferences, configImageReferencePatch,
         createClientId: () => `uploaded-${++nextId}`,
-        uploadImage: async (file: File) => {
+        uploadUserImage: async (file: File) => {
             uploads.push(file);
             if (failUpload) throw new Error("测试存储失败");
             return { url: `blob:${file.name}`, storageKey: `image:${file.name}`, mimeType: file.type, bytes: file.size };

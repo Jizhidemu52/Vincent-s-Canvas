@@ -61,7 +61,8 @@ test("exact recolor is saved once and a fresh browser downloads identical final 
     } finally { await other.close(); }
 });
 
-test("a failed final receipt stays explicit and retry saves the same image without a new AI task", async ({ page, api }, info) => {
+test("without the secure-context UUID API a failed receipt retries the same image without a new AI task", async ({ page, api }, info) => {
+    await page.addInitScript(() => Object.defineProperty(globalThis.crypto, "randomUUID", { configurable: true, value: undefined }));
     const writes: any[] = []; let failOnce = true;
     await page.route("**/api/assets/local-processing", async route => {
         if (route.request().method() !== "POST") return route.fallback();
@@ -70,6 +71,7 @@ test("a failed final receipt stays explicit and retry saves the same image witho
         return route.fallback();
     });
     await recolor(page);
+    expect(await page.evaluate(() => ({ randomUUID: typeof crypto.randomUUID, randomValues: typeof crypto.getRandomValues }))).toEqual({ randomUUID: "undefined", randomValues: "function" });
     await expect(page.getByRole("button", { name: "仅重试保存最终成果", exact: true })).toBeVisible();
     await expect(page.getByText("方案 1 最终成果待保存", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "按原参数重试", exact: true })).toHaveCount(0);
@@ -81,6 +83,7 @@ test("a failed final receipt stays explicit and retry saves the same image witho
     expect(api.localProcessingUploads.size).toBe(1); expect(api.localProcessingRecords.size).toBe(1);
     expect(api.submissions).toHaveLength(0); expect(api.batchSubmissions).toHaveLength(0);
     await expect(page.getByText("最终成果已保存到账号云端，没有重新生成或扣费。", { exact: true })).toBeVisible();
+    await page.screenshot({ path: info.outputPath("http-final-save-recovered-once.png"), fullPage: true });
 });
 
 test("full local image cache plus a failed final receipt retries the retained bytes without AI", async ({ page, api }, info) => {

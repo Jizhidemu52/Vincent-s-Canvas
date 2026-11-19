@@ -108,7 +108,7 @@ describe("video model parameter contract", () => {
     });
 
     test("HappyHorse reference mode survives both preflight and submission with one image", async () => {
-        globalThis.window = { location: { pathname: "/video" } } as Window & typeof globalThis;
+        globalThis.window = Object.assign(new EventTarget(), { location: { pathname: "/video" } }) as Window & typeof globalThis;
         const payloads: Array<Record<string, any>> = [];
         globalThis.fetch = (async (input, init) => {
             const url = String(input);
@@ -134,7 +134,7 @@ describe("video model parameter contract", () => {
     });
 
     test("video service uses the same normalized parameters for preflight and task submission", async () => {
-        globalThis.window = { location: { pathname: "/canvas/contract-test" } } as Window & typeof globalThis;
+        globalThis.window = Object.assign(new EventTarget(), { location: { pathname: "/canvas/contract-test" } }) as Window & typeof globalThis;
         for (const model of supportedVideoModelIds) {
             const config = { ...configFor(model), size: "adaptive", vquality: "480p", videoSeconds: model === "gemini-omni-1.2-flash" ? "15" : "30", videoGenerateAudio: "true", videoWatermark: "true" };
             const payloads: Array<Record<string, unknown>> = [];

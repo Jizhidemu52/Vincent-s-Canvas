@@ -23,7 +23,7 @@ const originalUser = useUserStore.getState();
 const originalBusiness = useBusinessConfigStore.getState();
 
 beforeEach(() => {
-    globals.window = { location: { pathname: "/canvas/test-canvas" } };
+    globals.window = Object.assign(new EventTarget(), { location: { pathname: "/canvas/test-canvas" } });
     useUserStore.setState({ user: { id: "employee-a", status: "active", role: "designer" } as never, status: "authenticated" });
 });
 afterEach(() => { globalThis.fetch = originalFetch; globals.window = originalWindow; useUserStore.setState(originalUser); useBusinessConfigStore.setState(originalBusiness); });
