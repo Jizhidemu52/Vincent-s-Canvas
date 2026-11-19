@@ -51,10 +51,15 @@ const SMALL_NUMBERS = ["zero", "one", "two", "three", "four", "five", "six", "se
 const ENGLISH_NUMBERS: Record<string, number> = { ...Object.fromEntries(SMALL_NUMBERS.map((word, index) => [word, index])), thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100, thousand: 1000 };
 export function imagePromptInvariantNumbers(text: string): Set<string> {
     const count = `(?:\\d+|${SMALL_NUMBERS.join("|")})`;
+    const chineseOutputCount = "(?:\\d+|[零一二两三四五六七八九十百千]{1,8})";
+    const outputRequestPrefix = "(^|[\\r\\n，。！？；：、,.!?;:])((?:(?:请|麻烦|帮我|给我|再|先|只|仅|直接)[ \\t]*)*(?:按(?:照)?(?:现在|当前)?这(?:一)?版[^\\r\\n，。！？；：、,.!?;:]{0,40})?)";
+    const proposalQuantitySetting = new RegExp(`(^|[\\r\\n，。！？；,.!?;])[ \\t]*(?:我[ \\t]*)?(?:已(?:经)?[ \\t]*)?(?:(?:把|将)[ \\t]*)?方案数量[ \\t]*(?:改为|设为|设置为|调整为)[ \\t]*${chineseOutputCount}(?=[ \\t]*(?:$|[\\r\\n，。！？；,!?;]|\\.(?!\\d)))`, "gu");
     const source = instructionsWithoutArtworkLiterals(text)
+        .replace(proposalQuantitySetting, "$1")
         .replace(/\[\[ref:[^\]]+\]\]|\bimage\s*#?\s*\d+\b|图(?:片)?\s*[\d一二三四五六七八九十]+/giu, "")
         // Output count/aspect ratio are independently constrained by generation settings, not image-content counts.
-        .replace(new RegExp(`(?:生成|输出|出图|制作|提供|返回|只要|只需)\\s*(?:仅|只|恰好)?\\s*\\d+\\s*张(?:图(?:片)?)?|\\b(?:generate|output|return|produce|want|need)\\s+(?:(?:only|exactly)\\s+)?${count}\\s+(?:images?|pictures?|outputs?|variations?)\\b|(?:比例|aspect\\s+ratio)\\s*[:：]?\\s*\\d+\\s*[:：]\\s*\\d+`, "giu"), "")
+        .replace(new RegExp(`(?:生成|输出|出图|制作|提供|返回|只要|只需)\\s*(?:仅|只|恰好)?\\s*${chineseOutputCount}\\s*张(?:图(?:片)?)?|\\b(?:generate|output|return|produce|want|need)\\s+(?:(?:only|exactly)\\s+)?${count}\\s+(?:images?|pictures?|outputs?|variations?)\\b|(?:比例|aspect\\s+ratio)\\s*[:：]?\\s*\\d+\\s*[:：]\\s*\\d+`, "giu"), "")
+        .replace(new RegExp(`${outputRequestPrefix}出\\s*(?:仅|只|恰好)?\\s*${chineseOutputCount}\\s*张(?:图(?:片)?)?(?=[ \\t]*(?:$|[\\r\\n，。！？；：、,.!?;:]))`, "giu"), "$1$2")
         .replace(/\b(?:both|a pair of)\s+(?=(?:[a-z]+\s+){0,2}(?:sleeves|cuffs|pockets|buttons|straps|handles|legs|shoes|socks|ears|eyes|wings)\b)/giu, "two ");
     const countedSource = source.replace(/\ba\s+(?=(?:(?:single|neat|evenly spaced|vertical|horizontal|straight)[,\s]+){0,4}(?:row|line|column)\b)/giu, "one ");
     const found = new Set(Array.from(countedSource.matchAll(/(?<![A-Za-z0-9_.])\d+(?:\.\d+)?(?![\d.])/gu), match => String(Number(match[0]))));

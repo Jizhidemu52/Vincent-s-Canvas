@@ -60,7 +60,8 @@ class FakeOperator(operator.CanvasDesignChat053):
             after = checks.after_state()
             if self.failure == "restart-drift" and label == "053-original-verified": after["designChatOtherRows"][0]["sha256"] = "changed"
             return after
-        return {key: 0 for key in ["waitingTasks", "processingTasks", "submittedWaitingTasks", "processingChatRequests", "processingAnalysisPreviews", "optimizingPromptCompilations", "admittingBatches", "pendingAssetThumbnails", "pausedTasks"]}
+        return {key: 0 for key in ["waitingTasks", "processingTasks", "submittedWaitingTasks", "processingChatRequests", "processingAnalysisPreviews", "optimizingPromptCompilations", "admittingBatches", "pendingAssetThumbnails", "pausedTasks",
+                                 "activeTurns", "plannerLeases", "inFlightPlanners", "uncertainTurns"]} | {"imageConversationTurnsPresent": False}
     def inventory(self, label): return copy.deepcopy(self.baseline["containers"])
     def application_configuration_unchanged(self, baseline): self.events.append("configuration-check")
     def start_original(self, baseline):

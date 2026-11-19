@@ -22,7 +22,11 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 108
         await page.setViewportSize(viewport);
         await page.goto("/image?tool=image-edit");
         const pane = activeWorkbench(page);
-        await pane.locator("input[type=file][accept='image/*']").setInputFiles({ name: "inline-reference.png", mimeType: "image/png", buffer: IMAGE });
+        const referenceInput = pane.locator("input[type=file][accept='image/*']");
+        await expect(referenceInput).toBeEnabled();
+        await referenceInput.setInputFiles({ name: "inline-reference.png", mimeType: "image/png", buffer: IMAGE });
+        await expect(pane.getByRole("region", { name: "参考图", exact: true })).toContainText("1 张");
+        expect([...api.assetBytes.values()]).toEqual([IMAGE]);
         const primary = pane.getByRole("region", { name: "常用参数", exact: true });
         await expect(primary).toBeVisible();
         const picker = primary.getByRole("combobox", { name: "选择模型", exact: true });

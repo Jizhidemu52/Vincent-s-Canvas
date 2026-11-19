@@ -17,7 +17,9 @@ from test_contract import compose, inspect, instance, mounts
 def idle_activity():
     return {"waitingTasks": 0, "processingTasks": 0, "submittedWaitingTasks": 0,
             "processingChatRequests": 0, "processingAnalysisPreviews": 0,
-            "optimizingPromptCompilations": 0, "admittingBatches": 0, "pendingAssetThumbnails": 0, "pausedTasks": 2}
+            "optimizingPromptCompilations": 0, "admittingBatches": 0, "pendingAssetThumbnails": 0, "pausedTasks": 2,
+            "imageConversationTurnsPresent": True, "activeTurns": 0, "plannerLeases": 0,
+            "inFlightPlanners": 0, "uncertainTurns": 0}
 
 
 def database_state(count=1):
@@ -301,10 +303,11 @@ class DeploymentContracts(unittest.TestCase):
         self.assertFalse(any(call.startswith("start:") for call in runner.calls))
         self.assertNotIn("gate:open", runner.calls)
 
-    def test_drain_waits_read_only_for_tasks_chat_compilation_and_admission(self):
+    def test_drain_waits_read_only_for_tasks_chat_compilation_admission_and_conversations(self):
         runner = self.fake_cutover(None)
         seen = []
-        for field in ["processingTasks", "processingChatRequests", "optimizingPromptCompilations", "admittingBatches", "pendingAssetThumbnails"]:
+        for field in ["processingTasks", "processingChatRequests", "optimizingPromptCompilations", "admittingBatches", "pendingAssetThumbnails",
+                      "activeTurns", "plannerLeases", "inFlightPlanners"]:
             activity = idle_activity(); activity[field] = 1
             seen.append(activity)
         seen.append(idle_activity())
@@ -313,8 +316,63 @@ class DeploymentContracts(unittest.TestCase):
         with patch("deploy.time.sleep") as sleep:
             result = runner.wait_for_drain(timeout_seconds=20, poll_seconds=1)
         self.assertEqual(result, idle_activity())
-        self.assertEqual(sleep.call_count, 5)
+        self.assertEqual(sleep.call_count, 8)
         self.assertEqual(runner.calls, [])
+
+    def test_conversation_uncertainty_after_gate_close_refuses_without_stop_or_retry(self):
+        runner = self.fake_cutover(None)
+        original = runner.sql
+        def sql(name, label):
+            result = original(name, label)
+            if name == "activity.sql":
+                self.assertIn("gate:verify-closed", runner.calls)
+                result["uncertainTurns"] = 1
+            return result
+        runner.sql = sql
+        with patch("deploy.time.sleep") as sleep:
+            with self.assertRaisesRegex(deploy.Rejected, "UNCERTAIN_CONVERSATION_REQUIRES_MANUAL_REVIEW_NO_MUTATION"):
+                runner.cutover(runner.prepared, "candidate", "fallback")
+        sleep.assert_not_called()
+        self.assertEqual(runner.calls, ["gate:close", "gate:verify-closed"])
+        self.assertFalse((runner.audit / "baseline.private.json").exists())
+
+    def test_conversation_activity_at_stopped_baseline_refuses_any_start(self):
+        for field in ["activeTurns", "plannerLeases", "inFlightPlanners", "uncertainTurns"]:
+            with self.subTest(field=field):
+                runner = self.fake_cutover(None)
+                original = runner.sql
+                def sql(name, label):
+                    result = original(name, label)
+                    if label == "activity-stopped-baseline": result[field] = 1
+                    return result
+                runner.sql = sql
+                with self.assertRaises(deploy.Rejected):
+                    runner.cutover(runner.prepared, "candidate", "fallback")
+                self.assertIn("stop:fallback", runner.calls)
+                self.assertFalse(any(call.startswith("start:") for call in runner.calls))
+                self.assertNotIn("gate:open", runner.calls)
+
+    def test_started_conversation_activity_keeps_gate_closed_and_refuses_fallback(self):
+        for field in ["activeTurns", "plannerLeases", "inFlightPlanners", "uncertainTurns"]:
+            with self.subTest(field=field):
+                runner = self.fake_cutover(None)
+                del runner.protected_and_database
+                original = runner.sql
+                target = runner.audit / "candidate.json"
+                target.write_text(json.dumps({"services": {role: {"image": "old"} for role in instance()["containers"]}}))
+                def sql(name, label):
+                    result = original(name, label)
+                    if name == "activity.sql" and label in ["activity-verified", "activity-failed-stopped-check"]:
+                        result[field] = 1
+                    return result
+                runner.sql = sql
+                with self.assertRaises(deploy.Rejected):
+                    runner.cutover(runner.prepared, target, "fallback")
+                self.assertIn("start:" + str(target), runner.calls)
+                self.assertIn("stop:" + str(target), runner.calls)
+                self.assertNotIn("start:fallback", runner.calls)
+                self.assertNotIn("gate:open", runner.calls)
+                self.assertFalse(json.loads((runner.audit / "failure.json").read_text())["fallbackApplicationRestored"])
 
     def test_drain_timeout_does_not_stop_or_resubmit_or_start_any_application(self):
         runner = self.fake_cutover(None)

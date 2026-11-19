@@ -27,6 +27,56 @@ async function prepare(context: BrowserContext, fallback: boolean) {
     await context.route("**/__lock?*", route => route.fulfill({ contentType: "text/html", body: fixture }));
 }
 
+async function readLease(page: Page, project: string) {
+    return page.evaluate(projectId => new Promise<{ tab: string; expiresAt: number } | null>((resolve, reject) => {
+        const open = indexedDB.open("wireless-canvas-editor-locks", 1);
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+            const database = open.result;
+            const transaction = database.transaction("leases", "readonly");
+            const request = transaction.objectStore("leases").get(`canvas-editor:${JSON.stringify(["test-owner", projectId])}`);
+            transaction.oncomplete = () => { resolve(request.result ?? null); database.close(); };
+            transaction.onerror = () => { reject(transaction.error); database.close(); };
+        };
+    }), project);
+}
+
+test("HTTP reload automatically acquires its abandoned lease after expiry without a takeover click", async ({ context, page }) => {
+    await prepare(context, true);
+    await page.goto("/__lock?project=reload-alone");
+    await expect(state(page)).toHaveAttribute("data-state", "editing");
+    const previous = await readLease(page, "reload-alone");
+    expect(previous).not.toBeNull();
+    await page.reload();
+    await expect(state(page)).toHaveAttribute("data-state", "readonly");
+    expect(await readLease(page, "reload-alone")).toEqual(previous);
+    expect(await page.evaluate(async () => ({ write: window.__lockFixture.write(), ready: await window.__lockFixture.ensureWritable() }))).toEqual({ write: false, ready: false });
+    await expect(page.getByTestId("loads")).toHaveText("0");
+    await expireLease(page);
+    await expect(state(page)).toHaveAttribute("data-state", "editing");
+    await expect(page.getByTestId("loads")).toHaveText("1");
+    expect((await readLease(page, "reload-alone"))?.tab).not.toBe(previous?.tab);
+    await page.getByRole("button", { name: "write", exact: true }).click();
+    await expect(page.getByTestId("writes")).toHaveText("1");
+});
+
+test("HTTP readonly retries never take a renewing owner's lease across its original expiry", async ({ context, page }) => {
+    await prepare(context, true);
+    await page.goto("/__lock?project=renewing-owner");
+    await expect(state(page)).toHaveAttribute("data-state", "editing");
+    const previous = (await readLease(page, "renewing-owner"))!;
+    const second = await context.newPage();
+    await second.goto("/__lock?project=renewing-owner");
+    await expect(state(second)).toHaveAttribute("data-state", "readonly");
+    await expect.poll(async () => (await readLease(second, "renewing-owner"))!.expiresAt, { timeout: 20_000 }).toBeGreaterThanOrEqual(previous.expiresAt + 15_000);
+    expect((await readLease(second, "renewing-owner"))?.tab).toBe(previous.tab);
+    await expect(state(page)).toHaveAttribute("data-state", "editing");
+    await expect(state(second)).toHaveAttribute("data-state", "readonly");
+    expect(await second.evaluate(async () => ({ write: window.__lockFixture.write(), ready: await window.__lockFixture.ensureWritable() }))).toEqual({ write: false, ready: false });
+    await expect(second.getByTestId("loads")).toHaveText("0");
+    await expect(second.getByTestId("writes")).toHaveText("0");
+});
+
 for (const fallback of [false, true]) {
     const label = fallback ? "HTTP IndexedDB lease" : "Web Locks";
     test(`${label}: StrictMode single editor, isolated owners and safe two-tab handoff`, async ({ context, page }) => {

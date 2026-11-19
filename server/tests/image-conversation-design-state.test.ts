@@ -31,7 +31,7 @@ describe("shared persisted conversation image semantics", () => {
   });
   test("a set replaces the old same-key requirement, unrelated requirements remain immutable", () => {
     const turnId = randomUUID(), next = deriveConversationRequestedState(edit(), state, turnId, "改为V领");
-    expect(next.constraints.find(item => item.key === "neckline")).toEqual({ key: "neckline", text: "改为V领", source: "confirmed_plan", sourceTurnId: turnId });
+    expect(next.constraints.find(item => item.key === "neckline")).toEqual({ key: "neckline", text: "neckline：改为V领", source: "confirmed_plan", sourceTurnId: turnId });
     expect(next.constraints.find(item => item.key === "color")).toEqual(state.constraints[0]);
     expect(state.constraints[1].text).toBe("圆领");
   });
@@ -64,5 +64,36 @@ describe("shared persisted conversation image semantics", () => {
     expect(() => compile(edit({ references: [{ versionId: randomUUID(), role: "color", instruction: "配色" }] }))).toThrow();
     expect(() => compile(edit({ references: [{ versionId: base.id, role: "color", instruction: "配色" }] }))).toThrow();
     expect(() => compile(edit({ references: refs.map(ref => ({ versionId: ref.id, role: "color", instruction: "配色" })) }))).toThrow();
+  });
+  test("output count wording does not block a persisted-plan edit of the current version", () => {
+    const original = version(1), current = version(2, original, original);
+    const preserve = ["保留原来的圆领、版型、袖长和针织纹理", "保持白底、单件、正面商品图", "不加条纹、印花、文字或 Logo"];
+    current.requestedState = { schemaVersion: 1, goals: [], constraints: [
+      { key: "毛衣配色", text: "按「通勤甲」只换色，生成 1 张：衣身改为雾灰绿，领口、袖口和下摆的罗纹均与衣身同色。", source: "confirmed_plan", sourceTurnId: current.turnId },
+      ...preserve.map(text => ({ key: `preserve:${text}`, text, source: "confirmed_plan" as const, sourceTurnId: current.turnId })),
+    ] };
+    const plan = edit({ revoke: ["毛衣配色"], preserve, changes: [
+      { kind: "set", target: "衣身主色（含非罗纹袖身）", instruction: "改为深海军蓝。" },
+      { kind: "set", target: "领口、袖口和下摆的罗纹", instruction: "三处统一改为浅米灰。" },
+    ] });
+    const base = resolveConversationVersion([original, current], current.id, plan.base);
+    for (const output of ["出 1 张", "出1张", "出一张", "生成1张", "生成一张"]) {
+      const result = compileConversationImagePrompt({ plan, versions: [original, current], base, sourceStateVersion: base,
+        sourceState: base.requestedState, turnId: randomUUID(), userText: `按现在这版通勤甲${output}，沿用上次生成的图继续改，其他照旧。` });
+      expect(result.sources.map(item => item.id)).toEqual([current.id]);
+      expect(result.prompt).toContain("衣身主色（含非罗纹袖身）：改为深海军蓝。");
+      expect(result.prompt).toContain("领口、袖口和下摆的罗纹：三处统一改为浅米灰。");
+      expect(result.prompt).not.toContain("雾灰绿");
+      for (const kept of preserve) expect(result.prompt).toContain(kept);
+      expect(result.requestedState.constraints.some(item => item.key === "毛衣配色")).toBe(false);
+      const nextVersion = version(3, original, current);
+      nextVersion.requestedState = result.requestedState;
+      const later = compileConversationImagePrompt({ plan: edit({ changes: [{ kind: "set", target: "画面四周留白", instruction: "略微增加" }] }),
+        versions: [original, current, nextVersion], base: nextVersion, sourceStateVersion: nextVersion, sourceState: nextVersion.requestedState,
+        turnId: randomUUID(), userText: "只增加四周留白，沿用刚才的配色" });
+      expect(later.prompt).toContain("衣身主色（含非罗纹袖身）：改为深海军蓝。");
+      expect(later.prompt).toContain("领口、袖口和下摆的罗纹：三处统一改为浅米灰。");
+      expect(later.prompt).not.toContain("雾灰绿");
+    }
   });
 });

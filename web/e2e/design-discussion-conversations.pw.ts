@@ -176,6 +176,49 @@ async function selectDirection(page: Page, fixture: DiscussionFixture, count = 1
     return { panel, generate: page.getByRole("button", { name: `按选中方案生成 ${count} 张`, exact: true }) };
 }
 
+test("an explicit selected-proposal click advances earlier discussion-only stages once and survives reload", async ({ page, api }, info) => {
+    const fixture = new DiscussionFixture(); await fixture.attach(page);
+    const requests: Record<string, any>[] = [];
+    const lockedDirection = "烟粉棕圆领针织衫，保持原轮廓、袖长、针织纹理和纯白底单件正面展示，不加文字、Logo、口袋或配饰。";
+    await page.route("**/api/chat/responses", route => {
+        const input = route.request().postDataJSON(); requests.push(input);
+        const proposals = requests.length === 3 ? [{ ...proposal, title: "暮砂二版", features: ["全衣烟粉棕", "保留圆领与针织纹理"], prompt: `生成一张${lockedDirection}` }] : [];
+        return route.fulfill({ json: { content: JSON.stringify({ message: requests.length === 3 ? "已整理暮砂二版，只给方案，不自动出图。" : "只讨论当前方向，全部原有锁定项保留。", questions: [], proposals, sources: [], trendStatus: "隔离回归，不代表真实模型质量。" }), toolCalls: [] } });
+    });
+    const projectId = await newCanvas(page);
+    await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
+    const panel = page.getByRole("complementary", { name: "设计讨论面板" });
+    const composer = panel.getByRole("textbox", { name: "输入设计需求" });
+    const history = [
+        `当前方向是暮砂二版：${lockedDirection}先聊设计，不生成图片。`,
+        "回到最早的业务背景：这件衣服原本是为哪一种上新场景做的？请把暮砂二版与第一次提出的晨雾只作历史对比，不把已经取消的方向重新加入当前方案，也不要生成。",
+    ];
+    for (const [index, content] of history.entries()) {
+        await expect(panel.getByRole("button", { name: "发送讨论", exact: true })).toBeEnabled();
+        await composer.fill(content); await composer.press("Enter");
+        await expect(panel.locator(".studio-message.assistant")).toHaveCount(index + 1);
+        expect(fixture.creates).toHaveLength(0); expect(fixture.submissions).toHaveLength(0);
+    }
+    await panel.locator(".discussion-settings > summary").click();
+    await panel.getByRole("combobox", { name: "方案数量", exact: true }).selectOption("1");
+    await composer.fill("把当前暮砂二版整理成一个完整可选方案，全部仍有效的锁定条件照旧，不恢复任何旧配色。我已把方案数量改为 1；这一步只给方案，不生成图片。");
+    await panel.getByRole("button", { name: "给我方案", exact: true }).click();
+    await expect(panel.locator(".discussion-proposals")).toContainText("暮砂二版");
+    expect(fixture.creates).toHaveLength(0); expect(fixture.submissions).toHaveLength(0); expect(api.submissions).toHaveLength(0);
+    await panel.locator(".studio-batch").click();
+    await page.screenshot({ path: info.outputPath("selected-proposal-before-explicit-generation.png"), animations: "disabled" });
+    await page.getByRole("button", { name: "按选中方案生成 1 张", exact: true }).click();
+    await expect(panel.locator(".discussion-results img")).toHaveCount(1);
+    await expect.poll(() => api.document(projectId)?.nodes.filter((node: any) => node.metadata?.imageConversation?.versionId).length).toBe(1);
+    expect(fixture.creates).toHaveLength(1); expect(fixture.submissions).toHaveLength(1); expect(api.submissions).toHaveLength(0);
+    expect(fixture.submissions[0]!.text).toContain("不加文字、Logo、口袋或配饰");
+    await page.reload(); await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
+    await expect(panel.locator(".discussion-results img")).toHaveCount(1);
+    await expect(panel.locator(".studio-message.user")).toHaveCount(3);
+    expect(requests).toHaveLength(3); expect(fixture.creates).toHaveLength(1); expect(fixture.submissions).toHaveLength(1);
+    await page.screenshot({ path: info.outputPath("explicit-generation-restored-once.png"), animations: "disabled" });
+});
+
 test("discussion and proposals stay non-generating; three independent server versions survive reload and video stays legacy", async ({ page, api }, info) => {
     const fixture = new DiscussionFixture(); await fixture.attach(page);
     const projectId = await newCanvas(page);

@@ -98,6 +98,62 @@ test("output quantity metadata does not masquerade as a visual part count", () =
     expect(() => assertImagePromptInvariantCoverage("生成1张，衣身有1个口袋", "Make the shirt pink.")).toThrow("数量");
 });
 
+test("Chinese output quantities keep button rows and dimensions independently protected", () => {
+    for (const output of ["出1张", "出 1 张", "出一张", "出 一 张", "生成1张", "生成一张", "出图两张", "输出十五张图片"]) {
+        expect(() => assertImagePromptInvariantCoverage(`${output}，只把衣身改成海军蓝`, "Recolor only the body navy blue.")).not.toThrow();
+        const source = `${output}，保留一排六颗纽扣，间距0.5cm`;
+        expect(() => assertImagePromptInvariantCoverage(source, "Keep one row of six buttons, spaced 0.5cm apart.")).not.toThrow();
+        expect(() => assertImagePromptInvariantCoverage(source, "Keep one row of five buttons, spaced 0.5cm apart.")).toThrow("数量");
+        expect(() => assertImagePromptInvariantCoverage(source, "Keep six buttons, spaced 0.5cm apart.")).toThrow("数量");
+        expect(() => assertImagePromptInvariantCoverage(source, "Keep one row of six buttons, spaced 5cm apart.")).toThrow("数量");
+    }
+    for (const source of ["出1张，保留1个口袋", "画出1张桌子", "桌角露出1张标签", "画出 1 张 桌子", "桌角露出 1 张 标签"]) {
+        expect(() => assertImagePromptInvariantCoverage(source, "Keep the garment unchanged.")).toThrow("数量");
+    }
+});
+
+test("content verbs ending in 出 retain object-first counts without output metadata", () => {
+    for (const source of [
+        "标签只露出1张，其他全部遮住。",
+        "从纸堆抽出1张，放在桌面上。",
+        "标签只画出1张，其余不画。",
+        "纸卡拿出1张，放到右侧。",
+        "标签剪出1张，其余不变。",
+        "出1张，标签只露出1张，其他全部遮住。",
+    ]) expect(() => assertImagePromptInvariantCoverage(source, "Keep the original composition unchanged.")).toThrow("数量");
+    for (const source of ["出1张", "只出1张", "请给我出1张", "按现在这版通勤甲出 1 张，沿用上次生成的图继续改，其他照旧。"]) {
+        expect(() => assertImagePromptInvariantCoverage(source, "Keep the selected garment as the base and update its colors.")).not.toThrow();
+    }
+});
+
+test("complete proposal quantity settings do not require a number in image content", () => {
+    const source = "把当前暮砂二版整理成一个完整可选方案，全部仍有效的锁定条件照旧，不恢复任何旧配色。我已把方案数量改为 1；这一步只给方案，不生成图片。";
+    expect(() => assertImagePromptInvariantCoverage(source, "保持暮砂二版烟粉棕配色、原轮廓和纯白背景，不加文字、Logo、口袋或配饰。")).not.toThrow();
+    for (const setting of ["我已把方案数量改为 1", "我已经将方案数量设为2", "把方案数量设置为 3", "方案数量调整为 4"]) {
+        expect(() => assertImagePromptInvariantCoverage(`${setting}，衣身改海军蓝。`, "Recolor the body navy blue.")).not.toThrow();
+        expect(() => assertImagePromptInvariantCoverage(`衣身改海军蓝； ${setting}。`, "Recolor the body navy blue.")).not.toThrow();
+    }
+});
+
+test("proposal quantity metadata preserves all adjacent pocket and button quantities", () => {
+    for (const setting of ["我已把方案数量改为1", "我已把方案数量改为2"]) {
+        const source = `保留1个口袋，${setting}；保留6颗纽扣。`;
+        expect(() => assertImagePromptInvariantCoverage(source, "Keep one pocket and six buttons.")).not.toThrow();
+        expect(() => assertImagePromptInvariantCoverage(source, "Keep six buttons.")).toThrow("数量");
+        expect(() => assertImagePromptInvariantCoverage(source, "Keep one pocket.")).toThrow("数量");
+    }
+    for (const source of ["标签方案数量改为1。", "衣身方案数量改为1。", "标签内容：我已把方案数量改为1。", "我已把方案数量改为1个口袋。", "方案数量改为1的标签放在衣身。", "图1方案数量改为2。", "方案数量改为1.5。"])
+        expect(() => assertImagePromptInvariantCoverage(source, "Keep the garment unchanged.")).toThrow("数量");
+});
+
+test("proposal quantity wording inside artwork remains mandatory literal content", () => {
+    for (const literal of ["方案数量1", "我已把方案数量改为1", "说明，我已把方案数量改为1"]) {
+        const source = `我已把方案数量改为1；保留标签文字“${literal}”。`;
+        expect(() => assertImagePromptInvariantCoverage(source, `Preserve the exact label text "${literal}".`)).not.toThrow();
+        expect(() => assertImagePromptInvariantCoverage(source, "Preserve the original label.")).toThrow("标识");
+    }
+});
+
 test("both and a pair of sleeves preserve the explicit content quantity two", () => {
     const source = "衣身、领子、两只袖子和袖口改成浅玫瑰粉";
     expect(() => assertImagePromptInvariantCoverage(source, "Recolor the body, collar, both sleeves and cuffs light rose pink.")).not.toThrow();

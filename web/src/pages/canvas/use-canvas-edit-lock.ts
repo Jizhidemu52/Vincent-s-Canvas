@@ -92,7 +92,7 @@ export function useCanvasEditLock(owner: string, projectId: string, flush: () =>
             }
             return canWriteRef.current();
         };
-        const acquireLease = async (wait: boolean) => {
+        const acquireLease = async () => {
             if (!usesLease || closed || !waiting) return;
             try {
                 const client = await loadLease();
@@ -100,10 +100,9 @@ export function useCanvasEditLock(owner: string, projectId: string, flush: () =>
                 const record = await client.claim(key, tab);
                 if (closed || !waiting) { if (record) await client.release(key, tab); return; }
                 if (!record) {
-                    setState({ status: "readonly" });
+                    setState(current => current.status === "readonly" ? current : { status: "readonly" });
                     channel.postMessage({ type: "query" });
-                    if (wait) retry = setTimeout(() => { void acquireLease(true); }, 500);
-                    else waiting = false;
+                    retry = setTimeout(() => { void acquireLease(); }, 500);
                     return;
                 }
                 waiting = false;
@@ -147,7 +146,7 @@ export function useCanvasEditLock(owner: string, projectId: string, flush: () =>
             const abort = wait ? new AbortController() : undefined;
             pendingRequest = abort;
             setState({ status: "checking" });
-            if (usesLease) { void acquireLease(wait); return; }
+            if (usesLease) { void acquireLease(); return; }
             void navigator.locks.request(key, wait ? { signal: abort!.signal } : { ifAvailable: true }, async lock => {
                 if (closed) return;
                 waiting = false;

@@ -397,9 +397,13 @@ def assert_application_runtime(before, after, model, images, release, deployment
 
 def assert_idle(value):
     require(isinstance(value, dict), "ACTIVITY_SNAPSHOT_INVALID")
-    fields = ["waitingTasks", "processingTasks", "submittedWaitingTasks", "processingChatRequests", "processingAnalysisPreviews", "optimizingPromptCompilations", "admittingBatches", "pendingAssetThumbnails"]
+    conversations = ["activeTurns", "plannerLeases", "inFlightPlanners", "uncertainTurns"]
+    fields = ["waitingTasks", "processingTasks", "submittedWaitingTasks", "processingChatRequests", "processingAnalysisPreviews", "optimizingPromptCompilations", "admittingBatches", "pendingAssetThumbnails", *conversations]
     require(all(type(value.get(field)) is int and value[field] >= 0 for field in fields), "ACTIVITY_COUNT_INVALID")
     require(type(value.get("pausedTasks")) is int and value["pausedTasks"] >= 0, "PAUSED_TASK_COUNT_INVALID")
+    require(type(value.get("imageConversationTurnsPresent")) is bool, "CONVERSATION_TABLE_PRESENCE_INVALID")
+    require(value["imageConversationTurnsPresent"] or all(value[field] == 0 for field in conversations), "ABSENT_CONVERSATION_TABLE_HAS_ACTIVITY")
+    require(value["uncertainTurns"] == 0, "UNCERTAIN_CONVERSATION_REQUIRES_MANUAL_REVIEW_NO_MUTATION")
     require(all(value[field] == 0 for field in fields), "INFLIGHT_WORK_REQUIRES_DRAIN")
 
 

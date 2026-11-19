@@ -29,7 +29,7 @@ export function deriveConversationRequestedState(plan: EditPlan | GenerateNewPla
   for (const change of plan.changes) {
     if (change.kind === "remove") constraints.delete(change.target);
     else constraints.set(change.target, { key: change.target,
-      text: change.kind === "relative" ? `保留来源版本中本轮调整后的${change.target}，后续不得再次执行相对增减。` : change.instruction,
+      text: change.kind === "relative" ? `保留来源版本中本轮调整后的${change.target}，后续不得再次执行相对增减。` : `${change.target}：${change.instruction}`,
       source: "confirmed_plan", sourceTurnId: turnId });
   }
   for (const text of plan.preserve) if (![...constraints.values()].some(item => item.text === text)) {
@@ -58,7 +58,7 @@ export function compileConversationImagePrompt(input: {
   const referenceText = references.map(reference => `${reference.version.label}仅作${reference.role}参考：${reference.instruction}`).join("\n");
   const sourceStateText = input.sourceStateVersion && input.sourceStateVersion.id !== base?.id
     ? `设计状态来源为${input.sourceStateVersion.label}，仅继承下面仍有效的要求，不以该参考图替换实际底图。` : "";
-  const currentChange = plan.action === "edit" ? plan.changes.map(change => change.instruction).join("\n") : plan.description;
+  const currentChange = plan.action === "edit" ? plan.changes.map(change => `${change.target}：${change.instruction}`).join("\n") : plan.description;
   const changedKeys = new Set(plan.action === "edit" ? plan.changes.map(change => change.target) : []);
   const keep = state.constraints.filter(constraint => !changedKeys.has(constraint.key)).map(constraint => constraint.text);
   const compiled = compileImageAgentPrompt({ prompt: [currentChange, referenceText, sourceStateText].filter(Boolean).join("\n\n"), keep,

@@ -191,6 +191,63 @@ class ImageConversations054055IsolatedSql(unittest.TestCase):
             if "snapshotJson" in row: row["snapshot"] = json.loads(row.pop("snapshotJson"))
         return values
 
+    def test_standard_activity_covers_legacy_absence_live_turns_and_schema_failure_readonly(self):
+        from deploy import activity_query
+        query = activity_query((HERE / "activity.sql").read_text(encoding="utf-8"))
+        readonly = "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;" + query + "COMMIT;"
+        seed = """WITH conversations AS (
+            INSERT INTO image_conversations(id,owner_user_id,entrypoint,create_request_id,create_request_hash)
+            SELECT gen_random_uuid(),'05300000-0000-4000-8000-000000000001','standalone',state,repeat('a',64)
+            FROM (VALUES ('accepted'),('planning'),('queued'),('generating'),('uncertain'),
+                         ('completed'),('failed'),('cancelled'),('detached')) states(state)
+            RETURNING id,owner_user_id,create_request_id
+        ) INSERT INTO image_conversation_turns(id,conversation_id,owner_user_id,client_request_id,payload_hash,
+            input_payload,accepted_revision,state,planner_status,planner_request_id,planner_dispatch_started_at,
+            planner_lease_token,planner_lease_expires_at,auto_activate)
+        SELECT gen_random_uuid(),id,owner_user_id,create_request_id,repeat('b',64),'{}',1,create_request_id,
+            CASE WHEN create_request_id IN ('planning','cancelled') THEN 'in_flight'
+                 WHEN create_request_id='failed' THEN 'unknown' ELSE 'succeeded' END,
+            create_request_id,now(),
+            CASE WHEN create_request_id IN ('planning','completed') THEN gen_random_uuid() ELSE NULL END,
+            CASE WHEN create_request_id='planning' THEN now()+interval '1 minute'
+                 WHEN create_request_id='completed' THEN now()-interval '1 minute' ELSE NULL END,
+            create_request_id<>'detached'
+        FROM conversations;"""
+        rows = self.execute([
+            {"sql": readonly},
+            {"sql": (ROOT / "server/src/migrations/054_image_conversations.sql").read_text(encoding="utf-8")},
+            {"sql": readonly}, {"sql": seed}, {"kind": "snapshot"}, {"sql": readonly}, {"kind": "snapshot"},
+            {"sql": "UPDATE image_conversation_turns SET state='completed',planner_status='succeeded',planner_lease_token=NULL,planner_lease_expires_at=NULL"},
+            {"sql": readonly}, {"sql": "ALTER TABLE image_conversation_turns DROP COLUMN planner_status CASCADE"},
+            {"sql": readonly},
+        ])
+        for index in range(10): self.assertTrue(rows[index]["ok"], rows[index])
+        def activity(index):
+            result = next(value["rows"][0] for value in rows[index]["values"] if value.get("rows"))
+            return next(iter(result.values()))
+        keys = ["activeTurns", "plannerLeases", "inFlightPlanners", "uncertainTurns"]
+        for index, present in [(0, False), (2, True), (8, True)]:
+            value = activity(index)
+            self.assertIs(value["imageConversationTurnsPresent"], present)
+            self.assertEqual({key: value[key] for key in keys}, dict.fromkeys(keys, 0))
+        live = activity(5)
+        self.assertIs(live["imageConversationTurnsPresent"], True)
+        self.assertEqual({key: live[key] for key in keys}, {"activeTurns": 4, "plannerLeases": 2, "inFlightPlanners": 2, "uncertainTurns": 2})
+        self.assertEqual(rows[4]["snapshot"], rows[6]["snapshot"])
+        self.assertFalse(rows[10]["ok"], rows[10])
+        self.assertEqual(rows[10]["code"], "42703")
+
+    def test_standard_activity_does_not_treat_registered_missing_turns_as_legacy(self):
+        from deploy import activity_query
+        query = activity_query((HERE / "activity.sql").read_text(encoding="utf-8"))
+        rows = self.execute([
+            {"sql": "INSERT INTO schema_migrations(name) VALUES('054_image_conversations.sql')"},
+            {"sql": "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;" + query + "COMMIT;"},
+        ])
+        self.assertTrue(rows[0]["ok"], rows[0])
+        self.assertFalse(rows[1]["ok"], rows[1])
+        self.assertEqual(rows[1]["code"], "42P01")
+
     def test_actual_catalog_five_empty_tables_exact_source_copy_and_single_native_number(self):
         result = subprocess.run(["node", str(HERE / "test_image_conversations_054_055_sql.mjs"), "catalog"], text=True, encoding="utf-8", capture_output=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr); self.assertEqual(json.loads(result.stdout), CATALOG)

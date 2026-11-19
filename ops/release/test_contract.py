@@ -257,10 +257,60 @@ class DeploymentTests(unittest.TestCase):
             with self.assertRaises(contract.Rejected): contract.prepare_compatibility_assets(source, destination)
 
     def test_idle_gate_preserves_paused_tasks_but_rejects_inflight_work(self):
-        snapshot = {"waitingTasks": 0, "processingTasks": 0, "submittedWaitingTasks": 0, "processingChatRequests": 0, "processingAnalysisPreviews": 0, "optimizingPromptCompilations": 0, "admittingBatches": 0, "pendingAssetThumbnails": 0, "pausedTasks": 7}
+        snapshot = {"waitingTasks": 0, "processingTasks": 0, "submittedWaitingTasks": 0, "processingChatRequests": 0, "processingAnalysisPreviews": 0, "optimizingPromptCompilations": 0, "admittingBatches": 0, "pendingAssetThumbnails": 0, "pausedTasks": 7,
+                    "imageConversationTurnsPresent": True, "activeTurns": 0, "plannerLeases": 0, "inFlightPlanners": 0, "uncertainTurns": 0}
         contract.assert_idle(snapshot)
         snapshot["processingChatRequests"] = 1
         with self.assertRaises(contract.Rejected): contract.assert_idle(snapshot)
+
+
+class ConversationActivityContracts(unittest.TestCase):
+    def snapshot(self):
+        return {**{key: 0 for key in ["waitingTasks", "processingTasks", "submittedWaitingTasks", "processingChatRequests",
+                                      "processingAnalysisPreviews", "optimizingPromptCompilations", "admittingBatches",
+                                      "pendingAssetThumbnails", "pausedTasks", "activeTurns", "plannerLeases", "inFlightPlanners", "uncertainTurns"]},
+                "imageConversationTurnsPresent": True}
+
+    def test_idle_accepts_existing_empty_conversations_and_explicit_legacy_absence(self):
+        for present in [True, False]:
+            value = self.snapshot(); value["imageConversationTurnsPresent"] = present
+            contract.assert_idle(value)
+
+    def test_each_conversation_execution_counter_blocks_idle(self):
+        for field in ["activeTurns", "plannerLeases", "inFlightPlanners"]:
+            with self.subTest(field=field):
+                value = self.snapshot(); value[field] = 1
+                with self.assertRaisesRegex(contract.Rejected, "INFLIGHT_WORK_REQUIRES_DRAIN"):
+                    contract.assert_idle(value)
+
+    def test_uncertain_conversation_refuses_immediately_even_when_other_work_is_active(self):
+        value = self.snapshot(); value.update(uncertainTurns=1, processingTasks=1)
+        with self.assertRaisesRegex(contract.Rejected, "UNCERTAIN_CONVERSATION_REQUIRES_MANUAL_REVIEW_NO_MUTATION"):
+            contract.assert_idle(value)
+
+    def test_conversation_counts_cannot_be_missing_or_coerced(self):
+        for field in ["activeTurns", "plannerLeases", "inFlightPlanners", "uncertainTurns"]:
+            for invalid in [None, True, -1, 0.0, "0"]:
+                with self.subTest(field=field, invalid=invalid):
+                    value = self.snapshot(); value[field] = invalid
+                    with self.assertRaisesRegex(contract.Rejected, "ACTIVITY_COUNT_INVALID"):
+                        contract.assert_idle(value)
+            value = self.snapshot(); del value[field]
+            with self.assertRaisesRegex(contract.Rejected, "ACTIVITY_COUNT_INVALID"):
+                contract.assert_idle(value)
+
+    def test_legacy_absence_must_be_explicit_and_have_no_conversation_counts(self):
+        for invalid in [None, 0, 1, "false"]:
+            value = self.snapshot(); value["imageConversationTurnsPresent"] = invalid
+            with self.assertRaisesRegex(contract.Rejected, "CONVERSATION_TABLE_PRESENCE_INVALID"):
+                contract.assert_idle(value)
+        value = self.snapshot(); del value["imageConversationTurnsPresent"]
+        with self.assertRaisesRegex(contract.Rejected, "CONVERSATION_TABLE_PRESENCE_INVALID"):
+            contract.assert_idle(value)
+        for field in ["activeTurns", "plannerLeases", "inFlightPlanners", "uncertainTurns"]:
+            value = self.snapshot(); value.update(imageConversationTurnsPresent=False); value[field] = 1
+            with self.assertRaisesRegex(contract.Rejected, "ABSENT_CONVERSATION_TABLE_HAS_ACTIVITY"):
+                contract.assert_idle(value)
 
 
 if __name__ == "__main__": unittest.main()

@@ -72,7 +72,8 @@ class FakeOperator(operator.ImageConversations054055):
             if self.failure == "after-sql-drift" or self.failure == "restart-drift" and label == "054-055-original-verified":
                 after["mai27OtherModels"]["sha256"] = "changed"
             return after
-        return {key: 0 for key in ["waitingTasks", "processingTasks", "submittedWaitingTasks", "processingChatRequests", "processingAnalysisPreviews", "optimizingPromptCompilations", "admittingBatches", "pendingAssetThumbnails", "pausedTasks"]}
+        return {key: 0 for key in ["waitingTasks", "processingTasks", "submittedWaitingTasks", "processingChatRequests", "processingAnalysisPreviews", "optimizingPromptCompilations", "admittingBatches", "pendingAssetThumbnails", "pausedTasks",
+                                 "activeTurns", "plannerLeases", "inFlightPlanners", "uncertainTurns"]} | {"imageConversationTurnsPresent": True}
 
     def inventory(self, label): return copy.deepcopy(self.baseline["containers"])
     def application_configuration_unchanged(self, baseline): self.events.append("configuration-check")
