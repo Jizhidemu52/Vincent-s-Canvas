@@ -90,6 +90,8 @@ function harness(options: { tasks?: Data[]; savedSession?: Data; upload?: (url: 
                 const localTasks = (options.tasks || []).filter(task => task.ownerId === configuration.ownerId && task.projectId === configuration.projectId);
                 const controller = {
                     ...configuration,
+                    needsRefresh: () => localTasks.some(task => ["processing", "waiting"].includes(task.status)),
+                    async refreshAnnotations() {},
                     async load() { configuration.onChange([...localTasks]); },
                     async refreshAll() { if (serverOwner !== configuration.ownerId) throw Object.assign(new Error("登录身份已变化"), { code: "SESSION_CHANGED" }); configuration.onChange([...localTasks]); },
                     async action() { configuration.onChange([...localTasks]); },
@@ -142,6 +144,22 @@ function button(tree: ReactElement<any>[], label: string) {
     if (!element) throw new Error(`Missing fixture button: ${label}`);
     return element;
 }
+
+test("typing merges the latest draft without repeatedly persisting document image bytes", async () => {
+    const subject = harness();
+    try {
+        await subject.settle();
+        const dataUrl = "data:image/png;base64," + "A".repeat(1024 * 1024);
+        subject.panel().onChange({ documents: [{ id: "document", figures: [{ id: "figure", dataUrl }] }] });
+        for (let index = 0; index < 40; index++) subject.panel().onChange({ prompt: `草稿 ${index}` });
+        await subject.panel().onSave();
+        expect(subject.panel().session.prompt).toBe("草稿 39");
+        const sessions = subject.writes.filter(write => write.key.endsWith(":session:media-v1"));
+        expect(sessions).toHaveLength(1);
+        expect(JSON.stringify(sessions[0].value)).not.toContain(dataUrl);
+        expect(subject.writes.filter(write => JSON.stringify(write.value).includes(dataUrl))).toHaveLength(1);
+    } finally { subject.dispose(); }
+});
 
 describe("conversation result projection identity", () => {
     const version = { id: "81000000-0000-4000-8000-000000000003", conversationId: "81000000-0000-4000-8000-000000000001", assetId: "11111111-1111-4111-8111-111111111111", turnId: "81000000-0000-4000-8000-000000000006" };

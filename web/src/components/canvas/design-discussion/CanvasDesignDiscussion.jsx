@@ -15,6 +15,7 @@ import { activeStatuses, designResultNodeId, designTaskMetadata, taskLabel } fro
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { readImageFiles } from "./studio-media.mjs";
 import { continueDesignRecord } from "./design-record.mjs";
+import { createDesignSessionPersistence } from "./session-persistence.mjs";
 import "./studio.css";
 import "./canvas-discussion.css";
 
@@ -56,6 +57,7 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
     const [installationRetry, setInstallationRetry] = useState(0);
     const controller = useRef(null);
     const store = useMemo(() => createWorkspaceStorage("design_discussion"), [identityKey]);
+    const mediaStore = useMemo(() => createWorkspaceStorage("design_discussion_media"), [identityKey]);
     const api = useMemo(() => createApi(globalThis.fetch.bind(globalThis), { projectId }), [projectId]);
     const scope = useMemo(() => ({ active: false, ownerId: "", adding: new Set(), installed: new Set(), failed: new Set(), pending: new Map(), locate: [], initialSelectionKey: null, ignoredSelectionKey: null }), [projectId, identityKey, connection]);
     const scopeRef = useRef(scope);
@@ -66,13 +68,13 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
     nodesRef.current = nodes;
     const visibleRef = useRef(visible);
     visibleRef.current = visible;
+    const sessionPersistence = useRef(null);
     const setPanelVisible = useCallback(value => {
         const next = typeof value === "function" ? value(visibleRef.current) : value;
         visibleRef.current = next;
         setVisible(next);
+        if (!next) void sessionPersistence.current?.flush().catch(error => setNotice("讨论保存失败：" + error.message));
     }, []);
-    const saveQueue = useRef(Promise.resolve());
-    const sessionStore = useRef(null);
     const selectionSequence = useRef(0);
     const isCurrent = useCallback(() => {
         const user = useUserStore.getState();
@@ -81,7 +83,9 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
     const clearSession = useCallback(() => {
         const empty = newStudioSession();
         sessionRef.current = empty;
-        controller.current = null; sessionStore.current = null;
+        controller.current = null;
+        void sessionPersistence.current?.dispose().catch(() => {});
+        sessionPersistence.current = null;
         selectionSequence.current++;
         setReady(false); setOwnerId(""); setCatalog(null); setTasks([]); setItems([]); setSession(empty);
         setInstallationErrors({}); setTaskView("closed");
@@ -91,7 +95,7 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
         clearSession();
         const account = useUserStore.getState().user?.id;
         setNotice(mountedOwner.current && account && account !== mountedOwner.current ? "员工已切换，请重新进入画布后使用设计讨论。" : "");
-        return () => { scope.active = false; controller.current = null; sessionStore.current = null; selectionSequence.current++; };
+        return () => { scope.active = false; controller.current = null; void sessionPersistence.current?.dispose().catch(() => {}); sessionPersistence.current = null; selectionSequence.current++; };
     }, [scope, clearSession]);
     const reportError = useCallback(error => {
         if (!isCurrent()) return;
@@ -104,12 +108,7 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
         if (next.references !== sessionRef.current.references) selectionSequence.current++;
         sessionRef.current = next;
         setSession(next);
-        if (sessionStore.current) {
-            const snapshot = structuredClone(next);
-            const target = sessionStore.current;
-            saveQueue.current = saveQueue.current.catch(() => {}).then(() => target.setItem("session", snapshot));
-            saveQueue.current.catch(error => { if (isCurrent()) setNotice("讨论保存失败：" + error.message); });
-        }
+        sessionPersistence.current?.schedule(next);
     }, [isCurrent]);
     const assertWritable = () => {
         if (!isCurrent()) throw new Error("当前画布或员工会话已变化，未继续操作。");
@@ -132,8 +131,8 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
 
     useEffect(() => {
         let alive = true;
-        let timer;
         let activeRuntime;
+        let persistence;
         const connect = async () => {
             const [identity, models] = await Promise.all([api.session(), api.catalog()]);
             if (!identity?.user?.id || identity.user.status !== "active") throw new Error("请重新登录后使用设计讨论。");
@@ -144,7 +143,8 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
             mountedOwner.current = owner;
             scope.ownerId = owner;
             const partitioned = partition(store, `${owner}:${encodeURIComponent(projectId)}:`);
-            const saved = await partitioned.getItem("session");
+            persistence = createDesignSessionPersistence(partitioned, partition(mediaStore, `${owner}:${encodeURIComponent(projectId)}:`), error => { if (alive && isCurrent()) setNotice("讨论保存失败：" + error.message); });
+            const saved = await persistence.load();
             if (saved) {
                 saved.references = await Promise.all(saved.references.map(restoreReference));
                 if (saved.proposalBatch) saved.proposalBatch.references = await Promise.all(saved.proposalBatch.references.map(restoreReference));
@@ -153,18 +153,31 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
             if (!alive || !isCurrent()) return;
             setOwnerId(owner); setCatalog(models);
             const restored = saved || newStudioSession();
-            sessionRef.current = restored; setSession(restored); sessionStore.current = partitioned;
+            sessionRef.current = restored; setSession(restored); sessionPersistence.current = persistence;
             const runtime = createTaskController({ api, ownerId: owner, projectId, assertWritable, imageConversationsEnabled: deploymentFeatures.imageConversationsEnabled, storage: partition(store, `${owner}:${encodeURIComponent(projectId)}:task:`), onChange: value => { if (alive && isCurrent()) setTasks(value); } });
             activeRuntime = runtime;
             await runtime.load();
             if (!alive || !isCurrent()) return;
             controller.current = runtime; setReady(true);
-            timer = setInterval(() => { if (isCurrent()) runtime.refreshAll().catch(reportError); }, 3000);
             await runtime.refreshAll();
         };
         connect().catch(error => { if (alive) reportError(error); });
-        return () => { alive = false; clearInterval(timer); activeRuntime?.dispose?.(); controller.current = null; sessionStore.current = null; };
-    }, [api, projectId, store, scope, isCurrent, reportError]);
+        const flush = () => { void persistence?.flush().catch(error => { if (alive && isCurrent()) setNotice("讨论保存失败：" + error.message); }); };
+        window.addEventListener("pagehide", flush);
+        window.addEventListener("beforeunload", flush);
+        return () => { alive = false; window.removeEventListener("pagehide", flush); window.removeEventListener("beforeunload", flush); void persistence?.dispose().catch(() => {}); activeRuntime?.dispose?.(); controller.current = null; };
+    }, [api, projectId, store, mediaStore, scope, isCurrent, reportError]);
+
+    useEffect(() => {
+        const runtime = controller.current;
+        if (!ready || !isCurrent() || !runtime?.needsRefresh()) return;
+        const timer = setInterval(() => { if (isCurrent()) runtime.refreshAll().catch(reportError); }, 3000);
+        return () => clearInterval(timer);
+    }, [tasks, ready, isCurrent, reportError]);
+
+    useEffect(() => {
+        if (expanded && ready && isCurrent()) void controller.current?.refreshAnnotations().catch(reportError);
+    }, [expanded, ready, isCurrent, reportError]);
 
     useEffect(() => {
         if (!ready || !isCurrent()) return;
@@ -373,6 +386,6 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
         </div>
         {notice && <div className="dd-notice" role="status"><span>{notice}</span><button aria-label="关闭设计讨论提示" onClick={() => setNotice("")}><X size={14} /></button></div>}
         {visible && !ready && <div className="dd-connect"><span>设计讨论尚未连接。</span><button onClick={() => setConnection(value => value + 1)}>重新连接</button></div>}
-        <StudioPanel key={`${projectId}:${identityKey}:${connection}`} visible={visible} session={isCurrent() ? session : newStudioSession()} onChange={updateSession} items={isCurrent() ? items : []} onChoose={async references => { assertWritable(); updateSession({ discussionFocus: null, references: references.map(reference => ({ ...reference, role: sessionRef.current.references.find(item => item.id === reference.id)?.role || "auto" })) }); }} onImport={async files => addImages(await readImageFiles(files))} onFigures={async (figures, name) => { try { await addImages(figures.map(figure => ({ title: `${name} · ${figure.label}`, image: figure.dataUrl || figure.image || figure.url })), false); } catch (error) { reportError(error); } }} api={panelApi} ownerId={isCurrent() ? ownerId : ""} catalog={isCurrent() ? catalog : null} ready={isCurrent() && ready && writable.current} brands={brands} onSave={async () => { assertWritable(); await saveQueue.current; assertWritable(); }} onSubmitBatch={submitBatch} onClose={() => setPanelVisible(false)} onNotice={message => { if (isCurrent()) setNotice(message); }} tasks={scopedTasks} onLocateResult={(task, index) => { if (isCurrent()) onLocate([resultNodeId(nodesRef.current, task, index)]); }} />
+        <StudioPanel key={`${projectId}:${identityKey}:${connection}`} visible={visible} session={isCurrent() ? session : newStudioSession()} onChange={updateSession} items={isCurrent() ? items : []} onChoose={async references => { assertWritable(); updateSession({ discussionFocus: null, references: references.map(reference => ({ ...reference, role: sessionRef.current.references.find(item => item.id === reference.id)?.role || "auto" })) }); }} onImport={async files => addImages(await readImageFiles(files))} onFigures={async (figures, name) => { try { await addImages(figures.map(figure => ({ title: `${name} · ${figure.label}`, image: figure.dataUrl || figure.image || figure.url })), false); } catch (error) { reportError(error); } }} api={panelApi} ownerId={isCurrent() ? ownerId : ""} catalog={isCurrent() ? catalog : null} ready={isCurrent() && ready && writable.current} brands={brands} onSave={async () => { assertWritable(); await sessionPersistence.current?.flush(); assertWritable(); }} onSubmitBatch={submitBatch} onClose={() => setPanelVisible(false)} onNotice={message => { if (isCurrent()) setNotice(message); }} tasks={scopedTasks} onLocateResult={(task, index) => { if (isCurrent()) onLocate([resultNodeId(nodesRef.current, task, index)]); }} />
     </div>;
 }

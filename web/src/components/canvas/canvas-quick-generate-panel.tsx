@@ -73,7 +73,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     const imageDrop = useImageDrop({ scopeKey: referenceScopeKey, disabled: !open || running || referencesLoading || !onAddReferenceFiles, onFiles: files => onAddReferenceFiles?.(files) });
     const referenceBusy = referencesLoading || imageDrop.reading;
     const referenceValidation = validateImageReferences(modelOptionName(availableModel || model), references, profile);
-    const sizeError = imageReferenceSizeIsAutomatic(profile, references.length) ? "" : imageModelSettingsError(settings.size, profile);
+    const sizeError = imageReferenceSizeIsAutomatic(profile, references.length) ? "" : imageModelSettingsError(settings.size, profile, imageOptions);
     const updatePrompt = (value: string) => { promptRef.current = value; setPrompt(value); onPromptChange?.(value); };
     const candidates = useMemo(() => quickMentionImages(references, mentionImages), [references, mentionImages]);
     useEffect(() => setMentionError(""), [referenceScopeKey, references, model]);

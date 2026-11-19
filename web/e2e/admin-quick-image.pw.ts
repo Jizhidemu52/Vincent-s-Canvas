@@ -235,7 +235,8 @@ for (const known of [true, false]) test(`${known ? "known-upstream" : "unknown-s
         expect(f.recoveries).toEqual([[...f.tasks.values()][0].id]);
     } else {
         await expect(panel.getByRole("button", { name: "恢复原任务查询", exact: true })).toHaveCount(0);
-        await expect(panel.getByText(/提交结果待核查，暂无法恢复上游查询/)).toBeVisible();
+        await expect(panel.getByRole("alert")).toHaveText("暂时无法获取生成结果，系统会继续更新。");
+        await expect(panel.getByRole("status")).toContainText(`请求编号：${f.tests[0].input.requestId}`);
         await panel.getByRole("button", { name: /查询原测试任务$/ }).click();
         expect(f.recoveries).toEqual([]);
     }

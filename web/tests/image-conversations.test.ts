@@ -107,3 +107,27 @@ test("paged server history reads opaque cursors and rejects loops instead of sil
     expect(cursors).toEqual([undefined, "opaque/cursor"]);
     await expect(allConversationPages(async () => ({ items: [], nextCursor: "same" }))).rejects.toThrow("游标重复");
 });
+
+test("turn history reads every page with opaque cursors, owner headers and no detail GETs", async () => {
+    const calls: Array<{ path: string; init: RequestInit }> = [];
+    const last = { ...conversationTurn("completed"), id: "82000000-0000-4000-8000-000000000001" };
+    const api = client(async (path, init) => {
+        calls.push({ path, init });
+        return ok({ items: [path.includes("cursor=") ? last : conversationTurn("completed")], nextCursor: path.includes("cursor=") ? null : "opaque /页?1" });
+    });
+    const signal = new AbortController().signal;
+    expect((await allConversationPages(cursor => api.turns(ids.conversation, cursor, signal))).map(turn => turn.id)).toEqual([ids.turn, last.id]);
+    expect(calls.map(call => call.path)).toEqual([
+        `/api/image-conversations/${ids.conversation}/turns?limit=100`,
+        `/api/image-conversations/${ids.conversation}/turns?limit=100&cursor=${encodeURIComponent("opaque /页?1")}`,
+    ]);
+    expect(calls.every(call => !call.init.method && !call.init.body && call.init.signal === signal)).toBe(true);
+    expect(calls[0].init.headers).toMatchObject({ "X-Canvas-Owner-Id": ids.owner });
+});
+
+test("turn pages reject crossed conversation identity and malformed public records", async () => {
+    const crossed = client(async () => ok({ items: [{ ...conversationTurn(), conversationId: ids.root }], nextCursor: null }));
+    await expect(crossed.turns(ids.conversation)).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    const malformed = client(async () => ok({ items: [{ ...conversationTurn(), state: "invented" }], nextCursor: null }));
+    await expect(malformed.turns(ids.conversation)).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+});

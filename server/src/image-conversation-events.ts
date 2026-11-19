@@ -10,6 +10,7 @@ import { toPublicImageConversationData } from "./image-conversation-public";
 export class ImageConversationEvents {
   private readonly emitter = new EventEmitter();
   private readonly closures = new Set<() => void>();
+  private readonly readers = new WeakMap<Database, Map<string, ConversationEventReader>>();
   private closed = false;
   constructor() { this.emitter.setMaxListeners(0); }
   wake(conversationId: string) { this.emitter.emit(conversationId); }
@@ -18,6 +19,19 @@ export class ImageConversationEvents {
     this.emitter.on(conversationId, wake);
     this.closures.add(close);
     return () => { this.emitter.off(conversationId, wake); this.closures.delete(close); };
+  }
+  subscribeStream(db: Database, ownerId: string, conversationId: string, pollMs: number, subscriber: EventSubscriber) {
+    if (this.closed) { subscriber.close(); return () => {}; }
+    let readers = this.readers.get(db);
+    if (!readers) { readers = new Map(); this.readers.set(db, readers); }
+    const key = JSON.stringify([ownerId, conversationId, pollMs]);
+    let reader = readers.get(key);
+    if (!reader) {
+      const registry = readers;
+      reader = new ConversationEventReader(db, ownerId, conversationId, pollMs, this, () => registry.delete(key));
+      readers.set(key, reader);
+    }
+    return reader.subscribe(subscriber);
   }
   close() {
     this.closed = true;
@@ -55,26 +69,94 @@ export async function readConversationEvents(db: Database, ownerId: string, conv
     return { events, latestEventSeq: latest };
   });
 }
+type EventBatch = Awaited<ReturnType<typeof readConversationEvents>>;
+type EventSubscriber = { cursor: number; receive(batch: EventBatch): void; fail(error: unknown): void; close(): void };
+
+class ConversationEventReader {
+  private readonly subscribers = new Set<EventSubscriber>();
+  private readonly unsubscribe: () => void;
+  private poll: ReturnType<typeof setInterval> | undefined;
+  private reading = false;
+  private dirty = false;
+  private closed = false;
+  constructor(private readonly db: Database, private readonly ownerId: string, private readonly conversationId: string,
+    private readonly pollMs: number, events: ImageConversationEvents, private readonly onEmpty: () => void) {
+    this.unsubscribe = events.subscribe(conversationId, () => this.wake(), () => this.close());
+  }
+  subscribe(subscriber: EventSubscriber) {
+    this.subscribers.add(subscriber);
+    this.wake();
+    return () => { this.subscribers.delete(subscriber); if (!this.subscribers.size) this.close(); };
+  }
+  private wake() {
+    if (this.closed) return;
+    this.dirty = true;
+    if (!this.reading) void this.read();
+  }
+  private close() {
+    if (this.closed) return;
+    this.closed = true;
+    clearInterval(this.poll);
+    this.unsubscribe();
+    this.onEmpty();
+    for (const subscriber of [...this.subscribers]) subscriber.close();
+    this.subscribers.clear();
+  }
+  private async read() {
+    this.reading = true;
+    try {
+      do {
+        this.dirty = false;
+        const subscribers = [...this.subscribers];
+        let cursor = Infinity;
+        for (const subscriber of subscribers) cursor = Math.min(cursor, subscriber.cursor);
+        let batch: EventBatch;
+        try { batch = await readConversationEvents(this.db, this.ownerId, this.conversationId, cursor); }
+        catch (error) {
+          if (this.closed) return;
+          if (error instanceof ImageConversationError && (error.status === 400 || error.status === 410)) {
+            for (const subscriber of subscribers) if (this.subscribers.has(subscriber) && subscriber.cursor === cursor) subscriber.fail(error);
+            this.dirty = this.subscribers.size > 0;
+            continue;
+          }
+          throw error;
+        }
+        if (this.closed) return;
+        for (const subscriber of subscribers) {
+          if (!this.subscribers.has(subscriber)) continue;
+          if (subscriber.cursor > batch.latestEventSeq) {
+            subscriber.fail(new ImageConversationError(400, "VALIDATION_ERROR", "事件序号不能超过当前会话"));
+            continue;
+          }
+          try { subscriber.receive(batch); } catch (error) { subscriber.fail(error); }
+        }
+        if (this.closed) return;
+        if (!this.poll) { this.poll = setInterval(() => this.wake(), this.pollMs); this.poll.unref(); }
+        if ([...this.subscribers].some(subscriber => subscriber.cursor < batch.latestEventSeq)) this.dirty = true;
+      } while (this.dirty && !this.closed);
+    } catch (error) {
+      for (const subscriber of [...this.subscribers]) subscriber.fail(error);
+    } finally { this.reading = false; }
+  }
+}
 export async function streamConversationEvents(input: {
   db: Database; events: ImageConversationEvents; ownerId: string; conversationId: string;
   afterSeq: number; response: Response; pollMs?: number; lifetimeMs?: number;
 }) {
   const { response } = input;
-  let cursor = input.afterSeq;
   let ended = false;
   let opened = false;
-  let dirty = false;
-  let reading = false;
+  const initial = Promise.withResolvers<void>();
   let unsubscribe = () => {};
-  let poll: ReturnType<typeof setInterval> | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let deadline: ReturnType<typeof setTimeout> | undefined;
   const cleanup = () => {
     if (ended) return;
     ended = true;
-    clearInterval(poll); clearInterval(heartbeat); clearTimeout(deadline);
+    clearInterval(heartbeat); clearTimeout(deadline);
     unsubscribe();
     response.off("close", cleanup); response.off("error", cleanup);
+    initial.resolve();
   };
   const close = () => { cleanup(); if (!response.writableEnded) response.end(); };
   const write = (frame: string) => {
@@ -82,37 +164,32 @@ export async function streamConversationEvents(input: {
     if (!response.write(frame)) { cleanup(); response.destroy(); return false; }
     return true;
   };
-  const read = async () => {
-    if (ended) return;
-    if (reading) { dirty = true; return; }
-    reading = true;
-    try {
-      do {
-        dirty = false;
-        const batch = await readConversationEvents(input.db, input.ownerId, input.conversationId, cursor);
-        if (ended) return;
-        if (!opened) {
-          response.status(200).set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "private, no-store", "X-Accel-Buffering": "no" });
-          response.flushHeaders(); opened = true;
-          write(": connected\n\n");
-        }
-        for (const event of batch.events) {
-          if (!write(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(toPublicImageConversationData(event))}\n\n`)) return;
-          cursor = event.seq;
-        }
-        if (cursor < batch.latestEventSeq) dirty = true;
-      } while (dirty && !ended);
-    } finally { reading = false; }
+  const subscriber: EventSubscriber = {
+    cursor: input.afterSeq,
+    receive(batch) {
+      if (ended) return;
+      if (!opened) {
+        response.status(200).set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "private, no-store", "X-Accel-Buffering": "no" });
+        response.flushHeaders(); opened = true;
+        if (!write(": connected\n\n")) return;
+      }
+      for (const event of batch.events) {
+        if (event.seq <= subscriber.cursor) continue;
+        if (!write(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(toPublicImageConversationData(event))}\n\n`)) return;
+        subscriber.cursor = event.seq;
+      }
+      initial.resolve();
+    },
+    fail(error) { if (opened) close(); else { initial.reject(error); cleanup(); } },
+    close,
   };
-  const wake = () => { dirty = true; if (opened) void read().catch(close); };
   response.once("close", cleanup); response.once("error", cleanup);
-  unsubscribe = input.events.subscribe(input.conversationId, wake, close);
+  unsubscribe = input.events.subscribeStream(input.db, input.ownerId, input.conversationId, input.pollMs ?? 2_000, subscriber);
   if (ended) { unsubscribe(); return; }
-  try { await read(); }
+  try { await initial.promise; }
   catch (error) { cleanup(); throw error; }
   if (ended) return;
-  poll = setInterval(wake, input.pollMs ?? 2_000);
   heartbeat = setInterval(() => write(": heartbeat\n\n"), 15_000);
   deadline = setTimeout(close, input.lifetimeMs ?? 5 * 60_000);
-  poll.unref(); heartbeat.unref(); deadline.unref();
+  heartbeat.unref(); deadline.unref();
 }

@@ -92,7 +92,9 @@ export class PromptRecipeStore {
         if (existing.input_hash !== input.inputHash) throw new PromptOptimizationError("PROMPT_REQUEST_CHANGED", "同一请求编号的优化输入已改变，请新建请求", 409);
         return { id: existing.id, execute: false };
       }
-      const cached = (await client.query<CompilationRow>("SELECT * FROM prompt_compilations WHERE user_id=$1 AND input_hash=$2 AND reused_from_id IS NULL AND status IN ('success','optimizing','uncertain') ORDER BY created_at DESC LIMIT 1", [input.userId, input.inputHash])).rows[0];
+      let cached: CompilationRow | undefined = (await client.query<CompilationRow>("SELECT * FROM prompt_compilations WHERE user_id=$1 AND input_hash=$2 AND reused_from_id IS NULL AND status IN ('success','optimizing') ORDER BY created_at DESC LIMIT 1", [input.userId, input.inputHash])).rows[0];
+      if (cached && this.expired(cached)) cached = await this.expire(client, cached.id);
+      if (cached?.status !== "success" && cached?.status !== "optimizing") cached = undefined;
       const id = randomUUID();
       const inserted = await client.query<CompilationRow>("INSERT INTO prompt_compilations(id,user_id,request_id,input_hash,recipe_key,recipe_version_id,status,reused_from_id,details,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(user_id,request_id) DO NOTHING RETURNING *", [id, input.userId, input.requestId, input.inputHash, input.recipeKey, input.recipeVersionId, cached?.status ?? "optimizing", cached?.id ?? null, JSON.stringify(input.details), this.clock().toISOString()]);
       if (!inserted.rows.length) {
@@ -108,20 +110,36 @@ export class PromptRecipeStore {
       await client.lock(`prompt-result:${id}`);
       const row = (await client.query<CompilationRow>("SELECT * FROM prompt_compilations WHERE id=$1", [id])).rows[0];
       if (!row || row.reused_from_id || row.status !== "optimizing") return;
+      if (this.expired(row)) { await this.finishExpired(client, row); return; }
       const details = { ...json<CompilationDetails>(row.details), ...patch, completedAt: this.clock().toISOString() };
       await client.query("UPDATE prompt_compilations SET status=$1,details=$2 WHERE id=$3 AND status='optimizing'", [status, JSON.stringify(details), id]);
     });
   }
+  private expired(row: CompilationRow) {
+    return row.status === "optimizing" && this.clock().getTime() - Date.parse(row.created_at) > 200_000;
+  }
+  private async finishExpired(client: PromptSql, row: CompilationRow) {
+    const details: CompilationDetails = { ...json<CompilationDetails>(row.details), optimized: false, errorCode: "PROMPT_PREPARATION_TIMEOUT",
+      message: "提示词准备超时，未提交生成。", upstreamOutcome: "unknown", completedAt: this.clock().toISOString() };
+    return (await client.query<CompilationRow>("UPDATE prompt_compilations SET status='failed',details=$1 WHERE id=$2 AND status='optimizing' RETURNING *", [JSON.stringify(details), row.id])).rows[0] ?? row;
+  }
+  private async expire(client: PromptSql, id: string): Promise<CompilationRow | undefined> {
+    await client.lock(`prompt-result:${id}`);
+    const row = (await client.query<CompilationRow>("SELECT * FROM prompt_compilations WHERE id=$1", [id])).rows[0];
+    return row && this.expired(row) ? this.finishExpired(client, row) : row;
+  }
   private async present(row: CompilationRow): Promise<AdminPromptCompilation> {
-    const source = row.reused_from_id ? (await this.database.query<CompilationRow>("SELECT * FROM prompt_compilations WHERE id=$1", [row.reused_from_id])).rows[0] : row;
+    let source: CompilationRow | undefined = row.reused_from_id ? (await this.database.query<CompilationRow>("SELECT * FROM prompt_compilations WHERE id=$1", [row.reused_from_id])).rows[0] : row;
+    if (source && this.expired(source)) {
+      const sourceId = source.id;
+      source = await this.database.transaction(client => this.expire(client, sourceId));
+    }
     const details = json<CompilationDetails>(source?.details ?? row.details);
-    let status = source?.status ?? row.status;
-    const expired = status === "optimizing" && this.clock().getTime() - Date.parse(source?.created_at ?? row.created_at) > 200_000;
-    if (expired) status = "uncertain";
-    return { ...details, id: row.id, userId: row.user_id, requestId: row.request_id, inputHash: row.input_hash,
-      recipeKey: row.recipe_key, recipeVersionId: row.recipe_version_id, status, reusedFromId: row.reused_from_id,
+    const status = source?.status ?? row.status;
+    return { ...details, id: row.id, userId: row.user_id, requestId: row.request_id, inputHash: row.input_hash, status: status === "uncertain" ? "failed" : status,
+      recipeKey: row.recipe_key, recipeVersionId: row.recipe_version_id, reusedFromId: row.reused_from_id,
       cacheHit: Boolean(row.reused_from_id), createdAt: row.created_at,
-      ...(expired ? { errorCode: "PROMPT_SUBMISSION_UNCERTAIN", message: "提示词优化状态待核查，不会自动重新提交；请联系管理员核查原请求" } : {}),
+      ...(status === "uncertain" ? { optimized: false, errorCode: "PROMPT_PREPARATION_FAILED", message: "提示词准备失败，未提交生成。", upstreamOutcome: "unknown" as const } : {}),
     };
   }
   async getCompilation(id: string, userId?: string) {

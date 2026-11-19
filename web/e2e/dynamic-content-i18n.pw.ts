@@ -231,8 +231,8 @@ test("image details translate only after expansion and retain the original exclu
     await page.evaluate(async value => {
         const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
         const store = createWorkspaceStorage("generation_drafts");
-        const settings = await store.getItem<Record<string, unknown>>("image-generation:settings");
-        await store.setItem("image-generation:settings", { ...settings, imageOptions: value });
+        const settings = await store.getItem<Record<string, unknown>>("image-edit:settings");
+        await store.setItem("image-edit:settings", { ...settings, imageOptions: value });
     }, imageOptions);
     await page.reload();
     await page.getByRole("textbox", { name: "图像提示词", exact: true }).fill("未提交中文草稿：保留纽扣");
@@ -251,7 +251,7 @@ test("image details translate only after expansion and retain the original exclu
     await switchLanguage(page, "zh-CN");
     expect(await page.evaluate(async () => {
         const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
-        return (await createWorkspaceStorage("generation_drafts").getItem<Record<string, unknown>>("image-generation:settings"))?.imageOptions;
+        return (await createWorkspaceStorage("generation_drafts").getItem<Record<string, unknown>>("image-edit:settings"))?.imageOptions;
     })).toBe(imageOptions);
     await expect(page.getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("未提交中文草稿：保留纽扣");
     expect(api.submissions).toEqual([]); expect(api.batchSubmissions).toEqual([]);

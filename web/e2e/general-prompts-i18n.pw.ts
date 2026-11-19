@@ -91,8 +91,14 @@ test("each English built-in target fills the same English prompt without generat
         await page.locator(`[data-general-prompt-id="${item.id}"]`).getByRole("button", { name: /^Use in / }).click();
         await expect.poll(() => new URL(page.url()).pathname).toBe(target === "video" ? "/video" : "/image");
         const prompt = page.locator("textarea").filter({ visible: true }).first();
+        if (target === "image-edit") {
+            await expect(page.getByRole("dialog")).toContainText("Replace the current draft?");
+            await expect(prompt).toHaveValue(englishItem(generalPromptTemplates.find(value => value.targetTool === "image-generation")!).prompt);
+            expect(api.submissions).toEqual([]);
+            await page.getByRole("button", { name: "Replace draft", exact: true }).click();
+        }
         await expect(prompt).toHaveValue(item.prompt);
-        expect(new URL(page.url()).searchParams.get("tool")).toBe(target === "image-edit" ? "image-edit" : null);
+        await expect.poll(() => new URL(page.url()).searchParams.get("tool")).toBe(target === "video" ? null : "image-edit");
         await expect.poll(() => new URL(page.url()).searchParams.has("prompt")).toBe(false);
     }
     expect(api.submissions).toEqual([]); expect(api.batchSubmissions).toEqual([]);

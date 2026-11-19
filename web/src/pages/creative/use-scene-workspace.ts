@@ -15,6 +15,7 @@ import { validateImageReferences } from "@/lib/image-reference-policy";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { workbenchSubmissions } from "@/lib/submission-gate";
 import { completedTaskDurationMs } from "@/lib/completed-task-duration";
+import { generationErrorMessage } from "@/lib/generation-feedback";
 import { requestEdit, requestGeneration } from "@/services/api/image";
 import { getImageBlob, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { freezeLocalInput, restoreLocalInput } from "@/services/generation-local-inputs";
@@ -783,11 +784,15 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             }
             const compilation = original.compilation;
             if (compilation?.status === "failed") {
-                await commit({ ...currentResult, status: "failed", failureKind: "local", compilationId: undefined, error: compilation.message || "原提示词优化已失败，未创建图片任务。" });
+                await commit({ ...currentResult, status: "failed", failureKind: "local", recovery: undefined, compilationId: undefined, error: generationErrorMessage(compilation.message || "原提示词优化已失败，未创建图片任务。", 422, compilation.errorCode) });
+                return;
+            }
+            if (compilation?.status === "optimizing") {
+                await commit({ ...currentResult, status: "pending", failureKind: undefined, recovery: undefined, compilationId: undefined, error: "正在准备提示词，请稍候。" });
                 return;
             }
             if (compilation?.status !== "success" || !compilation.prompt?.trim()) {
-                await commit({ ...currentResult, status: "failed", failureKind: "uncertain", compilationId: undefined, error: compilation?.status === "optimizing" ? "正在准备提示词，请稍候。" : "暂时无法获取进度，稍后会自动更新。" });
+                await commit({ ...currentResult, status: "failed", failureKind: "uncertain", compilationId: undefined, error: "暂时无法获取进度，稍后会自动更新。" });
                 return;
             }
             await commit({ ...currentResult, status: "failed", failureKind: "uncertain", compilationId: compilation.id, error: "准备已完成，图片尚未开始生成。点击“继续生成”可沿用已保存的设置。" }, { prompt: compilation.prompt, optimized: compilation.optimized });

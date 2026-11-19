@@ -96,7 +96,7 @@ export function imageSizeForSource(source: { width: number; height: number }, pr
     const candidates = sizes.flatMap(size => {
         const parts = /^(\d+(?:\.\d+)?)[x:](\d+(?:\.\d+)?)$/.exec(size);
         const ratio = parts ? Number(parts[1]) / Number(parts[2]) : NaN;
-        if (!Number.isFinite(ratio) || ratio <= 0 || imageModelSettingsError(size, profile)) return [];
+        if (!Number.isFinite(ratio) || ratio <= 0 || imageModelSettingsError(size, profile, undefined)) return [];
         const difference = Math.abs(Math.log(ratio / target));
         const pixelDifference = Math.min(Math.abs(source.width - source.height * ratio), Math.abs(source.height - source.width / ratio));
         return [{ size, difference, matches: difference < 1e-9 || difference <= .005 && pixelDifference <= 1 + 1e-9 }];
@@ -104,9 +104,9 @@ export function imageSizeForSource(source: { width: number; height: number }, pr
     const matching = candidates.filter(candidate => candidate.matches).sort((a, b) => a.difference - b.difference)[0];
     if (matching) return matching.size;
     const pixels = `${source.width}x${source.height}`;
-    if (profile.customSize && /^[1-9]\d*x[1-9]\d*$/.test(pixels) && !imageModelSettingsError(pixels, profile)) return pixels;
+    if (profile.customSize && /^[1-9]\d*x[1-9]\d*$/.test(pixels) && !imageModelSettingsError(pixels, profile, undefined)) return pixels;
     const ratio = `${source.width}:${source.height}`;
-    if (profile.customAspect && /^[1-9]\d*:[1-9]\d*$/.test(ratio) && !imageModelSettingsError(ratio, profile)) return ratio;
+    if (profile.customAspect && /^[1-9]\d*:[1-9]\d*$/.test(ratio) && !imageModelSettingsError(ratio, profile, undefined)) return ratio;
     // Arbitrary original dimensions need not be a valid output size. The provider's
     // adaptive mode is supported, but does not promise identical output pixels.
     if (profile.sizes.includes("auto")) return "auto";
@@ -128,7 +128,7 @@ export function normalizeImageModelSettings(config: Pick<AiConfig, "size" | "qua
 /** Apply only to an editable draft after an explicit model selection, never a task snapshot. */
 export function adaptImageModelSettings(config: Pick<AiConfig, "size" | "quality" | "count"> & { imageOptions?: string }, profile: ReturnType<typeof imageModelProfile>) {
     const settings = normalizeImageModelSettings(config, profile);
-    if (imageModelSettingsError(settings.size, profile, config.imageOptions)) settings.size = imageOutputIsGif(config.imageOptions, profile) ? "auto" : nearestImageSize(settings.size, profile.sizes.filter(size => !imageModelSettingsError(size, profile)));
+    if (imageModelSettingsError(settings.size, profile, config.imageOptions)) settings.size = imageOutputIsGif(config.imageOptions, profile) ? "auto" : nearestImageSize(settings.size, profile.sizes.filter(size => !imageModelSettingsError(size, profile, undefined)));
     return { ...settings, imageOptions: normalizeImageOptions(config.imageOptions, profile) };
 }
 
@@ -147,7 +147,7 @@ export function imageOutputIsGif(imageOptions: string | undefined, profile: Pick
 
 export const gifSizeNotice = "GIF 使用单帧像素尺寸，不使用比例或分辨率档位。自适应为 512 × 512；512 × 512 支持全部 2–16 帧，768 × 768 最多 12 帧。";
 
-export function imageModelSettingsError(size: string, profile: ReturnType<typeof imageModelProfile>, imageOptions?: string) {
+export function imageModelSettingsError(size: string, profile: ReturnType<typeof imageModelProfile>, imageOptions: string | undefined) {
     if (imageOutputIsGif(imageOptions, profile)) {
         const options = readImageOptions(imageOptions);
         try { validateGpt26GifParameters({ size, frame_count: options.frame_count ? Number(options.frame_count) : undefined, frame_duration_ms: options.frame_duration_ms ? Number(options.frame_duration_ms) : undefined }); return ""; }

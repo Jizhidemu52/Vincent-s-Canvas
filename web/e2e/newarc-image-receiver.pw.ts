@@ -231,7 +231,14 @@ test("invalid and other-account tokens cannot read the original draft and unrela
     await expect(page.getByText("设计交接链接无效，请从原结果重新打开。", { exact: true })).toBeVisible();
     await expect(submit(page)).toBeDisabled();
     await page.goto("/image?designToken=not-for-this-tool&prompt=普通生成草稿");
-    await expect(prompt(page)).toHaveValue("普通生成草稿");
+    await expect.poll(() => new URL(page.url()).searchParams.get("tool")).toBe("image-edit");
+    await expect(page.getByRole("button", { name: "重新读取设计交接", exact: true })).toBeVisible();
+    await expect(prompt(page)).toHaveValue("");
+    await expect(requirements(page)).toHaveValue("");
+    await expect(submit(page)).toBeDisabled();
+    await page.goto("/video?designToken=not-for-this-tool&prompt=普通视频草稿");
+    await expect(page.getByRole("textbox", { name: "视频提示词", exact: true })).toHaveValue("普通视频草稿");
     await expect(requirements(page)).toHaveCount(0);
+    expect((await saved(page, href)).prompt).toBe("只属于原账号");
     expect(api.submissions).toHaveLength(0);
 });

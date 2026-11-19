@@ -20,6 +20,9 @@ export type ImageConversationOptions = {
 
 const problem = (error: unknown) => error instanceof Error ? error.message : "服务端会话暂时无法读取";
 const confirmedRejection = (error: unknown) => error instanceof ImageConversationApiError && error.code !== "INVALID_RESPONSE" && !["IDEMPOTENCY_CONFLICT", "UPSTREAM_OUTCOME_UNKNOWN"].includes(error.code) && [400, 401, 403, 404, 409, 422, 429].includes(error.status);
+const retryableRead = (error: unknown) => error instanceof TypeError || (error instanceof DOMException && error.name === "TimeoutError")
+    || (error instanceof ImageConversationApiError && error.code !== "INVALID_RESPONSE" && ([408, 429].includes(error.status) || (error.status >= 500 && error.status < 600)));
+const readSignal = (signal: AbortSignal) => AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
 
 export function useImageConversation(ownerId: string, options: ImageConversationOptions) {
     const api = useMemo(() => createImageConversationApi(ownerId), [ownerId]);
@@ -53,7 +56,7 @@ export function useImageConversation(ownerId: string, options: ImageConversation
         for (const version of versions) {
             signal.throwIfAborted();
             if (version.source !== "generated" || !version.turnId || projected.current.has(`${version.conversationId}:${version.id}`)) continue;
-            const turn = turns.find(item => item.id === version.turnId) || (await api.turn(version.conversationId, version.turnId, signal)).turn;
+            const turn = turns.find(item => item.id === version.turnId) || (await api.turn(version.conversationId, version.turnId, readSignal(signal))).turn;
             if (!conversationVersionCanInstall(version, turn)) continue;
             await callbacks.current.onVersionCreated?.(version);
             signal.throwIfAborted();
@@ -77,16 +80,24 @@ export function useImageConversation(ownerId: string, options: ImageConversation
         setConversations(current => cursor ? [...new Map([...current, ...page.items].map(item => [item.id, item])).values()] : page.items);
         setListCursor(page.nextCursor);
     };
-    const readView = async (conversationId: string, signal: AbortSignal) => {
-        const snapshot = await api.snapshot(conversationId, signal);
+    const readView = async (conversationId: string, signal: AbortSignal, forceHistory = false) => {
+        const cached = !forceHistory && viewRef.current?.snapshot.id === conversationId ? viewRef.current : null;
+        const snapshot = await api.snapshot(conversationId, readSignal(signal));
         if (snapshot.entrypoint !== options.entrypoint || (options.entrypoint === "canvas" && snapshot.canvasExternalId !== options.canvasExternalId)) throw new Error("会话与当前入口不匹配，未发送任何请求。");
-        const [messages, versions] = await Promise.all([allConversationPages(cursor => api.messages(conversationId, cursor, signal)), allConversationPages(cursor => api.versions(conversationId, cursor, signal))]);
+        const [messages, versions] = await Promise.all([allConversationPages(cursor => api.messages(conversationId, cursor, readSignal(signal))), allConversationPages(cursor => api.versions(conversationId, cursor, readSignal(signal)))]);
         if ([...messages, ...versions].some(item => item.conversationId !== conversationId)) throw new Error("服务端记录与当前会话不一致，未发送任何请求。");
-        const turnIds = [...new Set([...messages.map(message => message.turnId), snapshot.pendingTurn?.id].filter((value): value is string => Boolean(value)))];
-        const turns = [];
-        for (const turnId of turnIds) { signal.throwIfAborted(); turns.push((await api.turn(conversationId, turnId, signal)).turn); }
+        const turnIds = [...new Set([...messages.map(message => message.turnId), ...versions.map(version => version.turnId), ...(cached?.turns.map(turn => turn.id) || []), snapshot.pendingTurn?.id].filter((value): value is string => Boolean(value)))];
+        let turns = cached?.turns.filter(turn => (turn.state === "completed" || (!turn.taskId && ["failed", "cancelled"].includes(turn.state))) && turn.id !== snapshot.pendingTurn?.id) || [];
+        if (snapshot.pendingTurn) turns.push(snapshot.pendingTurn);
+        const retained = new Set(turns.map(turn => turn.id));
+        const missing = turnIds.filter(turnId => !retained.has(turnId));
+        if (!cached || missing.length > 1) turns = await allConversationPages(cursor => api.turns(conversationId, cursor, readSignal(signal)));
+        else if (missing.length) turns.push((await api.turn(conversationId, missing[0], readSignal(signal))).turn);
+        const received = new Set(turns.map(turn => turn.id));
+        if (turns.some(turn => turn.conversationId !== conversationId) || turnIds.some(turnId => !received.has(turnId))) throw new ImageConversationApiError(200, "INVALID_RESPONSE", "服务端轮次记录不完整或不属于当前会话。");
         signal.throwIfAborted();
         await project(versions, signal, turns);
+        signal.throwIfAborted();
         if (snapshot.activeVersion && !versions.some(version => version.id === snapshot.activeVersionId)) versions.push(snapshot.activeVersion);
         return { snapshot, messages, versions, turns };
     };
@@ -110,20 +121,30 @@ export function useImageConversation(ownerId: string, options: ImageConversation
         if (!ready || !id) { install(null); return; }
         const controller = new AbortController(); stream.current?.abort(); stream.current = controller;
         const signal = controller.signal;
-        const pause = () => new Promise<void>(resolve => { const timer = setTimeout(resolve, 1500); signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true }); });
+        const pause = () => new Promise<void>(resolve => {
+            const done = () => { clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); };
+            const timer = setTimeout(done, 1500);
+            signal.addEventListener("abort", done, { once: true });
+            if (signal.aborted) done();
+        });
         void (async () => {
-            setConnection("正在读取服务端记录");
-            let next = await readView(id, signal); install(next);
-            const pendingReceipt = localRef.current.receipts[id];
-            if (pendingReceipt) {
-                try { await api.byRequest(id, pendingReceipt.clientRequestId, signal); await clearReceipt(id, pendingReceipt); }
-                catch (failure) { if (!signal.aborted) setError(failure instanceof ImageConversationApiError && failure.status === 404 ? "尚未查到原请求，不代表未提交；请继续查询，不要重新发送。" : problem(failure)); }
-            }
+            let next: ConversationView | null = null;
+            let forceHistory = false;
             while (!signal.aborted) {
                 try {
+                    if (!next) {
+                        setConnection("正在读取服务端记录");
+                        next = await readView(id, signal, forceHistory); forceHistory = false; install(next);
+                        const pendingReceipt = localRef.current.receipts[id];
+                        if (pendingReceipt) {
+                            try { await api.byRequest(id, pendingReceipt.clientRequestId, readSignal(signal)); await clearReceipt(id, pendingReceipt); }
+                            catch (failure) { if (!signal.aborted) setError(failure instanceof ImageConversationApiError && failure.status === 404 ? "尚未查到原请求，不代表未提交；请继续查询，不要重新发送。" : problem(failure)); }
+                        }
+                    }
+                    signal.throwIfAborted();
                     setConnection("已连接服务端");
                     await api.events(id, next.snapshot.latestEventSeq, async event => {
-                        if (event.seq <= next.snapshot.latestEventSeq) return;
+                        if (!next || event.seq <= next.snapshot.latestEventSeq) return;
                         if (event.type === "version.created") await project([event.payload.version], signal);
                         if (event.type === "turn.completed") await project(next.versions.filter(version => version.turnId === event.payload.turn.id), signal, [event.payload.turn]);
                         next = applyConversationEvent(next, event); install(next);
@@ -134,8 +155,10 @@ export function useImageConversation(ownerId: string, options: ImageConversation
                     if (failure instanceof ImageConversationApiError && [401, 403, 404].includes(failure.status)) throw failure;
                     if (failure instanceof ImageConversationApiError && failure.code === "EVENT_CURSOR_EXPIRED") {
                         setConnection("事件已过期，正在恢复服务端记录");
-                        next = await readView(id, signal); install(next);
-                    } else setConnection("连接暂时中断，只读重连中");
+                        forceHistory = true;
+                        next = null;
+                    } else if (retryableRead(failure)) setConnection("连接暂时中断，只读重连中");
+                    else throw failure;
                 }
                 if (!signal.aborted) await pause();
             }

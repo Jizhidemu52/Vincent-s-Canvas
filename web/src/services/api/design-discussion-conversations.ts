@@ -9,7 +9,7 @@ import {
 import type { createImageConversationApi } from "./image-conversations";
 
 type ConversationApi = Pick<ReturnType<typeof createImageConversationApi>, "create" | "createByRequest" | "submit" | "byRequest" | "snapshot" | "turn" | "versions">;
-type Storage = { setItem(key: string, value: unknown): Promise<unknown>; iterate(visitor: (value: unknown) => void): Promise<unknown> };
+type Storage = { getItem(key: string): Promise<unknown>; setItem(key: string, value: unknown): Promise<unknown>; iterate(visitor: (value: unknown) => void): Promise<unknown> };
 type Options = { api: ConversationApi; storage: Storage; ownerId: string; canvasExternalId: string;
     uploadReference(reference: DesignReference): Promise<DesignReference>; assertOwner(): Promise<unknown>;
     assertWritable?(): void | Promise<void>;
@@ -35,6 +35,8 @@ export function createDesignConversationController(options: Options) {
     const operations = new Map<string, Promise<DesignConversationTask>>();
     const lifetime = new AbortController();
     let polling = false;
+    const needsRefresh = () => [...tasks.values()].some(task => task.observing !== false && (task.persistenceError || task.queryError
+        || ["preparing", "submitting", "uncertain", "waiting", "processing", "paused", "detached"].includes(task.status)));
     const emit = () => { if (!lifetime.signal.aborted) options.onChange([...tasks.values()].sort((left, right) => left.startedAt - right.startedAt)); };
     const assertOwner = async () => { lifetime.signal.throwIfAborted(); await options.assertOwner(); lifetime.signal.throwIfAborted(); };
     const assertWritable = async () => { await assertOwner(); await options.assertWritable?.(); lifetime.signal.throwIfAborted(); };
@@ -148,7 +150,8 @@ export function createDesignConversationController(options: Options) {
         const existing = operations.get(id);
         if (existing) return existing;
         const pending = withSlotLock(id, lifetime.signal, async () => {
-            await storage.iterate(value => { if (isTask(value) && value.id === id) collect(value, true); });
+            const stored = await storage.getItem(id);
+            if (isTask(stored) && stored.id === id) collect(stored, true);
             return operation();
         }).finally(() => { operations.delete(id); });
         operations.set(id, pending);
@@ -170,6 +173,7 @@ export function createDesignConversationController(options: Options) {
     };
     return {
         has: (id: string) => tasks.has(id),
+        needsRefresh,
         async load() { await storage.iterate(value => collect(value)); emit(); },
         async start(input: DesignConversationInput) {
             if (input.generationAllowed !== true || input.mediaKind === "video") throw new Error("本轮没有明确的图片生成操作，未提交生成。");
@@ -195,7 +199,7 @@ export function createDesignConversationController(options: Options) {
             });
         },
         async refreshAll() {
-            if (polling) return;
+            if (polling || !needsRefresh()) return;
             polling = true;
             try {
                 await assertOwner();

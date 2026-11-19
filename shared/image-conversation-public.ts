@@ -16,10 +16,12 @@ export type PublicImageConversationData<T> = T extends Contract.SettingsSnapshot
     : T extends object ? { [K in keyof T]: PublicImageConversationData<T[K]> } : T;
 export type PublicConversationEvent = PublicImageConversationData<Contract.ConversationEvent>;
 export type PublicTurnDetails = Omit<Contract.TurnDetails, "turn"> & { turn: PublicImageTurn };
+export type PublicTurnPage = Omit<Contract.TurnPage, "items"> & { items: PublicImageTurn[] };
 export type PublicVersionPage = Omit<Contract.VersionPage, "items"> & { items: PublicImageVersion[] };
 export type PublicCreateConversationResponse = Contract.ApiSuccess<PublicConversationSnapshot>;
 export type PublicGetConversationResponse = Contract.ApiSuccess<PublicConversationSnapshot>;
 export type PublicGetTurnResponse = Contract.ApiSuccess<PublicTurnDetails>;
+export type PublicListTurnsResponse = Contract.ApiSuccess<PublicTurnPage>;
 export type PublicListVersionsResponse = Contract.ApiSuccess<PublicVersionPage>;
 export type PublicTurnSubmissionResponse = Contract.SubmitTurnResponse;
 export type PublicCancelTurnResponse = Contract.CancelTurnResponse;

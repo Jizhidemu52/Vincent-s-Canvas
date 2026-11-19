@@ -1,4 +1,6 @@
 import { test, expect, IMAGE } from "./fixtures";
+import { activeWorkbench, readWorkspaceRecords } from "./headless-workbench";
+import type { SceneLog } from "../src/pages/creative/use-scene-workspace";
 
 test("try-on refresh adopts an already successful original task without another submission", async ({ page, api }, info) => {
     api.taskStatus = "paused";
@@ -59,4 +61,50 @@ test("a failed compilation with authoritative no-task lookup permits resubmissio
     expect(new Set(requestIds).size).toBe(2);
     await expect(page.getByText("方案 1 生成失败", { exact: true })).toBeVisible();
     expect(api.tasks.size).toBe(0);
+});
+
+for (const [code, message] of [
+    ["PROMPT_PREPARATION_FAILED", "提示词准备失败，本次未提交生成。"],
+    ["PROMPT_PREPARATION_TIMEOUT", "提示词准备超时，本次已结束，未提交生成。"],
+]) test(`preparation stays pending and ends clearly for ${code} without resubmission`, async ({ page, api }, info) => {
+    let requestId = "", postCount = 0, terminal = false;
+    await page.route("**/api/tasks", async route => {
+        if (route.request().method() !== "POST") return route.fallback();
+        postCount++;
+        requestId = route.request().postDataJSON().requestId;
+        return route.fulfill({ status: 504, json: { message: "Gateway timeout" } });
+    });
+    await page.route("**/api/tasks/by-request/*", route => route.fulfill({ status: 404, json: { error: "NOT_FOUND" } }));
+    await page.route("**/api/prompt-compilations/by-request/*", route => route.fulfill({ json: { compilation: {
+        id: "12345678-1234-4123-8123-123456789abc", requestId, status: terminal ? "failed" : "optimizing",
+        ...(terminal ? { errorCode: code, message: "提示词准备未完成" } : {}),
+    } } }));
+    await page.goto("/creative/text-to-style");
+    const pane = activeWorkbench(page);
+    await pane.getByRole("textbox", { name: "款式描述", exact: true }).fill("蓝色圆领针织衫");
+    await pane.locator("button.cs-generate").click();
+    const result = async () => (await readWorkspaceRecords<SceneLog>(page, "creative_scene_workspaces"))
+        .filter(record => record.key.startsWith("history-record:"))[0]?.value.results[0];
+    await expect.poll(async () => (await result())?.status).toBe("pending");
+    await expect(pane.getByText("方案 1 生成失败", { exact: true })).toHaveCount(0);
+    await expect(pane.getByText("正在准备提示词，请稍候。", { exact: true })).toBeVisible();
+    expect((await result())?.failureKind).toBeUndefined();
+    expect(postCount).toBe(1);
+    await page.screenshot({ path: info.outputPath("preparation-pending.png"), fullPage: true });
+    terminal = true;
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(pane.getByText("方案 1 生成失败", { exact: true })).toBeVisible();
+    await expect(pane.getByText(message, { exact: true })).toBeVisible();
+    await expect(pane.getByRole("button", { name: "刷新进度", exact: true })).toHaveCount(0);
+    await expect(pane.getByRole("button", { name: "暂停获取进度", exact: true })).toHaveCount(0);
+    await expect(pane.locator("button.cs-generate")).toBeEnabled();
+    expect(await result()).toMatchObject({ status: "failed", failureKind: "local", requestId });
+    expect((await result())?.compilationId).toBeUndefined();
+    expect((await result())?.recovery).toBeUndefined();
+    await page.reload();
+    await expect(activeWorkbench(page).getByText(message, { exact: true })).toBeVisible();
+    expect(postCount).toBe(1);
+    expect(api.tasks.size).toBe(0);
+    expect(api.submissions).toHaveLength(0);
+    await page.screenshot({ path: info.outputPath("preparation-terminal-after-reload.png"), fullPage: true });
 });

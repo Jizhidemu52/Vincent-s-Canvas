@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import type {
-  AcceptedTurnInput, CancellationResult, ConversationPage, ConversationSnapshot, MessagePage, PaginationQuery, TurnDetails,
+  AcceptedTurnInput, CancellationResult, ConversationPage, ConversationSnapshot, MessagePage, PaginationQuery, TurnDetails, TurnPage,
   TurnSubmissionResult, VersionListQuery, VersionPage,
 } from "../../shared/image-conversation-contracts";
 import { cancelTurnRequestSchema, createConversationRequestSchema, requestKeySchema, submitTurnRequestSchema } from "../../shared/image-conversation-schemas";
@@ -188,6 +188,17 @@ export async function listImageConversationMessages(db: Database, ownerId: strin
   const rows = result.rows.slice(0, limit);
   const last = rows.at(-1);
   return { items: rows.map(messageSnapshot), nextCursor: result.rows.length > limit && last ? nextCursor(secret, scope, String(last.seq), last.id) : null };
+}
+export async function listImageConversationTurns(db: Database, ownerId: string, conversationId: string, query: PaginationQuery, secret: string): Promise<TurnPage> {
+  await readConversation(db, ownerId, conversationId);
+  const scope = `${ownerId}:${conversationId}:turns:created-asc`;
+  const cursor = readCursor(query.cursor, secret, scope);
+  const limit = query.limit ?? 30;
+  const result = await db.query<TurnRow & { cursor_time: string }>(`SELECT *,created_at::text AS cursor_time FROM image_conversation_turns
+    WHERE conversation_id=$1 ${cursor ? "AND (created_at,id)>($3::timestamptz,$4::uuid)" : ""} ORDER BY created_at ASC,id ASC LIMIT $2`,
+  [conversationId, limit + 1, ...(cursor ? [cursor.value, cursor.id] : [])]);
+  const rows = result.rows.slice(0, limit), last = rows.at(-1);
+  return { items: rows.map(turnSnapshot), nextCursor: result.rows.length > limit && last ? nextCursor(secret, scope, last.cursor_time, last.id) : null };
 }
 export async function listImageConversationVersions(db: Database, ownerId: string, conversationId: string, query: VersionListQuery, secret: string): Promise<VersionPage> {
   await readConversation(db, ownerId, conversationId);

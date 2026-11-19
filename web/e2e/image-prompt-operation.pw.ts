@@ -30,13 +30,14 @@ async function compiler(page: Page) {
 }
 
 for (const mode of [
-    { query: "", toolKey: "image", operationType: "image_generation", promptMode: "generate", action: "开始生成" },
-    { query: "?tool=image-edit", toolKey: "image-edit", operationType: "inpaint", promptMode: "edit", action: "开始编辑" },
+    { query: "", name: "legacy image link" },
+    { query: "?tool=image-edit", name: "image-edit" },
 ]) {
-    test(`${mode.toolKey}: optimize and generate use the same explicit operation with a reference`, async ({ page, api }) => {
+    test(`${mode.name}: optimize and edit use the same explicit operation with a reference`, async ({ page, api }, info) => {
         await models(page);
         const compilations = await compiler(page);
         await page.goto(`/image${mode.query}`);
+        await expect(page).toHaveURL(/\/image\?tool=image-edit$/);
         const prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
         await prompt.fill("蓝色亚麻连衣裙，保留参考图材质");
         await reference(page);
@@ -49,13 +50,15 @@ for (const mode of [
         await expect(preview).toBeHidden();
         await expect(prompt).toHaveValue(optimized);
         expect(compilations).toHaveLength(1);
-        expect(compilations[0]).toMatchObject({ toolKey: mode.toolKey, modelConfigId: model.id, promptInput: { scene: "free-optimize", mode: mode.promptMode } });
+        expect(compilations[0]).toMatchObject({ toolKey: "image-edit", modelConfigId: model.id, promptInput: { scene: "free-optimize", mode: "edit" } });
         expect(compilations[0].sourceUrls).toHaveLength(1);
         expect(api.submissions).toHaveLength(0);
-        await page.getByRole("button", { name: mode.action, exact: true }).click();
+        await page.getByRole("button", { name: "开始编辑", exact: true }).click();
         await expect(page.getByRole("button", { name: "放入画布", exact: true })).toBeVisible();
         expect(api.submissions).toHaveLength(1);
-        expect(api.submissions[0]).toMatchObject({ operationType: mode.operationType, toolKey: mode.toolKey, modelConfigId: model.id, promptInput: { mode: mode.promptMode, compilationId }, sourceUrls: compilations[0].sourceUrls });
+        expect(api.submissions[0]).toMatchObject({ operationType: "inpaint", toolKey: "image-edit", modelConfigId: model.id, promptInput: { mode: "edit", compilationId }, sourceUrls: compilations[0].sourceUrls });
+        await expect.poll(() => page.getByRole("img", { name: "生成结果 1", exact: true }).evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+        await page.screenshot({ path: info.outputPath("optimized-edit-result.png"), animations: "disabled" });
     });
 }
 
@@ -83,6 +86,7 @@ test("changing the model after optimization invalidates the old compilation with
     await page.goto("/image");
     const prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
     await prompt.fill("蓝色亚麻连衣裙");
+    await reference(page);
     await page.getByRole("button", { name: "一键优化提示词", exact: true }).click();
     const preview = page.getByRole("dialog", { name: "核对提示词优化", exact: true });
     await expect(preview.locator("pre").nth(1)).toHaveText(optimized);
@@ -96,11 +100,12 @@ test("changing the model after optimization invalidates the old compilation with
     await page.locator('[role=option][data-usage-value="10000000-0000-4000-8000-000000000002"]').click();
     await page.getByRole("dialog", { name: /^切换生成图片模型/ }).getByRole("button", { name: "关闭模型设置", exact: true }).click();
     await expect(prompt).toHaveValue(optimized);
-    await page.getByRole("button", { name: "开始生成", exact: true }).click();
+    await page.getByRole("button", { name: "开始编辑", exact: true }).click();
     await expect(page.getByRole("button", { name: "放入画布", exact: true })).toBeVisible();
     expect(compilations).toHaveLength(1);
     expect(api.submissions).toHaveLength(1);
     expect(api.submissions[0].modelConfigId).toBe("10000000-0000-4000-8000-000000000002");
+    expect(api.submissions[0]).toMatchObject({ operationType: "inpaint", toolKey: "image-edit", sourceUrls: compilations[0].sourceUrls });
     expect(api.submissions[0].promptInput).toBeUndefined();
 });
 
@@ -108,36 +113,40 @@ test("a failed image task exposes both server task and request identifiers", asy
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await models(page);
     const taskId = "20000000-0000-4000-8000-000000000007";
-    let requestId = "", posts = 0;
+    let requestId = "", posts = 0, submitted: any;
     await page.route("**/api/tasks", route => {
         if (route.request().method() !== "POST") return route.fallback();
-        posts++; requestId = route.request().postDataJSON().requestId;
+        posts++; submitted = route.request().postDataJSON(); requestId = submitted.requestId;
         return route.fulfill({ json: { task: { id: taskId, requestId, status: "queued", resultUrls: [] } } });
     });
     await page.route(`**/api/tasks/${taskId}`, route => route.fulfill({ json: { task: { id: taskId, requestId, status: "failed", resultUrls: [], failureReason: "原参考文件缺失，请重新导入原图。" } } }));
     await page.goto("/image");
     await page.getByRole("textbox", { name: "图像提示词", exact: true }).fill("一次可诊断的任务");
-    await page.getByRole("button", { name: "开始生成", exact: true }).click();
+    await reference(page);
+    await page.getByRole("button", { name: "开始编辑", exact: true }).click();
     await page.getByRole("button", { name: "复制诊断信息", exact: true }).click();
     const copied = await page.evaluate(() => navigator.clipboard.readText());
     expect(copied).toContain(`taskId: ${taskId}`);
     expect(copied).toContain(`requestId: ${requestId}`);
+    expect(submitted).toMatchObject({ operationType: "inpaint", toolKey: "image-edit", modelConfigId: model.id });
+    expect(submitted.sourceUrls).toHaveLength(1);
     expect(posts).toBe(1); expect(api.submissions).toHaveLength(0);
 });
 
 test("unknown image submission preserves the first diagnostic after missing lookup and reload without reposting", async ({ page, context, api }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await models(page);
-    let posts = 0, lookups = 0, requestId = "";
+    let posts = 0, lookups = 0, requestId = "", submitted: any;
     await page.route("**/api/tasks", route => {
         if (route.request().method() !== "POST") return route.fallback();
-        posts++; requestId = route.request().postDataJSON().requestId;
+        posts++; submitted = route.request().postDataJSON(); requestId = submitted.requestId;
         return route.fulfill({ status: 503, json: { error: "UNKNOWN_SUBMISSION_STATE", message: "original-image-503-diagnostic" } });
     });
     await page.route("**/api/tasks/by-request/**", route => { lookups++; return route.fulfill({ status: 404, json: { error: "NOT_FOUND", message: "later lookup 404" } }); });
     await page.goto("/image");
     await page.getByRole("textbox", { name: "图像提示词", exact: true }).fill("保留原始诊断");
-    await page.getByRole("button", { name: "开始生成", exact: true }).click();
+    await reference(page);
+    await page.getByRole("button", { name: "开始编辑", exact: true }).click();
     const copy = page.getByRole("button", { name: "复制诊断信息", exact: true });
     await copy.click();
     const before = await page.evaluate(() => navigator.clipboard.readText());
@@ -148,6 +157,8 @@ test("unknown image submission preserves the first diagnostic after missing look
     const after = await page.evaluate(() => navigator.clipboard.readText());
     expect(after).toContain("original-image-503-diagnostic");
     expect(after).not.toContain("later lookup 404");
+    expect(submitted).toMatchObject({ operationType: "inpaint", toolKey: "image-edit", modelConfigId: model.id });
+    expect(submitted.sourceUrls).toHaveLength(1);
     expect(posts).toBe(1); expect(lookups).toBeGreaterThan(0); expect(api.submissions).toHaveLength(0);
 });
 

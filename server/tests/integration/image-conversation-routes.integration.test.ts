@@ -112,6 +112,46 @@ integration("image conversation HTTP contract with existing real sessions", () =
     expect((await fixture.db.query("SELECT count(*)::int n FROM image_conversations WHERE owner_user_id=$1", [user.id])).rows[0].n).toBe(0);
   });
 
+  test("turn history uses bounded stable pages instead of one request per turn and scopes every cursor", async () => {
+    const user = await account(), stranger = await account();
+    const create = async () => (await (await request(user.cookie, "", { clientRequestId: randomUUID(), entrypoint: "standalone" })).json() as any).data.id as string;
+    const id = await create(), other = await create(), ids = Array.from({ length: 205 }, () => randomUUID()).sort();
+    await fixture.db.query(`INSERT INTO image_conversation_turns(id,conversation_id,owner_user_id,client_request_id,payload_hash,input_payload,accepted_revision,state,created_at)
+      SELECT item::uuid,$1,$2,item,repeat('a',64),'{"text":"History fixture"}'::jsonb,1,'cancelled','2026-11-19T10:00:00.000123Z'::timestamptz
+      FROM unnest($3::text[]) AS item`, [id, user.id, ids]);
+    const wakeCount = wakes, before = fixture.statements.length;
+    const firstResponse = await request(user.cookie, `/${id}/turns?limit=100`);
+    expect(firstResponse.status).toBe(200);
+    const first = await firstResponse.json() as any;
+    Public.turnPageSchema.parse(first.data);
+    expect(first).toMatchObject({ code: "OK", msg: "" });
+    expect(first.data.items.map((turn: { id: string }) => turn.id)).toEqual(ids.slice(0, 100));
+    expect(typeof first.data.nextCursor).toBe("string");
+    await fixture.db.query("UPDATE image_conversation_turns SET updated_at=now() WHERE id=$1", [ids[0]]);
+    const secondResponse = await request(user.cookie, `/${id}/turns?limit=100&cursor=${encodeURIComponent(first.data.nextCursor)}`);
+    expect(secondResponse.status).toBe(200);
+    const second = await secondResponse.json() as any;
+    Public.turnPageSchema.parse(second.data);
+    expect(second.data.items.map((turn: { id: string }) => turn.id)).toEqual(ids.slice(100, 200));
+    const thirdResponse = await request(user.cookie, `/${id}/turns?limit=100&cursor=${encodeURIComponent(second.data.nextCursor)}`);
+    expect(thirdResponse.status).toBe(200);
+    const third = await thirdResponse.json() as any;
+    Public.turnPageSchema.parse(third.data);
+    expect(third.data.items.map((turn: { id: string }) => turn.id)).toEqual(ids.slice(200));
+    expect(third.data.nextCursor).toBeNull();
+    const historyQueries = fixture.statements.slice(before).filter(sql => sql.includes("FROM image_conversation_turns") && sql.startsWith("SELECT"));
+    expect(historyQueries).toHaveLength(3);
+    expect(historyQueries.every(sql => sql.includes("LIMIT"))).toBe(true);
+    for (const path of [`/${other}/turns?cursor=${encodeURIComponent(first.data.nextCursor)}`, `/${id}/messages?cursor=${encodeURIComponent(first.data.nextCursor)}`,
+      `/${id}/turns?cursor=${encodeURIComponent(first.data.nextCursor + "invalid")}`, `/${id}/turns?limit=101`, `/${id}/turns?before=1`]) {
+      expect((await request(user.cookie, path)).status).toBe(400);
+    }
+    expect((await request(stranger.cookie, `/${id}/turns?cursor=${encodeURIComponent(first.data.nextCursor)}`)).status).toBe(404);
+    expect((await request("", `/${id}/turns`)).status).toBe(401);
+    expect((await request((await account(true)).cookie, `/${id}/turns`)).status).toBe(403);
+    expect(wakes).toBe(wakeCount);
+  });
+
   test("creation recovery GET is owner-scoped, validates request keys and never creates work or wakes subscribers", async () => {
     const user = await account(), stranger = await account(), clientRequestId = "create:中文/request?value#%";
     const created = await (await request(user.cookie, "", { clientRequestId, entrypoint: "standalone" })).json() as { data: unknown };
@@ -189,6 +229,12 @@ integration("image conversation HTTP contract with existing real sessions", () =
       expect(details.turn.settingsSnapshot).toEqual(expectedSettings);
       expect(JSON.stringify(details)).not.toMatch(/APIMart|gpt-image-2\.6-flare|flare-auto-v1/i);
     }
+    const turnPageResponse = await request(user.cookie, `/${conversation.id}/turns`);
+    expect(turnPageResponse.status).toBe(200);
+    const turnPagePayload = await turnPageResponse.json() as { data: unknown }, turnPage = Public.turnPageSchema.parse(turnPagePayload.data);
+    expect(turnPage.items).toHaveLength(1);
+    expect(turnPage.items[0]?.settingsSnapshot).toEqual(expectedSettings);
+    expect(JSON.stringify(turnPage)).not.toMatch(/APIMart|gpt-image-2\.6-flare|flare-auto-v1/i);
     const messageResponse = await request(user.cookie, `/${conversation.id}/messages`);
     const messagePayload = await messageResponse.json() as { data: unknown }, messages = Public.messagePageSchema.parse(messagePayload.data);
     expect(messages.items).toHaveLength(1); expect(messages.items[0]?.text).toBe(originalText);

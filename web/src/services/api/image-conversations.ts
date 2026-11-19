@@ -1,7 +1,7 @@
 import type { ApiErrorCode, CreateConversationRequest, ErrorDetails, SubmitTurnRequest } from "../../../../shared/image-conversation-contracts";
 import type { PublicConversationEvent as ConversationEvent } from "../../../../shared/image-conversation-public";
 import { createConversationRequestSchema, submitTurnRequestSchema } from "../../../../shared/image-conversation-schemas";
-import { cancellationResultSchema, conversationEventSchema, conversationPageSchema, conversationSnapshotSchema, messagePageSchema, turnDetailsSchema, turnSubmissionResultSchema, versionPageSchema } from "../../../../shared/image-conversation-public-schemas";
+import { cancellationResultSchema, conversationEventSchema, conversationPageSchema, conversationSnapshotSchema, messagePageSchema, turnDetailsSchema, turnPageSchema, turnSubmissionResultSchema, versionPageSchema } from "../../../../shared/image-conversation-public-schemas";
 import { workspaceOwnerHeaders } from "./workspace-owner";
 import { useUserStore } from "@/stores/use-user-store";
 
@@ -46,6 +46,11 @@ export function createImageConversationApi(ownerId: string, fetcher: Fetch = glo
         },
         messages: (id: string, cursor?: string, signal?: AbortSignal) => request(page(`${base}/${pathId(id)}/messages`, cursor), messagePageSchema, { signal }),
         versions: (id: string, cursor?: string, signal?: AbortSignal) => request(page(`${base}/${pathId(id)}/versions`, cursor), versionPageSchema, { signal }),
+        turns: async (id: string, cursor?: string, signal?: AbortSignal) => {
+            const result = await request(page(`${base}/${pathId(id)}/turns`, cursor), turnPageSchema, { signal });
+            if (result.items.some(turn => turn.conversationId !== id)) throw new ImageConversationApiError(200, "INVALID_RESPONSE", "轮次记录与请求会话不一致。");
+            return result;
+        },
         submit: (id: string, input: SubmitTurnRequest, signal?: AbortSignal) => post(`${base}/${pathId(id)}/turns`, turnSubmissionResultSchema, submitTurnRequestSchema.parse(input), signal),
         byRequest: async (id: string, key: string, signal?: AbortSignal) => {
             const result = await request(`${base}/${pathId(id)}/turns/by-request/${pathId(key)}`, turnDetailsSchema, { signal });

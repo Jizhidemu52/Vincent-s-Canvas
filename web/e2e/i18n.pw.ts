@@ -159,7 +159,7 @@ test("image settings keep raw model parameters and the prompt when switching lan
     const parameterState = async () => page.evaluate(async () => {
         const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
         return {
-            draft: await createWorkspaceStorage("generation_drafts").getItem<Record<string, unknown>>("image-generation:settings"),
+            draft: await createWorkspaceStorage("generation_drafts").getItem<Record<string, unknown>>("image-edit:settings"),
             segments: [...document.querySelectorAll(".image-parameters [data-usage-value][aria-pressed=true]")].map(element => ({
                 key: element.getAttribute("data-usage-control"), value: element.getAttribute("data-usage-value"),
             })),

@@ -64,7 +64,7 @@ test("model changes remove unsupported 2.6 controls and markup while preserving 
     const config = settings({ output_format: "gif", markup_reference: JSON.stringify(markup), frame_count: "12", complexity: "high", moderation: "auto" });
     const adapted = adaptImageModelSettings(config, imageModelProfile("opaque-25", models));
     expect(JSON.parse(adapted.imageOptions)).toEqual({ moderation: "auto", resolution: "1k" });
-    expect(imageModelSettingsError(adapted.size, imageModelProfile("opaque-25", models))).toBe("");
+    expect(imageModelSettingsError(adapted.size, imageModelProfile("opaque-25", models), undefined)).toBe("");
     expect(adaptImageModelSettings(settings({ output_format: "webp", complexity: "low" }, "1600x1200"), imageModelProfile("opaque-25", models)).size).toBe("1600x1200");
 });
 
@@ -91,10 +91,10 @@ test("MAI accepts every documented integer ratio in range and rejects unsupporte
     expect(mai.customAspect).toBe(true);
     for (const size of ["7:5", "5:7", "1:4", "4:1"]) {
         expect(normalizeImageModelSettings({ ...defaultConfig, size }, mai).size).toBe(size);
-        expect(imageModelSettingsError(size, mai)).toBe("");
+        expect(imageModelSettingsError(size, mai, undefined)).toBe("");
         expect(imageTaskParameters({ ...defaultConfig, size }, mai)).toMatchObject({ size });
     }
-    expect(imageModelSettingsError("5:1", mai)).not.toBe("");
+    expect(imageModelSettingsError("5:1", mai, undefined)).not.toBe("");
 });
 
 test("markup stored inside imageOptions remains protected from cleanup, ignoring unrelated JSON strings", () => {

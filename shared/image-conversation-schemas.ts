@@ -307,6 +307,7 @@ export const conversationSnapshotSchema = z.strictObject({
 export const conversationPageSchema = z.strictObject({ items: z.array(conversationSummarySchema).max(100), nextCursor: cursorSchema.nullable() }) satisfies z.ZodType<Contract.ConversationPage>;
 export const messagePageSchema = z.strictObject({ items: z.array(conversationMessageSchema).max(100), nextCursor: cursorSchema.nullable() }) satisfies z.ZodType<Contract.MessagePage>;
 export const versionPageSchema = z.strictObject({ items: z.array(imageVersionSchema).max(100), nextCursor: cursorSchema.nullable() }) satisfies z.ZodType<Contract.VersionPage>;
+export const turnPageSchema = z.strictObject({ items: z.array(imageTurnSchema).max(100), nextCursor: cursorSchema.nullable() }) satisfies z.ZodType<Contract.TurnPage>;
 export const turnSubmissionResultSchema = z.strictObject({ turnId: uuidSchema, stateRevision: safeIntegerSchema, state: turnStateSchema, assistant: assistantStatusSchema }) satisfies z.ZodType<Contract.TurnSubmissionResult>;
 export const turnDetailsSchema = z.strictObject({ turn: imageTurnSchema, stateRevision: safeIntegerSchema }) satisfies z.ZodType<Contract.TurnDetails>;
 export const cancellationDispositionSchema = z.enum(["cancelled_before_submission", "detached_task_continues", "already_terminal"]);

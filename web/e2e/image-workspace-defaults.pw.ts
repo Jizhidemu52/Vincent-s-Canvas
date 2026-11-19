@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { test, expect } from "./fixtures";
+import { test, expect, IMAGE } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
 import { antSelect, chooseAntSelect } from "./antd-select-helpers";
 
@@ -24,7 +24,7 @@ async function selectOld(page: Page, picker: Locator) {
     await expect(picker).toContainText(oldLabel);
 }
 
-test("new image, edit, creative and seamless workspaces use Flare without selecting the first catalog row", async ({ page, api }) => {
+test("new edit, legacy image link, creative and seamless workspaces use Flare without selecting the first catalog row", async ({ page, api }) => {
     await setup(page);
     for (const path of ["/image", "/image?tool=image-edit"]) {
         const picker = await imageSettings(page, path);
@@ -37,20 +37,28 @@ test("new image, edit, creative and seamless workspaces use Flare without select
     expect(api.submissions).toHaveLength(0);
 });
 
-test("explicit image and seamless model choices persist separately and do not replace other new workspace defaults", async ({ page, api }) => {
+test("legacy image links share edit choices while seamless and other workspace defaults stay separate", async ({ page, api }, info) => {
     await setup(page);
     let picker = await imageSettings(page, "/image");
     await selectOld(page, picker);
     await page.getByRole("dialog").getByRole("button", { name: /^完\s*成$/ }).click();
     await page.getByRole("textbox", { name: "图像提示词", exact: true }).fill("保留明确选择的旧模型");
-    await page.getByRole("button", { name: "开始生成", exact: true }).click();
+    await page.getByRole("textbox", { name: "图像提示词", exact: true }).evaluate((element, bytes) => {
+        const data = new DataTransfer(); data.items.add(new File([Uint8Array.from(bytes)], "reference.png", { type: "image/png" }));
+        element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    }, [...IMAGE]);
+    await expect(page.getByRole("img", { name: "reference.png", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "开始编辑", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
-    expect(api.submissions[0].modelConfigId).toBe(oldModel.id);
+    expect(api.submissions[0]).toMatchObject({ operationType: "inpaint", toolKey: "image-edit", modelConfigId: oldModel.id });
+    expect(api.submissions[0].sourceUrls).toHaveLength(1);
     await expect(page.getByRole("button", { name: "放入画布", exact: true })).toBeVisible();
     picker = await imageSettings(page, "/image?tool=image-edit");
-    await expect(picker).toContainText(flareLabel);
-    picker = await imageSettings(page, "/image");
     await expect(picker).toContainText(oldLabel);
+    picker = await imageSettings(page, "/image");
+    await expect(page).toHaveURL(/\/image\?tool=image-edit$/);
+    await expect(picker).toContainText(oldLabel);
+    await page.screenshot({ path: info.outputPath("legacy-edit-model-persistence.png"), animations: "disabled" });
 
     await page.goto("/image?tool=seamless-stitch");
     picker = page.locator(pickerSelector);

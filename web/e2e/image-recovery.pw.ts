@@ -1,5 +1,16 @@
 import type { BrowserContext, Page } from "@playwright/test";
-import { test, expect, type MockCanvasApi } from "./fixtures";
+import { test, expect, IMAGE, type MockCanvasApi } from "./fixtures";
+import { activeWorkbench, readWorkspaceRecords } from "./headless-workbench";
+
+type RecoveryTask = { id: string; prompt: string; status: string; resultUrls: string[] };
+
+async function openImageEditor(page: Page) {
+    await page.goto("/image?tool=image-edit");
+    const chooser = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "上传图片", exact: true }).click();
+    await (await chooser).setFiles({ name: "recovery-original.png", mimeType: "image/png", buffer: IMAGE });
+    await expect(page.getByRole("region", { name: "参考图", exact: true }).getByRole("img", { name: "recovery-original.png", exact: true })).toBeVisible();
+}
 
 async function captureRecoveryWrites(context: BrowserContext, api: MockCanvasApi) {
     const requests: string[] = [];
@@ -14,28 +25,48 @@ async function captureRecoveryWrites(context: BrowserContext, api: MockCanvasApi
 async function submitImage(page: Page, api: MockCanvasApi, prompt: string) {
     const before = api.submissions.length;
     await page.getByRole("textbox", { name: "图像提示词", exact: true }).fill(prompt);
-    await page.getByRole("button", { name: "开始生成", exact: true }).click();
+    await page.getByRole("button", { name: "开始编辑", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(before + 1);
-    return [...api.tasks.values()].at(-1)!;
+    expect(api.submissions[before].sourceUrls).toHaveLength(1);
+    expect(api.assetBytes.get(api.submissions[before].sourceUrls[0].split("/")[3])).toEqual(IMAGE);
+    return [...api.tasks.values()].at(-1)! as RecoveryTask;
 }
 
 async function unknownCard(page: Page) {
-    await expect(page.getByText("需要管理员协助", { exact: true })).toBeVisible();
-    await expect(page.getByRole("alert").filter({ hasText: "暂时无法获取结果，需要管理员协助。可先刷新进度，不会重新生成。" })).toBeVisible();
+    await expect(page.getByText("暂未完成", { exact: true })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "暂时无法获取生成结果，系统会继续更新。" })).toBeVisible();
     await expect(page.getByRole("button", { name: "刷新进度", exact: true })).toBeEnabled();
     await expect(page.getByRole("button", { name: "复制诊断信息", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "继续获取结果", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "取消任务", exact: true })).toHaveCount(0);
 }
 
+async function expectRecordedTask(page: Page, task: { id: string; prompt: string }) {
+    type Log = { prompt: string; images: Array<{ sourceTaskId?: string }> };
+    await expect.poll(async () => (await readWorkspaceRecords<Log>(page, "image_generation_logs"))
+        .filter(record => record.value.images.some(image => image.sourceTaskId === task.id))
+        .map(record => ({ prompt: record.value.prompt, taskId: record.value.images[0].sourceTaskId })))
+        .toEqual([{ prompt: task.prompt, taskId: task.id }]);
+}
+
+async function expectDownloadedOriginal(page: Page, bytes: Buffer) {
+    const downloaded = page.waitForEvent("download");
+    await page.getByRole("button", { name: "下载", exact: true }).click();
+    const stream = await (await downloaded).createReadStream(), chunks: Buffer[] = [];
+    expect(stream).not.toBeNull();
+    for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
+    expect(Buffer.concat(chunks)).toEqual(bytes);
+}
+
 test("停止观察会跨刷新保留，认证恢复和前台事件不自动重启；明确刷新只查原任务", async ({ page, context, api }, testInfo) => {
     const recoveries = await captureRecoveryWrites(context, api);
     api.taskStatus = "processing";
-    await page.goto("/image");
+    await openImageEditor(page);
     const original = await submitImage(page, api, "认证恢复与停止观察回归");
     await expect.poll(() => api.taskReads.length).toBeGreaterThan(0);
     await page.getByRole("button", { name: "停止本页查询（不取消服务端任务）", exact: true }).click();
-    await expect(page.getByText("暂时无法获取进度", { exact: true })).toBeVisible();
+    await expect(page.getByText("暂未完成", { exact: true })).toBeVisible();
+    await expect(activeWorkbench(page).getByRole("alert")).toHaveText("暂时无法获取进度，请稍后再试；刷新进度不会重新生成。");
     const reads = api.taskReads.length;
     api.holdSession = true;
     await page.reload();
@@ -55,6 +86,8 @@ test("停止观察会跨刷新保留，认证恢复和前台事件不自动重�
     await expect.poll(() => api.taskReads.length).toBeGreaterThan(reads);
     await expect(page.getByRole("button", { name: "停止本页查询（不取消服务端任务）", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /下载/ }).first()).toBeVisible();
+    await expectRecordedTask(page, original);
+    await expectDownloadedOriginal(page, api.assetBytes.get(original.id)!);
     expect(api.taskReads.slice(reads).every(path => path.endsWith(original.id))).toBe(true);
     expect(api.submissions).toHaveLength(1);
     expect(recoveries).toEqual([]);
@@ -64,7 +97,7 @@ for (const wake of ["focus", "online"]) {
     test(`无上游ID仅只读刷新，晚到成功经${wake}自动回填且草稿不变`, async ({ page, context, api }, testInfo) => {
         const recoveries = await captureRecoveryWrites(context, api);
         api.taskStatus = "paused";
-        await page.goto("/image");
+        await openImageEditor(page);
         const original = await submitImage(page, api, `提交未知等待-${wake}`);
         await unknownCard(page);
         const reads = api.taskReads.length;
@@ -91,8 +124,10 @@ for (const wake of ["focus", "online"]) {
         original.resultUrls = [`/api/assets/${original.id}/content`];
         await page.evaluate(event => window.dispatchEvent(new Event(event)), wake);
         await expect(page.getByRole("button", { name: "下载", exact: true })).toBeVisible({ timeout: 8_000 });
-        await expect(page.getByText("需要管理员协助", { exact: true })).toHaveCount(0);
+        await expect(page.getByText("暂未完成", { exact: true })).toHaveCount(0);
         await expect(page.getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue(draft);
+        await expectRecordedTask(page, original);
+        await expectDownloadedOriginal(page, api.assetBytes.get(original.id)!);
         expect(api.submissions).toHaveLength(1);
         expect(recoveries).toEqual([]);
         await page.screenshot({ path: testInfo.outputPath(`late-success-${wake}.png`), fullPage: true });
@@ -101,11 +136,14 @@ for (const wake of ["focus", "online"]) {
 
 test("后台晚到成功只更新生成记录，不替换已选历史预览或未提交草稿", async ({ page, context, api }, testInfo) => {
     const recoveries = await captureRecoveryWrites(context, api);
-    await page.goto("/image");
-    await submitImage(page, api, "历史预览保留A");
+    await openImageEditor(page);
+    const original = await submitImage(page, api, "历史预览保留A");
     await expect(page.getByRole("button", { name: "下载", exact: true })).toBeVisible();
-    const historical = page.getByRole("button", { name: /历史预览保留A/ });
+    await expectRecordedTask(page, original);
+    const records = activeWorkbench(page).locator(".image-history-card");
+    const historical = records.last();
     await page.getByRole("tab", { name: /^历史记录/ }).click();
+    await expect(records).toHaveCount(1);
     await expect(historical).toBeVisible();
     await page.getByRole("tab", { name: "本次结果", exact: true }).click();
     api.taskStatus = "paused";
@@ -122,32 +160,37 @@ test("后台晚到成功只更新生成记录，不替换已选历史预览或�
     pending.status = "success";
     pending.resultUrls = [`/api/assets/${pending.id}/content`];
     await page.evaluate(() => window.dispatchEvent(new Event("online")));
-    await expect(page.getByRole("button", { name: /晚到结果B/ })).toBeVisible({ timeout: 8_000 });
+    await expectRecordedTask(page, pending);
+    await expect(records).toHaveCount(2, { timeout: 8_000 });
     await expect(image).toHaveAttribute("src", originalSource!);
     await expect(historical).toHaveClass(/border-foreground bg-muted/);
     await expect(page.getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("草稿C不能被A或B替换");
+    await expectDownloadedOriginal(page, api.assetBytes.get(original.id)!);
     expect(api.submissions).toHaveLength(2);
     expect(recoveries).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath("history-view-preserved.png"), fullPage: true });
 });
 
-test("新建空白结果视图后，原任务成功只进历史不占据新草稿", async ({ page, context, api }) => {
+test("新建空白结果视图后，原任务成功只进历史不占据新草稿", async ({ page, context, api }, testInfo) => {
     const recoveries = await captureRecoveryWrites(context, api);
     api.taskStatus = "paused";
-    await page.goto("/image");
+    await openImageEditor(page);
     const original = await submitImage(page, api, "旧任务后台收尾");
     await unknownCard(page);
-    await page.getByRole("button", { name: "新建任务", exact: true }).click();
+    await page.getByRole("tab", { name: /^历史记录/ }).click();
+    await activeWorkbench(page).locator(".image-history-panel").getByRole("button", { name: "新建", exact: true }).click();
     await page.getByRole("textbox", { name: "图像提示词", exact: true }).fill("新的独立草稿");
     await expect(page.getByRole("img", { name: /^生成结果/ })).toHaveCount(0);
     original.status = "success";
     original.resultUrls = [`/api/assets/${original.id}/content`];
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await page.getByRole("tab", { name: /^历史记录/ }).click();
-    await expect(page.getByRole("button", { name: /旧任务后台收尾/ })).toBeVisible({ timeout: 8_000 });
+    await expectRecordedTask(page, original);
+    await expect(activeWorkbench(page).locator(".image-history-card")).toHaveCount(1, { timeout: 8_000 });
     await page.getByRole("tab", { name: "本次结果", exact: true }).click();
     await expect(page.getByRole("img", { name: /^生成结果/ })).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("新的独立草稿");
     expect(api.submissions).toHaveLength(1);
     expect(recoveries).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath("new-draft-preserved.png"), fullPage: true });
 });

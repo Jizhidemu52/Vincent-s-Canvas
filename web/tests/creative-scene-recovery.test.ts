@@ -143,7 +143,8 @@ test("creative automatically reconciles a restored original request through succ
     const app = harness(new Map(), pendingLog); await app.initialize();
     app.setCompilation({ ...compilation, status: "optimizing", prompt: undefined });
     await app.reconcile();
-    expect(app.render().results[0].failureKind).toBe("uncertain");
+    expect(app.render().results[0]).toMatchObject({ status: "pending", error: "正在准备提示词，请稍候。" });
+    expect(app.render().results[0].failureKind).toBeUndefined();
     app.setTask({ id: "late-task", requestId: "original-request:0", status: "success", userId: "owner", resultUrls: ["/original.png"], failureReason: null });
     await app.reconcile();
     expect(app.render().results[0].status).toBe("success");

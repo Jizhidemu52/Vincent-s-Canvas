@@ -10,7 +10,7 @@ export function canvasMaskAdaptationPlan(source: Size, profile: ReturnType<typeo
     if (![source.width, source.height].every(value => Number.isSafeInteger(value) && value > 0)) throw new Error("原图像素尺寸无效，尚未提交生成。");
     if (!profile.verified || !profile.supportsMask) throw new Error("当前模型不支持局部蒙版，请选择支持蒙版的模型。");
     const raw = `${source.width}x${source.height}`;
-    const valid = (size: string) => !imageModelSettingsError(size, profile) && (profile.customSize || profile.sizes.includes(size));
+    const valid = (size: string) => !imageModelSettingsError(size, profile, undefined) && (profile.customSize || profile.sizes.includes(size));
     let target = raw;
     if (!valid(target)) {
         const choices = profile.sizes.filter(value => /^\d+x\d+$/.test(value) && valid(value));

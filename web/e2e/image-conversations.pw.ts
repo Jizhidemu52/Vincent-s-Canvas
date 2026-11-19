@@ -16,6 +16,10 @@ class ConversationFixture {
     versions: ImageVersion[] = [conversationVersion()];
     messages: ConversationMessage[] = [];
     turn: ImageTurn | null = null;
+    historyTurns: ImageTurn[] = [];
+    turnReads = 0;
+    turnPages = 0;
+    historyDelay = 0;
     events: ConversationEvent[] = [];
     creates: Record<string, unknown>[] = [];
     createLookups = 0;
@@ -55,8 +59,17 @@ class ConversationFixture {
                 return reply(this.snapshot);
             }
             if (path === `/api/image-conversations/${ids.conversation}`) { this.snapshots++; return reply(this.snapshot); }
-            if (path.endsWith("/messages")) return reply({ items: this.messages, nextCursor: null });
-            if (path.endsWith("/versions")) return reply({ items: this.versions, nextCursor: null });
+            const historyPage = <T,>(items: T[]) => {
+                const start = Number(url.searchParams.get("cursor") || 0), limit = Number(url.searchParams.get("limit") || 100);
+                return { items: items.slice(start, start + limit), nextCursor: start + limit < items.length ? String(start + limit) : null };
+            };
+            if (path.endsWith("/messages")) return reply(historyPage(this.messages));
+            if (path.endsWith("/versions")) return reply(historyPage(this.versions));
+            if (path.endsWith("/turns") && method === "GET") {
+                this.turnPages++;
+                if (this.historyDelay) await new Promise(resolve => setTimeout(resolve, this.historyDelay));
+                return reply(historyPage([...this.historyTurns, ...(this.turn ? [this.turn] : [])]));
+            }
             if (path.endsWith("/events")) {
                 const cursor = Number(url.searchParams.get("afterSeq")); this.streamCursors.push(cursor);
                 expect(route.request().headers()["last-event-id"]).toBe(String(cursor));
@@ -66,7 +79,7 @@ class ConversationFixture {
             }
             if (path.endsWith("/turns") && method === "POST") {
                 const input = route.request().postDataJSON(); this.submissions.push(input); this.turn = conversationTurn("accepted", input.clientRequestId);
-                this.messages = [{ ...conversationMessage(), text: input.text }];
+                this.messages.push({ ...conversationMessage(), text: input.text, seq: this.messages.length + 1 });
                 this.snapshot.pendingTurn = this.turn; this.snapshot.stateRevision = 2; this.snapshot.latestEventSeq = 2;
                 if (this.loseSubmissionResponse) return route.abort("failed");
                 return reply({ turnId: this.turn.id, stateRevision: 2, state: this.turn.state, assistant: this.turn.assistant }, 202);
@@ -82,7 +95,11 @@ class ConversationFixture {
                 this.snapshot.pendingTurn = null; this.snapshot.stateRevision++;
                 return reply({ turnId: this.turn.id, stateRevision: this.snapshot.stateRevision, state: this.turn.state, assistant: this.turn.assistant, disposition: this.cancellation });
             }
-            if (path.includes("/turns/")) return reply({ turn: this.turn, stateRevision: this.snapshot.stateRevision });
+            if (path.includes("/turns/")) {
+                this.turnReads++;
+                if (this.historyDelay) await new Promise(resolve => setTimeout(resolve, this.historyDelay));
+                return reply({ turn: this.historyTurns.find(turn => turn.id === path.split("/").at(-1)) || this.turn, stateRevision: this.snapshot.stateRevision });
+            }
             throw new Error(`Unmocked conversation API ${method} ${path}`);
         });
     }
@@ -106,6 +123,53 @@ class ConversationFixture {
     }
 }
 
+test("long conversation reads turn pages once and reuses terminal turns after another submission", async ({ page, api }, info) => {
+    const fixture = new ConversationFixture();
+    fixture.exists = true; fixture.historyDelay = 100;
+    fixture.historyTurns = Array.from({ length: 125 }, (_, index) => ({ ...conversationTurn("completed", `history-${index}`),
+        id: `82000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, intent: "discuss", taskId: null, outputVersionId: null }));
+    fixture.messages = fixture.historyTurns.map((turn, index) => ({ ...conversationMessage(),
+        id: `83000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, turnId: turn.id, seq: index + 1, text: `历史设计讨论 ${index + 1}` }));
+    await fixture.attach(page);
+    await page.goto("/chat");
+    const start = Date.now();
+    await page.getByRole("navigation", { name: "会话列表" }).getByRole("button", { name: /针织衫改款/ }).click();
+    await expect(page.getByText("已连接服务端", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator("[data-turn-state='completed']")).toHaveCount(125);
+    const initial = { turns: fixture.historyTurns.length, turnDetailGets: fixture.turnReads, turnPageGets: fixture.turnPages, simulatedPerRequestLatencyMs: fixture.historyDelay, loadedInMs: Date.now() - start };
+    await info.attach("long-history-initial-request-counts", { contentType: "application/json", body: JSON.stringify(initial) });
+    await page.screenshot({ path: info.outputPath("long-history-loaded.png"), fullPage: true });
+    expect(fixture.turnReads).toBe(0);
+    expect(fixture.turnPages).toBe(2);
+    await page.getByRole("textbox", { name: "对话内容", exact: true }).fill("继续讨论这一个新细节");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await expect(page.getByRole("button", { name: "停止本轮", exact: true })).toBeVisible();
+    await expect(page.locator("[data-turn-state='completed']")).toHaveCount(125);
+    expect(fixture.turnReads).toBe(0);
+    expect(fixture.turnPages).toBe(2);
+    expect(fixture.submissions).toHaveLength(1);
+    expect(api.submissions).toHaveLength(0);
+    await info.attach("long-history-after-submission-request-counts", { contentType: "application/json", body: JSON.stringify({ turnDetailGets: fixture.turnReads, turnPageGets: fixture.turnPages, turnPosts: fixture.submissions.length }) });
+    await page.screenshot({ path: info.outputPath("long-history-next-turn.png"), fullPage: true });
+});
+
+test("a task-linked failure is read again so a late server result is not hidden by the terminal cache", async ({ page, api }) => {
+    const fixture = new ConversationFixture();
+    fixture.exists = true; fixture.turn = conversationTurn("failed"); fixture.messages = [conversationMessage()];
+    await fixture.attach(page);
+    await page.route(`**/api/image-conversations/${ids.conversation}/events?*`, route => route.fulfill({ contentType: "text/event-stream", body: ": connected\n\n" }));
+    await page.goto("/chat");
+    await page.getByRole("navigation", { name: "会话列表" }).getByRole("button", { name: /针织衫改款/ }).click();
+    await expect(page.locator("[data-turn-state='failed']")).toHaveCount(1);
+    fixture.complete();
+    await page.getByRole("button", { name: "刷新服务端记录", exact: true }).click();
+    await expect(page.locator("[data-turn-state='completed']")).toHaveCount(1);
+    await expect(page.locator(`[data-version-id='${ids.generated}']`)).toHaveCount(1);
+    expect(fixture.turnReads).toBe(1);
+    expect(fixture.submissions).toHaveLength(0);
+    expect(api.submissions).toHaveLength(0);
+});
+
 async function uploadAndSend(page: Page, fixture: ConversationFixture) {
     await page.goto("/chat");
     await expect(page.getByTestId("server-image-conversation")).toBeVisible();
@@ -116,6 +180,118 @@ async function uploadAndSend(page: Page, fixture: ConversationFixture) {
     await page.getByRole("button", { name: "发送", exact: true }).click();
     await expect.poll(() => fixture.submissions.length).toBe(1);
 }
+
+test("initial snapshot network failure automatically reconnects read-only without refreshing or submitting a turn", async ({ page, api }, info) => {
+    const fixture = new ConversationFixture(); await fixture.attach(page);
+    let reads = 0;
+    await page.route(`**/api/image-conversations/${ids.conversation}`, route => {
+        reads++;
+        return reads === 1 ? route.abort("failed") : route.fallback();
+    });
+    await page.goto("/chat");
+    await expect(page.getByTestId("server-image-conversation")).toBeVisible();
+    await page.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: "自动同步原图.png", mimeType: "image/png", buffer: IMAGE });
+    await expect.poll(() => reads).toBe(2);
+    await expect(page.locator(`[data-version-id="${ids.root}"]`)).toBeVisible();
+    await expect(page.getByText("已连接服务端", { exact: true })).toBeVisible();
+    await expect.poll(() => fixture.streamCursors.length).toBeGreaterThan(0);
+    expect(fixture.creates).toHaveLength(1);
+    expect(fixture.submissions).toHaveLength(0);
+    expect(fixture.legacyPosts).toHaveLength(0);
+    expect(api.submissions).toHaveLength(0);
+    await page.screenshot({ path: info.outputPath("initial-read-auto-reconnected.png"), fullPage: true });
+});
+
+test("an unresponsive initial snapshot is bounded and automatically replaced by a successful read", async ({ page, api }) => {
+    const fixture = new ConversationFixture(); await fixture.attach(page);
+    let reads = 0;
+    let firstFailed = false;
+    page.on("requestfailed", request => { if (request.url().endsWith(`/api/image-conversations/${ids.conversation}`)) firstFailed = true; });
+    await page.route(`**/api/image-conversations/${ids.conversation}`, route => {
+        reads++;
+        if (reads === 1) return;
+        return route.fallback();
+    });
+    await page.goto("/chat");
+    await expect(page.getByTestId("server-image-conversation")).toBeVisible();
+    await page.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: "有界读取原图.png", mimeType: "image/png", buffer: IMAGE });
+    await expect.poll(() => reads, { timeout: 20_000 }).toBe(2);
+    await expect(page.getByText("已连接服务端", { exact: true })).toBeVisible();
+    expect(firstFailed).toBe(true);
+    expect(fixture.creates).toHaveLength(1);
+    expect(fixture.submissions).toHaveLength(0);
+    expect(api.submissions).toHaveLength(0);
+});
+
+for (const fault of [401, 403, 404, "identity", "structure", "entrypoint"] as const) test(`initial snapshot ${fault} failure stops automatic reads instead of retrying invalid state`, async ({ page, api }) => {
+    const fixture = new ConversationFixture(); await fixture.attach(page);
+    let reads = 0;
+    await page.route(`**/api/image-conversations/${ids.conversation}`, route => {
+        reads++;
+        if (typeof fault === "number") return route.fulfill({ status: fault, json: { code: "NOT_FOUND", data: null, msg: `Synthetic terminal HTTP ${fault}` } });
+        const snapshot = conversationSnapshot();
+        const data = fault === "structure" ? { ...snapshot, stateRevision: "invalid" }
+            : fault === "identity" ? { ...snapshot, id: ids.root } : { ...snapshot, entrypoint: "canvas", canvasExternalId: "other-canvas" };
+        return route.fulfill({ json: envelope(data) });
+    });
+    await page.goto("/chat");
+    await expect(page.getByTestId("server-image-conversation")).toBeVisible();
+    await page.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: "终止校验原图.png", mimeType: "image/png", buffer: IMAGE });
+    await expect(page.getByText("服务端记录尚未同步", { exact: true })).toBeVisible();
+    await page.waitForTimeout(3_200);
+    expect(reads).toBe(1);
+    expect(fixture.streamCursors).toHaveLength(0);
+    expect(fixture.creates).toHaveLength(1);
+    expect(fixture.submissions).toHaveLength(0);
+    expect(api.submissions).toHaveLength(0);
+});
+
+test("selecting a new conversation cancels the failed initial read loop and never opens a stale stream", async ({ page, api }) => {
+    const fixture = new ConversationFixture(); await fixture.attach(page);
+    let reads = 0;
+    await page.route(`**/api/image-conversations/${ids.conversation}`, route => { reads++; return route.abort("failed"); });
+    await page.goto("/chat");
+    await expect(page.getByTestId("server-image-conversation")).toBeVisible();
+    await page.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: "切换会话原图.png", mimeType: "image/png", buffer: IMAGE });
+    await expect(page.getByText("连接暂时中断，只读重连中", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "新会话", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "直接说怎么改", exact: true })).toBeVisible();
+    const before = reads;
+    await page.waitForTimeout(3_200);
+    expect(reads).toBe(before);
+    expect(fixture.streamCursors).toHaveLength(0);
+    expect(fixture.creates).toHaveLength(1);
+    expect(fixture.submissions).toHaveLength(0);
+    expect(api.submissions).toHaveLength(0);
+});
+
+for (const destination of ["workbench", "signout"] as const) test(`${destination} aborts the previous employee conversation read loop`, async ({ page, context, api }) => {
+    const fixture = new ConversationFixture(); await fixture.attach(page);
+    await context.route("**/api/prompt-templates?*", route => route.fulfill({ json: { templates: [], total: 0 } }));
+    let reads = 0;
+    await page.route(`**/api/image-conversations/${ids.conversation}`, route => { reads++; return route.abort("failed"); });
+    await context.route("**/api/auth/logout", route => route.fulfill({ status: 204 }));
+    await page.goto("/chat");
+    await expect(page.getByTestId("server-image-conversation")).toBeVisible();
+    await page.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: "离开会话原图.png", mimeType: "image/png", buffer: IMAGE });
+    await expect(page.getByText("连接暂时中断，只读重连中", { exact: true })).toBeVisible();
+    if (destination === "workbench") {
+        await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "工作台", exact: true }).click();
+        await expect(page).not.toHaveURL(/\/chat(?:$|\?)/);
+    } else {
+        await page.getByRole("button", { name: "个人账号", exact: true }).click();
+        await page.getByRole("button", { name: "退出登录", exact: true }).first().click();
+        await expect(page.getByRole("heading", { name: "登录状态已变化，工作区已暂停", exact: true })).toBeVisible();
+    }
+    await expect(page.getByTestId("server-image-conversation")).toHaveCount(0);
+    const before = reads;
+    await page.waitForTimeout(3_200);
+    expect(reads).toBe(before);
+    expect(fixture.streamCursors).toHaveLength(0);
+    expect(fixture.creates).toHaveLength(1);
+    expect(fixture.submissions).toHaveLength(0);
+    expect(api.submissions).toHaveLength(0);
+});
 
 test("upload original, persisted acceptance, duplicate SSE result and refresh recover from server without paid endpoints", async ({ page, api }) => {
     const fixture = new ConversationFixture(); await fixture.attach(page);

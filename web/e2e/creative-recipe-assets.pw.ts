@@ -1,6 +1,7 @@
 import { test, expect, IMAGE, fixturePng, type MockCanvasApi } from "./fixtures";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { createHash } from "node:crypto";
+import { activeWorkbench, workbenchPanes } from "./headless-workbench";
 
 const owner = "00000000-0000-4000-8000-000000000099";
 const primaryId = "79100000-0000-4000-8000-000000000001";
@@ -76,21 +77,35 @@ test("creative library inputs preserve both originals and stay task-scoped", asy
     expect(await bytes(page.getByRole("img", { name: "pattern-original.png", exact: true }))).toEqual(fixturePng(40));
     await expect.poll(async () => (await stored(page, "creative_scene_workspaces", `draft:${owner}:accessory-design`))?.images?.secondary?.sourceAssetId).toBe(secondaryId);
     await page.screenshot({ path: info.outputPath("creative-task-two-roles.png"), fullPage: true });
-    await page.getByRole("button", { name: "新建任务", exact: true }).click();
+    expect(api.submissions).toHaveLength(0);
+    api.taskStatus = "processing";
+    await page.locator(".cs-generate").click();
+    await expect.poll(() => api.submissions.length).toBe(1);
+    const originalTask = [...api.tasks.values()][0];
+    await page.getByRole("button", { name: "新建任务，继续创作", exact: true }).click();
+    await expect(workbenchPanes(page)).toHaveCount(2);
     await expect(page.getByRole("img", { name: "primary-original.png", exact: true })).toHaveCount(0);
     await choose(page, page.getByRole("button", { name: "从素材库选择辅料图", exact: true }), "图案素材");
     expect(await bytes(page.getByRole("img", { name: "pattern-original.png", exact: true }))).toEqual(fixturePng(40));
-    const firstTask = page.getByRole("tab", { name: /^任务 1/ });
-    await firstTask.click();
-    // Activation commits its IndexedDB registry before changing the visible pane.
-    // Do not capture an image handle from task 2 while that write is pending.
-    await expect(firstTask).toHaveAttribute("aria-selected", "true");
-    const restoredPrimary = await bytes(page.getByRole("img", { name: "primary-original.png", exact: true }));
+    const firstTask = workbenchPanes(page).first();
+    await expect(firstTask).toBeHidden();
+    await expect(page.getByRole("tab", { name: /^任务 \d+/ })).toHaveCount(0);
+    const originalPrimary = firstTask.getByRole("img", { name: "primary-original.png", exact: true, includeHidden: true });
+    const restoredPrimary = await bytes(originalPrimary);
     const digest = (value: Buffer) => ({ bytes: value.length, sha256: createHash("sha256").update(value).digest("hex") });
     expect(restoredPrimary.equals(IMAGE), JSON.stringify({ expected: digest(IMAGE), received: digest(restoredPrimary) })).toBe(true);
-    await page.reload(); await expect(page.getByRole("img", { name: "pattern-original.png", exact: true })).toBeVisible();
-    expect(await bytes(page.getByRole("img", { name: "pattern-original.png", exact: true }))).toEqual(fixturePng(40));
-    expect(api.submissions).toHaveLength(0);
+    expect(await bytes(firstTask.getByRole("img", { name: "pattern-original.png", exact: true, includeHidden: true }))).toEqual(fixturePng(40));
+    originalTask.status = "success";
+    originalTask.resultUrls = [`/api/assets/${originalTask.id}/content`];
+    await page.reload();
+    await expect(workbenchPanes(page)).toHaveCount(2);
+    await expect(activeWorkbench(page).getByRole("img", { name: "pattern-original.png", exact: true })).toBeVisible();
+    expect(await bytes(activeWorkbench(page).getByRole("img", { name: "pattern-original.png", exact: true }))).toEqual(fixturePng(40));
+    expect(await bytes(originalPrimary)).toEqual(IMAGE);
+    expect(await bytes(firstTask.getByRole("img", { name: "pattern-original.png", exact: true, includeHidden: true }))).toEqual(fixturePng(40));
+    expect([...api.tasks.keys()]).toEqual([originalTask.id]);
+    expect(api.submissions).toHaveLength(1);
+    await page.screenshot({ path: info.outputPath("creative-task-scoped-after-refresh.png"), fullPage: true });
 });
 
 test("creative shows source read failure inside the picker and leaves its original untouched", async ({ page, context, api }) => {

@@ -144,6 +144,9 @@ export class PromptCompiler {
     let rawResponse: string | null = null;
     let usage: Awaited<ReturnType<PromptOptimizer["invoke"]>>["usage"];
     try {
+      const current = await this.store.getCompilation(claim.id, actor.id);
+      if (!current) throw new PromptOptimizationError("PROMPT_COMPILATION_NOT_FOUND", "优化记录不存在", 404);
+      if (current.status !== "optimizing") return checkedResult(current);
       if (template) {
         assertPromptOutputContent(template.prompt, [system], outputOptions);
         await this.store.finish(claim.id, "success", { prompt: template.prompt, summaryZh: template.summaryZh, questions: [], optimized: false,
@@ -166,13 +169,14 @@ export class PromptCompiler {
       const knownFailure = rawResponse !== null || error instanceof PromptOptimizationError || diagnostics?.phase === "initial_tls" || diagnostics?.phase === "preflight"
         || (upstreamStatus !== undefined && isDefinitiveSubmissionRejection(upstreamStatus));
       const uncertain = !knownFailure;
-      const failure = error instanceof PromptOptimizationError ? error : new PromptOptimizationError(uncertain ? "PROMPT_SUBMISSION_UNCERTAIN" : "PROMPT_OPTIMIZATION_FAILED",
-        uncertain ? `${isVideo ? "动效规划" : "提示词优化"}状态待核查，未提交生成；不会自动重新提交` : isVideo ? "动效规划失败，未提交生成" : "提示词优化失败，未提交生成", 502);
+      const failure = error instanceof PromptOptimizationError ? error : new PromptOptimizationError(uncertain ? "PROMPT_PREPARATION_FAILED" : "PROMPT_OPTIMIZATION_FAILED",
+        uncertain ? "提示词准备失败，未提交生成。" : isVideo ? "动效规划失败，未提交生成" : "提示词优化失败，未提交生成", 422);
       const upstreamDiagnostics = error instanceof ChatProtocolError ? {
         ...(typeof error.upstreamStatus === "number" && Number.isInteger(error.upstreamStatus) && error.upstreamStatus >= 100 && error.upstreamStatus <= 599 ? { upstreamStatus: error.upstreamStatus } : {}),
         ...(error.upstreamReason && chatUpstreamFailureReasons.includes(error.upstreamReason) ? { upstreamReason: error.upstreamReason } : {}),
       } : {};
-      const metrics = { rawResponse, latencyMs: Math.round(performance.now() - started), ...usageFields(usage, rawResponse === null ? null : optimizer?.estimatedRmbCost ?? null), ...upstreamDiagnostics };
+      const metrics = { rawResponse, latencyMs: Math.round(performance.now() - started), ...usageFields(usage, rawResponse === null ? null : optimizer?.estimatedRmbCost ?? null), ...upstreamDiagnostics,
+        ...(uncertain ? { upstreamOutcome: "unknown" as const } : {}) };
       if (!uncertain && active.recipe.failurePolicy === "fallback" && active.version.fallbackPrompt.trim() && failure.code !== "PROMPT_OUTPUT_REJECTED") {
         const prompt = active.version.fallbackPrompt.replaceAll("{{user_text}}", userText).replaceAll("{{fields}}", JSON.stringify(fields));
         try {
@@ -185,7 +189,7 @@ export class PromptCompiler {
           const timelineFailure = fallbackError instanceof PromptOptimizationError && fallbackError.code === "PROMPT_VIDEO_TIMELINE_INVALID" ? fallbackError : null;
           await this.store.finish(claim.id, "failed", { ...metrics, errorCode: timelineFailure?.code ?? "PROMPT_OUTPUT_REJECTED", message: timelineFailure?.message ?? "备用提示词未通过检查，未提交生成" });
         }
-      } else await this.store.finish(claim.id, uncertain ? "uncertain" : "failed", { ...metrics, errorCode: failure.code, message: failure.message });
+      } else await this.store.finish(claim.id, "failed", { ...metrics, errorCode: failure.code, message: failure.message });
     }
     return checkedResult((await this.store.getCompilation(claim.id, actor.id))!);
   }

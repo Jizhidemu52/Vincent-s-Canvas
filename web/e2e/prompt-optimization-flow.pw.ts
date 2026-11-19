@@ -94,10 +94,11 @@ async function setupFlow(page: Page, api: MockCanvasApi, video = false) {
     return { compilations, manualPosts, reused };
 }
 
-for (const mode of [{ query: "", tool: "image", operation: "image_generation", action: "开始生成" }, { query: "?tool=image-edit", tool: "image-edit", operation: "inpaint", action: "开始编辑" }]) {
-    test(`${mode.tool}: lettering seen only in the synthetic reference survives optimize then one generation`, async ({ page, api }) => {
+for (const mode of [{ query: "", name: "legacy image link" }, { query: "?tool=image-edit", name: "image-edit" }]) {
+    test(`${mode.name}: lettering seen only in the synthetic reference survives optimize then one edit`, async ({ page, api }, info) => {
         const flow = await setupFlow(page, api), bytes = await hatImage(page);
         await page.goto(`/image${mode.query}`);
+        await expect(page).toHaveURL(/\/image\?tool=image-edit$/);
         const input = page.getByRole("textbox", { name: "图像提示词", exact: true });
         await input.fill("仅将帽子改为钴蓝色，其他保持参考图原样");
         await pasteReference(input, bytes);
@@ -113,13 +114,16 @@ for (const mode of [{ query: "", tool: "image", operation: "image_generation", a
         expect(flow.compilations).toHaveLength(1); expect(api.submissions).toHaveLength(0);
         expect(flow.compilations[0].promptInput.userText).not.toContain("NOVA");
         expect(flow.compilations[0].compilation.keepText).toEqual(["NOVA", "73"]);
-        await page.getByRole("button", { name: mode.action, exact: true }).click();
+        expect(flow.compilations[0]).toMatchObject({ toolKey: "image-edit", modelConfigId: model.id, promptInput: { mode: "edit" } });
+        await page.getByRole("button", { name: "开始编辑", exact: true }).click();
         await expect(page.getByRole("button", { name: "放入画布", exact: true })).toBeVisible();
         expect(api.submissions).toHaveLength(1); expect(flow.compilations).toHaveLength(1);
-        expect(api.submissions[0]).toMatchObject({ prompt: referencePrompt, toolKey: mode.tool, operationType: mode.operation, promptInput: { compilationId: flow.compilations[0].compilation.id } });
+        expect(api.submissions[0]).toMatchObject({ prompt: referencePrompt, modelConfigId: model.id, toolKey: "image-edit", operationType: "inpaint", promptInput: { mode: "edit", compilationId: flow.compilations[0].compilation.id } });
         expect(api.submissions[0].sourceUrls).toEqual(flow.compilations[0].sourceUrls);
         expect(flow.reused).toHaveLength(1);
         expect([...api.assetBytes.values()].some(value => value.equals(bytes))).toBe(true);
+        await expect.poll(() => page.getByRole("img", { name: "生成结果 1", exact: true }).evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+        await page.screenshot({ path: info.outputPath("lettering-preserving-edit.png"), animations: "disabled" });
     });
 }
 

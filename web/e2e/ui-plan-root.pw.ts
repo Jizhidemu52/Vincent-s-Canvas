@@ -49,7 +49,9 @@ for (const size of [{ width: 1366, height: 768 }, { width: 1920, height: 1080 }]
         await expect(generate).toBeEnabled();
         await expect(generate).toBeInViewport();
         await expect(generate).toHaveText("生成图片");
-        await expect(page.getByRole("button", { name: "新建任务", exact: true })).toBeInViewport();
+        await expect(page.getByTestId("layer-studio-submit-bar")).toBeInViewport();
+        await expect(page.getByRole("button", { name: /^(新建任务|继续创作)$/ })).toHaveCount(0);
+        await expect(page.getByRole("tab", { name: /^任务 \d+/ })).toHaveCount(0);
         for (const theme of ["dark", "light"]) {
             if (theme === "light") await page.getByRole("button", { name: "切换到浅色主题", exact: true }).click();
             await expect(page.locator("html")).not.toHaveAttribute("data-magicui-theme-vt", "active");

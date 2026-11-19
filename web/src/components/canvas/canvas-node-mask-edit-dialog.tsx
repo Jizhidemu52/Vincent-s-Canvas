@@ -45,7 +45,7 @@ export function canvasMaskEditImageSettings(config: Pick<AiConfig, "size" | "qua
         throw new Error("无法确认原图像素尺寸；尚未提交生成。");
     if (!profile.verified || !profile.supportsMask || (!profile.customSize && !profile.sizes.includes(size)))
         throw new Error(`当前模型不能按原图 ${width} × ${height}px 进行严格蒙版编辑，请选择支持该像素尺寸的模型；尚未提交生成。`);
-    const sizeError = imageModelSettingsError(size, profile);
+    const sizeError = imageModelSettingsError(size, profile, undefined);
     if (sizeError) throw new Error(`原图 ${width} × ${height}px 不符合当前模型的尺寸要求：${sizeError} 尚未提交，不会自动缩放原图或蒙版。`);
     const options = readImageOptions(config.imageOptions);
     const safeKeys = new Set(["background", "output_format", "output_compression", "moderation"]);

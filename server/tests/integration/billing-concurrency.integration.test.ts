@@ -3,11 +3,12 @@ import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Pool, type PoolClient, type QueryResult } from "pg";
+import { Pool, type QueryResult } from "pg";
 
 import { adjustCredits, BillingError, reserveCredits, setCreditBalance, settleReservation } from "../../src/billing";
 import type { Cache, Database } from "../../src/db";
-import { enqueueTask, transitionTask, type TaskInput } from "../../src/tasks";
+import { enqueueTask, prepareTaskEnqueue, transitionTask, type TaskInput } from "../../src/tasks";
+import { expectedRejection } from "../helpers/expected-rejection";
 
 const integration = process.env.RUN_INTEGRATION_TESTS === "true" ? describe : describe.skip;
 const schema = `billing_concurrency_${randomUUID().replaceAll("-", "")}`;
@@ -74,25 +75,33 @@ integration("PostgreSQL billing concurrency", () => {
   function observeQueries(afterQuery?: (sql: string, result: QueryResult) => Promise<void>,
     beforeQuery?: (sql: string) => Promise<void>) {
     const concurrencyErrors: string[] = [];
-    const db = {
-      connect: async () => {
-        const client = await database.connect();
-        const query = (async (sql: string, values?: unknown[]) => {
-          try {
-            await beforeQuery?.(sql);
-            const result = await client.query(sql, values);
-            await afterQuery?.(sql, result);
-            return result;
-          } catch (error) {
-            const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
-            // withTransaction retries these errors. A successful retry must not hide a regression.
-            if (code === "40P01" || code === "40001") concurrencyErrors.push(code);
-            throw error;
-          }
-        }) as PoolClient["query"];
-        return { query, release: () => client.release() } as PoolClient;
+    const db: Database = new Proxy(database, {
+      get(target, key) {
+        if (key === "connect") return async () => {
+          const client = await target.connect();
+          return new Proxy(client, {
+            get(connection, method) {
+              if (method === "query") return async (sql: string, values?: unknown[]) => {
+                try {
+                  await beforeQuery?.(sql);
+                  const result = await connection.query(sql, values);
+                  await afterQuery?.(sql, result);
+                  return result;
+                } catch (error) {
+                  const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+                  if (code === "40P01" || code === "40001") concurrencyErrors.push(code);
+                  throw error;
+                }
+              };
+              const value = Reflect.get(connection, method);
+              return typeof value === "function" ? value.bind(connection) : value;
+            },
+          });
+        };
+        const value = Reflect.get(target, key);
+        return typeof value === "function" ? value.bind(target) : value;
       },
-    } as unknown as Database;
+    });
     return { db, concurrencyErrors };
   }
 
@@ -168,6 +177,21 @@ integration("PostgreSQL billing concurrency", () => {
     return result.rows[0]!;
   }
 
+  test("observed database retains preparation reads and transaction hooks", async () => {
+    const data = await fixture({ users: 1, department: false });
+    const input = data.input();
+    const statements: string[] = [];
+    const observed = observeQueries(async sql => { statements.push(sql); });
+    const prepared = await prepareTaskEnqueue(observed.db, input);
+    expect(prepared.execution).toMatchObject({ modelConfigId: input.modelConfigId });
+    expect(statements).toEqual([]);
+    expect(await taskCounts([input.requestId])).toEqual({ tasks: 0, reservations: 0, userHolds: 0, departmentHolds: 0 });
+    expect((await enqueueTask(observed.db, cache, input)).status).toBe("waiting");
+    expect(statements).toContain("BEGIN");
+    expect(statements).toContain("COMMIT");
+    expect(await balances(data.userIds)).toEqual([92]);
+  });
+
   test("concurrent administrator additions retain every increment and deduplicate a shared request", async () => {
     const data = await fixture({ users: 1, department: false });
     const userId = data.userIds[0]!;
@@ -188,7 +212,7 @@ integration("PostgreSQL billing concurrency", () => {
     const repeated = await Promise.all([reserveCredits(database, input), reserveCredits(database, input)]);
     expect(repeated.map(result => result.duplicate).sort()).toEqual([false, true]);
     expect(await balances(data.userIds)).toEqual([92, 100]);
-    await expect(reserveCredits(database, { ...input, userId: data.userIds[1]! })).rejects.toMatchObject({ code: "DUPLICATE_REQUEST" });
+    expect(await expectedRejection(reserveCredits(database, { ...input, userId: data.userIds[1]! }))).toMatchObject({ code: "DUPLICATE_REQUEST" });
     const sharedRequestId = randomUUID();
     const competing = await Promise.allSettled(data.userIds.map(userId => reserveCredits(database, { ...input, requestId: sharedRequestId, userId })));
     expect(competing.map(result => result.status).sort()).toEqual(["fulfilled", "rejected"]);

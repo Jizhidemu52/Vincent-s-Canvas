@@ -15,7 +15,7 @@ function fixture() {
     } });
     const wakeTarget = new EventTarget();
     const controller = new AbortController();
-    const start = (reconcile: () => Promise<void>, intervalMs = 1_000) => watchTaskReconciliation({ taskIds: ["original"], signal: controller.signal, reconcile, intervalMs, watch: stream.subscribe, visibility, wakeTarget: wakeTarget as Window }).catch(error => { if (!controller.signal.aborted) throw error; });
+    const start = (reconcile: () => Promise<void>, intervalMs = 1_000, onError?: (error: unknown) => void) => watchTaskReconciliation({ taskIds: ["original"], signal: controller.signal, reconcile, intervalMs, onError, watch: stream.subscribe, visibility, wakeTarget: wakeTarget as Window }).catch(error => { if (!controller.signal.aborted) throw error; });
     return { start, connections, controller, wakeTarget, visibility, changeOwner() { owner = "employee-b"; stream.identityChanged(); }, visible() { visibility.hidden = false; visibilityEvents.dispatchEvent(new Event("visibilitychange")); } };
 }
 
@@ -63,6 +63,58 @@ test.each(["focus", "online"])("%s refreshes promptly without a second loop or m
     f.controller.abort(); await run;
     f.wakeTarget.dispatchEvent(new Event(event)); await Bun.sleep(5);
     expect(reads).toBe(2);
+});
+
+test.each(["focus", "online"])("%s during a read triggers one prompt serial follow-up", async event => {
+    const f = fixture();
+    const entered = Promise.withResolvers<void>(), gate = Promise.withResolvers<void>();
+    const followed = Promise.withResolvers<void>();
+    let reads = 0, concurrent = 0, peak = 0;
+    const run = f.start(async () => {
+        reads++; concurrent++; peak = Math.max(peak, concurrent);
+        if (reads === 1) { entered.resolve(); await gate.promise; }
+        else followed.resolve();
+        concurrent--;
+    });
+    try {
+        await entered.promise;
+        f.wakeTarget.dispatchEvent(new Event(event));
+        f.wakeTarget.dispatchEvent(new Event(event));
+        expect(reads).toBe(1);
+        gate.resolve();
+        await Promise.race([followed.promise, Bun.sleep(50)]);
+        expect(reads).toBe(2); expect(peak).toBe(1);
+    } finally { gate.resolve(); f.controller.abort(); await run; }
+    f.wakeTarget.dispatchEvent(new Event(event)); await Bun.sleep(5);
+    expect(reads).toBe(2);
+});
+
+test("focus during a read cannot hide an employee change or permit another read", async () => {
+    const f = fixture();
+    const entered = Promise.withResolvers<void>(), gate = Promise.withResolvers<void>();
+    let reads = 0;
+    const run = f.start(async () => { reads++; entered.resolve(); await gate.promise; });
+    try {
+        await entered.promise;
+        f.wakeTarget.dispatchEvent(new Event("focus"));
+        f.changeOwner(); gate.resolve();
+        await expect(run).rejects.toThrow("员工会话已变化");
+        expect(reads).toBe(1);
+    } finally { gate.resolve(); f.controller.abort(); await run.catch(() => {}); }
+});
+
+test("focus during a read cannot swallow an error handler failure", async () => {
+    const f = fixture();
+    const entered = Promise.withResolvers<void>(), gate = Promise.withResolvers<void>();
+    const handlerError = new Error("error handler failed");
+    let reads = 0;
+    const run = f.start(async () => { reads++; entered.resolve(); await gate.promise; throw new Error("snapshot failed"); }, 1_000, () => { throw handlerError; });
+    try {
+        await entered.promise;
+        f.wakeTarget.dispatchEvent(new Event("focus")); gate.resolve();
+        await expect(run).rejects.toBe(handlerError);
+        expect(reads).toBe(1);
+    } finally { gate.resolve(); f.controller.abort(); await run.catch(() => {}); }
 });
 
 test("hidden pages do not GET; returning to the foreground reconciles the existing task", async () => {

@@ -263,12 +263,13 @@ class UbuntuMirrorFixtures(unittest.TestCase):
 
 
 class WorkflowWiring(unittest.TestCase):
-    def test_release_and_both_production_jobs_configure_before_first_apt_call(self):
+    def test_release_and_production_jobs_configure_before_first_apt_call(self):
         release = (ROOT / ".github/workflows/docker-image.yml").read_text(encoding="utf-8")
         production = (ROOT / ".github/workflows/production-ci.yml").read_text(encoding="utf-8")
         backend = production.split("  backend-integration:\n", 1)[1].split("  frontend:\n", 1)[0]
-        frontend = production.split("  frontend:\n", 1)[1].split("  compose-recovery:\n", 1)[0]
-        for job in (release, backend, frontend):
+        frontend = production.split("  frontend:\n", 1)[1].split("  frontend-e2e:\n", 1)[0]
+        frontend_e2e = production.split("  frontend-e2e:\n", 1)[1].split("  compose-recovery:\n", 1)[0]
+        for job in (release, backend, frontend, frontend_e2e):
             with self.subTest(job=job[:60]):
                 self.assertEqual(job.count('python3 -B "$GITHUB_WORKSPACE/ops/release/ci-ubuntu-apt.py"'), 1)
                 setup = job.index("Configure signed Ubuntu mirrors on the disposable runner")

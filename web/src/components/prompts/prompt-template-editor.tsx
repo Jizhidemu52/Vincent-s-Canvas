@@ -98,7 +98,7 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
 
     const save = () => run(async () => {
         const values = await form.validateFields();
-            const sizeError = imageProfile && values.size && !imageReferenceSizeIsAutomatic(imageProfile, values.referenceAssetIds?.length || 0) ? imageModelSettingsError(values.size, imageProfile) : "";
+            const sizeError = imageProfile && values.size && !imageReferenceSizeIsAutomatic(imageProfile, values.referenceAssetIds?.length || 0) ? imageModelSettingsError(values.size, imageProfile, values.imageOptions) : "";
             if (sizeError) throw new Error(sizeError);
             await onSubmit({
                 title: values.title, prompt: values.prompt, targetTool: values.targetTool, modelConfigId: values.modelConfigId ?? null,

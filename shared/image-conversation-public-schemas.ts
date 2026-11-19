@@ -42,6 +42,7 @@ export const conversationSnapshotSchema = z.strictObject({ ...Internal.conversat
   { ...value, activeVersion: internalVersion(value.activeVersion), pendingTurn: internalTurn(value.pendingTurn) }, context)) satisfies z.ZodType<Public.PublicConversationSnapshot>;
 
 export const turnDetailsSchema = z.strictObject({ ...Internal.turnDetailsSchema.shape, turn: imageTurnSchema }) satisfies z.ZodType<Public.PublicTurnDetails>;
+export const turnPageSchema = z.strictObject({ ...Internal.turnPageSchema.shape, items: z.array(imageTurnSchema).max(100) }) satisfies z.ZodType<Public.PublicTurnPage>;
 export const versionPageSchema = z.strictObject({ ...Internal.versionPageSchema.shape, items: z.array(imageVersionSchema).max(100) }) satisfies z.ZodType<Public.PublicVersionPage>;
 
 const eventEnvelopeFields = { conversationId: Internal.uuidSchema, seq: Internal.positiveSequenceSchema, turnId: Internal.uuidSchema.nullable(), createdAt: Internal.isoDateTimeSchema };

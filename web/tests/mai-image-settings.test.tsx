@@ -37,8 +37,8 @@ test("opaque MAI profile exposes only documented modes and no quality, mask or f
 });
 
 test("MAI custom pixels enforce 768px minimum and 2359296 total pixels but only recommend 32 alignment", () => {
-    for (const size of ["768x768", "800x769", "1000x1000", "1025x1024", "1024x1024", "1536x1536", "3072x768", "768x3072", "16:9", "1:4", "auto"]) expect(imageModelSettingsError(size, mai)).toBe("");
-    for (const size of ["767x1024", "512x1024", "1537x1536", "2048x2048", "3840x2160", "8:1", "wrong"]) expect(imageModelSettingsError(size, mai)).not.toBe("");
+    for (const size of ["768x768", "800x769", "1000x1000", "1025x1024", "1024x1024", "1536x1536", "3072x768", "768x3072", "16:9", "1:4", "auto"]) expect(imageModelSettingsError(size, mai, undefined)).toBe("");
+    for (const size of ["767x1024", "512x1024", "1537x1536", "2048x2048", "3840x2160", "8:1", "wrong"]) expect(imageModelSettingsError(size, mai, undefined)).not.toBe("");
     expect(imageTaskParameters({ ...config, size: "1000x1000" }, mai)).toEqual({ size: "1000x1000", resolution: "2k" });
     expect(mai.sizeConstraintMessage).toContain("建议使用 32 的倍数");
     expect(mai.sizeConstraintMessage).toContain("实际输出宽高各向下取整");

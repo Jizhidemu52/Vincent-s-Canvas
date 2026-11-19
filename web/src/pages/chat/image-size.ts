@@ -54,7 +54,7 @@ export async function resolveChatImageSize(config: AiConfig, requested: string |
     if (!automatic && requestedAspect && (!normalizedAspect || Math.abs(Math.log(requestedAspect / normalizedAspect)) >= 1e-9)) {
         throw new Error("当前模型不支持已选择的图片尺寸，请在出图设置重新选择；图片任务尚未提交。");
     }
-    const error = imageModelSettingsError(normalized, profile);
+    const error = imageModelSettingsError(normalized, profile, config.imageOptions);
     if (error) throw new Error(error);
     return normalized;
 }

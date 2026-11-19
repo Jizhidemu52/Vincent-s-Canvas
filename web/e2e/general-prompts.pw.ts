@@ -48,8 +48,14 @@ test("each target fills only its prompt without generation", async ({ page, cont
         const card = page.locator(`[data-general-prompt-id="${item.id}"]`);
         await card.getByRole("button", { name: /^填入/ }).click();
         await expect.poll(() => new URL(page.url()).pathname).toBe(target === "video" ? "/video" : "/image");
-        expect(new URL(page.url()).searchParams.get("tool")).toBe(target === "image-edit" ? "image-edit" : null);
+        await expect.poll(() => new URL(page.url()).searchParams.get("tool")).toBe(target === "video" ? null : "image-edit");
         const prompt = target === "video" ? page.locator("textarea").filter({ visible: true }).first() : page.getByRole("textbox", { name: "图像提示词", exact: true });
+        if (target === "image-edit") {
+            await expect(page.getByRole("dialog")).toContainText("替换当前草稿？");
+            await expect(prompt).toHaveValue(generalPromptTemplates.find(value => value.targetTool === "image-generation")!.prompt);
+            expect(api.submissions).toEqual([]);
+            await page.getByRole("button", { name: "确认替换", exact: true }).click();
+        }
         await expect(prompt).toHaveValue(item.prompt);
         await expect.poll(() => new URL(page.url()).searchParams.has("prompt")).toBe(false);
         await page.waitForTimeout(300);

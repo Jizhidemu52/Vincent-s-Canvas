@@ -6,7 +6,7 @@ import type { Database } from "../db";
 import { ImageConversationEvents, parseConversationEventCursor, streamConversationEvents } from "../image-conversation-events";
 import {
   cancelImageConversationTurn, createImageConversation, getImageConversation, getImageConversationByRequest, getImageConversationTurn,
-  listImageConversationMessages, listImageConversations, listImageConversationVersions, submitImageConversationTurn,
+  listImageConversationMessages, listImageConversations, listImageConversationTurns, listImageConversationVersions, submitImageConversationTurn,
 } from "../image-conversation-service";
 import { ImageConversationError } from "../image-conversation-store";
 import { toPublicImageConversationData } from "../image-conversation-public";
@@ -86,6 +86,8 @@ export function createImageConversationsRouter(db: Database, options: {
   }));
   router.get("/:conversationId/turns/by-request/:clientRequestId", action((request, _response, userId) => getImageConversationTurn(db, userId, conversationId(request), { clientRequestId: requestKeySchema.parse(request.params.clientRequestId) })));
   router.get("/:conversationId/turns/:turnId", action((request, _response, userId) => getImageConversationTurn(db, userId, conversationId(request), { turnId: turnId(request) })));
+  router.get("/:conversationId/turns", action((request, _response, userId) => listImageConversationTurns(db, userId, conversationId(request),
+    paginationQuerySchema.parse({ ...request.query, ...(request.query.limit !== undefined ? { limit: queryNumber(request.query.limit) } : {}) }), options.cursorSecret)));
   router.post("/:conversationId/turns/:turnId/cancel", action(async (request, _response, userId) => {
     const id = conversationId(request);
     const result = await cancelImageConversationTurn(db, userId, id, turnId(request), request.body);

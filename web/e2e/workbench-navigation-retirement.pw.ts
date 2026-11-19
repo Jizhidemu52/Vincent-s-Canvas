@@ -10,13 +10,15 @@ test("only requested boards disappear; creation tools retain their fixed desktop
     await context.route("**/api/prompt-templates?*", route => route.fulfill({ json: { templates: [], total: 0, page: 1, pageSize: 4 } }));
     await page.goto("/");
     const nav = page.getByRole("navigation", { name: "主导航" });
-    const creationPaths = ["/creative", ...moved.map(item => `/${item.id}`), "/image", "/video"];
+    const creationPaths = ["/creative", ...moved.map(item => `/${item.id}`), "/video"];
     const create = nav.locator("section").filter({ has: page.getByRole("button", { name: "创作工具", exact: true }) });
     await expect(create.getByRole("link")).toHaveCount(creationPaths.length);
     for (const [index, path] of creationPaths.entries()) await expect(create.getByRole("link").nth(index)).toHaveAttribute("href", path);
     for (const item of moved) await expect(create.getByRole("link", { name: item.title, exact: true })).toHaveAttribute("href", `/${item.id}`);
+    await expect(nav.getByRole("link", { name: "图像生成", exact: true })).toHaveCount(0);
     await nav.getByRole("button", { name: "图像工具", exact: true }).click();
     await expect(nav.getByRole("link", { name: "高清放大", exact: true })).toHaveAttribute("href", "/hd-upscale");
+    await expect(nav.getByRole("link", { name: "图片编辑", exact: true })).toHaveAttribute("href", "/image?tool=image-edit");
     for (const title of ["细节增强", "角度控制", "系列配方"]) await expect(page.getByRole("link", { name: title, exact: true })).toHaveCount(0);
     const allTools = page.getByRole("region", { name: "全部工具", exact: true });
     for (const item of moved) await expect(allTools.getByRole("link", { name: item.title, exact: true })).toHaveAttribute("href", `/${item.id}`);

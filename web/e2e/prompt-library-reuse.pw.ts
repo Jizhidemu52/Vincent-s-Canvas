@@ -2,6 +2,8 @@ import type { BrowserContext, Page } from "@playwright/test";
 import { test, expect, newCanvas } from "./fixtures";
 import { generalPromptTemplates } from "../../shared/general-prompt-templates";
 import type { PromptScope, PromptTemplate } from "../src/services/api/prompts";
+import { toolDefinitions } from "../../shared/feature-catalog";
+import { chooseAntSelect } from "./antd-select-helpers";
 
 const owner = "00000000-0000-4000-8000-000000000099";
 const template = (index: number, scope: PromptScope = "personal"): PromptTemplate => ({
@@ -90,6 +92,48 @@ test("new private prompts appear immediately, reopening refreshes newer addition
     dialog = await openLibrary(page);
     await expect(dialog.getByRole("heading", { name: newer.title, exact: true })).toBeVisible();
     expect(state.resolves).toEqual([]);
+    expect(api.submissions).toEqual([]); expect(api.batchSubmissions).toEqual([]);
+});
+
+test("template editor blocks static 512px but saves valid GIF frame settings exactly once", async ({ page, context, api }, info) => {
+    const state = await library(context);
+    const model = { id: "10000000-0000-4000-8000-000000000026", modelId: "gpt-image-2.6-flare", name: "GIF template test model", imageParameterProfile: "quality-resolution-v2", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 };
+    await page.route("**/api/models", route => route.fulfill({ json: { models: [model], prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: null, configurationVersion: 1 })) } }));
+    await page.goto("/image");
+    const dialog = await openLibrary(page);
+    await dialog.getByRole("button", { name: "新增个人提示词", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: "新增个人提示词", exact: true });
+    await editor.getByLabel("模板名称", { exact: true }).fill("GIF 像素尺寸模板");
+    await editor.getByLabel("完整提示词", { exact: true }).fill("针织帽缓慢转动，纯色背景");
+    await chooseAntSelect(editor.getByLabel("适用板块", { exact: true }), "自由画布");
+    await chooseAntSelect(editor.getByLabel("模型快照", { exact: true }), model.name);
+    await editor.locator("summary", { hasText: "自定义像素" }).click();
+    for (const label of ["自定义宽度", "自定义高度"]) {
+        await editor.getByRole("spinbutton", { name: label, exact: true }).fill("512");
+        await editor.getByRole("spinbutton", { name: label, exact: true }).press("Tab");
+    }
+    await editor.getByRole("button", { name: "保存模板", exact: true }).click();
+    await expect(page.locator(".ant-message-error")).toContainText("655360–8294400");
+    await expect(editor).toBeVisible();
+    expect(state.posts).toHaveLength(0);
+    await page.screenshot({ path: info.outputPath("template-static-512-rejected.png"), fullPage: true });
+    await editor.locator("summary", { hasText: "全部高级参数" }).click();
+    await chooseAntSelect(editor.getByRole("combobox", { name: "输出格式", exact: true }), "GIF");
+    await editor.getByRole("spinbutton", { name: "GIF 帧数", exact: true }).fill("12");
+    await editor.getByRole("spinbutton", { name: "GIF 每帧时长（毫秒）", exact: true }).fill("120");
+    await expect(editor.getByRole("spinbutton", { name: "自定义宽度", exact: true })).toHaveValue("512");
+    await expect(editor.getByRole("spinbutton", { name: "自定义高度", exact: true })).toHaveValue("512");
+    await expect(editor.getByRole("alert")).toHaveCount(0);
+    await page.screenshot({ path: info.outputPath("template-gif-512-valid.png"), fullPage: true });
+    await editor.getByRole("button", { name: /保存模板$/ }).click();
+    await expect(editor).toBeHidden();
+    expect(state.posts).toHaveLength(1);
+    expect(state.posts[0]).toMatchObject({ targetTool: "canvas", modelConfigId: model.id, referenceAssetIds: [], parameters: { size: "512x512", quantity: 1, output_format: "gif", frame_count: 12, frame_duration_ms: 120 } });
+    const parameters = state.posts[0]!.parameters as Record<string, unknown>;
+    expect(JSON.parse(String(parameters.imageOptions))).toMatchObject({ output_format: "gif", frame_count: "12", frame_duration_ms: "120" });
+    expect(parameters).not.toHaveProperty("resolution");
+    await expect(dialog.getByRole("heading", { name: "GIF 像素尺寸模板", exact: true })).toBeVisible();
+    await page.screenshot({ path: info.outputPath("template-gif-saved.png"), fullPage: true });
     expect(api.submissions).toEqual([]); expect(api.batchSubmissions).toEqual([]);
 });
 

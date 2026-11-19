@@ -314,6 +314,11 @@ export interface VersionPage {
   nextCursor: Cursor | null;
 }
 
+export interface TurnPage {
+  items: ImageTurn[];
+  nextCursor: Cursor | null;
+}
+
 export interface TurnSubmissionResult {
   turnId: UUID;
   stateRevision: SafeInteger;
@@ -373,6 +378,7 @@ export type ListConversationsResponse = ApiSuccess<ConversationPage>;
 export type GetConversationResponse = ApiSuccess<ConversationSnapshot>;
 export type SubmitTurnResponse = ApiSuccess<TurnSubmissionResult>;
 export type GetTurnResponse = ApiSuccess<TurnDetails>;
+export type ListTurnsResponse = ApiSuccess<TurnPage>;
 export type ListMessagesResponse = ApiSuccess<MessagePage>;
 export type ListVersionsResponse = ApiSuccess<VersionPage>;
 export type CancelTurnResponse = ApiSuccess<CancellationResult>;

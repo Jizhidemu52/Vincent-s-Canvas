@@ -40,20 +40,20 @@ export async function watchTaskReconciliation(options: {
             options.signal.throwIfAborted();
             // Capture before GET so an event arriving during it is not lost.
             const revision = events.version;
-            if (!foregroundOnly || !visibility?.hidden) {
-                try { await options.reconcile(); }
-                catch (error) { options.signal.throwIfAborted(); options.onError?.(error); }
-            }
-            options.signal.throwIfAborted();
             const wake = new AbortController();
             const onWake = () => wake.abort();
             target?.addEventListener("focus", onWake);
             target?.addEventListener("online", onWake);
             try {
+                if (!foregroundOnly || !visibility?.hidden) {
+                    try { await options.reconcile(); }
+                    catch (error) { options.signal.throwIfAborted(); options.onError?.(error); }
+                }
+                options.signal.throwIfAborted();
                 await events.next(revision, interval, AbortSignal.any([options.signal, wake.signal]), interval);
             } catch (error) {
                 options.signal.throwIfAborted();
-                if (!wake.signal.aborted) throw error;
+                if (!wake.signal.aborted || error !== wake.signal.reason) throw error;
             } finally {
                 target?.removeEventListener("focus", onWake);
                 target?.removeEventListener("online", onWake);

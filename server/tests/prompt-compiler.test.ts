@@ -183,14 +183,17 @@ describe("prompt compiler lifecycle", () => {
     expect((await f.compiler.compile(actor, input)).status).toBe("failed");
     expect(f.calls).toHaveLength(1);
   });
-  test("uncertain transport cannot fall back or replay with a new request ID", async () => {
+  test("unconfirmed transport terminates preparation without fallback and requires a new request to try again", async () => {
     const f = await fixture(async () => { throw Object.assign(new Error("private provider details"), { code: "PROVIDER_TIMEOUT", phase: "http_started" }); });
     await f.store.update("text-to-style", { ...(await f.store.get("text-to-style")), failurePolicy: "fallback" });
     const version = await f.store.saveVersion("text-to-style", content({ fallbackPrompt: "Basic visual: {{user_text}}" }), "admin");
     await f.store.activate("text-to-style", version.id);
     const input = request(); const first = await f.compiler.compile(actor, input);
+    expect((await f.compiler.compile(actor, input)).id).toBe(first.id); expect(f.calls).toHaveLength(1);
     const second = await f.compiler.compile(actor, { ...input, requestId: randomUUID() });
-    expect(first.status).toBe("uncertain"); expect(second.status).toBe("uncertain"); expect(f.calls).toHaveLength(1);
+    expect(first).toMatchObject({ status: "failed", errorCode: "PROMPT_PREPARATION_FAILED", upstreamOutcome: "unknown" });
+    expect(first.prompt).toBeUndefined(); expect(second.status).toBe("failed"); expect(second.id).not.toBe(first.id); expect(f.calls).toHaveLength(2);
+    expect(publicPromptCompilation(first)).not.toHaveProperty("upstreamOutcome");
     expect(JSON.stringify(publicPromptCompilation(first))).not.toContain("private provider details");
   });
   test("explicit fallback is labelled unoptimized and invalid fallback terminates instead of staying pending", async () => {
@@ -227,17 +230,17 @@ describe("prompt compiler lifecycle", () => {
     }
     expect(f.calls).toHaveLength(1);
   });
-  test("unclassified transport errors are uncertain, while definite HTTP rejection and preflight stay failed", async () => {
-    for (const [error, expected] of [
-      [new TypeError("network failed"), "uncertain"],
-      [Object.assign(new Error("timed out"), { name: "TimeoutError" }), "uncertain"],
-      [Object.assign(new Error("server error"), { upstreamStatus: 503 }), "uncertain"],
-      [Object.assign(new Error("bad request"), { upstreamStatus: 400 }), "failed"],
-      [Object.assign(new Error("no connection"), { code: "PROVIDER_CONNECT_TIMEOUT", phase: "initial_tls" }), "failed"],
+  test("all optimizer errors terminate preparation while only unconfirmed dispatch retains an unknown upstream outcome", async () => {
+    for (const [error, outcome] of [
+      [new TypeError("network failed"), "unknown"],
+      [Object.assign(new Error("timed out"), { name: "TimeoutError" }), "unknown"],
+      [Object.assign(new Error("server error"), { upstreamStatus: 503 }), "unknown"],
+      [Object.assign(new Error("bad request"), { upstreamStatus: 400 }), undefined],
+      [Object.assign(new Error("no connection"), { code: "PROVIDER_CONNECT_TIMEOUT", phase: "initial_tls" }), undefined],
     ] as const) {
       const f = await fixture(async () => { throw error; });
       const input = request(); const first = await f.compiler.compile(actor, input);
-      expect(first.status).toBe(expected);
+      expect(first.status).toBe("failed"); expect(first.upstreamOutcome).toBe(outcome);
       await f.compiler.compile(actor, input);
       expect(f.calls).toHaveLength(1);
     }

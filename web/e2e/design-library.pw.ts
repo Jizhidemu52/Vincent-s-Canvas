@@ -44,6 +44,7 @@ async function fixture(context: BrowserContext, baseURL: string, oa = true) {
         if (path.startsWith("/api/usage") || path.startsWith("/api/generation-history")) return json({ code: 0, data: [], history: [], total: 0 });
         if (path === "/api/assets" || path === "/api/assets/summary") return json({ assets: [...assets.values()], nextCursor: null, hasMore: false });
         if (/^\/api\/assets\/[^/]+\/(content|thumb)$/.test(path)) return route.fulfill({ contentType: "image/png", body: IMAGE });
+        if (/^\/api\/assets\/[^/]+\/events$/.test(path)) return json({ recorded: true });
         if (/^\/api\/assets\/[^/]+$/.test(path)) {
             const current = assets.get(path.split("/")[3]);
             return json({ asset: rejectSource && current ? { ...current, ownerUserId: "someone-else" } : current });
@@ -135,17 +136,25 @@ test("owned asset opens a prefilled, unacknowledged draft; cancel stays private 
     expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
 });
 
-test("a generated result shares its original task prompt and reuses its private server image without another task", async ({ page, context, baseURL }) => {
-    const f = await fixture(context, baseURL!); await page.goto("/image");
+test("a generated result shares its original task prompt and reuses its private server image without another task", async ({ page, context, baseURL }, info) => {
+    const f = await fixture(context, baseURL!); await page.goto(`/image?tool=image-edit&sourceAssetId=${ownAsset}&sourceOwnerId=${owner}`);
+    await expect(page.getByRole("region", { name: "参考图", exact: true }).locator("img")).toHaveCount(1);
     await page.getByRole("textbox", { name: "图像提示词", exact: true }).fill("已生成图片的提示词");
-    await page.getByRole("button", { name: "开始生成", exact: true }).click();
+    await page.getByRole("button", { name: "开始编辑", exact: true }).click();
     await expect(page.getByRole("button", { name: "分享到灵感库", exact: true })).toBeVisible();
+    expect(f.submissions).toHaveLength(1);
+    const taskPrompt = f.submissions[0].prompt;
+    expect(taskPrompt).toContain("已生成图片的提示词");
+    expect(f.submissions[0]).toMatchObject({ toolKey: "image-edit", operationType: "inpaint", sourceUrls: [`/api/assets/${ownAsset}/content`] });
+    expect(f.requests).toContain(`GET /api/assets/${ownAsset}/content`);
     await page.getByRole("textbox", { name: "图像提示词", exact: true }).fill("尚未生成的新草稿，不能被带入");
     await page.getByRole("button", { name: "分享到灵感库", exact: true }).click();
     await expect(publishDialog(page)).toBeVisible();
-    await expect(publishDialog(page).getByRole("textbox", { name: "生图提示词" })).toHaveValue("已生成图片的提示词");
+    await expect(publishDialog(page).getByRole("textbox", { name: "生图提示词" })).toHaveValue(taskPrompt);
     await expect(checkbox(page)).not.toBeChecked(); expect(f.submissions).toHaveLength(1); expect(f.publications).toEqual([]); expect(f.uploads).toEqual([]);
+    expect(f.requests).not.toContain("POST /api/assets/upload-request");
     expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+    await page.screenshot({ path: info.outputPath("edited-result-share-original-prompt.png"), animations: "disabled" });
 });
 
 test("an asset whose owner changed is rejected before a share draft is opened", async ({ page, context, baseURL }) => {

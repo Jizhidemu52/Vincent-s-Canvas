@@ -19,16 +19,35 @@ type Call = { method: string; path: string; input?: unknown };
 function memoryStorage() {
     const records = new Map<string, DesignConversationTask>();
     const writes: DesignConversationTask[] = [];
+    const access = { reads: [] as string[], scans: 0 };
     let rejectWrite: (task: DesignConversationTask) => boolean = () => false;
-    return { records, writes, reject: (reject: typeof rejectWrite) => { rejectWrite = reject; },
+    return { records, writes, access, reject: (reject: typeof rejectWrite) => { rejectWrite = reject; },
+        async getItem(key: string) { access.reads.push(key); return structuredClone(records.get(key) ?? null); },
         async setItem(key: string, value: unknown) {
             const task = value as DesignConversationTask;
             if (rejectWrite(task)) throw new Error("fixture storage unavailable");
             writes.push(structuredClone(task)); records.set(key, structuredClone(task));
         },
-        async iterate(visitor: (value: unknown) => void) { for (const value of records.values()) visitor(structuredClone(value)); },
+        async iterate(visitor: (value: unknown) => void) { access.scans++; for (const value of records.values()) visitor(structuredClone(value)); },
     };
 }
+
+test("active conversation polling reads only its own receipt key and stopped tasks cause no reads", async () => {
+    const run = fixture();
+    await run.controller.load();
+    const task = await run.controller.start(input());
+    run.storage.access.reads.length = 0; run.storage.access.scans = 0;
+    await run.controller.refreshAll();
+    expect(run.storage.access).toEqual({ reads: [task.id], scans: 0 });
+    await run.controller.action(task.id, "stop");
+    run.storage.access.reads.length = 0;
+    const requests = run.calls.length;
+    expect(run.controller.needsRefresh()).toBe(false);
+    await run.controller.refreshAll();
+    expect(run.storage.access).toEqual({ reads: [], scans: 0 });
+    expect(run.calls).toHaveLength(requests);
+    run.controller.dispose();
+});
 
 function fixture(options: { loseCreate?: boolean; loseTurn?: boolean; queryMissing?: boolean; storage?: ReturnType<typeof memoryStorage>; enabled?: boolean } = {}) {
     const storage = options.storage || memoryStorage(), calls: Call[] = [];

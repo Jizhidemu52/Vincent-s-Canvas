@@ -39,11 +39,11 @@ test("configured image models expose only their adapter's supported options", ()
 
 test("custom dimensions stay editable while validation catches invalid GPT size constraints", () => {
     const profile = imageModelProfile("gpt-image-2", []);
-    for (const size of ["640x1024", "2880x2880", "3840x2160", "1152x2048", "1536x864"]) expect(imageModelSettingsError(size, profile)).toBe("");
-    for (const size of ["512x512", "1025x1024", "4096x2048", "3840x3840", "3072x768", "wrong"]) expect(imageModelSettingsError(size, profile)).not.toBe("");
+    for (const size of ["640x1024", "2880x2880", "3840x2160", "1152x2048", "1536x864"]) expect(imageModelSettingsError(size, profile, undefined)).toBe("");
+    for (const size of ["512x512", "1025x1024", "4096x2048", "3840x3840", "3072x768", "wrong"]) expect(imageModelSettingsError(size, profile, undefined)).not.toBe("");
     expect(normalizeImageModelSettings({ size: "1025x1024", quality: "high", count: "1" }, profile).size).toBe("1025x1024");
     for (const [size, expected] of [["16:9", "1536x864"], ["9:16", "864x1536"], ["4:3", "1536x1152"], ["3:4", "1152x1536"]]) {
-        expect(imageModelSettingsError(size!, profile)).toBe("");
+        expect(imageModelSettingsError(size!, profile, undefined)).toBe("");
         expect(normalizeImageModelSettings({ size: size!, quality: "high", count: "1" }, profile).size).toBe(expected!);
     }
     const mj = imageModelProfile("midjourney", []);

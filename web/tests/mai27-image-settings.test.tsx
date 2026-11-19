@@ -38,8 +38,8 @@ test("MAI 2.7 opaque and raw identities expose their own profile without changin
 });
 
 test("MAI 2.7 pixels follow the documented area limit without inventing a 2048 edge or 4:1 pixel limit", () => {
-    for (const size of ["768x768", "1000x1000", "1025x1024", "2048x2048", "2560x1536", "4096x1024", "5461x768", "1:4", "4:1", "21:9"]) expect(imageModelSettingsError(size, profile)).toBe("");
-    for (const size of ["767x1024", "5462x768", "2080x2048", "auto", "8:1", "1:8"]) expect(imageModelSettingsError(size, profile)).not.toBe("");
+    for (const size of ["768x768", "1000x1000", "1025x1024", "2048x2048", "2560x1536", "4096x1024", "5461x768", "1:4", "4:1", "21:9"]) expect(imageModelSettingsError(size, profile, undefined)).toBe("");
+    for (const size of ["767x1024", "5462x768", "2080x2048", "auto", "8:1", "1:8"]) expect(imageModelSettingsError(size, profile, undefined)).not.toBe("");
     expect(imageTaskParameters({ ...config, size: "1000x1000" }, profile)).toEqual({ size: "1000x1000", resolution: "2k", nsfw_check: true });
     expect(() => imageTaskParameters({ ...config, size: "auto" }, profile)).toThrow("不支持自适应");
     expect(normalizeImageModelSettings({ size: "auto", quality: "max", count: "5" }, profile)).toEqual({ size: "1:1", quality: "auto", count: "1" });

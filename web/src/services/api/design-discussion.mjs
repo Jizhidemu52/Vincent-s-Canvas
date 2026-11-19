@@ -74,6 +74,8 @@ export function createTaskController({ api, storage, ownerId, projectId = "canva
         }, onChange: value => { imageTasks = value; emit(); } });
     return {
         async load() { await legacy.load(); await images.load(); },
+        needsRefresh: () => legacy.needsRefresh() || images.needsRefresh(),
+        async refreshAnnotations() { await legacy.refreshAnnotations(); await images.load(); },
         start: input => input.mediaKind === "video" ? legacy.start(input) : images.start(input),
         async refreshAll() { await legacy.refreshAll(); await images.refreshAll(); },
         action: (id, action) => images.has(id) ? images.action(id, action) : legacy.action(id, action),
@@ -91,6 +93,7 @@ function createLegacyTaskController({ api, storage, ownerId, projectId = "canvas
     const inFlight = new Set();
     const receipts = new Map();
     const annotations = new Map();
+    const needsRefresh = () => tasks.some(task => task.observing !== false && (task.persistenceError || ["submitting", "uncertain", "waiting", "processing"].includes(task.status)));
     const emit = () => onChange([...tasks]);
     async function checkOwner() {
         const session = await api.session();
@@ -154,6 +157,8 @@ function createLegacyTaskController({ api, storage, ownerId, projectId = "canvas
         } finally { inFlight.delete(id); }
     }
     return {
+        needsRefresh,
+        async refreshAnnotations() { if (tasks.length) { await checkOwner(); await refreshAnnotations(); } },
         async load() {
             const records = [];
             receipts.clear(); annotations.clear();
@@ -226,11 +231,10 @@ function createLegacyTaskController({ api, storage, ownerId, projectId = "canvas
             } finally { starting = false; if (id) inFlight.delete(id); }
         },
         async refreshAll() {
-            if (polling || starting) return;
+            if (polling || starting || !needsRefresh()) return;
             polling = true;
             try {
                 await checkOwner();
-                await refreshAnnotations();
                 for (const task of tasks) if (task.observing !== false && (task.persistenceError || ["submitting", "uncertain", "waiting", "processing"].includes(task.status))) await refresh(task.id);
             } finally { polling = false; }
         },

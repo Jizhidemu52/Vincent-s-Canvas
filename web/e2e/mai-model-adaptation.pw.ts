@@ -45,20 +45,35 @@ async function canvasSelect(page: Page, panel: Locator, model: typeof mai) {
 
 for (const model of [flare, sunburst, mai]) {
     for (const editing of [false, true]) {
-        test(`${model.name} ${editing ? "reference edit" : "text image"}: optimized text submits once with the selected model and supported settings`, async ({ page, api }) => {
+        test(`${model.name} ${editing ? "reference edit" : "canvas text image"}: optimized text submits once with the selected model and supported settings`, async ({ page, api }, info) => {
             const compilations = await setup(page);
-            await page.goto(`/image${editing ? "?tool=image-edit" : ""}`);
-            const prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
-            await prompt.fill("蓝色亚麻连衣裙，保留材质");
-            const settings = await openSettings(page);
-            await selectStandalone(page, settings, model);
-            await chooseAntSelect(settings.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }), "2K");
-            if (model !== mai) await chooseAntSelect(settings.getByRole("combobox", { name: "图片质量", exact: true }), "高");
-            else await expect(settings.getByRole("combobox", { name: "图片质量", exact: true })).toHaveCount(0);
-            await settings.getByRole("button", { name: "关闭模型设置", exact: true }).click();
+            let prompt: Locator, submit: Locator, canvasId: string | undefined;
             if (editing) {
+                await page.goto("/image?tool=image-edit");
+                prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
+                await prompt.fill("蓝色亚麻连衣裙，保留材质");
+                const settings = await openSettings(page);
+                await selectStandalone(page, settings, model);
+                await chooseAntSelect(settings.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }), "2K");
+                if (model !== mai) await chooseAntSelect(settings.getByRole("combobox", { name: "图片质量", exact: true }), "高");
+                else await expect(settings.getByRole("combobox", { name: "图片质量", exact: true })).toHaveCount(0);
+                await settings.getByRole("button", { name: "关闭模型设置", exact: true }).click();
                 await addReference(prompt);
                 await expect(page.getByRole("img", { name: "reference-1.png", exact: true })).toBeVisible();
+                submit = page.getByRole("button", { name: "开始编辑", exact: true });
+            } else {
+                canvasId = await newCanvas(page);
+                await page.getByRole("button", { name: "展开创建面板", exact: true }).click();
+                const panel = page.getByTestId("canvas-quick-generate-panel");
+                prompt = panel.getByRole("textbox", { name: "描述图像", exact: true });
+                await prompt.fill("蓝色亚麻连衣裙，保留材质");
+                await canvasSelect(page, panel, model);
+                await panel.getByRole("button", { name: model === mai ? "清晰度 / 分辨率" : "分辨率与质量", exact: true }).click();
+                await page.locator('[data-usage-control="resolution"][data-usage-value="2k"]').click();
+                if (model !== mai) await page.locator('[data-usage-control="quality"][data-usage-value="high"]').click();
+                else await expect(page.getByRole("group", { name: "图片质量", exact: true })).toHaveCount(0);
+                await page.getByRole("button", { name: "返回创建面板", exact: true }).click();
+                submit = panel.getByRole("button", { name: /^生成(?:\s|$)/ });
             }
             await page.getByRole("button", { name: "一键优化提示词", exact: true }).click();
             const preview = page.getByRole("dialog", { name: "核对提示词优化", exact: true });
@@ -69,25 +84,30 @@ for (const model of [flare, sunburst, mai]) {
             await expect(preview).toBeHidden();
             await expect(prompt).toHaveValue(optimized);
             expect(compilations).toHaveLength(1);
-            expect(compilations[0].modelConfigId).toBe(model.id);
+            expect(compilations[0]).toMatchObject({ modelConfigId: model.id, toolKey: editing ? "image-edit" : "canvas-image", promptInput: { mode: editing ? "edit" : "generate" } });
             expect(api.submissions).toHaveLength(0);
-            await page.getByRole("button", { name: editing ? "开始编辑" : "开始生成", exact: true }).click();
-            await expect(page.getByRole("button", { name: "放入画布", exact: true })).toBeVisible();
+            await submit.click();
+            await expect.poll(() => api.submissions.length).toBe(1);
+            if (canvasId) await expect.poll(() => api.document(canvasId!)?.nodes.some((node: any) => node.metadata?.status === "success" && node.metadata?.prompt === optimized)).toBe(true);
+            else await expect(page.getByRole("button", { name: "放入画布", exact: true })).toBeVisible();
             expect(api.submissions).toHaveLength(1);
-            expect(api.submissions[0]).toMatchObject({ modelConfigId: model.id, promptInput: { compilationId }, sourceUrls: compilations[0].sourceUrls });
+            expect(api.submissions[0]).toMatchObject({ operationType: editing ? "inpaint" : "image_generation", toolKey: editing ? "image-edit" : "canvas-image", modelConfigId: model.id, promptInput: { compilationId }, sourceUrls: compilations[0].sourceUrls });
+            expect(api.submissions[0].sourceUrls).toHaveLength(editing ? 1 : 0);
             if (model === mai) {
                 expect(api.submissions[0].parameters).not.toHaveProperty("quality");
                 expect(api.submissions[0].parameters).not.toHaveProperty("output_format");
                 if (editing) for (const key of ["size", "resolution", "width", "height"]) expect(api.submissions[0].parameters).not.toHaveProperty(key);
                 else expect(api.submissions[0].parameters).toMatchObject({ resolution: "2k", size: "1:1" });
             } else expect(api.submissions[0].parameters).toMatchObject({ quality: "high", resolution: "2k" });
+            if (editing) await expect.poll(() => page.getByRole("img", { name: "生成结果 1", exact: true }).evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+            await page.screenshot({ path: info.outputPath("selected-model-result.png"), animations: "disabled" });
         });
     }
 }
 
-test("standalone explicit model changes clear incompatible 4K options and old optimization IDs without losing text", async ({ page, api }, testInfo) => {
+test("edit model changes clear incompatible 4K options and old optimization IDs without losing text", async ({ page, api }, testInfo) => {
     const compilations = await setup(page);
-    await page.goto("/image");
+    await page.goto("/image?tool=image-edit");
     const prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
     await prompt.fill("保留轮廓的服装产品图");
     let settings = await openSettings(page);
@@ -122,10 +142,11 @@ test("standalone explicit model changes clear incompatible 4K options and old op
     await expect(settings.getByRole("status").filter({ hasText: "图生图尺寸由模型决定，约 100 万像素" })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("mai-reference-settings.png"), animations: "disabled" });
     await settings.getByRole("button", { name: "关闭模型设置", exact: true }).click();
-    await page.getByRole("button", { name: "开始生成", exact: true }).click();
+    await page.getByRole("button", { name: "开始编辑", exact: true }).click();
     await expect(page.getByRole("button", { name: "放入画布", exact: true })).toBeVisible();
     expect(compilations).toHaveLength(1); expect(api.submissions).toHaveLength(1);
-    expect(api.submissions[0].modelConfigId).toBe(mai.id);
+    expect(api.submissions[0]).toMatchObject({ operationType: "inpaint", toolKey: "image-edit", modelConfigId: mai.id });
+    expect(api.submissions[0].sourceUrls).toHaveLength(1);
     expect(api.submissions[0].promptInput).toBeUndefined();
     expect(api.submissions[0].parameters).toMatchObject({ web_grounding: false, count: 1, n: 1 });
     expect(api.submissions[0].parameters.inputArchive.parameters).toEqual({ web_grounding: false });

@@ -566,7 +566,7 @@ integration(
       } finally { await query("UPDATE tool_api_configurations SET model_config_id=$1 WHERE tool_key=ANY($2::text[])", [imageId, ["image", "image-edit"]]); }
     });
 
-    test("uncertain optimizer transport, invalid output and private-rule leak never create tasks or reservations", async () => {
+    test("optimizer transport loss, invalid output and private-rule leak terminate preparation without tasks or reservations", async () => {
       for (const fixtureOutcome of ["throw", "invalid", "leak"]) {
         const actor = await user(),
           before = calls.length,
@@ -580,31 +580,31 @@ integration(
         const response = await request(actor, "/api/tasks", "POST", value);
         const body = await response.json();
         expect({ status: response.status, body }).toMatchObject({
-          status: fixtureOutcome === "throw" ? 409 : 422,
+          status: 422,
         });
         expect(await count("tasks", actor)).toBe(0);
         expect(await count("credit_reservations", actor)).toBe(0);
         expect(await balance(actor)).toBe(1000);
         expect((await store.byRequest(actor, value.requestId))?.status).toBe(
-          fixtureOutcome === "throw" ? "uncertain" : "failed",
+          "failed",
         );
         expect(JSON.stringify(body)).not.toContain(rules.systemPrompt);
         expect(JSON.stringify(body)).not.toContain("not a valid JSON response");
         if (fixtureOutcome === "throw") {
-          expect(body.error).toBe("PROMPT_SUBMISSION_UNCERTAIN");
+          expect(body.error).toBe("PROMPT_PREPARATION_FAILED");
           const recovered = await request(
             actor,
             `/api/prompt-compilations/by-request/${value.requestId}`,
           );
           expect(recovered.status).toBe(200);
           expect((await recovered.json()).compilation).toMatchObject({
-            status: "uncertain",
-            errorCode: "PROMPT_SUBMISSION_UNCERTAIN",
+            status: "failed",
+            errorCode: "PROMPT_PREPARATION_FAILED",
           });
           const repeated = await request(actor, "/api/tasks", "POST", value);
-          expect(repeated.status).toBe(409);
+          expect(repeated.status).toBe(422);
           expect(await repeated.json()).toMatchObject({
-            error: "PROMPT_SUBMISSION_UNCERTAIN",
+            error: "PROMPT_PREPARATION_FAILED",
           });
           expect(calls.length - before).toBe(1);
           expect(await count("tasks", actor)).toBe(0);

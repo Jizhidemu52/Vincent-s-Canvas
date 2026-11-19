@@ -57,6 +57,7 @@ function expectPublicDiagnosticsAbsent(result: AdminPromptCompilation) {
   const value = publicPromptCompilation(result);
   expect(value).not.toHaveProperty("upstreamStatus");
   expect(value).not.toHaveProperty("upstreamReason");
+  expect(value).not.toHaveProperty("upstreamOutcome");
   expect(JSON.stringify(value)).not.toContain("PRIVATE_PROVIDER_BODY_CANARY");
   expect(JSON.stringify(value)).not.toContain("PRIVATE_SECRET_CANARY");
 }
@@ -64,13 +65,14 @@ function expectPublicDiagnosticsAbsent(result: AdminPromptCompilation) {
 describe("prompt compiler administrator-only upstream diagnostics", () => {
   for (const [status, reason, expectedState] of [
     [400, "request_invalid", "failed"],
-    [503, "service_unavailable", "uncertain"],
+    [503, "service_unavailable", "failed"],
   ] as const) {
     test(`trusted ${status} ${reason} persists only safe diagnostics and never retries the same request`, async () => {
       const f = await fixture(protocolError(status, reason));
       const input = request();
       const result = await f.compiler.compile(actor, input);
       expect(result).toMatchObject({ status: expectedState, upstreamStatus: status, upstreamReason: reason });
+      expect(result.upstreamOutcome).toBe(status === 503 ? "unknown" : undefined);
       expect(await persistedDetails(f, result)).toMatchObject({ upstreamStatus: status, upstreamReason: reason });
       expectPublicDiagnosticsAbsent(result);
 

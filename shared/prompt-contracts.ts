@@ -90,6 +90,7 @@ export type AdminPromptCompilation = PublicPromptCompilation & {
   inputHash: string; reusedFromId: string | null; cacheHit: boolean;
   /** Admin-only diagnostics: the compiler accepts a trusted HTTP status and fixed reason category, never provider error text. */
   upstreamStatus?: number; upstreamReason?: string;
+  upstreamOutcome?: "unknown";
   rawResponse: string | null; latencyMs: number | null;
   promptMetrics?: { characters: number; words: number; avoidPhrases: number; overRecommended: boolean };
   inputTokens: number | null; outputTokens: number | null;

@@ -42,9 +42,9 @@ test.each(["mark-flare-id", "mark-sunburst-id"])("%s keeps quality, resolution, 
   expect(profile.sizes).toContain("21:9");
   const config = { ...defaultConfig, model: id, size: "21:9", quality: "max", imageOptions: JSON.stringify({ resolution: "4k", output_format: "webp", output_compression: "88", background: "opaque", google_search: "true" }) };
   expect(imageTaskParameters(config)).toEqual({ size: "21:9", quality: "max", resolution: "4k", output_format: "webp", output_compression: 88, background: "opaque" });
-  for (const size of [...profile.sizes, "640x1024", "3840x2160"]) expect(imageModelSettingsError(size, profile)).toBe("");
-  expect(imageModelSettingsError("21:9", imageModelProfile("gpt-image-2.5-flare", models))).not.toBe("");
-  for (const size of ["512x512", "1025x1024", "4096x2048", "3840x3840", "3072x768", "8:1"]) expect(imageModelSettingsError(size, profile)).not.toBe("");
+  for (const size of [...profile.sizes, "640x1024", "3840x2160"]) expect(imageModelSettingsError(size, profile, undefined)).toBe("");
+  expect(imageModelSettingsError("21:9", imageModelProfile("gpt-image-2.5-flare", models), undefined)).not.toBe("");
+  for (const size of ["512x512", "1025x1024", "4096x2048", "3840x3840", "3072x768", "8:1"]) expect(imageModelSettingsError(size, profile, undefined)).not.toBe("");
   const html = renderToStaticMarkup(<ImageSettingsPanel config={config} theme={canvasThemes.light} onConfigChange={() => undefined} />);
   expect(html).toContain('aria-label="图片质量"');
   expect(html).toContain('aria-label="清晰度 / 分辨率"');

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { generationDownloadName, generationErrorDiagnostic, generationErrorMessage, imageResultProcessingFailureMessage, mergeGenerationDiagnostics, shouldConfirmPromptReuse } from "../src/lib/generation-feedback";
+import { generationDownloadName, generationErrorDiagnostic, generationErrorMessage, generationSubmissionRejected, imageResultProcessingFailureMessage, mergeGenerationDiagnostics, shouldConfirmPromptReuse } from "../src/lib/generation-feedback";
 import { snapshotVideoRequest } from "../src/pages/video/video-retry";
 import { defaultConfig } from "../src/stores/use-config-store";
 import { publicTaskFailurePayload } from "../../shared/generation-error";
@@ -67,6 +67,17 @@ describe("generation interaction safety", () => {
         expect(generationErrorMessage("管理员尚未启用此场景的配方版本，未提交生成", 503, "PROMPT_RECIPE_UNAVAILABLE")).toContain("尚未提交生成");
         expect(generationErrorMessage("未提交生成", 503, "UNRECOGNIZED_ERROR")).not.toContain("尚未提交生成");
         expect(generationErrorMessage("connection lost", 503)).toContain("查询原任务");
+    });
+    test.each(["PROMPT_PREPARATION_FAILED", "PROMPT_PREPARATION_TIMEOUT"])("%s ends preparation without asking the user to query an image that was never submitted", code => {
+        for (const status of [422, 502, 504]) {
+            const message = generationErrorMessage("upstream timeout; private transport detail", status, code);
+            expect(generationSubmissionRejected(status, code)).toBe(true);
+            expect(message).toContain("未提交生成");
+            expect(message).not.toMatch(/查询|刷新|待核查|private|upstream/);
+            expect(generationErrorMessage(message)).toBe(message);
+        }
+        expect(generationSubmissionRejected(504, "UPSTREAM_OUTCOME_UNKNOWN")).toBe(false);
+        expect(generationSubmissionRejected(409, "PROMPT_SUBMISSION_UNCERTAIN")).toBe(false);
     });
     test("diagnostic context preserves lookup identifiers without serializing task data", () => {
         const error = Object.assign(new Error("安全失败原因"), { taskId: "actual-task", requestId: "actual-request", task: { prompt: "private input", parameters: { secret: "private-value" } } });

@@ -2159,7 +2159,7 @@ function AgentGenerationControls({ settings: savedSettings, config: baseConfig, 
             const requested = settings.requestedImageSize;
             const adapted = adaptImageModelSettings({ ...settings, size: requested || settings.size, count: settings.imageCount }, profile);
             const aspect = (size: string) => { const dimensions = /^(\d+(?:\.\d+)?)[x:](\d+(?:\.\d+)?)$/.exec(size); return dimensions ? Number(dimensions[1]) / Number(dimensions[2]) : NaN; };
-            const keepRequested = requested && !imageModelSettingsError(requested, profile) && (requested === adapted.size || Math.abs(aspect(requested) - aspect(adapted.size)) < 1e-9);
+            const keepRequested = requested && !imageModelSettingsError(requested, profile, adapted.imageOptions) && (requested === adapted.size || Math.abs(aspect(requested) - aspect(adapted.size)) < 1e-9);
             onChange(normalizeAgentImageSettings({ ...settings, ...adapted, imageModel: model, imageCount: adapted.count, requestedImageSize: requested ? keepRequested ? requested : adapted.size : undefined }, profile));
             return;
         }

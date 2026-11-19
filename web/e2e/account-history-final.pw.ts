@@ -33,7 +33,7 @@ test("fresh browser contexts show the same account originals, paginate and keep 
     await expect(history.getByRole("button", { name: /^查看云端记录/ })).toHaveCount(30);
     await history.getByRole("button", { name: "加载更多云端记录" }).click();
     await expect(history.getByRole("button", { name: /^查看云端记录/ })).toHaveCount(31);
-    expect(reads).toEqual([{ board: "image-generation", cursor: null }, { board: "image-generation", cursor: "second" }]);
+    expect(reads).toEqual([{ board: "image-edit", cursor: null }, { board: "image-edit", cursor: "second" }]);
     await history.getByRole("button", { name: /^查看云端记录/ }).first().click();
     const detail = page.getByTestId("account-history-detail");
     await expect(detail.getByRole("img", { name: "账号历史原件" })).toBeVisible();
@@ -89,10 +89,11 @@ test("layer studio history stays provider-neutral and leaves its editable input 
     await cloud(page.context(), [original], reads);
     await page.context().route("**/api/layer-studio/estimate", route => route.fulfill({ json: { estimate: { currency: "CNY", estimatedPrecharge: 3.2, maximumOutputs: 1, sourceCount: 0, priceVersion: 1, employeeCredits: 0, providerCharge: "unverified" } } }));
     await page.goto("/layer-studio");
+    await expect(page.getByRole("heading", { name: "豆包生图", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "图片生成 / 编辑", exact: true }).click();
     await page.getByRole("textbox", { name: "图片描述", exact: true }).fill("此浏览器尚未提交的新草稿");
     expect(reads).toEqual([]);
-    await page.getByText("账号历史记录", { exact: true }).click();
+    await page.getByRole("tab", { name: "历史记录", exact: true }).click();
     await page.getByRole("button", { name: "查看云端记录：针织字母原件与图层拆分" }).click();
     await expect(page.getByRole("img", { name: "账号历史原件" })).toBeVisible();
     const detail = page.getByTestId("account-history-detail");

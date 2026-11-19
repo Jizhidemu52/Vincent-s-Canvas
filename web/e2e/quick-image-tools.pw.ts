@@ -120,22 +120,27 @@ for (const action of ["remove-background", "hd-upscale", "item-extract"] as cons
     });
 }
 
-test("an unresolved standalone request only refreshes its original task and cannot resubmit", async ({ page, api }) => {
+test("an unresolved standalone request only refreshes its original task and cannot resubmit", async ({ page, context, api }, info) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     api.taskStatus = "paused";
     await page.goto("/remove-background");
     await uploadStandaloneImage(page);
     await page.getByRole("button", { name: "一键去背景", exact: true }).click();
-    // A paused task without an upstream id needs investigation, not a new
-    // submission. The visible wording is intentionally not "generation failed".
-    await expect(page.getByText("需要管理员协助", { exact: true })).toBeVisible();
+    const diagnosticAlert = page.getByRole("region", { name: "创作工作区", exact: true }).getByRole("alert");
+    await expect(diagnosticAlert).toHaveText("暂时无法获取生成结果，系统会继续更新。");
     await expect(page.getByRole("button", { name: "一键去背景", exact: true })).toBeDisabled();
     expect(api.submissions).toHaveLength(1);
     const original = [...api.tasks.values()][0]!;
+    await page.getByRole("button", { name: "复制诊断信息", exact: true }).click();
+    const diagnostic = await page.evaluate(() => navigator.clipboard.readText());
+    expect(diagnostic).toContain(`taskId: ${original.id}`);
+    expect(diagnostic).toContain(`requestId: ${original.requestId}`);
+    await page.screenshot({ path: info.outputPath("paused-original-task.png") });
     const taskPath = `/api/tasks/${original.id}`;
     const readsBeforeRefresh = api.taskReads.filter(path => path === taskPath).length;
     await page.getByRole("button", { name: "刷新进度", exact: true }).click();
     await expect.poll(() => api.taskReads.filter(path => path === taskPath).length).toBeGreaterThan(readsBeforeRefresh);
-    await expect(page.getByText("需要管理员协助", { exact: true })).toBeVisible();
+    await expect(diagnosticAlert).toHaveText("暂时无法获取生成结果，系统会继续更新。");
     expect(api.submissions).toHaveLength(1);
     // On reload, the original result is adopted automatically. Do not race
     // that observer by clicking a recovery card which may already be gone.

@@ -6,7 +6,7 @@ import { moduleDefinitions } from "../../shared/feature-catalog";
 import { designExampleForLocation, designExampleForScene } from "../src/lib/design-examples";
 
 const scenes = ["text-to-style", "style-to-sketch", "local-restyle", "garment-colorway", "back-design", "pattern-extract", "pattern-colorway", "accessory-design", "pattern-craft"];
-const routes = ["/image", ...["image-edit", "midjourney-blend"].map(tool => `/image?tool=${tool}`), "/video", "/chat", "/assets", "/prompts", "/my-prompts", "/design-library", "/reference-import", "/creative/pattern-placement", "/creative/pattern-repeat", ...scenes.map(scene => `/creative/${scene}`)];
+const routes = ["/image", ...["image", "image-generation", "image-edit", "midjourney-blend"].map(tool => `/image?tool=${tool}`), "/video", "/chat", "/assets", "/prompts", "/my-prompts", "/design-library", "/reference-import", "/creative/pattern-placement", "/creative/pattern-repeat", ...scenes.map(scene => `/creative/${scene}`)];
 const record = (page: Page) => page.locator('[data-testid="practice-example-record"]:visible');
 const article = (page: Page) => page.locator('[data-testid="design-example-article"]:visible');
 const videoExampleSource = "/design-examples/model-natural-showcase.mp4";
@@ -50,9 +50,11 @@ for (const href of routes) {
     test(`own module example appears in history or saved items, not a global tutorial: ${href}`, async ({ page, context, api }) => {
         const writes = await exampleFixture(context);
         const url = new URL(href, "http://example.test"), scene = scenes.find(id => url.pathname === `/creative/${id}`);
-        const example = scene ? designExampleForScene(scene) : designExampleForLocation(url.pathname, url.search);
+        const retiredImageEntry = url.pathname === "/image" && [null, "image", "image-generation"].includes(url.searchParams.get("tool"));
+        const example = scene ? designExampleForScene(scene) : designExampleForLocation(url.pathname, retiredImageEntry ? "?tool=image-edit" : url.search);
         expect(example, `catalog for ${href}`).toBeTruthy();
         await page.goto(href);
+        if (retiredImageEntry) await expect.poll(() => new URL(page.url()).searchParams.get("tool")).toBe("image-edit");
         if (["/image", "/video"].includes(url.pathname)) await page.getByRole("tab", { name: /^历史记录/ }).click();
         await expect(page.getByTestId("feature-example")).toHaveCount(0);
         await expect(record(page)).toHaveCount(1);
@@ -82,7 +84,7 @@ for (const href of routes) {
 test("copy and download preserve the real draft and saved records, without any generation submission", async ({ page, context, api }) => {
     const writes = await exampleFixture(context);
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    await page.goto("/image");
+    await page.goto("/image?tool=image-edit");
     const prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
     await expect(prompt).toBeVisible();
     await page.getByRole("tab", { name: /^历史记录/ }).click();
@@ -106,10 +108,10 @@ test("copy and download preserve the real draft and saved records, without any g
     await page.evaluate(() => navigator.clipboard.writeText("not-copied:design-example"));
     await copyButton.click();
     await expect(copyButton).toHaveText("已复制 ✓");
-    await expect.poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).replace(/\r\n/g, "\n"))).toBe(designExampleForLocation("/image")!.prompt!.replace(/\r\n/g, "\n"));
+    await expect.poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).replace(/\r\n/g, "\n"))).toBe(designExampleForLocation("/image", "?tool=image-edit")!.prompt!.replace(/\r\n/g, "\n"));
     await expect(page.getByText("示例要求已复制", { exact: true })).toHaveCount(0);
     await expect(copyButton).toHaveText("复制示例要求");
-    const material = designExampleForLocation("/image")!.media[0];
+    const material = designExampleForLocation("/image", "?tool=image-edit")!.media[0];
     const downloadEvent = page.waitForEvent("download");
     await article(page).getByRole("link", { name: `下载${material.label}`, exact: true }).first().click();
     const downloaded = await downloadEvent;
@@ -249,9 +251,9 @@ for (const viewport of [{ width: 1800, height: 1200 }, { width: 390, height: 844
 
 test("blocked modules reveal no examples, and the catalog has no unrelated mixed example", async ({ page, context, api }) => {
     const writes = await exampleFixture(context);
-    const blocked = new Set(["image", "creative-text-to-style"]);
+    const blocked = new Set(["image-edit", "creative-text-to-style"]);
     await context.route("**/api/modules", route => route.fulfill({ json: { modules: moduleDefinitions.map(item => ({ moduleKey: item.moduleKey, enabled: !blocked.has(item.moduleKey) })) } }));
-    for (const href of ["/image", "/creative/text-to-style"]) {
+    for (const href of ["/image", "/image?tool=image-generation", "/image?tool=image", "/image?tool=image-edit", "/creative/text-to-style"]) {
         await page.goto(href);
         await expect(page.getByRole("heading", { name: "此功能暂未开放", exact: true })).toBeVisible();
         await expect(record(page)).toHaveCount(0);
