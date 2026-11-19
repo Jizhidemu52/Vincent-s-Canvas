@@ -34,7 +34,8 @@ test("local placement drops preserve base/artwork roles, original bytes and mult
     expect(bytes(exported.base.src)).toEqual(IMAGE);
     expect(exported.layers).toHaveLength(3);
     for (const layer of exported.layers.slice(1)) expect(bytes(layer.src)).toEqual(IMAGE);
-    expect(api.submissions).toHaveLength(0); expect(api.assetBytes.size).toBe(0);
+    expect(api.submissions).toHaveLength(0); expect(api.assetBytes.size).toBe(3);
+    expect([...api.assetBytes.values()]).toEqual([IMAGE, IMAGE, IMAGE]);
 });
 
 test("local repeat accepts item-only WeCom images and exports original bytes without model calls", async ({ page, api }) => {
@@ -45,7 +46,8 @@ test("local repeat accepts item-only WeCom images and exports original bytes wit
     const exported = await project(page, "导出 JSON");
     expect(exported.elements).toHaveLength(8);
     expect(bytes(exported.elements[7].src)).toEqual(IMAGE);
-    expect(api.submissions).toHaveLength(0); expect(api.assetBytes.size).toBe(0);
+    expect(api.submissions).toHaveLength(0); expect(api.assetBytes.size).toBe(1);
+    expect([...api.assetBytes.values()]).toEqual([IMAGE]);
 });
 
 test("a remote drop cannot append into a different local project after a switch", async ({ page, api }) => {

@@ -17,7 +17,16 @@ export default defineConfig(({ mode }) => {
             canvasStaticImports.clear();
             for (const chunk of Object.values(bundle)) {
                 if (chunk.type === "chunk" && Object.keys(chunk.modules).some((id) => id.replaceAll("\\", "/").endsWith("/src/pages/canvas/project.tsx"))) {
-                    canvasStaticImports.set(chunk.fileName, new Set(chunk.imports.filter((name) => /\.m?js$/.test(name))));
+                    const imports = new Set<string>();
+                    const pending = [...chunk.imports];
+                    while (pending.length) {
+                        const name = pending.pop()!;
+                        if (!/\.m?js$/.test(name) || imports.has(name)) continue;
+                        imports.add(name);
+                        const dependency = bundle[name];
+                        if (dependency?.type === "chunk") pending.push(...dependency.imports);
+                    }
+                    canvasStaticImports.set(chunk.fileName, imports);
                 }
             }
         },

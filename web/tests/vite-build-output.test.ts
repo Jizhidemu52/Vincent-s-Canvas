@@ -73,3 +73,23 @@ test("canvas dynamic preloads omit only its own already imported JS, keeping tar
     plugin.generateBundle({}, {});
     expect(resolveDependencies(target, deps, context)).toEqual(deps);
 });
+
+test("canvas preloads omit transitive static JS once without following dynamic imports or removing CSS", () => {
+    const config = viteConfig({ command: "build", mode: "production", isSsrBuild: false, isPreview: false });
+    const preload = config.build?.modulePreload;
+    if (!preload || typeof preload !== "object") throw new Error("Missing preload resolver");
+    const plugin = config.plugins?.flat().find((item: any) => item?.name === "canvas-static-preload") as any;
+    const host = "assets/project-11111111.js", direct = "assets/shared-a.js", nested = "assets/shared-b.js", target = "assets/dialog.js";
+    plugin.generateBundle({}, {
+        [host]: { type: "chunk", fileName: host, modules: { "/web/src/pages/canvas/project.tsx": {} }, imports: [direct], dynamicImports: [target] },
+        [direct]: { type: "chunk", fileName: direct, modules: {}, imports: [nested, "assets/static.css"], dynamicImports: ["assets/only-dynamic.js"] },
+        [nested]: { type: "chunk", fileName: nested, modules: {}, imports: [direct, host, target] },
+        [target]: { type: "chunk", fileName: target, modules: {}, imports: [] },
+        "assets/static.css": { type: "asset", fileName: "assets/static.css", source: "" },
+    });
+    const deps = [target, direct, nested, "assets/static.css", "assets/only-dynamic.js", "assets/unknown.js"];
+    expect(preload.resolveDependencies!(target, deps, { hostId: host, hostType: "js" })).toEqual([
+        target, "assets/static.css", "assets/only-dynamic.js", "assets/unknown.js",
+    ]);
+    expect(preload.resolveDependencies!(target, deps, { hostId: "assets/other.js", hostType: "js" })).toEqual(deps);
+});

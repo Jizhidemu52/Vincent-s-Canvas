@@ -24,7 +24,7 @@ function harness() {
         react: { ...React, useState: (initial: unknown) => { const index = si++; if (!(index in states)) states[index] = initial; return [states[index], (next: unknown) => { states[index] = next; }]; },
             useRef: (initial: unknown) => refs[ri++] ||= { current: initial }, useEffect: (effect: () => (() => void)) => { if (!mounted) effects.push(effect()); } },
         "@/lib/i18n": i18nHarness,
-        "@/services/image-storage": { uploadImage: async () => { started++; return pending; } },
+        "@/services/user-image-upload": { uploadUserImage: async () => { started++; return pending; } },
         "./image-settings-panel.css": {},
     };
     const compiled = ts.transpileModule(`${readFileSync(path, "utf8")}\nexport { ImageMarkupInput };`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;

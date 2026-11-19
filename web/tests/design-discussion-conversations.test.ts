@@ -56,6 +56,7 @@ function fixture(options: { loseCreate?: boolean; loseTurn?: boolean; queryMissi
     let owner = ownerId, writable = true, visible: DesignConversationTask[] = [];
     const assertWritable = () => { if (!writable) throw new Error("当前画布不可写"); };
     const api = {
+        async designExecutions() { return { items: [], nextCursor: null }; },
         async create(request: CreateConversationRequest) {
             calls.push({ method: "POST", path: "/api/image-conversations", input: request });
             const stored = [...storage.records.values()].find(value => value.conversationExecution.createRequest?.clientRequestId === request.clientRequestId)!;

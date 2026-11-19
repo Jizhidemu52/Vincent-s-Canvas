@@ -267,7 +267,7 @@ function averageDesignerSummaries(designers: DesignerSummary[]): DesignerSummary
 
 async function getPerformanceOptions(db: Database, actor: SessionUser) {
   const values: unknown[] = [];
-  const clauses = ["u.role='designer'"];
+  const clauses = ["u.role='designer'", "u.deleted_at IS NULL"];
   if (actor.role === "department_admin") { values.push(actor.departmentId); clauses.push(`u.department_id=$${values.length}`); }
   if (actor.role === "designer") { values.push(actor.groupId); clauses.push(`gm.group_id=$${values.length}`); }
   const users = await db.query(`SELECT DISTINCT u.id AS value,u.display_name AS label,u.department_id AS "departmentId",gm.group_id AS "groupId"

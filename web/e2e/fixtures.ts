@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { deflateSync } from "node:zlib";
 import { test as base, expect, type BrowserContext, type Page, type Route } from "@playwright/test";
 import { moduleDefinitions, toolDefinitions } from "../../shared/feature-catalog";
@@ -38,6 +38,8 @@ export class MockCanvasApi {
     tasks = new Map<string, Json>();
     assets = new Map<string, Json>();
     assetBytes = new Map<string, Buffer>();
+    localProcessingRecords = new Map<string, Json>();
+    localProcessingUploads = new Map<string, string>();
     submissions: Json[] = [];
     batchSubmissions: Json[] = [];
     batchActions: string[] = [];
@@ -153,9 +155,30 @@ export class MockCanvasApi {
             const input = request.postDataJSON();
             return json({ project: { id: input.externalId || randomUUID(), externalId: input.externalId, name: input.name, status: "active" } });
         }
+        if (path === "/api/assets/local-processing") {
+            if (method === "GET") {
+                const operation = url.searchParams.get("clientOperationId"), board = url.searchParams.get("board");
+                const records = [...this.localProcessingRecords.values()].filter(record => record.board === board && (!operation || record.clientOperationId === operation));
+                return json({ records, nextCursor: null, hasMore: false });
+            }
+            if (method === "POST") {
+                const { assetId, ...input } = request.postDataJSON(), prior = this.localProcessingRecords.get(input.clientOperationId);
+                if (prior) return json({ record: prior, reused: true });
+                const asset = this.assets.get(assetId), bytes = this.assetBytes.get(assetId);
+                if (!asset || !bytes) return json({ message: "Final image is missing" }, 400);
+                const record = { ...input, version: 1, id: assetId, ownerUserId: OWNER, outputAssetId: assetId, sourceOutputAssetId: assetId, sourceTaskId: input.sourceTaskId || null,
+                    filename: asset.filename, mimeType: asset.mimeType, byteSize: bytes.length, contentSha256: createHash("sha256").update(bytes).digest("hex"), createdAt: new Date().toISOString(),
+                    contentUrl: `/api/assets/${assetId}/content`, thumbnailUrl: `/api/assets/${assetId}/thumb?w=256`, previewUrl: `/api/assets/${assetId}/thumb?w=1024` };
+                this.localProcessingRecords.set(input.clientOperationId, record);
+                return json({ record, reused: false }, 201);
+            }
+        }
         if (path === "/api/assets/upload-request") {
-            const input = request.postDataJSON(), id = randomUUID();
+            const input = request.postDataJSON(), old = input.localProcessingOperationId ? this.localProcessingUploads.get(input.localProcessingOperationId) : undefined;
+            if (old) return json({ assetId: old, uploadUrl: null, reused: true });
+            const id = randomUUID();
             this.assets.set(id, { ...input, id, ownerUserId: OWNER, status: "ready", contentUrl: `/api/assets/${id}/content` });
+            if (input.localProcessingOperationId) this.localProcessingUploads.set(input.localProcessingOperationId, id);
             return json({ assetId: id, uploadUrl: `/api/assets/${id}/upload` });
         }
         if (/^\/api\/assets\/[^/]+\/upload$/.test(path) && method === "PUT") {

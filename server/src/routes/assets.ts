@@ -26,6 +26,7 @@ import { scheduleAssetThumbnails } from "../asset-thumbnails";
 import { hashAssetContent, requestedContentHash } from "../asset-content-hash";
 import { AssetObjectError, isMissingAssetObject } from "../asset-object-error";
 import { VideoPreviewError, type AssetVideoPreviewService, type VideoPlaybackAsset } from "../asset-video-preview";
+import { archiveLocalProcessing, assertLocalProcessingUploadInput, listLocalProcessing, LocalProcessingError, reserveLocalProcessingUpload } from "../local-processing";
 
 const createSchema = z.object({
   filename: z.string().trim().min(1).max(255),
@@ -34,6 +35,7 @@ const createSchema = z.object({
   kind: z.enum(["image", "video", "text", "other"]).default("image"),
   projectId: z.string().uuid().nullish(),
   clientReferenceId: z.string().trim().min(8).max(160).optional(),
+  localProcessingOperationId: z.string().uuid().transform(value => value.toLowerCase()).optional(),
   repairAssetId: z.string().uuid().optional(),
   metadata: z.record(z.string(), z.unknown()).default({}),
 });
@@ -175,6 +177,32 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage, playbac
     } catch (error) { next(error); }
   });
 
+  router.get("/local-processing", async (request, response, next) => {
+    try {
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      assertCanvasOwner(request.get("X-Canvas-Owner-Id"), actor.id);
+      response.json(await listLocalProcessing(db, actor, request.query));
+    } catch (error) {
+      if (error instanceof CanvasDocumentError) response.status(error.status).json({ error: error.code, message: error.message });
+      else next(error);
+    }
+  });
+
+  router.post("/local-processing", async (request, response, next) => {
+    try {
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      assertCanvasOwner(request.get("X-Canvas-Owner-Id"), actor.id);
+      const result = await archiveLocalProcessing(db, storage, actor, request.body);
+      if (!result.reused) scheduleAssetThumbnails(db, storage, result.record.outputAssetId);
+      response.status(result.reused ? 200 : 201).json(result);
+    } catch (error) {
+      if (error instanceof LocalProcessingError || error instanceof CanvasDocumentError)
+        response.status(error.status).json({ error: error.code, message: error.message });
+      else if (error instanceof AssetObjectError) sendAssetObjectError(response, error);
+      else next(error);
+    }
+  });
+
   router.get('/summary', async (request, response, next) => {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
@@ -231,8 +259,16 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage, playbac
       const input = createSchema.parse(request.body);
       const actor = (request as unknown as AuthenticatedRequest).auth;
       if (request.get("X-Canvas-Owner-Id") !== undefined) assertCanvasOwner(request.get("X-Canvas-Owner-Id"), actor.id);
+      assertLocalProcessingUploadInput(input);
       if (!storage.configured) {
         response.status(503).json({ error: "STORAGE_NOT_CONFIGURED", message: "公司对象存储尚未配置" });
+        return;
+      }
+      if (input.localProcessingOperationId) {
+        assertCanvasOwner(request.get("X-Canvas-Owner-Id"), actor.id);
+        const reservation = await reserveLocalProcessingUpload(db, actor, { ...input, localProcessingOperationId: input.localProcessingOperationId });
+        if (reservation.reused) await respondReusedUpload(response, storage, reservation.asset, input);
+        else response.status(201).json({ assetId: reservation.asset.id, uploadUrl: `/api/assets/${reservation.asset.id}/upload` });
         return;
       }
       if (input.projectId) {
@@ -292,7 +328,7 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage, playbac
       );
       response.status(201).json({ assetId: id, uploadUrl: `/api/assets/${id}/upload` });
     } catch (error) {
-      if (error instanceof CanvasDocumentError) response.status(error.status).json({ error: error.code, message: error.message });
+      if (error instanceof CanvasDocumentError || error instanceof LocalProcessingError) response.status(error.status).json({ error: error.code, message: error.message });
       else if (error instanceof AssetObjectError) sendAssetObjectError(response, error);
       else next(error);
     }

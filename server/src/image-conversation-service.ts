@@ -179,6 +179,35 @@ export async function listImageConversations(db: Database, ownerId: string, quer
   const last = rows.at(-1);
   return { items: rows.map(conversationSummary), nextCursor: result.rows.length > limit && last ? nextCursor(secret, scope, last.cursor_time, last.id) : null };
 }
+
+export async function listDesignExecutionHistory(db: Database, ownerId: string, query: PaginationQuery & { canvasExternalId: string }, secret: string) {
+  const scope = JSON.stringify([ownerId, "design-executions", query.canvasExternalId, "created-desc"]);
+  const cursor = readCursor(query.cursor, secret, scope), limit = query.limit ?? 30;
+  const result = await db.query<{ id: string; create_request_id: string; title: string | null; created_at: Date; cursor_time: string;
+    initial_asset_id: string | null; turn_row: TurnRow | null; version_row: VersionRow | null }>(`
+    SELECT c.id,c.create_request_id,c.title,c.created_at,c.created_at::text AS cursor_time,
+      base.asset_id AS initial_asset_id,row_to_json(t) AS turn_row,row_to_json(v) AS version_row
+    FROM image_conversations c
+    JOIN canvas_documents d ON d.owner_user_id=c.owner_user_id AND d.external_id=c.canvas_external_id AND d.deleted=false
+    LEFT JOIN image_conversation_turns t ON t.conversation_id=c.id AND t.owner_user_id=c.owner_user_id
+      AND t.client_request_id=regexp_replace(c.create_request_id, ':create$', ':turn')
+    LEFT JOIN image_conversation_versions v ON v.id=t.output_version_id AND v.conversation_id=c.id AND v.turn_id=t.id AND v.source='generated'
+    LEFT JOIN image_conversation_versions base ON base.conversation_id=c.id
+      AND base.id=COALESCE(t.input_active_version_id,CASE WHEN t.id IS NULL THEN c.active_version_id END)
+    WHERE c.owner_user_id=$1 AND c.canvas_external_id=$2 AND c.entrypoint='canvas'
+      AND c.create_request_id ~ '^design-image-[a-f0-9]{64}:create$'
+      ${cursor ? "AND (c.created_at,c.id)<($4::timestamptz,$5::uuid)" : ""}
+    ORDER BY c.created_at DESC,c.id DESC LIMIT $3`, [ownerId, query.canvasExternalId, limit + 1, ...(cursor ? [cursor.value, cursor.id] : [])]);
+  const rows = result.rows.slice(0, limit), last = rows.at(-1);
+  return { items: rows.map(row => {
+    const input = row.turn_row?.input_payload;
+    return { id: row.create_request_id.slice(0, -7), conversationId: row.id, canvasExternalId: query.canvasExternalId,
+      title: row.title, createdAt: isoTimestamp(row.created_at), initialAssetId: row.initial_asset_id,
+      turnRequest: input ? submitTurnRequestSchema.parse({ clientRequestId: input.clientRequestId, expectedStateRevision: input.expectedStateRevision,
+        text: input.text, attachments: input.attachments, ...(input.replyToTurnId ? { replyToTurnId: input.replyToTurnId } : {}), outputPreferences: input.outputPreferences }) : null,
+      turn: row.turn_row ? turnSnapshot(row.turn_row) : null, outputVersion: row.version_row ? versionSnapshot(row.version_row) : null };
+  }), nextCursor: result.rows.length > limit && last ? nextCursor(secret, scope, last.cursor_time, last.id) : null };
+}
 export async function listImageConversationMessages(db: Database, ownerId: string, conversationId: string, query: PaginationQuery, secret: string): Promise<MessagePage> {
   await readConversation(db, ownerId, conversationId);
   const scope = `${ownerId}:${conversationId}:messages:seq-asc`;

@@ -50,6 +50,7 @@ import { createLatestVideoPreview, hydrateVideoLogMedia } from "./video-log-medi
 import { completedVideoTaskDurationMs } from "./video-task-duration";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { uploadUserImage } from "@/services/user-image-upload";
 import { createVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { getQueuedTask, getQueuedTaskByRequestId, QueuedTaskFailedError, QueuedTaskPausedError, QueuedTaskSubmissionUncertainError, recoverQueuedTask, waitForTasks } from "@/services/api/generation-tasks";
 import { resolveConfiguredToolModel } from "@/services/api/tool-runtime";
@@ -374,8 +375,8 @@ function VideoGenerationWorkspace() {
         if (references.length + selectedFiles.length > maxImageReferences) throw new Error(`当前模型或模式最多使用 ${maxImageReferences} 张图片，请先移除多余参考图。`);
         const nextReferences = await Promise.all(
             selectedFiles.map(async (file) => {
-                const image = await uploadImage(file);
-                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, bytes: image.bytes, width: image.width, height: image.height };
+                const image = await uploadUserImage(file, { source: "video-image-reference", ownerId: user?.id });
+                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: image.sourceAssetId, bytes: image.bytes, width: image.width, height: image.height };
             }),
         );
         if (!isCurrentReferenceScope(scope)) return;
@@ -417,8 +418,9 @@ function VideoGenerationWorkspace() {
             if (blobs.some((blob) => !isSupportedVideoImage(blob))) throw new Error("参考图仅支持 JPEG、PNG、WebP，单张非空且不超过 10MB。");
             const nextReferences = await Promise.all(
                 blobs.map(async (blob, index) => {
-                    const image = await uploadImage(blob);
-                    return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
+                    const name = `clipboard-${index + 1}.png`;
+                    const image = await uploadUserImage(blob, { source: "video-image-clipboard", ownerId: user?.id, name });
+                    return { id: nanoid(), name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: image.sourceAssetId };
                 }),
             );
             if (!isCurrentReferenceScope(scope)) return;

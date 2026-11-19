@@ -64,7 +64,8 @@ for (const width of [320, 390]) {
         await expectOriginal(tray.getByRole("img", { name: "gallery-detail.png", exact: true }));
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         await page.screenshot({ path: info.outputPath(`image-uploaded-${width}.png`), animations: "disabled" });
-        expect(api.assets.size).toBe(0);
+        expect(api.assets.size).toBe(2);
+        expect([...api.assets.values()].every(asset => asset.metadata.source === "asset-picker-upload")).toBe(true);
         expect(api.submissions).toHaveLength(0);
     });
 

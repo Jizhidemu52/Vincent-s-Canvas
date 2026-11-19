@@ -6,9 +6,10 @@ import { canvasPixels, loadProcessingImage, pixelsCanvas } from "./image-process
 import { rgbHex, suggestPalette, type PixelImage, type RecolorRule } from "./image-processing";
 import { processImageInWorker } from "./image-processing-client";
 import type { SceneImage } from "./use-scene-workspace";
+import type { SceneFinalSave } from "./scene-final-archive";
 
 export function RecolorDialog({ source, onClose, onSave }: {
-    source: SceneImage; onClose: () => void; onSave: (blob: Blob, description: string) => Promise<void>;
+    source: SceneImage; onClose: () => void; onSave: (blob: Blob, description: string, save: SceneFinalSave) => Promise<void>;
 }) {
     useUiText();
     const original = useRef<PixelImage | null>(null);
@@ -26,6 +27,7 @@ export function RecolorDialog({ source, onClose, onSave }: {
     const [previewBusy, setPreviewBusy] = useState(false);
     const [error, setError] = useState("");
     const [saveError, setSaveError] = useState("");
+    const operation = useRef<{ identity: string; id: string } | null>(null);
     useEffect(() => {
         let cancelled = false;
         original.current = null; setSmall(null); setBusy(false); setError(""); setSaveError(""); setPreviewBusy(false);
@@ -75,7 +77,10 @@ export function RecolorDialog({ source, onClose, onSave }: {
             const description = `本地精确换色；${rules.map(rule => `${rule.from} → ${rule.to}`).join("，")}；RGB 容差 ${tolerance}%；改变 ${result.changedPixels} 个像素；保持尺寸与透明度。`;
             const blob = await editorPngBlob(pixelsCanvas(result));
             if (controller.signal.aborted) return;
-            await onSave(blob, description); if (!controller.signal.aborted) onClose();
+            const identity = JSON.stringify([source.id, rules, tolerance]);
+            if (operation.current?.identity !== identity) operation.current = { identity, id: crypto.randomUUID() };
+            await onSave(blob, description, { clientOperationId: operation.current.id, operation: "recolor", recolor: { rules: rules.map(rule => ({ ...rule })), tolerance } });
+            if (!controller.signal.aborted) onClose();
         } catch (caught) { if (!controller.signal.aborted) setSaveError(caught instanceof Error ? uiText(caught.message) : uiText("换色保存失败")); }
         finally { if (!controller.signal.aborted) setBusy(false); if (saveController.current === controller) saveController.current = null; }
     };

@@ -10,6 +10,8 @@ import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { omitFinancialFields } from "@/lib/financial-presentation";
 import { listGenerationHistory, readHistoryOriginal, historyAssetPath, type GenerationHistoryTask } from "@/services/api/generation-task-history";
+import { listLocalProcessing, localProcessingBoard } from "@/services/api/local-processing";
+import type { LocalProcessingRecord } from "../../../shared/local-processing-contracts";
 
 const statusLabels: Record<string, string> = { waiting: "排队中", queued: "排队中", processing: "处理中", paused: "未完成", success: "已完成", failed: "失败", cancelled: "已取消" };
 const titleOf = (task: GenerationHistoryTask) => task.userInput?.userText || task.prompt || "图片处理任务";
@@ -55,7 +57,7 @@ function HistoryDetail({ task, ownerId, board }: { task: GenerationHistoryTask; 
         (key, value) => hideModel && /model|provider/i.test(key) ? undefined : value, 2);
     const detailJson = detailOpen ? JSON.stringify(displayValue(JSON.parse(originalDetailJson)), null, 2) : originalDetailJson;
     return <div className="space-y-4" data-testid="account-history-detail">
-        <p className="text-sm text-muted-foreground">{t("查看记录不会重新生成，也不会替换当前草稿。本浏览器里的局部合成、图层位置等未提交编辑不属于云端原件。")}</p>
+        <p className="text-sm text-muted-foreground">{t("查看记录不会重新生成，也不会替换当前草稿。这里是原 AI 任务；精确换色与选区合成的最终成果会以独立处理记录保存。未提交的图层编辑不属于云端原件。")}</p>
         <div className="flex flex-wrap items-center gap-3 text-sm"><span>{t(statusLabels[task.status] || task.status)}</span>{!hideModel && <span>{task.modelName ? display(task.modelName) : task.modelId || t("历史模型")}</span>}<time>{formatBeijingDateTime(task.queuedAt || task.createdAt || "")}{t(" 北京时间")}</time></div>
         {files.length > 0 ? <><div className="flex flex-wrap gap-2" role="group" aria-label={t("历史原件选择")}>{files.map((file, index) => <Button key={`${file.label}:${file.path}`} aria-pressed={selected === index} className={selected === index ? "!bg-muted !font-semibold !text-foreground" : undefined} onClick={() => setSelected(index)}>{file.label}</Button>)}</div><OriginalPreview key={files[selected].path} path={files[selected].path} ownerId={ownerId} /></>
             : <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">{t("此任务尚无已保存结果。只展示原状态，不会自动恢复查询或重新提交。")}</p>}
@@ -65,25 +67,51 @@ function HistoryDetail({ task, ownerId, board }: { task: GenerationHistoryTask; 
     </div>;
 }
 
+function LocalProcessingDetail({ record, ownerId }: { record: LocalProcessingRecord; ownerId: string }) {
+    const t = useUiText();
+    const displayValue = useDisplayValue();
+    const { copy, copied } = useCopyFeedback();
+    const [selected, setSelected] = useState(0);
+    const files = [{ path: record.contentUrl, label: t("最终成果") }, ...record.sourceAssetIds.map((id, index) => ({ path: `/api/assets/${id}/content`, label: t("来源原件 {index}", { index: index + 1 }) }))];
+    return <div className="space-y-4" data-testid="account-local-processing-detail">
+        <p className="text-sm text-muted-foreground">{t("已保存最终图片与完整处理参数，换浏览器或电脑仍可查看。此处仅查看和下载，不会重新生成、扣费或覆盖原 AI 任务。")}</p>
+        <div className="flex flex-wrap items-center gap-3 text-sm"><span>{t(record.operation === "recolor" ? "精确换色 · 本地处理已归档" : "选区合成 · 最终成果已归档")}</span><time>{formatBeijingDateTime(record.createdAt)}{t(" 北京时间")}</time></div>
+        <div className="flex flex-wrap gap-2" role="group" aria-label={t("处理原件选择")}>{files.map((file, index) => <Button key={file.path} aria-pressed={selected === index} onClick={() => setSelected(index)}>{file.label}</Button>)}</div>
+        <OriginalPreview key={files[selected].path} path={files[selected].path} ownerId={ownerId} />
+        <section className="space-y-2"><div className="flex items-center justify-between gap-2"><h3 className="text-base font-medium">{t("完整处理要求")}</h3><Button size="small" icon={copied ? <Check size={14} /> : <Copy size={14} />} onClick={() => void copy(record.prompt)}>{t(copied ? "已复制" : "复制提示词")}</Button></div><p className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-3 text-sm"><DisplayText text={record.prompt} /></p></section>
+        <details className="text-sm"><summary className="cursor-pointer rounded-md py-2 focus-visible:outline-2 focus-visible:outline-primary">{t("查看处理参数与关联原任务")}</summary><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs">{JSON.stringify(displayValue({ operation: record.operation, parameters: record.parameters, sourceAssetIds: record.sourceAssetIds, sourceTaskId: record.sourceTaskId, clientOperationId: record.clientOperationId, outputAssetId: record.outputAssetId }), null, 2)}</pre></details>
+    </div>;
+}
+
+type HistorySelection = { kind: "task"; task: GenerationHistoryTask } | { kind: "local"; record: LocalProcessingRecord };
+
 function AccountHistoryList({ board, ownerId, active }: { board: string; ownerId: string; active: boolean }) {
     const t = useUiText();
     const display = useDisplayText();
     const [tasks, setTasks] = useState<GenerationHistoryTask[]>([]);
+    const [records, setRecords] = useState<LocalProcessingRecord[]>([]);
     const [cursor, setCursor] = useState<string | null>(null);
+    const [localCursor, setLocalCursor] = useState<string | null>(null);
     const [loaded, setLoaded] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
-    const [selected, setSelected] = useState<GenerationHistoryTask | null>(null);
+    const [selected, setSelected] = useState<HistorySelection | null>(null);
     const controller = useRef<AbortController | null>(null);
-    const lastRequestedCursor = useRef<string | undefined>(undefined);
-    const load = useCallback(async (next?: string) => {
+    const lastRequestedCursor = useRef<{ task: string | null; local: string | null } | undefined>(undefined);
+    const load = useCallback(async (next?: { task: string | null; local: string | null }) => {
         lastRequestedCursor.current = next;
         controller.current?.abort(); const current = new AbortController(); controller.current = current;
         setLoading(true); setError("");
         try {
-            const page = await listGenerationHistory(board, ownerId, next, current.signal);
-            setTasks(previous => next ? [...new Map([...previous, ...page.tasks].map(task => [task.id, task])).values()] : page.tasks);
-            setCursor(page.nextCursor); setLoaded(true);
+            const localBoard = localProcessingBoard(board);
+            const [page, local] = await Promise.all([
+                !next || next.task ? listGenerationHistory(board, ownerId, next?.task || undefined, current.signal) : null,
+                localBoard && (!next || next.local) ? listLocalProcessing(localBoard, ownerId, { cursor: next?.local || undefined, signal: current.signal }) : null,
+            ]);
+            current.signal.throwIfAborted();
+            if (page) { setTasks(previous => next ? [...new Map([...previous, ...page.tasks].map(task => [task.id, task])).values()] : page.tasks); setCursor(page.nextCursor); }
+            if (local) { setRecords(previous => next ? [...new Map([...previous, ...local.records].map(record => [record.id, record])).values()] : local.records); setLocalCursor(local.nextCursor); }
+            setLoaded(true);
         } catch (caught) { if (!current.signal.aborted) setError(caught instanceof Error ? caught.message : "账号历史暂时读取失败"); }
         finally { if (!current.signal.aborted) setLoading(false); }
     }, [board, ownerId]);
@@ -93,17 +121,19 @@ function AccountHistoryList({ board, ownerId, active }: { board: string; ownerId
         return () => controller.current?.abort();
     }, [active, load]);
     if (!active) return null;
+    const entries = [...tasks.map(task => ({ kind: "task" as const, task, id: `task:${task.id}`, date: task.queuedAt || task.createdAt || "" })),
+        ...records.map(record => ({ kind: "local" as const, record, id: `local:${record.id}`, date: record.createdAt }))].sort((left, right) => Date.parse(right.date) - Date.parse(left.date) || left.id.localeCompare(right.id));
     return <section className="mb-6 space-y-3" aria-label={t("账号云端历史")} data-testid="account-history">
         <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="flex items-center gap-2 text-base font-semibold"><History size={16} />{t("账号云端历史")}</h2><Tooltip title={t(loading ? "正在读取账号历史" : "重新读取本账号的已提交记录")}><Button size="small" icon={<RefreshCw size={14} />} disabled={loading} onClick={() => void load()}>{t("刷新记录")}</Button></Tooltip></div>
-        <p className="text-sm leading-relaxed text-muted-foreground">{t("本账号在此板块提交的任务，换浏览器仍可查看。下方本机记录继续保留，不会合并删除或覆盖。")}</p>
-        {tasks.map(task => <button key={task.id} type="button" onClick={() => setSelected(task)} className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary" aria-label={t("查看云端记录：{title}", { title: display(t(titleOf(task))).slice(0, 80) })}>
-            <History size={18} className="shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{display(t(titleOf(task)))}</span><span className="mt-1 block text-xs text-muted-foreground">{formatBeijingDateTime(task.queuedAt || task.createdAt || "")} · {t(statusLabels[task.status] || task.status)} · {task.resultUrls?.length || 0}{t(" 份结果")}</span></span><span className="shrink-0 text-xs text-primary">{t("查看")}</span>
-        </button>)}
+        <p className="text-sm leading-relaxed text-muted-foreground">{t("本账号在此板块提交的任务与已归档的处理成果，换浏览器或电脑仍可查看。原浏览器中的旧记录继续保留，不会合并删除或覆盖。")}</p>
+        {entries.map(entry => { const title = entry.kind === "task" ? titleOf(entry.task) : entry.record.prompt; return <button key={entry.id} type="button" onClick={() => setSelected(entry)} className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary" aria-label={t("查看云端记录：{title}", { title: display(t(title)).slice(0, 80) })}>
+            <History size={18} className="shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{display(t(title))}</span><span className="mt-1 block text-xs text-muted-foreground">{formatBeijingDateTime(entry.date)} · {entry.kind === "task" ? <>{t(statusLabels[entry.task.status] || entry.task.status)} · {entry.task.resultUrls?.length || 0}{t(" 份结果")}</> : t(entry.record.operation === "recolor" ? "精确换色 · 最终成果已归档" : "选区合成 · 最终成果已归档")}</span></span><span className="shrink-0 text-xs text-primary">{t("查看")}</span>
+        </button>; })}
         {loading && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle size={16} className="animate-spin" />{t("正在读取账号历史…")}</p>}
         {error && <div role="alert" className="space-y-2 text-sm text-destructive"><p><DisplayText text={t(error)} /></p><Button size="small" onClick={() => void load(lastRequestedCursor.current)}>{t("重试读取历史")}</Button></div>}
-        {loaded && !tasks.length && !error && <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">{t("此账号在本板块还没有可归类的云端任务。仅存本机的旧记录仍在原浏览器保留。")}</p>}
-        {cursor && !error && <Button disabled={loading} onClick={() => void load(cursor)}>{t("加载更多云端记录")}</Button>}
-        <Modal title={t("云端任务详情")} open={Boolean(selected)} onCancel={() => setSelected(null)} footer={null} width={960} destroyOnHidden>{selected && <HistoryDetail key={selected.id} task={selected} ownerId={ownerId} board={board} />}</Modal>
+        {loaded && !entries.length && !error && <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">{t("此账号在本板块还没有可归类的云端任务或处理成果。仅存本机的旧记录仍在原浏览器保留。")}</p>}
+        {(cursor || localCursor) && !error && <Button disabled={loading} onClick={() => void load({ task: cursor, local: localCursor })}>{t("加载更多云端记录")}</Button>}
+        <Modal title={t(selected?.kind === "local" ? "云端处理成果详情" : "云端任务详情")} open={Boolean(selected)} onCancel={() => setSelected(null)} footer={null} width={960} destroyOnHidden>{selected?.kind === "task" ? <HistoryDetail key={selected.task.id} task={selected.task} ownerId={ownerId} board={board} /> : selected ? <LocalProcessingDetail key={selected.record.id} record={selected.record} ownerId={ownerId} /> : null}</Modal>
     </section>;
 }
 

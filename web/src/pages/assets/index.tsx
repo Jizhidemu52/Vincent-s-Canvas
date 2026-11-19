@@ -27,6 +27,7 @@ import { createZip } from "@/lib/zip";
 import { loadCanvasProject, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
+import { watchVisibleAssetChanges } from "@/services/asset-changes";
 import { cn } from "@/lib/utils";
 import { isSupportedServerAsset, serverAssetToLocal } from "@/lib/server-asset-local";
 import { canUserAccessAsset, serverAssetIdFromAsset, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
@@ -37,7 +38,7 @@ import { collectAssetPages } from "./asset-export-pages";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { buildAssetSearchIndex, searchAssetIndex } from "./asset-search";
 import { assetCanvasNodes, assetCanvasViewport, selectAssetRange } from "./asset-batch";
-import { compareAssetCreatedAt, filterLocalAssets, patchAssetProjection, uploadAssetBatch, type AssetUploadJob } from "./asset-library-state";
+import { compareAssetCreatedAt, filterLocalAssets, mergeAssetLibraryHead, patchAssetProjection, uploadAssetBatch, type AssetUploadJob } from "./asset-library-state";
 import {
     deleteServerAsset,
     updateServerAssetMetadata,
@@ -128,6 +129,8 @@ export default function AssetsPage() {
     const assetQuery: AssetListQuery = { q: deferredKeyword || undefined, kind: kindFilter === "all" ? undefined : kindFilter,
         tag: deferredTag || undefined, projectId: projectFilter, createdFrom: dateRange?.[0], createdBefore: dateRange?.[1], sort };
     const assetQueryKey = ["asset-library", user?.id, libraryView, assetQuery] as const;
+    const assetQueryScope = JSON.stringify(assetQueryKey);
+    const [refreshError, setRefreshError] = useState("");
     const hasFilters = Boolean(keyword || kindFilter !== "all" || tagFilter || projectFilter || dateRange);
     const clearFilters = () => { setKeyword(""); setKindFilter("all"); setTagFilter(""); setProjectFilter(undefined); setDateRange(null); };
     const assetPages = useInfiniteQuery({
@@ -141,6 +144,22 @@ export default function AssetsPage() {
         retry: false,
         refetchOnWindowFocus: false,
     });
+    useEffect(() => {
+        setRefreshError("");
+        const ownerId = user?.id;
+        if (!ownerId) return;
+        return watchVisibleAssetChanges(ownerId, async signal => {
+            if (queryClient.getQueryState(assetQueryKey)?.fetchStatus === "fetching") return;
+            try {
+                const head = await (libraryView === "trash" ? listDeletedServerAssets : listServerAssets)({ ...assetQuery, limit: 60 }, signal);
+                if (signal.aborted || useUserStore.getState().user?.id !== ownerId) return;
+                queryClient.setQueryData<InfiniteData<ServerAssetPage>>(assetQueryKey, data => mergeAssetLibraryHead(data, head));
+                setRefreshError("");
+            } catch (error) {
+                if (!signal.aborted && useUserStore.getState().user?.id === ownerId) setRefreshError(error instanceof Error ? error.message : t("公司素材加载失败"));
+            }
+        });
+    }, [assetQueryScope, queryClient]);
     const serverAssets = useMemo(() => {
         const unique = new Map<string, ServerAsset>();
         for (const page of assetPages.data?.pages || []) for (const asset of page.assets) {
@@ -151,7 +170,7 @@ export default function AssetsPage() {
     const serverAssetIds = useMemo(() => new Set(serverAssets.map(asset => asset.id)), [serverAssets, t]);
     const serverAssetResponse = assetPages.data?.pages.at(-1);
     const serverLoading = assetPages.isFetching;
-    const serverError = assetPages.error instanceof Error ? assetPages.error.message : assetPages.isError ? t("公司素材加载失败") : "";
+    const serverError = assetPages.error instanceof Error ? assetPages.error.message : assetPages.isError ? t("公司素材加载失败") : refreshError;
     const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
     const editingServerAsset = Boolean(editingAsset && serverAssetIds.has(editingAsset.id));
     const { pending: savingAsset, run: runSave } = useAsyncAction(`asset-save:${editingAsset?.id || "new"}`);
@@ -191,6 +210,7 @@ export default function AssetsPage() {
     const note = Form.useWatch("note", form) || "";
     const refreshServerAssets = async (cursor?: string) => {
         if (!user?.id) return;
+        setRefreshError("");
         if (cursor) await assetPages.fetchNextPage();
         else await assetPages.refetch();
     };

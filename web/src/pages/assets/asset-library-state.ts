@@ -1,6 +1,7 @@
 import { uiText } from "@/lib/i18n";
 import type { Asset } from "@/stores/use-asset-store";
 import type { AssetListQuery, AssetProjection, ServerAssetPage } from "@/services/api/server-assets";
+import type { InfiniteData } from "@tanstack/react-query";
 
 export function compareAssetCreatedAt(a: string, b: string) {
     const milliseconds = Date.parse(a) - Date.parse(b);
@@ -19,6 +20,14 @@ export function patchAssetProjection<T extends { pages: ServerAssetPage[] }>(dat
     if (!data) return data;
     return { ...data, pages: data.pages.map(page => page.assets.some(asset => asset.id === id)
         ? { ...page, assets: page.assets.map(asset => asset.id === id ? { ...asset, ...projection } : asset) } : page) };
+}
+
+export function mergeAssetLibraryHead(data: InfiniteData<ServerAssetPage> | undefined, head: ServerAssetPage): InfiniteData<ServerAssetPage> {
+    const first = data?.pages[0];
+    const ids = new Set(head.assets.map(asset => asset.id));
+    const assets = [...head.assets, ...(first?.assets || []).filter(asset => !ids.has(asset.id))];
+    if (!first || !head.hasMore || !first.assets.some(asset => ids.has(asset.id)) || assets.length > 120) return { pages: [head], pageParams: [undefined] };
+    return { ...data!, pages: [{ ...first, assets }, ...data!.pages.slice(1).map(page => ({ ...page, assets: page.assets.filter(asset => !ids.has(asset.id)) }))] };
 }
 
 export type AssetUploadJob = { file: File; clientReferenceId: string; error?: string };

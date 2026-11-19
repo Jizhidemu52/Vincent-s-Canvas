@@ -56,6 +56,7 @@ import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "
 import { completedTaskDurationMs } from "@/lib/completed-task-duration";
 import { requestEdit, requestGeneration } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { uploadUserImage } from "@/services/user-image-upload";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { fetchServerAssetContent, recordServerAssetEvent } from "@/services/api/server-assets";
@@ -676,8 +677,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         }
         const nextReferences = await Promise.all(
             imageFiles.map(async (file) => {
-                const image = await uploadImage(file);
-                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, bytes: file.size };
+                const image = await uploadUserImage(file, { source: "image-reference", ownerId: user?.id });
+                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: image.sourceAssetId, bytes: file.size };
             }),
         );
         if (!stillCurrent()) return;
@@ -700,8 +701,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             }
             const nextReferences = await Promise.all(
                 blobs.map(async (blob, index) => {
-                    const image = await uploadImage(blob);
-                    return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, bytes: blob.size };
+                    const name = `clipboard-${index + 1}.png`;
+                    const image = await uploadUserImage(blob, { source: "image-clipboard", ownerId: user?.id, name });
+                    return { id: nanoid(), name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: image.sourceAssetId, bytes: blob.size };
                 }),
             );
             if (!isCurrentReferenceScope(scope)) return;

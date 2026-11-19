@@ -1,4 +1,6 @@
 import { generationPreSubmissionMessage } from "@/lib/generation-feedback";
+import { notifyAssetsChanged } from "@/services/asset-changes";
+import { useUserStore } from "@/stores/use-user-store";
 
 export type AssetResultStatus = "unused" | "candidate" | "project" | "editing" | "downloaded" | "adopted" | "delivered" | "pending" | "rejected";
 export type AssetEventType = "asset.candidate_added" | "asset.project_added" | "asset.edited" | "asset.reused" | "asset.downloaded" | "asset.exported" | "asset.adopted" | "asset.delivered" | "asset.pending" | "asset.rejected";
@@ -111,8 +113,9 @@ export async function fetchServerAssetVariants(id: string, signal?: AbortSignal)
     return payload;
 }
 
-export async function uploadServerAsset(file: File, metadata: Record<string, unknown> = {}, options: { projectId?: string; clientReferenceId?: string; repairAssetId?: string; expectedOwnerId?: string; signal?: AbortSignal } = {}) {
+export async function uploadServerAsset(file: File, metadata: Record<string, unknown> = {}, options: { projectId?: string; clientReferenceId?: string; localProcessingOperationId?: string; repairAssetId?: string; expectedOwnerId?: string; signal?: AbortSignal } = {}) {
     const { expectedOwnerId, signal, ...bodyOptions } = options;
+    const ownerId = expectedOwnerId || useUserStore.getState().user?.id;
     const ownerHeaders: Record<string, string> = expectedOwnerId ? { "X-Canvas-Owner-Id": expectedOwnerId } : {};
     signal?.throwIfAborted();
     const created = await request<{ assetId: string; uploadUrl: string | null; reused?: boolean }>("/api/assets/upload-request", {
@@ -126,6 +129,7 @@ export async function uploadServerAsset(file: File, metadata: Record<string, unk
     if (created.uploadUrl) await request<void>(created.uploadUrl, { method: "PUT", headers: { "content-type": file.type || "application/octet-stream", ...ownerHeaders }, body: file, signal });
     signal?.throwIfAborted();
     if (!created.uploadUrl || created.reused || options.repairAssetId) await assertServerAssetContent(created.assetId, signal);
+    notifyAssetsChanged(ownerId);
     return created.assetId;
 }
 

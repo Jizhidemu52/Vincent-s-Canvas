@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import express from "express";
 import type { Server } from "node:http";
 import * as Public from "../../../shared/image-conversation-public-schemas";
+import { designExecutionHistoryPageSchema } from "../../../shared/design-conversation-history";
 import { loadConfig } from "../../src/config";
 import type { Cache } from "../../src/db";
 import { withTransaction } from "../../src/db-transaction";
@@ -55,6 +56,24 @@ integration("image conversation HTTP contract with existing real sessions", () =
   const request = (cookie: string, path = "", body?: unknown, headers: Record<string, string> = {}) => fetch(url + path, {
     method: body === undefined ? "GET" : "POST", headers: { cookie, ...(body === undefined ? {} : { "content-type": "application/json" }), ...headers },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+
+  test("design history discovery uses the current session and one paged read without waking work", async () => {
+    const user = await account(), other = await account(), project = randomUUID();
+    await fixture.db.query("INSERT INTO canvas_documents(owner_user_id,external_id,revision,document) VALUES($1,$2,1,'{}')", [user.id, project]);
+    const createdResponse = await request(user.cookie, "", { clientRequestId: `design-image-${"b".repeat(64)}:create`, entrypoint: "canvas", canvasExternalId: project });
+    const created = await createdResponse.json() as { data: { id: string } };
+    const wakeCount = wakes, path = `/design-executions?canvasExternalId=${project}&limit=1`;
+    const response = await request(user.cookie, path);
+    expect(response.status).toBe(200); expect(response.headers.get("cache-control")).toBe("private, no-store");
+    const body = await response.json() as { data: unknown };
+    expect(designExecutionHistoryPageSchema.parse(body.data).items).toMatchObject([{ conversationId: created.data.id, turn: null }]);
+    const foreign = await request(other.cookie, path);
+    expect(designExecutionHistoryPageSchema.parse((await foreign.json() as { data: unknown }).data).items).toEqual([]);
+    expect((await request("", path)).status).toBe(401);
+    expect((await request(user.cookie, "/design-executions?limit=1")).status).toBe(400);
+    expect((await request(user.cookie, `${path}&unexpected=1`)).status).toBe(400);
+    expect(wakes).toBe(wakeCount);
   });
 
   test("authentication and onboarding preserve status in the new error envelope without provisioning guests", async () => {

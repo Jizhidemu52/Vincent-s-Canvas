@@ -1,6 +1,7 @@
 import type { PublicConversationSnapshot } from "../../../../shared/image-conversation-public";
 import { createConversationRequestSchema, submitTurnRequestSchema } from "../../../../shared/image-conversation-schemas";
 import { conversationSnapshotSchema, imageTurnSchema, imageVersionSchema } from "../../../../shared/image-conversation-public-schemas";
+import { restoreServerDesignExecution } from "../../components/canvas/design-discussion/server-execution-history";
 import {
     buildDesignConversationText, designConversationCreateRequest, designConversationExecutionId, designConversationFingerprint,
     designConversationTurnRequest, designReferenceAsset, projectDesignConversationTurn,
@@ -8,7 +9,7 @@ import {
 } from "../../components/canvas/design-discussion/conversation-execution";
 import type { createImageConversationApi } from "./image-conversations";
 
-type ConversationApi = Pick<ReturnType<typeof createImageConversationApi>, "create" | "createByRequest" | "submit" | "byRequest" | "snapshot" | "turn" | "versions">;
+type ConversationApi = Pick<ReturnType<typeof createImageConversationApi>, "create" | "createByRequest" | "submit" | "byRequest" | "snapshot" | "turn" | "versions" | "designExecutions">;
 type Storage = { getItem(key: string): Promise<unknown>; setItem(key: string, value: unknown): Promise<unknown>; iterate(visitor: (value: unknown) => void): Promise<unknown> };
 type Options = { api: ConversationApi; storage: Storage; ownerId: string; canvasExternalId: string;
     uploadReference(reference: DesignReference): Promise<DesignReference>; assertOwner(): Promise<unknown>;
@@ -35,6 +36,7 @@ export function createDesignConversationController(options: Options) {
     const operations = new Map<string, Promise<DesignConversationTask>>();
     const lifetime = new AbortController();
     let polling = false;
+    let historyCursor: string | null = null, historyIssue = "", historyRead: Promise<void> | null = null;
     const needsRefresh = () => [...tasks.values()].some(task => task.observing !== false && (task.persistenceError || task.queryError
         || ["preparing", "submitting", "uncertain", "waiting", "processing", "paused", "detached"].includes(task.status)));
     const emit = () => { if (!lifetime.signal.aborted) options.onChange([...tasks.values()].sort((left, right) => left.startedAt - right.startedAt)); };
@@ -43,6 +45,7 @@ export function createDesignConversationController(options: Options) {
     const publish = (task: DesignConversationTask) => { tasks.set(task.id, task); emit(); return task; };
     const save = async (task: DesignConversationTask, required = false) => {
         lifetime.signal.throwIfAborted();
+        if (task.serverHistory) return publish(task);
         const stored = { ...task, persistenceError: "" };
         try { await storage.setItem(task.id, stored); lifetime.signal.throwIfAborted(); return publish(stored); }
         catch (error) {
@@ -171,10 +174,42 @@ export function createDesignConversationController(options: Options) {
         }
         if (replace || !operations.has(value.id) || !tasks.has(value.id)) tasks.set(value.id, value);
     };
+    const loadHistory = (more = false) => {
+        if (historyRead) return historyRead;
+        if (more && !historyCursor) return Promise.resolve();
+        const cursor = more ? historyCursor! : undefined;
+        const pending = (async () => {
+            try {
+                await assertOwner();
+                const page = await api.designExecutions(canvasExternalId, cursor, AbortSignal.any([lifetime.signal, AbortSignal.timeout(10_000)]));
+                await assertOwner();
+                if (page.nextCursor && page.nextCursor === cursor) throw new Error("设计记录分页游标重复，请重新读取。");
+                const recovered = page.items.map(item => restoreServerDesignExecution(item, ownerId, canvasExternalId));
+                for (const task of recovered) {
+                    const current = tasks.get(task.id);
+                    if (operations.has(task.id) || current && !current.serverHistory) continue;
+                    tasks.set(task.id, current ? { ...task, observing: current.conversationExecution.turnRequest ? current.observing : task.observing,
+                        feedback: current.feedback, feedbackHistory: current.feedbackHistory, review: current.review } : task);
+                }
+                historyCursor = page.nextCursor; historyIssue = "";
+            } catch (error) {
+                if (lifetime.signal.aborted) throw error;
+                if (error !== null && typeof error === "object" && ("code" in error && error.code === "SESSION_CHANGED" || "status" in error && error.status === 401)) throw error;
+                historyIssue = `服务端设计记录暂未读取：${message(error)}；未重新提交任何任务。`;
+            } finally { if (!lifetime.signal.aborted) emit(); }
+        })();
+        historyRead = pending;
+        void pending.finally(() => { if (historyRead === pending) historyRead = null; }).catch(() => undefined);
+        return pending;
+    };
     return {
         has: (id: string) => tasks.has(id),
         needsRefresh,
-        async load() { await storage.iterate(value => collect(value)); emit(); },
+        async load() { await storage.iterate(value => collect(value)); emit(); await loadHistory(); },
+        refreshHistory: () => loadHistory(),
+        loadMoreHistory: () => loadHistory(true),
+        hasMoreHistory: () => Boolean(historyCursor),
+        historyError: () => historyIssue,
         async start(input: DesignConversationInput) {
             if (input.generationAllowed !== true || input.mediaKind === "video") throw new Error("本轮没有明确的图片生成操作，未提交生成。");
             const id = designConversationExecutionId(ownerId, canvasExternalId, input);

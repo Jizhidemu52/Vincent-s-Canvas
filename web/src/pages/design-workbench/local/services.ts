@@ -4,6 +4,7 @@ import { createClientUuid } from "@/lib/client-uuid";
 import { useUserStore } from "@/stores/use-user-store";
 import { createWorkbenchProjectStorage } from "./project-storage";
 import { imageToDataUrl } from "@/services/image-storage";
+import { uploadUserImage } from "@/services/user-image-upload";
 import { uploadServerAsset } from "@/services/api/server-assets";
 import type { InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { setWorkbenchText } from "./ui-text.js";
@@ -85,6 +86,8 @@ export function createLocalWorkbenchServices(root: HTMLElement, ownerId: string 
         });
         persistence.assertCurrent();
         await loadImage(result);
+        await uploadUserImage(file, { source: "design-workbench-reference", ownerId: ownerId || undefined, signal });
+        persistence.assertCurrent();
         return result;
     }
 

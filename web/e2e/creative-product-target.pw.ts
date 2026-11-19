@@ -163,14 +163,20 @@ test("result review carries frozen requirements and original bytes into an isola
     expect(api.submissions).toHaveLength(1);
 });
 
-test("oversized recognition sources remain untouched and are blocked before server upload", async ({ page, api }) => {
+test("oversized recognition sources retain original cloud bytes while recognition stays blocked", async ({ page, context, api }) => {
+    const recognitionRequests: string[] = [];
+    context.on("request", request => {
+        if (request.method() === "POST" && new URL(request.url()).pathname === "/api/chat/responses") recognitionRequests.push(request.url());
+    });
     await page.goto("/creative/back-design");
     const bytes = Buffer.concat([IMAGE, Buffer.alloc(10 * 1024 * 1024 + 1 - IMAGE.length)]);
     await page.getByLabel("上传服装正面图", { exact: true }).setInputFiles({ name: "large-original.png", mimeType: "image/png", buffer: bytes });
     await expect(page.getByRole("button", { name: "识别图中产品", exact: true })).toBeDisabled();
     await expect(page.getByText("产品识别仅支持不超过 10 MiB 的单张原图；原件未压缩，可手动填写产品。", { exact: true })).toBeVisible();
     await page.getByRole("textbox", { name: /要处理的产品/ }).fill("仍可手工指定产品");
-    expect(api.assets.size).toBe(0); expect(api.submissions).toHaveLength(0);
+    expect(api.assets.size).toBe(1); expect(api.submissions).toHaveLength(0); expect(api.tasks.size).toBe(0);
+    expect(recognitionRequests).toHaveLength(0);
+    expect([...api.assetBytes.values()]).toEqual([bytes]);
     const previewBytes = await page.locator(".cs-upload-preview").evaluate(async image => (await (await fetch((image as HTMLImageElement).src)).arrayBuffer()).byteLength);
     expect(previewBytes).toBe(bytes.length);
 });

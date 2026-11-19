@@ -13,12 +13,11 @@ function watchPosts(page: Page) {
     page.on("request", request => { const url = new URL(request.url()); if (url.pathname.startsWith("/api/") && request.method() === "POST") posts.push(url.pathname); });
     return posts;
 }
-function localOnly(api: MockCanvasApi, posts: string[]) {
+function localOnly(api: MockCanvasApi, posts: string[], archived = 0) {
     expect(api.submissions).toHaveLength(0);
     expect(api.batchSubmissions).toHaveLength(0);
-    expect(api.assets.size).toBe(0);
-    // Module visit telemetry is expected; local tools must never upload or invoke AI.
-    expect(posts.filter(path => path !== "/api/usage/events")).toEqual([]);
+    expect(api.localProcessingRecords.size).toBe(archived);
+    expect(posts.filter(path => !["/api/usage/events", "/api/assets/upload-request", ...(archived ? ["/api/assets/local-processing"] : [])].includes(path))).toEqual([]);
 }
 async function upload(page: Page, label: string, name: string, buffer: Buffer) {
     await pane(page).getByLabel(`上传${label}`, { exact: true }).setInputFiles({ name, mimeType: "image/png", buffer });
@@ -279,8 +278,9 @@ test("precise recolor saves one non-cascading local result with unchanged source
     await expect(pane(page).getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
     expect(sha256((await downloadBytes(page, pane(page).getByRole("button", { name: "下载原图", exact: true }))).bytes)).toBe(sha256(result));
     await assertOriginal(page, "pattern-colorway", original);
-    localOnly(api, posts);
-    await info.attach("recolor-integrity", { body: JSON.stringify({ originalSha256: original.sha256, resultSha256: sha256(result), resultBytes: result.length, facts, generationPosts: 0 }), contentType: "application/json" });
+    localOnly(api, posts, 1);
+    expect([...api.localProcessingRecords.values()][0].contentSha256).toBe(sha256(result));
+    await info.attach("recolor-integrity", { body: JSON.stringify({ originalSha256: original.sha256, resultSha256: sha256(result), resultBytes: result.length, facts, generationPosts: 0, cloudFinalRecords: 1 }), contentType: "application/json" });
 });
 
 test("SVG tracing runs a real local worker and downloads paths only, while blank input stays an explicit failure", async ({ page, api }, info) => {

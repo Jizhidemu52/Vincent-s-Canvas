@@ -18,6 +18,7 @@ import { completedTaskDurationMs } from "@/lib/completed-task-duration";
 import { generationErrorMessage } from "@/lib/generation-feedback";
 import { requestEdit, requestGeneration } from "@/services/api/image";
 import { getImageBlob, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { uploadUserImage } from "@/services/user-image-upload";
 import { freezeLocalInput, restoreLocalInput } from "@/services/generation-local-inputs";
 import { restoreGenerationDraft } from "@/services/api/generation-history";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -37,6 +38,8 @@ import { classifyTaskRecovery, watchTaskReconciliation } from "@/services/api/ta
 import { canRetrySceneResult, prepareSceneRetry, sceneFailure } from "./scene-retry";
 import { createSceneResultActions } from "./scene-result-actions";
 import { canQuerySceneResult, readSceneRequest, sceneInputMatchesLog, sceneRootRequestId } from "./scene-recovery";
+import { freezeSceneSource, saveSceneFinalImage, selectionFinalSave, type SceneFinalSave } from "./scene-final-archive";
+import { serverMediaId } from "@/services/canvas-media-links";
 
 export type SceneImage = ReferenceImage & {
     inputSha256?: string;
@@ -47,6 +50,7 @@ export type SceneImages = Partial<Record<SceneSlotId, SceneImage>>;
 export type SceneParameters = Pick<AiConfig, "model" | "imageModel" | "size" | "quality" | "count" | "imageOptions">;
 export type SceneSelection = { sourceId: string; mask: SceneImage };
 export type SceneResult = { id: string; status: "pending" | "success" | "failed" | "cancelled"; image?: SceneImage; uncompositedImage?: SceneImage; error?: string;
+    pendingFinalImage?: SceneImage; finalSave?: SceneFinalSave; finalAssetId?: string;
     taskId?: string; requestId?: string; compilationId?: string; failureKind?: "terminal" | "uncertain" | "local"; retryLogId?: string;
     recovery?: "resume" | "investigate" };
 export type SceneLog = {
@@ -74,7 +78,7 @@ export function sceneParameters(config: SceneParameters): SceneParameters {
 }
 
 function storedImage(image: SceneImage): SceneImage {
-    return { ...image, dataUrl: image.storageKey || image.dataUrl.startsWith("blob:") ? "" : image.dataUrl, url: undefined };
+    return { ...image, dataUrl: serverMediaId(image.dataUrl) ? image.dataUrl : image.storageKey || image.dataUrl.startsWith("blob:") ? "" : image.dataUrl, url: undefined };
 }
 
 function mapImages(images: SceneImages, map: (image: SceneImage) => SceneImage): SceneImages {
@@ -94,12 +98,13 @@ export function serializeSceneLog(log: SceneLog): SceneLog {
         images: log.images.map(storedImage),
         selection: log.selection ? { ...log.selection, mask: storedImage(log.selection.mask) } : null,
         results: log.results.map(result => ({ ...result, image: result.image ? storedImage(result.image) : undefined,
+            pendingFinalImage: result.pendingFinalImage ? storedImage(result.pendingFinalImage) : undefined,
             uncompositedImage: result.uncompositedImage ? storedImage(result.uncompositedImage) : undefined })),
     };
 }
 
 async function hydrateImage(image: SceneImage): Promise<SceneImage> {
-    const dataUrl = await resolveImageUrl(image.storageKey, image.dataUrl);
+    const dataUrl = await resolveImageUrl(image.storageKey, image.dataUrl || (image.sourceAssetId ? `/api/assets/${image.sourceAssetId}/content` : ""));
     if (!dataUrl) throw new Error(`图片“${image.name}”的本地文件已不可用，请重新上传`);
     return { ...image, dataUrl };
 }
@@ -110,6 +115,7 @@ async function hydrateImages(images: SceneImages): Promise<SceneImages> {
 
 async function hydrateLog(log: SceneLog): Promise<SceneLog> {
     const results = await Promise.all(log.results.map(async result => ({ ...result, image: result.image ? await hydrateImage(result.image) : undefined,
+        pendingFinalImage: result.pendingFinalImage ? await hydrateImage(result.pendingFinalImage) : undefined,
         uncompositedImage: result.uncompositedImage ? await hydrateImage(result.uncompositedImage) : undefined })));
     return { ...log, results, images: results.flatMap(result => result.image ? [result.image] : []) };
 }
@@ -124,13 +130,13 @@ async function hydrateSelection(selection: SceneSelection | null | undefined, im
     return { ...selection, mask: await hydrateImage(selection.mask) };
 }
 
-async function storeSceneResult(item: SceneResult, source: Awaited<ReturnType<typeof requestGeneration>>[number] | undefined, index: number, sceneId: string, snapshot: Pick<SceneDraft, "images" | "selection">, warning: (message: string) => void): Promise<SceneResult> {
+export async function storeSceneResult(item: SceneResult, source: (Awaited<ReturnType<typeof requestGeneration>>[number] & { sourceAssetId?: string }) | undefined, index: number, sceneId: string, snapshot: Pick<SceneDraft, "images" | "selection" | "form" | "config">, warning: (message: string) => void, archive: { ownerId: string; prompt: string }): Promise<SceneResult> {
     if (!source) throw new Error("接口没有返回图片");
     let image: SceneImage;
     const identity = canvasImageReferenceIdentity(snapshot.images.primary || snapshot.images.secondary);
     try {
         const stored = await uploadImage(source.dataUrl);
-        image = { ...source, ...stored, dataUrl: stored.url, name: `设计结果-${index + 1}`, type: stored.mimeType, ...identity };
+        image = { ...source, ...stored, sourceAssetId: source.sourceAssetId || serverMediaId(source.dataUrl) || undefined, dataUrl: stored.url, name: `设计结果-${index + 1}`, type: stored.mimeType, ...identity };
     } catch (caught) {
         const meta = await readImageMeta(source.dataUrl);
         image = { ...source, ...meta, name: `设计结果-${index + 1}`, type: meta.mimeType, bytes: getDataUrlByteSize(source.dataUrl), ...identity };
@@ -138,12 +144,26 @@ async function storeSceneResult(item: SceneResult, source: Awaited<ReturnType<ty
     }
     if (sceneId === "local-restyle" && snapshot.selection && snapshot.images.primary) {
         const raw = image;
+        let finalSave: SceneFinalSave | undefined;
         try {
+            finalSave = { ...selectionFinalSave(source.sourceTaskId || item.taskId || "", raw), prompt: item.finalSave?.prompt || source.prompt || archive.prompt };
             const composited = await compositeSelectedImage(snapshot.images.primary.dataUrl, image.dataUrl, snapshot.selection.mask.dataUrl);
-            const stored = await uploadImage(composited);
-            image = { ...image, ...stored, dataUrl: stored.url, type: stored.mimeType, name: `选区合成-${index + 1}.png` };
+            try {
+                const stored = await uploadImage(composited);
+                image = { ...image, ...stored, sourceAssetId: undefined, inputSha256: undefined, dataUrl: stored.url, type: stored.mimeType, name: `选区合成-${index + 1}.png` };
+            } catch {
+                image = { ...image, sourceAssetId: undefined, inputSha256: undefined, storageKey: undefined, dataUrl: URL.createObjectURL(composited), width: snapshot.images.primary.width, height: snapshot.images.primary.height, bytes: composited.size, mimeType: composited.type, type: composited.type, name: `选区合成-${index + 1}.png` };
+            }
+            try {
+                const saved = await saveSceneFinalImage({ final: image, finalBlob: composited, original: snapshot.images.primary, mask: snapshot.selection.mask, raw,
+                    taskId: source.sourceTaskId || item.taskId, prompt: source.prompt || archive.prompt, form: snapshot.form, config: snapshot.config, save: finalSave, ownerId: archive.ownerId });
+                return { ...item, status: "success", image: saved.image, finalAssetId: saved.record.outputAssetId, finalSave, pendingFinalImage: undefined, uncompositedImage: undefined, error: undefined, failureKind: undefined };
+            } catch (caught) {
+                return { ...item, status: "failed", failureKind: "local", pendingFinalImage: image, uncompositedImage: raw, finalSave,
+                    error: `原 AI 任务已成功，最终合成图保存失败：${errorText(caught)}。可仅重试保存，不会重新生成或扣费。` };
+            }
         } catch (caught) {
-            return { ...item, status: "failed", failureKind: "local", uncompositedImage: raw, error: `选区合成未完成：${errorText(caught)}。AI 原始结果已保留，可下载检查。` };
+            return { ...item, status: "failed", failureKind: "local", uncompositedImage: raw, finalSave, error: `原 AI 任务已成功，选区合成未完成：${errorText(caught)}。AI 原始结果已保留，可下载检查。` };
         }
     }
     return { ...item, status: "success", image };
@@ -342,7 +362,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
         if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { setError(uiText("请上传 PNG、JPG 或 WebP 图片")); return; }
         setError(null); setUploadCount(value => value + 1);
         try {
-            const stored = await uploadImage(file);
+            const stored = await uploadUserImage(file, { source: `creative-${sceneId}-reference`, ownerId: user?.id });
             if (revision !== epoch.current || uploadRevision !== inputEpoch.current[slot]) return;
             if (slot === "primary") {
                 setSelection(null);
@@ -352,7 +372,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                 }
             }
             setImages(current => ({ ...current, [slot]: { id: nanoid(), name: file.name, originalFileName: file.name, type: stored.mimeType,
-                mimeType: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes } }));
+                mimeType: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, sourceAssetId: stored.sourceAssetId, width: stored.width, height: stored.height, bytes: stored.bytes } }));
         } catch (caught) { if (revision === epoch.current) setError(uiText("图片保存失败：{value1}", { value1: errorText(caught) })); }
         finally { if (revision === epoch.current) setUploadCount(value => Math.max(0, value - 1)); }
     };
@@ -383,14 +403,16 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             }
             assertCurrent();
             if (!["image/jpeg", "image/png", "image/webp"].includes(blob.type)) throw new Error("请选择 PNG、JPG 或 WebP 图片素材");
-            const stored = original && asset.storageKey
-                ? { ...(await readImageMeta(url)), url, storageKey: asset.storageKey, mimeType: blob.type, bytes: blob.size }
-                : await uploadImage(blob);
+            const stored = asset.origin === "upload" && !asset.sourceAssetId
+                ? await uploadUserImage(blob, { source: `creative-${sceneId}-reference`, ownerId: expectedOwnerId, name: asset.originalFileName || asset.title })
+                : original && asset.storageKey || asset.sourceAssetId
+                    ? { ...(await readImageMeta(url)), url, storageKey: asset.storageKey || "", sourceAssetId: asset.sourceAssetId, mimeType: blob.type, bytes: blob.size }
+                    : { ...await uploadImage(blob), sourceAssetId: undefined };
             assertCurrent();
             if (uploadRevision !== inputEpoch.current[slot]) throw new Error("参考图已更新，请重新选择素材");
             if (slot === "primary") { setSelection(null); setForm(current => ({ ...current, targetProduct: "" })); }
             setImages(current => ({ ...current, [slot]: { id: nanoid(), name: asset.originalFileName || asset.title, originalFileName: asset.originalFileName,
-                imageName: asset.imageName, imageVersion: asset.imageVersion, sourceAssetId: asset.sourceAssetId, type: stored.mimeType, mimeType: stored.mimeType,
+                imageName: asset.imageName, imageVersion: asset.imageVersion, sourceAssetId: stored.sourceAssetId || asset.sourceAssetId, type: stored.mimeType, mimeType: stored.mimeType,
                 dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes } }));
             setNotice((asset.origin === "upload" ? uiText("已加入参考图") : uiText("已从素材库加入{name}；原素材保持不变。", { name: asset.title })) + (slot === "primary" && imagesRef.current.primary ? uiText("请重新确认要处理的产品。") : ""));
         } catch (caught) {
@@ -528,21 +550,30 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
         setSelection({ sourceId, mask }); setError(null);
     };
 
-    const saveLocalResult = async (sourceId: string, blob: Blob, description: string) => {
+    const saveLocalResult = async (sourceId: string, blob: Blob, description: string, save: SceneFinalSave) => {
         if (!user || user.status !== "active" || !scope || loading || running || uploadCount || imagesRef.current.primary?.id !== sourceId) throw new Error("当前图片或账号状态已变化，请重新打开换色工具");
         const revision = epoch.current, start = performance.now();
         returnToCurrentTask();
         viewEpoch.current += 1;
         setRunning(true); setSelectedPrompt(null); setPreviewing(false); setError(null); setStartedAt(start);
         try {
-            const original = images.primary ? await freezeLocalInput(images.primary) : undefined;
-            const stored = await uploadImage(blob);
-            const image: SceneImage = { ...stored, id: nanoid(), name: "精确换色结果.png", dataUrl: stored.url, type: stored.mimeType, ...canvasImageReferenceIdentity(images.primary) };
-            const result: SceneResult = { id: nanoid(), status: "success", image };
+            const original = await freezeSceneSource(images.primary!, user.id);
+            let image: SceneImage = { id: nanoid(), name: "精确换色结果.png", dataUrl: URL.createObjectURL(blob), width: original.width, height: original.height,
+                bytes: blob.size, mimeType: blob.type, type: blob.type, ...canvasImageReferenceIdentity(original) };
+            try { const stored = await uploadImage(blob); URL.revokeObjectURL(image.dataUrl); image = { ...image, ...stored, dataUrl: stored.url }; } catch { }
+            let result: SceneResult;
+            try {
+                const saved = await saveSceneFinalImage({ final: image, finalBlob: blob, original, prompt: description, form, config, save, ownerId: user.id });
+                image = saved.image;
+                result = { id: nanoid(), status: "success", image, finalSave: save, finalAssetId: saved.record.outputAssetId };
+            } catch (caught) {
+                result = { id: nanoid(), status: "failed", failureKind: "local", pendingFinalImage: image, finalSave: save,
+                    error: `换色已完成，最终成果保存失败：${errorText(caught)}。可仅重试保存，不会调用 AI。` };
+            }
             const log: SceneLog = { id: nanoid(), ownerId: user.id, sceneId, workspaceId, createdAt: Date.now(), prompt: description,
                 form: cloneSceneForm(form), referenceImages: { primary: original }, config: sceneParameters(config), operation: "recolor", inputArchiveVersion: 1,
-                results: [result], images: [image], durationMs: performance.now() - start, successCount: 1, failCount: 0 };
-            if (revision === epoch.current) { setResults([result]); rememberLog(log); setActiveLog(log); }
+                results: [result], images: result.image ? [result.image] : [], durationMs: performance.now() - start, successCount: result.image ? 1 : 0, failCount: result.image ? 0 : 1 };
+            if (revision === epoch.current) { setResults([result]); rememberLog(log); setActiveLog(log); if (result.error) setError(uiText(result.error)); }
             try {
                 await history!.save(serializeSceneLog(log));
             } catch (caught) { if (revision === epoch.current) setError(uiText("换色结果仍保留在页面，但本地记录保存失败：{value1}", { value1: errorText(caught) })); }
@@ -619,7 +650,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                 try {
                     const options = { operationType, tool: `creative-${sceneId}`, promptInput, signal: controller.signal, cancelOnAbort: () => false, onOptimizing: () => { if (revision === epoch.current) setOptimizing(true); }, onCompiled: (finalPrompt: string, wasOptimized: boolean) => { prompt = finalPrompt; optimized = wasOptimized; runLog.prompt = finalPrompt; runLog.optimized = wasOptimized; if (revision === epoch.current) setOptimizing(false); }, requestId: sceneRootRequestId(tracked), onSubmissionStarted: async () => { await persistRun(); submitted = true; }, onSubmitted: async (ids: string[]) => { tracked.taskId = ids[0]; await persistRun(); } };
                     const generated = requestReferences.length ? await requestEdit(requestConfig, prompt, requestReferences, undefined, options) : await requestGeneration(requestConfig, prompt, options);
-                    const result = await storeSceneResult(tracked, generated[0], index, sceneId, snapshot, message => storageWarnings.push(message));
+                    const result = await storeSceneResult(tracked, generated[0], index, sceneId, snapshot, message => storageWarnings.push(message), { ownerId: user.id, prompt });
                     if (result.image) result.image.durationMs = performance.now() - itemStart;
                     updateResult(index, result);
                     return result;
@@ -683,7 +714,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             try {
                 const generated = await requestQueuedImages({ ...prepared.input, requestId: sceneRootRequestId(pending), signal: controller.signal, cancelOnAbort: () => false, onOptimizing: () => { if (revision === epoch.current) setOptimizing(true); }, onCompiled: (prompt, optimized) => { retryLog.prompt = prompt; retryLog.optimized = optimized; if (revision === epoch.current) setOptimizing(false); },
                     onSubmissionStarted: async () => { await persistRetry(); submitted = true; }, onSubmitted: async ids => { pending.taskId = ids[0]; await persistRetry(); } });
-                completed = await storeSceneResult(pending, generated[0], 0, sceneId, { images: prepared.referenceImages, selection: prepared.selection }, message => warnings.push(message));
+                completed = await storeSceneResult(pending, generated[0], 0, sceneId, { images: prepared.referenceImages, selection: prepared.selection, form: retryLog.form, config: retryLog.config }, message => warnings.push(message), { ownerId: user.id, prompt: retryLog.prompt });
             } catch (caught) { completed = { id: pending.id, ...sceneFailure(caught, submitted, pending.taskId, pending.requestId) }; }
             const log: SceneLog = { ...retryLog, results: [completed],
                 images: completed.image ? [completed.image] : [], successCount: completed.image ? 1 : 0, failCount: completed.status === "failed" ? 1 : 0, durationMs: performance.now() - start,
@@ -697,6 +728,42 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             catch (caught) { if (revision === epoch.current) setError(uiText("重试结果仍保留在页面，但本地记录保存失败：{value1}", { value1: errorText(caught) })); }
         } catch (caught) { if (revision === epoch.current) setError(uiText("未提交重试：{value1}", { value1: errorText(caught) })); }
         finally { observationControllers.current.delete(controller); release(); if (revision === epoch.current) { setRunning(false); setOptimizing(false); } }
+    };
+
+    const retryFinalSave = async (result: SceneResult) => {
+        const sourceLog = historyPreviewLog?.results.some(item => item.id === result.id) ? historyPreviewLog : activeLog;
+        if (!user || !history || !sourceLog || running || loading || !result.finalSave || result.status !== "failed") return;
+        const release = workbenchSubmissions.acquire(`creative:${scope}`);
+        if (!release) return;
+        const revision = epoch.current;
+        setRunning(true); setError(null); setNotice(null);
+        try {
+            const log = await hydrateLog(pendingHistoryWrites.current.get(sourceLog.id) || sourceLog);
+            if (revision !== epoch.current || useUserStore.getState().user?.id !== user.id || log.ownerId !== user.id) throw new Error("员工或场景已变化，已停止保存");
+            const current = log.results.find(item => item.id === result.id);
+            if (!current?.finalSave || current.status !== "failed" || !log.referenceImages.primary) throw new Error("原保存记录已变化，请重新打开记录");
+            const original = await restoreLocalInput(log.referenceImages.primary);
+            const mask = log.selection ? await restoreLocalInput(log.selection.mask) : undefined;
+            let completed: SceneResult;
+            if (current.pendingFinalImage) {
+                const saved = await saveSceneFinalImage({ final: current.pendingFinalImage, original, mask, raw: current.uncompositedImage, taskId: current.taskId,
+                    prompt: log.prompt, form: log.form, config: log.config, save: current.finalSave, ownerId: user.id });
+                completed = { ...current, status: "success", image: saved.image, finalAssetId: saved.record.outputAssetId, pendingFinalImage: undefined, uncompositedImage: undefined, error: undefined, failureKind: undefined };
+            } else if (current.uncompositedImage && mask && log.selection) {
+                completed = await storeSceneResult(current, { ...current.uncompositedImage, sourceTaskId: current.taskId || current.uncompositedImage.sourceTaskId || "", durationMs: current.uncompositedImage.durationMs ?? null, prompt: log.prompt, userInput: log.userInput, optimized: log.optimized === true }, 0, sceneId, { images: { ...log.referenceImages, primary: original }, selection: { ...log.selection, mask }, form: log.form, config: log.config }, text => setNotice(uiText(text)), { ownerId: user.id, prompt: log.prompt });
+            } else throw new Error("缺少待保存的最终图或原始合成图，不会重新生成");
+            if (revision !== epoch.current || useUserStore.getState().user?.id !== user.id) throw new Error("员工或场景已变化，已停止显示结果");
+            const nextResults = log.results.map(item => item.id === completed.id ? completed : item);
+            const updated = { ...log, results: nextResults, images: nextResults.flatMap(item => item.image ? [item.image] : []), successCount: nextResults.filter(item => item.status === "success").length, failCount: nextResults.filter(item => item.status === "failed").length };
+            if (historyPreviewLog?.id === log.id) setHistoryPreviewLog(updated);
+            if (activeLog?.id === log.id) { setResults(nextResults); setActiveLog(updated); }
+            rememberLog(updated);
+            try { await history.save(serializeSceneLog(updated)); }
+            catch { pendingHistoryWrites.current.set(updated.id, updated); setHistoryWriteRevision(value => value + 1); }
+            if (completed.status === "success") setNotice(uiText("最终成果已保存到账号云端，没有重新生成或扣费。"));
+            else setError(uiText(completed.error || "最终成果尚未保存"));
+        } catch (caught) { if (revision === epoch.current) setError(uiText(errorText(caught))); }
+        finally { release(); if (revision === epoch.current) setRunning(false); }
     };
 
     const queryResult = async (result: SceneResult, continueSubmission = false, observationSignal?: AbortSignal) => {
@@ -768,8 +835,8 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                 if (task.status === "success") {
                     if (!task.resultUrls[0]) throw new Error("原任务成功但未返回结果图片，请勿重新生成");
                     const snapshot = await restoreSnapshot(); assertCurrent();
-                    const completed = await storeSceneResult({ ...currentResult, taskId: task.id, failureKind: undefined, recovery: undefined, error: undefined, compilationId: undefined }, { id: `${task.id}:0`, dataUrl: task.resultUrls[0], sourceTaskId: task.id, durationMs: completedTaskDurationMs(task), prompt: patch.prompt, userInput: patch.userInput, optimized: patch.optimized }, 0, sceneId, snapshot, text => setNotice(uiText(text)));
-                    await commit(completed, patch, true); setNotice(uiText("已找回原任务结果，没有重新生成。"));
+                    const completed = await storeSceneResult({ ...currentResult, taskId: task.id, failureKind: undefined, recovery: undefined, error: undefined, compilationId: undefined }, { id: `${task.id}:0`, dataUrl: task.resultUrls[0], sourceTaskId: task.id, durationMs: completedTaskDurationMs(task), prompt: patch.prompt, userInput: patch.userInput, optimized: patch.optimized }, 0, sceneId, { ...snapshot, form: log.form, config: log.config }, text => setNotice(uiText(text)), { ownerId: user.id, prompt: patch.prompt });
+                    await commit(completed, patch, true); setNotice(uiText(completed.status === "success" ? "已找回原任务结果，没有重新生成。" : completed.error || "原任务已成功，最终成果尚未保存。"));
                 } else if (classifyTaskRecovery(task) === "terminal") {
                     await commit({ id: currentResult.id, ...sceneFailure(new QueuedTaskFailedError(task), true, task.id, task.requestId) }, patch);
                 } else if (task.status === "paused") {
@@ -809,7 +876,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                     onSubmitted: async (ids: string[]) => { await commit({ ...currentResult!, taskId: ids[0], status: "pending" }); } };
                 const generated = restoredReferences.length ? await requestEdit(requestConfig, compilation.prompt, restoredReferences, undefined, options) : await requestGeneration(requestConfig, compilation.prompt, options);
                 assertCurrent();
-                const completed = await storeSceneResult({ ...currentResult!, failureKind: undefined, error: undefined, compilationId: undefined }, generated[0], 0, sceneId, snapshot, text => setNotice(uiText(text)));
+                const completed = await storeSceneResult({ ...currentResult!, failureKind: undefined, error: undefined, compilationId: undefined }, generated[0], 0, sceneId, { ...snapshot, form: log.form, config: log.config }, text => setNotice(uiText(text)), { ownerId: user.id, prompt: compilation.prompt });
                 await commit(completed, { prompt: generated[0]?.prompt || compilation.prompt, userInput: generated[0]?.userInput || promptInput, optimized: generated[0]?.optimized ?? compilation.optimized });
             } catch (caught) {
                 assertCurrent();
@@ -889,5 +956,5 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
         activeLog: historyPreviewLog || activeLog, selectedPrompt: historyPreviewLog?.prompt ?? selectedPrompt,
         previewing, previewLog, isHistoryPreview: Boolean(historyPreviewLog), returnToCurrentTask, selectResultPrompt,
         results: previewing ? [] : historyPreviewLog?.results || results, currentResultCount: results.length, generate, restoreLog, reset, error, validation,
-        quotaBlocked, estimatedCredits: estimateValue.credits, download, startedAt, notice, resultActionBusy, resultAction, retryResult, queryResult, autoObserving, recoveredRequestId };
+        quotaBlocked, estimatedCredits: estimateValue.credits, download, startedAt, notice, resultActionBusy, resultAction, retryResult, retryFinalSave, queryResult, autoObserving, recoveredRequestId };
 }

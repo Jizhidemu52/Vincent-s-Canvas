@@ -80,7 +80,7 @@ function uploadPanel(failUpload = false) {
     const requireModule = createRequire(import.meta.url);
     const render = loadComponent("../src/components/canvas/canvas-node-prompt-panel.tsx", "CanvasNodePromptPanel", {
         antd: { ...requireModule("antd"), App: { useApp: () => ({ message: { error: (text: string) => errors.push(text) } }) } },
-        "@/services/image-storage": { uploadImage: async (file: File) => {
+        "@/services/user-image-upload": { uploadUserImage: async (file: File) => {
             uploaded.push(file);
             if (failUpload) throw new Error("本地图片保存失败");
             return { url: `blob:${file.name}`, storageKey: `image:${file.name}`, mimeType: file.type };

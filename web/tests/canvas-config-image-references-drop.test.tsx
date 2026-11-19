@@ -55,7 +55,7 @@ function harness(options: { readGate?: Promise<void>; uploadGate?: Promise<void>
         "react-router-dom": { useParams: () => ({ id: project }) },
         "@/stores/use-theme-store": { useThemeStore: (select: Function) => select({ theme: "light" }) },
         "@/stores/use-user-store": { useUserStore: Object.assign((select: Function) => select(account), { getState: () => account }) },
-        "@/services/image-storage": { uploadImage: async (file: File) => {
+        "@/services/user-image-upload": { uploadUserImage: async (file: File) => {
             uploads.push(file); await options.uploadGate;
             return { mimeType: file.type, url: `blob:${file.name}`, storageKey: `image:${file.name}`, bytes: file.size };
         } },

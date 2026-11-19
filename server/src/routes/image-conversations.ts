@@ -1,12 +1,13 @@
 import { Router, type ErrorRequestHandler, type Request, type RequestHandler, type Response } from "express";
 import { ZodError } from "zod";
+import { designExecutionHistoryQuerySchema } from "../../../shared/design-conversation-history";
 import type { ApiErrorCode } from "../../../shared/image-conversation-contracts";
 import { eventSubscriptionQuerySchema, paginationQuerySchema, requestKeySchema, uuidSchema, versionListQuerySchema } from "../../../shared/image-conversation-schemas";
 import type { Database } from "../db";
 import { ImageConversationEvents, parseConversationEventCursor, streamConversationEvents } from "../image-conversation-events";
 import {
   cancelImageConversationTurn, createImageConversation, getImageConversation, getImageConversationByRequest, getImageConversationTurn,
-  listImageConversationMessages, listImageConversations, listImageConversationTurns, listImageConversationVersions, submitImageConversationTurn,
+  listDesignExecutionHistory, listImageConversationMessages, listImageConversations, listImageConversationTurns, listImageConversationVersions, submitImageConversationTurn,
 } from "../image-conversation-service";
 import { ImageConversationError } from "../image-conversation-store";
 import { toPublicImageConversationData } from "../image-conversation-public";
@@ -74,6 +75,8 @@ export function createImageConversationsRouter(db: Database, options: {
   router.get("/", action((request, _response, userId) => listImageConversations(db, userId,
     paginationQuerySchema.parse({ ...request.query, ...(request.query.limit !== undefined ? { limit: queryNumber(request.query.limit) } : {}) }), options.cursorSecret)));
   router.get("/by-request/:clientRequestId", action((request, _response, userId) => getImageConversationByRequest(db, userId, requestKeySchema.parse(request.params.clientRequestId))));
+  router.get("/design-executions", action((request, _response, userId) => listDesignExecutionHistory(db, userId,
+    designExecutionHistoryQuerySchema.parse({ ...request.query, ...(request.query.limit !== undefined ? { limit: queryNumber(request.query.limit) } : {}) }), options.cursorSecret)));
   router.get("/:conversationId", action((request, _response, userId) => getImageConversation(db, userId, conversationId(request))));
   router.post("/:conversationId/turns", action(async (request, response, userId) => {
     acceptsWrites();

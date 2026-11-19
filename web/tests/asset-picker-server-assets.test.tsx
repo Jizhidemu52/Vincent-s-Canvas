@@ -53,6 +53,7 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "single-imag
     let selectionMode = initialMode;
     const inserted: any[] = [];
     const batches: any[][] = [];
+    let backgroundRefresh: ((signal: AbortSignal) => Promise<unknown>) | undefined;
     const requests: Array<{ path: string; init: RequestInit; succeed: (assets: ServerAsset[], nextCursor?: string | null) => void; fail: (message: string) => void }> = [];
     const userState = () => ({ user: ownerId ? { id: ownerId, role: "designer", departmentId: null } : null });
     const userStore = Object.assign((select: Function) => select(userState()), { getState: userState });
@@ -63,7 +64,7 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "single-imag
         () => ({ createClientId: () => "not-used" }), apiModule, apiModule.exports,
         (path: string, init: RequestInit) => new Promise<Response>((resolve) => {
             requests.push({ path, init,
-                succeed: (assets, nextCursor) => resolve(Response.json({ assets, nextCursor })),
+                succeed: (assets, nextCursor) => resolve(Response.json({ assets, nextCursor, hasMore: Boolean(nextCursor) })),
                 fail: (message) => resolve(Response.json({ msg: message }, { status: 503 })),
             });
         }),
@@ -101,7 +102,9 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "single-imag
         "@/lib/utils": { cn: (...values: unknown[]) => values.filter(Boolean).join(" ") },
         "@/lib/server-asset-local": { isSupportedServerAsset, serverAssetToLocal },
         "@/lib/canvas/canvas-asset-preview": {},
-        "@/services/image-storage": { resolveImageUrl: resolveOriginal, uploadImage: uploadLocal }, "@/services/file-storage": { resolveMediaUrl: resolveOriginal },
+        "@/services/image-storage": { resolveImageUrl: resolveOriginal }, "@/services/file-storage": { resolveMediaUrl: resolveOriginal },
+        "@/services/user-image-upload": { uploadUserImage: uploadLocal },
+        "@/services/asset-changes": { watchVisibleAssetChanges: (_owner: string, refresh: (signal: AbortSignal) => Promise<unknown>) => { backgroundRefresh = refresh; return () => { backgroundRefresh = undefined; }; } },
         "@/services/api/server-assets": apiModule.exports,
         "@/stores/use-asset-store": { ...permissions, useAssetStore: (select: Function) => select({ assets: localAssets }) },
         "@/stores/use-user-store": { useUserStore: userStore },
@@ -128,6 +131,7 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "single-imag
     disposers.push(() => cleanup(active));
     return {
         render, cards, nodes, inserted, batches, requests,
+        backgroundRefresh: () => backgroundRefresh?.(new AbortController().signal),
         assets: () => cards().map(card => card.props.asset as Asset),
         refresh: () => buttons().find(node => node.props.children === "刷新")!.props.onClick(),
         loadMore: () => buttons().find(node => node.props.children === "加载更多素材")!.props.onClick(),
@@ -142,6 +146,29 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "single-imag
 }
 
 describe("shared asset picker server-backed materials", () => {
+    test("visible background refresh preserves selected older cards and the active insertion scope", async () => {
+        const picker = harness([], "multiple-images");
+        picker.render(); picker.requests[0]!.succeed([serverAsset("first"), serverAsset("older")], "next-page"); await picker.settle();
+        picker.cards()[1]!.props.onClick(); await picker.settle();
+        const refresh = picker.backgroundRefresh();
+        expect(picker.requests).toHaveLength(2);
+        picker.requests[1]!.succeed([serverAsset("new"), serverAsset("first")], "next-page");
+        await refresh; await picker.settle();
+        expect(picker.cards().find(card => card.props.asset.id === "older")?.props.selected).toBe(true);
+        expect(picker.confirm().disabled).toBe(false);
+        picker.confirm().onClick(); await picker.settle();
+        expect(picker.batches[0]!.map(asset => asset.title)).toEqual(["older"]);
+    });
+    test("background refresh waits while the selected original is being resolved", async () => {
+        let release!: (url: string) => void;
+        const picker = harness([], "single", true, true, () => new Promise<string>(resolve => { release = resolve; }));
+        picker.render(); picker.requests[0]!.succeed([serverAsset("picture")]); await picker.settle();
+        picker.cards()[0]!.props.onClick(); await picker.settle();
+        await picker.backgroundRefresh();
+        expect(picker.requests).toHaveLength(1);
+        release("/exact-original"); await picker.settle();
+        expect(picker.inserted).toMatchObject([{ dataUrl: "/exact-original" }]);
+    });
     test("empty browser cache loads formal assets and inserts the original durable image reference", async () => {
         const picker = harness();
         expect(elements(picker.render()).some(node => node.props.role === "status")).toBe(true);

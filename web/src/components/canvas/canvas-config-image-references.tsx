@@ -13,7 +13,7 @@ import { createClientId } from "@/lib/client-id";
 import { createImageReferenceItem, dedupeImageReferences, moveImageReference } from "@/lib/image-reference-policy";
 import { toCanvasStoredImageReference } from "@/lib/canvas/canvas-image-references";
 import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
-import { uploadImage } from "@/services/image-storage";
+import { uploadUserImage } from "@/services/user-image-upload";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 import type { ImageReferenceItem } from "@/types/image";
 import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
@@ -82,9 +82,9 @@ export function CanvasConfigImageReferences(props: Props) {
             }
             for (const file of files) {
                 if (!current()) return;
-                const stored = await uploadImage(file);
+                const stored = await uploadUserImage(file, { source: "canvas-config-reference" });
                 if (!current()) return;
-                added.push(createImageReferenceItem({ id: createClientId(), name: file.name, originalFileName: file.name, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }, "upload"));
+                added.push(createImageReferenceItem({ id: createClientId(), name: file.name, originalFileName: file.name, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, sourceAssetId: stored.sourceAssetId }, "upload"));
             }
         } catch (reason) {
             if (!current()) return;

@@ -3,7 +3,7 @@ import { uiText } from "@/lib/i18n";
 import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { modelOptionName } from "@/stores/use-config-store";
-import { uploadImage } from "@/services/image-storage";
+import { uploadUserImage } from "@/services/user-image-upload";
 import type { CanvasSelectionReference } from "@/lib/canvas/canvas-selection-references";
 import type { App } from "antd";
 import { nanoid } from "nanoid";
@@ -28,8 +28,8 @@ export async function uploadCanvasQuickReferences(input: File[], options: Refere
     }
     files.forEach(assertCanvasImageUploadSize);
     const uploaded = await Promise.all(files.map(async file => {
-        const image = await uploadImage(file);
-        return { id: nanoid(), name: file.name, originalFileName: file.name, type: image.mimeType, dataUrl: image.url, url: image.url, storageKey: image.storageKey };
+        const image = await uploadUserImage(file, { source: "canvas-quick-reference" });
+        return { id: nanoid(), name: file.name, originalFileName: file.name, type: image.mimeType, dataUrl: image.url, url: image.url, storageKey: image.storageKey, sourceAssetId: image.sourceAssetId };
     }));
     if (!options.current()) return;
     const latest = options.latest();

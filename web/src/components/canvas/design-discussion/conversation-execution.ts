@@ -20,7 +20,7 @@ export type DesignConversationReceipt = {
 };
 export type DesignConversationTask = DesignConversationInput & {
     kind: "image-conversation-execution"; id: string; requestId: string; ownerId: string; projectId: string; mediaKind: "image";
-    model: string; modelId: string; status: string; stage?: string; taskId?: string; startedAt: number; observing: boolean;
+    model: string; modelId: string; status: string; stage?: string; taskId?: string; startedAt: number; observing: boolean; serverHistory?: boolean;
     resultUrls: string[]; resultVersions: PublicImageVersion[]; conversationExecution: DesignConversationReceipt;
     failureReason: string; queryError: string; persistenceError: string; feedback: { status: string; note: string }; feedbackHistory: unknown[];
 };

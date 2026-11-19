@@ -7,7 +7,7 @@ import type { CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig } from "@/stores/use-config-store";
 import { automaticReferenceSizeNotice, gifSizeNotice, imageModelSettingsError, imageOutputIsGif, imageReferenceSizeIsAutomatic, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
 import { imageMarkupReference, imageOptionFields, normalizeImageOptions, readImageOptions } from "@/lib/image-advanced-settings";
-import { uploadImage } from "@/services/image-storage";
+import { uploadUserImage } from "@/services/user-image-upload";
 import "./image-settings-panel.css";
 
 type ImageSettingsPanelProps = {
@@ -269,10 +269,11 @@ function ImageMarkupInput({ value, referenceCount, contextKey, onChange }: { val
             if (file.size > 50 * 1024 * 1024) throw new Error("标注层不能超过 50 MB");
             const signature = new Uint8Array(await file.slice(0, 8).arrayBuffer());
             if (![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => signature[index] === byte)) throw new Error("请上传独立透明 PNG 标注层");
-            const stored = await uploadImage(file);
-            if (stored.width * stored.height > 16_777_216) throw new Error("标注层总像素不能超过 16,777,216");
+            const stored = await uploadUserImage(file, { source: "image-markup-reference", validate: image => {
+                if (image.width * image.height > 16_777_216) throw new Error("标注层总像素不能超过 16,777,216");
+            } });
             if (!stillCurrent()) return;
-            change.current(JSON.stringify({ id: `markup:${stored.storageKey}`, name: file.name, originalFileName: file.name, type: "image/png", dataUrl: stored.url, storageKey: stored.storageKey, bytes: stored.bytes, width: stored.width, height: stored.height }));
+            change.current(JSON.stringify({ id: `markup:${stored.sourceAssetId || stored.storageKey}`, name: file.name, originalFileName: file.name, type: "image/png", dataUrl: stored.url, storageKey: stored.storageKey, sourceAssetId: stored.sourceAssetId, bytes: stored.bytes, width: stored.width, height: stored.height }));
         } catch (error) { if (stillCurrent()) setError(error instanceof Error ? error.message : "标注层读取失败"); }
         finally { if (stillCurrent()) setBusy(false); }
     };

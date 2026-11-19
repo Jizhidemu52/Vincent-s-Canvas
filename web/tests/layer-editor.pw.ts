@@ -12,6 +12,10 @@ const pixel = (page: Page, x: number, y: number) => page.locator("canvas").evalu
 const value = (page: Page) => page.evaluate(() => (window as any).layerEditorFixture.value);
 const fixture = (page: Page, method: string) => page.evaluate(method => (window as any).layerEditorFixture[method](), method);
 
+test.afterEach(async ({ page }, testInfo) => {
+    await page.screenshot({ path: testInfo.outputPath("final-state.png"), fullPage: true });
+});
+
 test("same geometry renders preview and PNG with alpha, original byte hash retained", async ({ page }) => {
     const errors = await open(page);
     await expect.poll(() => pixel(page, 20, 20)).toEqual([0, 0, 255, 255]);
@@ -73,7 +77,7 @@ test("partial and read errors preserve draft, unknown position and OCR are hones
     await page.getByText("文字识别与样式（模型参考值）").click();
     await expect(page.getByText("<script>不执行</script>", { exact: true })).toBeVisible();
     await expect(page.getByText("无真实字体证明", { exact: true })).toBeVisible();
-    await fixture(page, "failRead"); await expect(page.getByText("当前预览有 3 个图层未显示。编辑已保留。")).toBeVisible();
+    await fixture(page, "failRead"); await expect(page.getByLabel("图片保存状态", { exact: true }).getByText("图片预览加载失败", { exact: true })).toBeVisible();
     await expect(page.getByRole("spinbutton", { name: "X 位置" })).toHaveValue("11");
     const before = await value(page); await page.getByRole("button", { name: "导出合成 PNG" }).click();
     await expect(page.getByRole("alert")).toContainText("503"); expect(await value(page)).toEqual(before);

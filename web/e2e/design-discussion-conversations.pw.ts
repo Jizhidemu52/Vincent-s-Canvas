@@ -8,7 +8,7 @@ import { conversationSnapshot, conversationTurn, conversationVersion } from "../
 
 const proposal = { id: "blue-knit", title: "灰蓝针织方向", features: ["灰蓝衣身", "保留白色翻领"], rationale: "隔离测试中的固定方案。", prompt: "生成一张灰蓝色针织开衫白底图，保留白色翻领。", referenceIds: [], sourceNotes: [] };
 const videoModel = { id: "40000000-0000-4000-8000-000000000115", modelId: "seedance-2-5-flash", name: "seedance-2-5-flash", capabilities: ["video"] };
-type State = { snapshot: PublicConversationSnapshot; create: CreateConversationRequest; turn: PublicImageTurn | null; versions: PublicImageVersion[] };
+type State = { snapshot: PublicConversationSnapshot; create: CreateConversationRequest; turn: PublicImageTurn | null; turnRequest: SubmitTurnRequest | null; versions: PublicImageVersion[] };
 
 class DiscussionFixture {
     states = new Map<string, State>();
@@ -32,14 +32,19 @@ class DiscussionFixture {
             return [...this.states.values()].some(state => state.versions.some(version => version.assetId === asset)) ? route.fulfill({ contentType: "image/png", body: IMAGE }) : route.fallback();
         });
         await page.route(/^https?:\/\/[^/]+\/api\/image-conversations(?:[/?]|$)/, async route => {
-            const path = new URL(route.request().url()).pathname, method = route.request().method();
+            const url = new URL(route.request().url()), path = url.pathname, method = route.request().method();
             const reply = (data: unknown, status = 200) => route.fulfill({ status, json: { code: "OK", data, msg: "" } });
             const missing = () => route.fulfill({ status: 404, json: { code: "NOT_FOUND", data: null, msg: "尚未查到原请求" } });
+            if (path === "/api/image-conversations/design-executions" && method === "GET") return reply({ items: [...this.states.values()]
+                .filter(state => state.snapshot.canvasExternalId === url.searchParams.get("canvasExternalId"))
+                .map(state => ({ id: state.create.clientRequestId.slice(0, -7), conversationId: state.snapshot.id, canvasExternalId: state.snapshot.canvasExternalId,
+                    title: state.snapshot.title, createdAt: state.snapshot.createdAt, initialAssetId: state.create.initialAssetId || null, turnRequest: state.turnRequest,
+                    turn: state.turn, outputVersion: state.versions.find(version => version.id === state.turn?.outputVersionId) || null })), nextCursor: null });
             if (path === "/api/image-conversations" && method === "POST") {
                 const input = route.request().postDataJSON() as CreateConversationRequest; this.creates.push(input);
                 const id = randomUUID();
                 const snapshot: PublicConversationSnapshot = { ...conversationSnapshot(), id, title: input.title || null, entrypoint: "canvas", canvasExternalId: input.canvasExternalId!, activeVersionId: null, activeVersion: null };
-                this.states.set(id, { snapshot, create: input, turn: null, versions: [] });
+                this.states.set(id, { snapshot, create: input, turn: null, turnRequest: null, versions: [] });
                 return this.loseCreate ? route.abort("failed") : reply(snapshot, 201);
             }
             if (path.includes("/by-request/") && !path.includes("/turns/")) {
@@ -51,6 +56,7 @@ class DiscussionFixture {
             if (!state) return missing();
             if (path.endsWith("/turns") && method === "POST") {
                 const input = route.request().postDataJSON() as SubmitTurnRequest; this.submissions.push(input);
+                state.turnRequest = input;
                 const turn = { ...conversationTurn("generating", input.clientRequestId), id: randomUUID(), conversationId: id, taskId: randomUUID(), baseVersionId: null, inputActiveVersionId: null, intent: "generate_new" as const };
                 const version = { ...conversationVersion(true), id: randomUUID(), conversationId: id, turnId: turn.id, assetId: randomUUID(), parentVersionId: null, versionNo: 1, imageNo: 1 };
                 version.rootVersionId = version.id;
@@ -69,6 +75,85 @@ class DiscussionFixture {
         });
     }
 }
+
+test("a fresh independent browser discovers server design history without recreating deleted canvas results or paid work", async ({ page, browser, api }, info) => {
+    const fixture = new DiscussionFixture(); await fixture.attach(page);
+    const projectId = await newCanvas(page);
+    const { panel, generate } = await selectDirection(page, fixture);
+    await generate.click();
+    await expect(panel.locator(".discussion-results img")).toHaveCount(1);
+    await expect.poll(() => api.document(projectId)?.nodes.filter((node: any) => node.metadata?.imageConversation?.versionId).length).toBe(1);
+    const second = await browser.newContext({ baseURL: info.project.use.baseURL, viewport: { width: 1440, height: 1000 }, serviceWorkers: "block" });
+    try {
+        await api.attach(second);
+        const other = await second.newPage(); await fixture.attach(other);
+        await other.goto(page.url());
+        await other.getByRole("button", { name: "查看设计生成任务", exact: true }).click();
+        const history = other.getByRole("region", { name: "设计生成任务" });
+        await expect(history.getByText("灰蓝针织方向", { exact: true })).toBeVisible();
+        await expect(history.getByRole("button", { name: "定位设计结果", exact: true })).toBeVisible();
+        const initialNode = api.document(projectId)!.nodes.find((node: any) => node.metadata?.imageConversation?.versionId);
+        await history.getByRole("button", { name: "定位设计结果", exact: true }).click();
+        await other.locator(`[data-node-id="${initialNode.id}"]`).click();
+        await other.keyboard.press("Delete");
+        await expect.poll(() => api.document(projectId)?.nodes.filter((node: any) => node.metadata?.imageConversation?.versionId).length).toBe(0);
+        await other.reload();
+        await other.getByRole("button", { name: "查看设计生成任务", exact: true }).click();
+        await expect(history.getByText("结果已保存到服务器", { exact: true })).toBeVisible();
+        await history.locator("summary", { hasText: "方案、参考与执行记录" }).click();
+        await expect(history.getByText("服务端原执行记录；未恢复原设备的讨论草稿。", { exact: true })).toBeVisible();
+        await expect(history.getByRole("link", { name: "查看原设计结果 1", exact: true })).toBeVisible();
+        await other.screenshot({ path: info.outputPath("new-browser-server-history.png"), animations: "disabled" });
+        expect(api.document(projectId)?.nodes.filter((node: any) => node.metadata?.imageConversation?.versionId)).toHaveLength(0);
+        await history.getByRole("button", { name: "将历史设计结果放入画布", exact: true }).click();
+        await expect(history.getByRole("button", { name: "定位设计结果", exact: true })).toBeVisible();
+        await expect.poll(() => api.document(projectId)?.nodes.filter((node: any) => node.metadata?.imageConversation?.versionId).length).toBe(1);
+        await other.reload();
+        await other.getByRole("button", { name: "查看设计生成任务", exact: true }).click();
+        await expect(history.getByRole("button", { name: "定位设计结果", exact: true })).toBeVisible();
+        expect(api.document(projectId)?.nodes.filter((node: any) => node.metadata?.imageConversation?.versionId)).toHaveLength(1);
+        await other.setViewportSize({ width: 390, height: 844 });
+        expect(await other.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        await other.screenshot({ path: info.outputPath("new-browser-history-mobile.png"), animations: "disabled" });
+        expect(fixture.creates).toHaveLength(1); expect(fixture.submissions).toHaveLength(1); expect(api.submissions).toHaveLength(0);
+    } finally { await second.close(); }
+});
+
+test("deleting a server-history placeholder during original download prevents automatic resurrection", async ({ page, browser, api }, info) => {
+    const fixture = new DiscussionFixture(); fixture.loseTurn = true; fixture.hideTurn = true; await fixture.attach(page);
+    const projectId = await newCanvas(page);
+    const { generate } = await selectDirection(page, fixture); await generate.click();
+    await expect.poll(() => fixture.lookups.length).toBeGreaterThan(0);
+    await expect.poll(() => api.document(projectId)?.nodes.filter((node: any) => node.metadata?.designTask).length).toBe(1);
+    await page.close();
+    const second = await browser.newContext({ baseURL: info.project.use.baseURL, viewport: { width: 1440, height: 1000 }, serviceWorkers: "block" });
+    let release!: () => void, reads = 0;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    try {
+        await api.attach(second);
+        const other = await second.newPage(); await fixture.attach(other);
+        await other.route("**/api/assets/*/content", async route => {
+            reads++; await gate;
+            await route.fulfill({ contentType: "image/png", body: IMAGE });
+        });
+        await other.goto(`/canvas/${projectId}`);
+        await expect.poll(() => reads).toBeGreaterThan(0);
+        const placeholder = api.document(projectId)!.nodes.find((node: any) => node.metadata?.designTask);
+        await other.locator(`[data-node-id="${placeholder.id}"]`).click();
+        await other.keyboard.press("Delete");
+        await other.getByRole("button", { name: "删除节点", exact: true }).click();
+        await expect.poll(() => api.document(projectId)?.nodes.length).toBe(0);
+        const originalResponse = other.waitForResponse(response => response.url().includes("/api/assets/") && response.url().endsWith("/content"));
+        release(); await (await originalResponse).finished();
+        await other.getByRole("button", { name: "查看设计生成任务", exact: true }).click();
+        await expect(other.getByRole("button", { name: "将历史设计结果放入画布", exact: true })).toBeVisible();
+        await other.screenshot({ path: info.outputPath("deleted-during-original-download.png"), animations: "disabled" });
+        expect(api.document(projectId)?.nodes).toHaveLength(0);
+        await other.getByRole("button", { name: "将历史设计结果放入画布", exact: true }).click();
+        await expect.poll(() => api.document(projectId)?.nodes.filter((node: any) => node.metadata?.imageConversation?.versionId).length).toBe(1);
+        expect(fixture.creates).toHaveLength(1); expect(fixture.submissions).toHaveLength(1); expect(api.submissions).toHaveLength(0);
+    } finally { release(); await second.close(); }
+});
 
 async function selectDirection(page: Page, fixture: DiscussionFixture, count = 1) {
     await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();

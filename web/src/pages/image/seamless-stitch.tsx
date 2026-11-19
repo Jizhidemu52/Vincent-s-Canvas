@@ -31,6 +31,7 @@ import { fetchServerAssetContent } from "@/services/api/server-assets";
 import { hydratePromptReuse } from "@/services/api/prompts";
 import { promptImageSettings } from "@/lib/prompt-editor-parameters";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { uploadUserImage } from "@/services/user-image-upload";
 import { loadSeamlessPreview, type StitchPreviewImage } from "./seamless-preview";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -201,9 +202,9 @@ export function SeamlessStitchWorkspace() {
         const owner = useUserStore.getState().user?.id;
         sourceReadRef.current = true; setReadingSource(true);
         try {
-            const uploaded = await uploadImage(blob);
+            const uploaded = await uploadUserImage(blob, { source: "seamless-stitch-reference", ownerId: owner, name });
             if (!mountedRef.current || useUserStore.getState().user?.id !== owner) return;
-            const nextSource = { id: nanoid(), name, type: uploaded.mimeType, dataUrl: uploaded.url, url: uploaded.url, storageKey: uploaded.storageKey };
+            const nextSource = { ...uploaded, id: nanoid(), name, type: uploaded.mimeType, dataUrl: uploaded.url };
             sourceRef.current = nextSource;
             setSource(nextSource);
             return true;

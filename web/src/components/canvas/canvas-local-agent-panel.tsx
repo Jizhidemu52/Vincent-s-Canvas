@@ -22,6 +22,7 @@ import { canvasAgentUndoMessage } from "@/lib/canvas/canvas-agent-undo-report";
 import { useChatBottomFollow } from "@/hooks/use-chat-bottom-follow";
 import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 import { canvasOpsDeleteContent, canvasToolCallPreview } from "@/lib/canvas/canvas-assistant-ux";
+import { uploadUserImage } from "@/services/user-image-upload";
 
 const PANEL_MOTION_SECONDS = 0.24;
 const MAX_ATTACHMENTS = 6;
@@ -267,14 +268,15 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
 
     const addAttachments = async (files: FileList | File[] | null) => {
         const requestScope = scopeRef.current;
+        const ownerId = useUserStore.getState().user?.id;
         if (!files) return;
         const images = Array.from(files).filter((file) => file.type.startsWith("image/"));
         const prev = useCanvasAgentStore.getState().attachments;
         try {
             const next = await Promise.all(images.slice(0, Math.max(0, MAX_ATTACHMENTS - prev.length)).map(async (file) => {
                 const dataUrl = await readDataUrl(file);
-                // The request already needs dataUrl. Reuse it for previews so a
-                // sent message or remounted panel never holds a revoked Blob URL.
+                if (requestScope !== scopeRef.current) throw new DOMException("画布已变化", "AbortError");
+                await uploadUserImage(file, { source: "canvas-local-agent-reference", ownerId });
                 return { id: createId(), name: file.name, type: file.type, size: file.size, url: dataUrl, dataUrl };
             }));
             if (requestScope !== scopeRef.current) return;

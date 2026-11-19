@@ -44,6 +44,7 @@ class ConversationFixture {
             expect(route.request().headers()["x-canvas-owner-id"]).toBe(ids.owner);
             const reply = (data: unknown, status = 200) => route.fulfill({ status, json: envelope(data) });
             if (path === "/api/image-conversations" && method === "GET") return reply({ items: this.exists ? [this.summary()] : [], nextCursor: null });
+            if (path === "/api/image-conversations/design-executions" && method === "GET") return reply({ items: [], nextCursor: null });
             if (path === "/api/image-conversations" && method === "POST") {
                 const input = route.request().postDataJSON(); this.creates.push(input); this.exists = true;
                 this.snapshot.entrypoint = input.entrypoint; this.snapshot.canvasExternalId = input.canvasExternalId || null;

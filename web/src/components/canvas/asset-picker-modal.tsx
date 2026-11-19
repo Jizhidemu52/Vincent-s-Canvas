@@ -7,7 +7,9 @@ import { Check, ImageIcon, Search, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isSupportedServerAsset, serverAssetToLocal } from "@/lib/server-asset-local";
 import { needsCanvasAssetPreviewResolution, resolveCanvasAssetPreview } from "@/lib/canvas/canvas-asset-preview";
-import { resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { resolveImageUrl } from "@/services/image-storage";
+import { uploadUserImage } from "@/services/user-image-upload";
+import { watchVisibleAssetChanges } from "@/services/asset-changes";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { fetchServerAsset, listServerAssets } from "@/services/api/server-assets";
 import { canUserAccessAsset, serverAssetIdFromAsset, useAssetStore, type Asset } from "@/stores/use-asset-store";
@@ -129,6 +131,8 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: Pick<Props
     const queryScopeRef = useRef(queryScope);
     queryScopeRef.current = queryScope;
     const pageController = useRef<AbortController | null>(null);
+    const serverStateRef = useRef(serverState);
+    serverStateRef.current = serverState;
 
     useEffect(() => {
         pageController.current?.abort();
@@ -146,6 +150,24 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: Pick<Props
         });
         return () => { controller.abort(); pageController.current?.abort(); pageController.current = null; };
     }, [open, ownerId, refreshRevision, deferredKeyword, kindFilter, selectionMode]);
+
+    useEffect(() => {
+        if (!open || !ownerId) return;
+        return watchVisibleAssetChanges(ownerId, async signal => {
+            if (serverStateRef.current?.loading || pageController.current || insertingRef.current) return;
+            const isCurrent = () => !signal.aborted && queryScopeRef.current === queryScope && useUserStore.getState().user?.id === ownerId;
+            try {
+                const head = await listServerAssets({ limit: PAGE_SIZE, q: deferredKeyword || undefined, kind: imageOnly ? "image" : kindFilter === "all" ? undefined : kindFilter as "image" | "video" | "text" }, signal);
+                if (!isCurrent()) return;
+                const assets = head.assets.filter(isSupportedServerAsset).map(serverAssetToLocal);
+                const ids = new Set(assets.map(asset => asset.id));
+                setServerState(current => current?.ownerId === ownerId ? { ...current, assets: head.hasMore ? [...assets, ...current.assets.filter(asset => !ids.has(asset.id))] : assets, error: "" } : current);
+                if (!head.hasMore) setNextCursor(null);
+            } catch (error) {
+                if (isCurrent()) setServerState(current => current?.ownerId === ownerId ? { ...current, error: error instanceof Error ? error.message : "素材加载失败，请重试" } : current);
+            }
+        });
+    }, [queryScope]);
 
     useEffect(() => { setSelectedIds(new Set()); setInsertError(""); setKindFilter("all"); }, [open, ownerId, selectionMode]);
 
@@ -259,9 +281,9 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: Pick<Props
             if (files.some(file => !file.type.startsWith("image/"))) throw new Error("请选择图片文件");
             const payloads: InsertAssetPayload[] = [];
             for (const file of selectionMode === "multiple-images" ? files : files.slice(0, 1)) {
-                const stored = await uploadImage(file);
+                const stored = await uploadUserImage(file, { source: "asset-picker-upload", ownerId });
                 if (!isCurrent()) return;
-                payloads.push({ kind: "image", dataUrl: stored.url, storageKey: stored.storageKey, title: file.name, originalFileName: file.name, mimeType: stored.mimeType, origin: "upload" });
+                payloads.push({ kind: "image", dataUrl: stored.url, storageKey: stored.storageKey, sourceAssetId: stored.sourceAssetId, title: file.name, originalFileName: file.name, mimeType: stored.mimeType, origin: "upload" });
             }
             if (selectionMode === "multiple-images") await onInsertMany?.(payloads);
             else await onInsert?.(payloads[0]!);
@@ -276,7 +298,7 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: Pick<Props
         <div className="flex max-h-[70dvh] min-h-0 flex-col gap-4">
             <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <Button className="max-sm:!min-h-11" icon={<Upload className="size-4" />} disabled={!ownerId || inserting} loading={inserting} onClick={() => uploadInput.current?.click()}>{t("从相册 / 本机上传")}</Button>
-                <span className="text-xs text-muted-foreground">{t("直接添加到当前模块，无需先存入素材库")}</span>
+                <span className="text-xs text-muted-foreground">{t("上传后保存原件，并添加到当前模块")}</span>
                 <input ref={uploadInput} type="file" accept="image/*" multiple={selectionMode === "multiple-images"} className="hidden" aria-label={t("从相册或本机选择图片")} disabled={!ownerId || inserting} onChange={event => { const files = Array.from(event.currentTarget.files || []); event.currentTarget.value = ""; void insertLocalImages(files); }} />
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-3">

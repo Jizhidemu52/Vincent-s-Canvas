@@ -59,7 +59,7 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
     const store = useMemo(() => createWorkspaceStorage("design_discussion"), [identityKey]);
     const mediaStore = useMemo(() => createWorkspaceStorage("design_discussion_media"), [identityKey]);
     const api = useMemo(() => createApi(globalThis.fetch.bind(globalThis), { projectId }), [projectId]);
-    const scope = useMemo(() => ({ active: false, ownerId: "", adding: new Set(), installed: new Set(), failed: new Set(), pending: new Map(), locate: [], initialSelectionKey: null, ignoredSelectionKey: null }), [projectId, identityKey, connection]);
+    const scope = useMemo(() => ({ active: false, ownerId: "", adding: new Set(), installed: new Set(), failed: new Set(), historyImports: new Set(), pending: new Map(), locate: [], initialSelectionKey: null, ignoredSelectionKey: null }), [projectId, identityKey, connection]);
     const scopeRef = useRef(scope);
     scopeRef.current = scope;
     const mountedOwner = useRef("");
@@ -177,6 +177,15 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
 
     useEffect(() => {
         if (expanded && ready && isCurrent()) void controller.current?.refreshAnnotations().catch(reportError);
+    }, [expanded, ready, isCurrent, reportError]);
+
+    useEffect(() => {
+        if (!expanded || !ready) return;
+        const refresh = () => {
+            if (isCurrent() && document.visibilityState === "visible" && navigator.onLine) void controller.current?.refreshHistory?.().catch(reportError);
+        };
+        window.addEventListener("focus", refresh); window.addEventListener("online", refresh); document.addEventListener("visibilitychange", refresh);
+        return () => { window.removeEventListener("focus", refresh); window.removeEventListener("online", refresh); document.removeEventListener("visibilitychange", refresh); };
     }, [expanded, ready, isCurrent, reportError]);
 
     useEffect(() => {
@@ -320,6 +329,9 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
                 const version = task.resultVersions?.[index];
                 if (!isCurrent() || !writable.current) return;
                 if (nodesRef.current.some(node => node.id === id && (node.metadata?.content || node.metadata?.storageKey)) || scope.installed.has(id) || scope.adding.has(id) || scope.failed.has(id)) continue;
+                const allowNewNode = !task.serverHistory || scope.historyImports.has(task.id);
+                const pendingId = nodesRef.current.find(node => (node.id === id || version && node.metadata?.designTask?.requestId === task.requestId) && !node.metadata?.content && !node.metadata?.storageKey)?.id;
+                if (!allowNewNode && !pendingId) continue;
                 scope.adding.add(id);
                 try {
                     const video = task.mediaKind === "video";
@@ -327,6 +339,7 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
                     await assertOwner();
                     assertWritable();
                     const placeholder = nodesRef.current.find(node => node.id === id || version && node.metadata?.designTask?.requestId === task.requestId && !node.metadata?.content && !node.metadata?.storageKey);
+                    if (!allowNewNode && !nodesRef.current.some(node => node.id === pendingId)) continue;
                     const right = nodesRef.current.reduce((maximum, node) => Math.max(maximum, node.position.x + node.width), getCanvasCenter().x);
                     const node = createCanvasNode(video ? CanvasNodeType.Video : CanvasNodeType.Image, placeholder?.position || { x: right + 230, y: getCanvasCenter().y }, video ? videoMetadata(stored) : imageMetadata(stored));
                     node.id = id; node.title = task.proposal?.title || (video ? "设计视频" : "设计方案");
@@ -334,13 +347,14 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
                     node.metadata = { ...node.metadata, sourceTaskId: task.taskId, ...(version ? { imageConversation: { conversationId: version.conversationId, versionId: version.id, assetId: version.assetId, turnId: version.turnId }, designExecutionId: task.id } : {}), prompt: task.prompt, designProposal: { title: node.title, features: task.proposal?.features || [], rationale: task.proposal?.rationale || "", references: task.references.map(reference => ({ title: reference.title, image: reference.image })) } };
                     onBeforeChange();
                     setNodes(current => {
-                        if (!isCurrent()) return current;
+                        if (!isCurrent() || !writable.current || !allowNewNode && !current.some(item => item.id === pendingId)) return current;
                         const existing = current.find(item => item.id === id || version && item.metadata?.imageConversation?.conversationId === version.conversationId && item.metadata?.imageConversation?.versionId === version.id);
                         if (existing?.metadata?.content || existing?.metadata?.storageKey) return current;
                         const targetId = existing?.id || placeholder?.id;
+                        scope.installed.add(id);
+                        scope.historyImports.delete(task.id);
                         return targetId && current.some(item => item.id === targetId) ? current.map(item => item.id === targetId ? { ...item, ...node, position: item.position } : item) : [...current, node];
                     });
-                    scope.installed.add(id);
                     setInstallationErrors(current => { const next = { ...current }; delete next[id]; return next; });
                 } catch (error) {
                     if (error.code === "SESSION_CHANGED" || error.status === 401) { reportError(error); return; }
@@ -352,11 +366,13 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
                 } finally { scope.adding.delete(id); }
             }
         };
-        for (const task of tasks) if (task.ownerId === ownerId && task.projectId === projectId && task.status === "success" && task.resultUrls.length && writable.current) void install(task);
+        for (const task of tasks) if (task.ownerId === ownerId && task.projectId === projectId && task.status === "success" && task.resultUrls.length && writable.current
+            && (!task.serverHistory || scope.historyImports.has(task.id) || nodesRef.current.some(node => node.metadata?.designTask?.requestId === task.requestId && !node.metadata?.content && !node.metadata?.storageKey))) void install(task);
     }, [tasks, ready, ownerId, projectId, scope, isCurrent, assertOwner, reportError, installationRetry, setNodes, getCanvasCenter, onBeforeChange, writable]);
 
     const retryInstallation = task => {
         assertWritable();
+        scope.historyImports.add(task.id);
         const resultIds = task.resultUrls.map((_, index) => resultNodeId(nodesRef.current, task, index));
         for (const id of resultIds) scope.failed.delete(id);
         setInstallationErrors(current => Object.fromEntries(Object.entries(current).filter(([id]) => !resultIds.includes(id))));
@@ -375,14 +391,15 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
     return <div className="canvas-design-discussion" data-testid="canvas-design-discussion">
         <div className="dd-island" onMouseEnter={() => setTaskView(value => value === "pinned" ? value : "preview")} onMouseLeave={() => setTaskView(value => value === "pinned" ? value : "closed")}>
             <div className="dd-pill"><button className="dd-launch" aria-label="打开设计讨论" aria-expanded={visible} onClick={() => { setPanelVisible(value => !value); setTaskView("closed"); }}><Sparkles size={17} /><span>{active.length ? `${active.length} 个创作任务进行中` : "创作随时开始"}</span></button><button aria-label="查看设计生成任务" aria-expanded={expanded} aria-pressed={taskView === "pinned"} onClick={() => setTaskView(value => value === "pinned" ? "closed" : "pinned")}>{needsAttention.length ? <span>{needsAttention.length}</span> : <ChevronDown size={14} />}</button></div>
-            {expanded && <section className="dd-tasks" aria-label="设计生成任务"><header><strong>创作任务</strong><small>每个结果单独记录</small></header>{!scopedTasks.length ? <p>选中画布图片，打开设计讨论。<br />原有左侧创建与对话保持独立。</p> : [...scopedTasks].reverse().map(task => {
+            {expanded && <section className="dd-tasks" aria-label="设计生成任务"><header><strong>创作任务</strong><small>每个结果单独记录</small></header>{controller.current?.historyError?.() && <p role="alert">{controller.current.historyError()}<button onClick={() => controller.current?.refreshHistory?.().catch(reportError)}>重新读取历史</button></p>}{!scopedTasks.length ? <p>选中画布图片，打开设计讨论。<br />原有左侧创建与对话保持独立。</p> : [...scopedTasks].reverse().map(task => {
                 const resultIds = task.resultUrls.map((_, index) => resultNodeId(nodes, task, index));
                 const canContinue = task.conversationExecution && !task.conversationExecution.turnDispatchStartedAt && ["preparing", "ready_to_submit"].includes(task.conversationExecution.phase);
                 const failed = resultIds.some(id => installationErrors[id]);
                 const placed = resultIds.length > 0 && resultIds.every(id => nodes.some(node => node.id === id && (node.metadata?.content || node.metadata?.storageKey)));
-                const label = failed ? "结果已完成 · 放入画布失败，可重试" : task.status === "success" && !placed && resultIds.length ? "结果已完成 · 正在放入画布" : taskLabel(task);
-                return <article key={task.id} data-design-task-id={task.id} data-status={task.status}><div><strong>{task.proposal?.title || task.userText}</strong><small>{label}</small></div>{failed ? <button aria-label="重试放入设计结果" onClick={() => { try { retryInstallation(task); } catch (error) { reportError(error); } }}><RefreshCw size={15} /></button> : task.status === "success" && placed ? <button aria-label="定位设计结果" onClick={() => { if (isCurrent()) onLocate(resultIds); setTaskView("closed"); }}><LocateFixed size={16} /></button> : canContinue ? <button aria-label="继续已记录的生成操作" onClick={() => action(task, "continue")}><Sparkles size={15} /></button> : <button aria-label="查询原设计任务" onClick={() => action(task, task.status === "paused" && task.upstreamTaskId ? "recover" : "refresh")}><RefreshCw size={15} /></button>}<details><summary>方案、参考与执行记录</summary><p>{task.proposal?.features?.join("；")}</p><div className="dd-task-refs">{task.references.map(reference => <img key={reference.id} src={reference.image} alt={reference.title} />)}</div><p>{task.mediaKind === "video" ? "视频" : "图片"} · {task.model} · 每任务 1 个结果</p><p>请求：{task.requestId}</p>{task.failureReason && <p role="alert">{task.failureReason}</p>}{task.queryError && <p role="alert">{task.queryError}</p>}{resultIds.filter(id => installationErrors[id]).map(id => <p role="alert" key={id}>{installationErrors[id]}</p>)}{["failed", "needs_input"].includes(task.status) && <button onClick={() => continueTask(task)}>修改需求后新建任务（可能计费）</button>}</details></article>;
-            })}</section>}
+                const unplacedHistory = task.serverHistory && task.status === "success" && !placed && !scope.historyImports.has(task.id);
+                const label = failed ? "结果已完成 · 放入画布失败，可重试" : unplacedHistory ? "结果已保存到服务器" : task.status === "success" && !placed && resultIds.length ? "结果已完成 · 正在放入画布" : taskLabel(task);
+                return <article key={task.id} data-design-task-id={task.id} data-status={task.status}><div><strong>{task.proposal?.title || task.userText}</strong><small>{label}</small></div>{failed || unplacedHistory ? <button aria-label={unplacedHistory ? "将历史设计结果放入画布" : "重试放入设计结果"} onClick={() => { try { retryInstallation(task); } catch (error) { reportError(error); } }}><RefreshCw size={15} /></button> : task.status === "success" && placed ? <button aria-label="定位设计结果" onClick={() => { if (isCurrent()) onLocate(resultIds); setTaskView("closed"); }}><LocateFixed size={16} /></button> : canContinue ? <button aria-label="继续已记录的生成操作" onClick={() => action(task, "continue")}><Sparkles size={15} /></button> : <button aria-label="查询原设计任务" onClick={() => action(task, task.status === "paused" && task.upstreamTaskId ? "recover" : "refresh")}><RefreshCw size={15} /></button>}<details><summary>方案、参考与执行记录</summary><p>{task.proposal?.features?.join("；")}</p>{task.serverHistory && <p>服务端原执行记录；未恢复原设备的讨论草稿。</p>}<div className="dd-task-refs">{task.references.map(reference => <img key={reference.id} src={reference.image} alt={reference.title} />)}</div><details><summary>原执行要求</summary><p>{task.prompt}</p></details><div className="dd-task-refs">{task.resultUrls.map((url, index) => <a key={url} href={url} target="_blank" rel="noopener noreferrer" aria-label={`查看原设计结果 ${index + 1}`}>{task.mediaKind === "video" ? "查看视频结果" : <img src={url} alt={`已保存结果 ${index + 1}`} />}</a>)}</div><p>{task.mediaKind === "video" ? "视频" : "图片"} · {task.model} · 每任务 1 个结果</p><p>请求：{task.requestId}</p>{task.failureReason && <p role="alert">{task.failureReason}</p>}{task.queryError && <p role="alert">{task.queryError}</p>}{resultIds.filter(id => installationErrors[id]).map(id => <p role="alert" key={id}>{installationErrors[id]}</p>)}{["failed", "needs_input"].includes(task.status) && <button onClick={() => continueTask(task)}>修改需求后新建任务（可能计费）</button>}</details></article>;
+            })}{controller.current?.hasMoreHistory?.() && <button onClick={() => controller.current?.loadMoreHistory?.().catch(reportError)}>加载更早的服务端记录</button>}</section>}
         </div>
         {notice && <div className="dd-notice" role="status"><span>{notice}</span><button aria-label="关闭设计讨论提示" onClick={() => setNotice("")}><X size={14} /></button></div>}
         {visible && !ready && <div className="dd-connect"><span>设计讨论尚未连接。</span><button onClick={() => setConnection(value => value + 1)}>重新连接</button></div>}

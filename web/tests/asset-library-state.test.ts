@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { compareAssetCreatedAt, filterLocalAssets, patchAssetProjection, uploadAssetBatch } from "@/pages/assets/asset-library-state";
+import { compareAssetCreatedAt, filterLocalAssets, mergeAssetLibraryHead, patchAssetProjection, uploadAssetBatch } from "@/pages/assets/asset-library-state";
 import type { Asset } from "@/stores/use-asset-store";
 import type { ServerAsset } from "@/services/api/server-assets";
 
@@ -34,4 +34,21 @@ test("batch upload stays within three concurrent files and isolates failures wit
     expect(progress).toEqual([1, 2, 3, 4, 5, 6, 7]);
     const retried = await uploadAssetBatch(result.failed, async job => { expect(job.clientReferenceId).toBe('upload-2'); }, () => {});
     expect(retried).toEqual({ succeeded: 1, failed: [] });
+});
+
+test("head refresh keeps displaced rows and the established next-page cursor without re-fetching historical pages", () => {
+    const asset = (id: string) => ({ id } as ServerAsset);
+    const old = { pages: [{ assets: [asset("b"), asset("c")], hasMore: true, nextCursor: "after-c" }, { assets: [asset("d")], hasMore: true, nextCursor: "after-d" }], pageParams: [undefined, "after-c"] };
+    const next = mergeAssetLibraryHead(old, { assets: [asset("a"), asset("b")], hasMore: true, nextCursor: "after-b" });
+    expect(next.pages.flatMap(page => page.assets.map(item => item.id))).toEqual(["a", "b", "c", "d"]);
+    expect(next.pages.at(-1)?.nextCursor).toBe("after-d");
+    expect(next.pageParams).toEqual(old.pageParams);
+});
+
+test("non-overlapping or oversized head updates restart from an authoritative cursor without pagination gaps", () => {
+    const asset = (id: string) => ({ id } as ServerAsset);
+    const head = { assets: [asset("fresh")], hasMore: true, nextCursor: "after-fresh" };
+    expect(mergeAssetLibraryHead({ pages: [{ assets: [asset("old")], hasMore: true, nextCursor: "after-old" }], pageParams: [undefined] }, head)).toEqual({ pages: [head], pageParams: [undefined] });
+    const large = { pages: [{ assets: [asset("fresh"), ...Array.from({ length: 120 }, (_, i) => asset(String(i)))], hasMore: true, nextCursor: "old" }], pageParams: [undefined] };
+    expect(mergeAssetLibraryHead(large, head)).toEqual({ pages: [head], pageParams: [undefined] });
 });

@@ -19,6 +19,7 @@ import { watchTaskEvents } from "./task-events";
 import { readTaskSnapshot } from "./task-snapshot-query";
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
 import { imageToDataUrl } from "@/services/image-storage";
+import { readMediaSource, serverMediaId } from "@/services/canvas-media-links";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import { fingerprintImage, type ArchivedReference, type GenerationDraftInput, type GenerationInputArchive } from "./generation-history";
@@ -650,6 +651,11 @@ useUserStore.subscribe((state, previous) => {
 export async function uploadImageReference(reference: ReferenceImage, file: File, hash: string, ownerId: string, signal?: AbortSignal) {
     const assertOwner = () => { signal?.throwIfAborted(); if (useUserStore.getState().user?.id !== ownerId) throw new Error("员工会话已变化"); };
     assertOwner();
+    if (!reference.sourceAssetId) {
+        const source = serverMediaId(reference.dataUrl || reference.url || "") || (reference.storageKey ? serverMediaId(await readMediaSource(reference.storageKey) || "") : "");
+        assertOwner();
+        if (source) reference = { ...reference, sourceAssetId: source };
+    }
     if (referenceUploadOwner !== ownerId) { referenceUploads.clear(); referenceUploadOwner = ownerId; }
     let sharedSourceId: string | undefined;
     if (reference.sourceAssetId) {

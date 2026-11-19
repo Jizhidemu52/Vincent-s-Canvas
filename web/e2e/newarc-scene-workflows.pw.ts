@@ -14,7 +14,8 @@ test("try-on validates a product and adult model description, persists draft, an
     await page.getByRole("textbox", { name: "成人模特与试穿要求", exact: true }).fill("短发成年女性，全身站姿，简洁黑裤");
     await page.getByRole("textbox", { name: /关键特征保持/ }).fill("保留圆领、六列绞花与罗纹");
     await expect(submit).toBeEnabled();
-    expect(api.submissions).toHaveLength(0); expect(api.assets.size).toBe(0);
+    expect(api.submissions).toHaveLength(0); expect(api.tasks.size).toBe(0); expect(api.assets.size).toBe(1);
+    expect([...api.assetBytes.values()]).toEqual([IMAGE]);
     await page.reload();
     await expect(page.getByRole("textbox", { name: "成人模特与试穿要求", exact: true })).toHaveValue("短发成年女性，全身站姿，简洁黑裤");
     await expect(page.getByRole("img", { name: "product-original.png", exact: true })).toBeVisible();
@@ -63,7 +64,8 @@ test("sketch color and fabric are explicit, optional reference is scoped, and em
     await upload(page, "材质与配色参考图", "fabric-reference.png", optionalImage);
     await page.getByRole("radio", { name: "白底悬浮", exact: true }).check();
     await expect(submit).toBeEnabled();
-    expect(api.submissions).toHaveLength(0); expect(api.assets.size).toBe(0);
+    expect(api.submissions).toHaveLength(0); expect(api.tasks.size).toBe(0); expect(api.assets.size).toBe(2);
+    expect([...api.assetBytes.values()]).toEqual([IMAGE, optionalImage]);
     await page.reload();
     await expect(page.getByRole("textbox", { name: "颜色方向", exact: true })).toHaveValue("淡粉色");
     await submit.click();

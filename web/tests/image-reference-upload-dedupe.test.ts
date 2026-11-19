@@ -11,6 +11,20 @@ const file = new File(["same bytes"], "reference.png", { type: "image/png" });
 const reference: ReferenceImage = { id: "ref", name: file.name, dataUrl: "", type: file.type };
 const signIn = (id: string) => useUserStore.setState({ user: { ...originalUser.user, id } as never, status: "authenticated" });
 
+test("a cloud-first upload's canonical content URL is validated and reused even if a caller omitted sourceAssetId", async () => {
+    const owner = "cloud-first-reference", id = "a0000000-0000-4000-8000-000000000001";
+    signIn(owner);
+    const calls: string[] = [];
+    globalThis.fetch = (async (input, init) => {
+        calls.push(`${init?.method || "GET"} ${input}`);
+        if (String(input) === `/api/assets/${id}`) return Response.json({ asset: { id, ownerUserId: owner, status: "ready", kind: "image" } });
+        if (String(input) === `/api/assets/${id}/content` && init?.method === "HEAD") return new Response(null, { status: 200 });
+        throw new Error("An already-uploaded reference must not be uploaded again");
+    }) as typeof fetch;
+    expect(await uploadImageReference({ ...reference, dataUrl: `/api/assets/${id}/content` }, file, "same-hash", owner)).toBe(id);
+    expect(calls).toEqual([`GET /api/assets/${id}`, `HEAD /api/assets/${id}/content`]);
+});
+
 test("concurrent slots upload identical reference bytes once per employee", async () => {
     let uploads = 0;
     globalThis.fetch = (async (input, init) => {

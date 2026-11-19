@@ -30,6 +30,7 @@ import { resolveCanvasNodeImageReferences, toCanvasStoredImageReference } from "
 import { canvasNodePromptDraft } from "@/lib/canvas/canvas-node-prompt-draft";
 import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
 import { uploadImage } from "@/services/image-storage";
+import { uploadUserImage } from "@/services/user-image-upload";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
@@ -195,8 +196,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         try {
             images.forEach(assertCanvasImageUploadSize);
             const items = await Promise.all(images.map(async (file) => {
-                const stored = await uploadImage(file);
-                return createImageReferenceItem({ id: createClientId(), name: file.name, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }, "upload");
+                const stored = await uploadUserImage(file, { source: "canvas-node-reference" });
+                return createImageReferenceItem({ id: createClientId(), name: file.name, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, sourceAssetId: stored.sourceAssetId }, "upload");
             }));
             saveReferences(dedupeImageReferences([...imageReferences, ...items]));
         } catch (error) {

@@ -1,4 +1,5 @@
 import type { ApiErrorCode, CreateConversationRequest, ErrorDetails, SubmitTurnRequest } from "../../../../shared/image-conversation-contracts";
+import { designExecutionHistoryPageSchema } from "../../../../shared/design-conversation-history";
 import type { PublicConversationEvent as ConversationEvent } from "../../../../shared/image-conversation-public";
 import { createConversationRequestSchema, submitTurnRequestSchema } from "../../../../shared/image-conversation-schemas";
 import { cancellationResultSchema, conversationEventSchema, conversationPageSchema, conversationSnapshotSchema, messagePageSchema, turnDetailsSchema, turnPageSchema, turnSubmissionResultSchema, versionPageSchema } from "../../../../shared/image-conversation-public-schemas";
@@ -39,6 +40,11 @@ export function createImageConversationApi(ownerId: string, fetcher: Fetch = glo
         create: (input: CreateConversationRequest, signal?: AbortSignal) => post(base, conversationSnapshotSchema, createConversationRequestSchema.parse(input), signal),
         createByRequest: (key: string, signal?: AbortSignal) => request(`${base}/by-request/${pathId(key)}`, conversationSnapshotSchema, { signal }),
         list: (cursor?: string, signal?: AbortSignal) => request(page(base, cursor), conversationPageSchema, { signal }),
+        designExecutions: async (canvasExternalId: string, cursor?: string, signal?: AbortSignal) => {
+            const result = await request(`${page(`${base}/design-executions`, cursor)}&canvasExternalId=${encodeURIComponent(canvasExternalId)}`, designExecutionHistoryPageSchema, { signal });
+            if (result.items.some(item => item.canvasExternalId !== canvasExternalId)) throw new ImageConversationApiError(200, "INVALID_RESPONSE", "设计执行记录不属于当前画布。");
+            return result;
+        },
         snapshot: async (id: string, signal?: AbortSignal) => {
             const snapshot = await request(`${base}/${pathId(id)}`, conversationSnapshotSchema, { signal });
             if (snapshot.id !== id) throw new ImageConversationApiError(200, "INVALID_RESPONSE", "会话快照与请求编号不一致。");

@@ -16,18 +16,19 @@ function functionSource(name: string) {
     return found;
 }
 
-function harness(reader: (file: File) => Promise<string> = async () => "data:image/png;base64,aGVsbG8=") {
-    const messages: any[] = [], requests: any[] = [];
+function harness(reader: (file: File) => Promise<string> = async () => "data:image/png;base64,aGVsbG8=", upload: (file: File) => Promise<void> = async () => {}) {
+    const messages: any[] = [], requests: any[] = [], originals: any[] = [];
+    const userState = { user: { id: "employee-a" } };
     const state: any = { attachments: [], prompt: "make it blue", connected: true, sending: false, waiting: false, activeThreadId: "thread" };
     let serial = 0;
     const scopeRef = { current: "project:user" }, requestRef = { current: null };
     const scope = { useCanvasAgentStore: { getState: () => state }, setAgentState: (patch: any) => Object.assign(state, patch), readDataUrl: reader, createId: () => String(++serial), addMessage: (item: any) => messages.push(item), addEventLog() {}, MAX_ATTACHMENTS: 6, MAX_ATTACHMENT_PAYLOAD_BYTES: 28 * 1024 * 1024, endpoint: "http://isolated.invalid", token: "fixture", snapshotRef: { current: { projectId: "project" } }, fetch: async (_url: string, init: any) => { requests.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ threadId: "thread" }) }; }, URL: { createObjectURL() { throw new Error("No Blob URL allocation is necessary"); }, revokeObjectURL() { throw new Error("Persistent previews must not be revoked"); } } };
     const handlers = () => {
         const code = ts.transpileModule(["attachmentPayloadBytes", "promptWithAttachments", "addAttachments", "removeAttachment", "sendPrompt"].map(functionSource).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
-        const values = { ...scope, scopeRef, requestRef, ...state };
+        const values = { ...scope, scopeRef, requestRef, ...state, useUserStore: { getState: () => userState }, uploadUserImage: async (file: File, options: unknown) => { originals.push({ file, options }); await upload(file); } };
         return new Function(...Object.keys(values), `${code}\nreturn { addAttachments, removeAttachment, sendPrompt };`)(...Object.values(values));
     };
-    return { state, messages, requests, handlers, scopeRef, requestRef };
+    return { state, messages, requests, handlers, scopeRef, requestRef, originals, userState };
 }
 
 test("local-agent sent attachment preview remains valid after clearing the draft and remounting handlers", async () => {
@@ -65,4 +66,38 @@ test("local-agent failed image reads leave existing drafts intact without creati
     await h.handlers().addAttachments([new File(["a"], "good.png", { type: "image/png" }), new File(["a"], "bad.png", { type: "image/png" })]);
     expect(h.state.attachments).toBe(before);
     expect(h.messages.at(-1).title).toBe("图片读取失败");
+});
+
+test("local-agent archives the exact image before attachment success without changing the local turn payload", async () => {
+    const file = new File(["original bytes"], "original.png", { type: "image/png" });
+    const h = harness();
+    await h.handlers().addAttachments([file, new File(["text"], "note.txt", { type: "text/plain" })]);
+    expect(h.originals).toHaveLength(1);
+    expect(h.originals[0].file).toBe(file);
+    expect(h.originals[0].options).toEqual({ source: "canvas-local-agent-reference", ownerId: "employee-a" });
+    await h.handlers().sendPrompt();
+    expect(h.requests[0].attachments).toHaveLength(1);
+    expect(h.requests[0].attachments[0].dataUrl).toStartWith("data:image/png;");
+    expect(h.requests[0].attachments[0]).not.toHaveProperty("sourceAssetId");
+});
+
+test("local-agent cloud failure leaves attachment drafts unchanged", async () => {
+    const h = harness(undefined, async () => { throw new Error("原件保存失败"); });
+    const before = h.state.attachments;
+    await h.handlers().addAttachments([new File(["image"], "photo.png", { type: "image/png" })]);
+    expect(h.state.attachments).toBe(before);
+    expect(h.messages.at(-1).text).toBe("原件保存失败");
+});
+
+test("local-agent late original upload cannot populate a different owner or canvas", async () => {
+    const pending = Promise.withResolvers<void>();
+    const h = harness(undefined, () => pending.promise);
+    const adding = h.handlers().addAttachments([new File(["image"], "photo.png", { type: "image/png" })]);
+    await Promise.resolve(); await Promise.resolve();
+    h.scopeRef.current = "other-project:employee-b";
+    h.userState.user.id = "employee-b";
+    pending.resolve(); await adding;
+    expect(h.originals[0].options.ownerId).toBe("employee-a");
+    expect(h.state.attachments).toEqual([]);
+    expect(h.messages).toEqual([]);
 });

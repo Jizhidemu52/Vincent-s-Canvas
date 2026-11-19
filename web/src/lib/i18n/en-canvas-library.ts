@@ -1,6 +1,10 @@
 export default {
     "从相册 / 本机上传": "Upload from photos or this device",
     "直接添加到当前模块，无需先存入素材库": "Add directly to this tool without saving to the asset library first",
+    "上传后保存原件，并添加到当前模块": "Save the original and add it to this tool",
+    "员工会话已变化，已停止添加图片；已上传的原件仍归原账号保存。": "The signed-in account changed. Image insertion stopped; uploaded originals remain saved to the original account.",
+    "请选择有效的图片文件": "Choose a valid image file",
+    "服务器返回了无效的图片编号，原件保存状态需要核查。": "The server returned an invalid image ID. The original's save status needs to be checked.",
     "从相册或本机选择图片": "Choose images from photos or this device",
     "画布名称": "Canvas name",
     "{count} 个画布": "{count} canvases",

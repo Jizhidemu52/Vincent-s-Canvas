@@ -4,7 +4,8 @@ import { uiText, useUiText } from "@/lib/i18n";
 import { DisplayText } from "@/hooks/use-display-text";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { getImageBlob, resolveImageUrl } from "@/services/image-storage";
-import { uploadServerAsset } from "@/services/api/server-assets";
+import { uploadImageReference } from "@/services/api/generation-tasks";
+import { fingerprintImage } from "@/services/api/generation-history";
 import { getProductCandidates, identifyProductCandidates } from "@/services/api/product-candidates";
 import { useUserStore } from "@/stores/use-user-store";
 import { createSceneProductCandidates, type SceneProductCandidateRecord } from "./scene-product-candidates";
@@ -35,7 +36,7 @@ export function SceneProductPicker({ sceneId, source, disabled, onConfirm }: {
             storage.assertIdentity();
             if (useUserStore.getState().user?.id !== ownerId) throw new Error("员工会话已变化，请重新进入工作区。");
         },
-        async upload(requestId, signal) {
+        async upload(_requestId, signal) {
             let blob = source.storageKey ? await getImageBlob(source.storageKey) : null;
             if (!blob) {
                 const url = await resolveImageUrl(source.storageKey, source.dataUrl);
@@ -44,11 +45,12 @@ export function SceneProductPicker({ sceneId, source, disabled, onConfirm }: {
                 blob = await response.blob();
             }
             if (!blob.size || !["image/png", "image/jpeg", "image/webp"].includes(blob.type || source.mimeType)) throw new Error("请使用有效的 PNG、JPG 或 WebP 原图。");
-            if (blob.size > MAX_SOURCE_BYTES) throw new Error("产品识别仅支持不超过 10 MiB 的单张原图；原件未压缩，尚未上传或提交识别。");
+            if (blob.size > MAX_SOURCE_BYTES) throw new Error("产品识别仅支持不超过 10 MiB 的单张原图；原件未压缩，尚未提交产品识别。");
+            const file = new File([blob], source.name || "product.png", { type: blob.type || source.mimeType });
+            const hash = await fingerprintImage(file);
             signal?.throwIfAborted();
             if (current.current !== key) throw new Error("素材已切换，未提交产品识别。");
-            return uploadServerAsset(new File([blob], source.name || "product.png", { type: blob.type || source.mimeType }),
-                { source: "creative-product-candidates", sceneId }, { expectedOwnerId: ownerId, clientReferenceId: requestId, signal });
+            return uploadImageReference(source, file, hash, ownerId, signal);
         },
         submit: (requestId, sourceAssetId, signal) => identifyProductCandidates(requestId, sourceAssetId, ownerId, signal),
         query: (requestId, signal) => getProductCandidates(requestId, ownerId, signal),
