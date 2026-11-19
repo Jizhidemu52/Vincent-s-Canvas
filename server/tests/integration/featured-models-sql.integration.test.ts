@@ -60,7 +60,7 @@ sqlTest("real PostgreSQL SQL preserves featured order and explicit empty selecti
     });
     const platformInput = {
       baseUrl: MARK_IMAGE_BASE_URL, enabled: true, apiKey: "fixture-mark-featured-no-network",
-      models: MARK_PLATFORM_MODELS.map(model => ({ modelId: model.modelId, enabled: model.defaultEnabled, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 })),
+      models: MARK_PLATFORM_MODELS.map(model => ({ modelId: model.modelId, enabled: model.modelId !== "gpt-image-2.6-sunburst" && model.defaultEnabled, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 })),
     };
     const configured = await request("/api/admin/model-configuration/mark-images", "PUT", platformInput);
     const configuredBody = await configured.json();
@@ -75,7 +75,11 @@ sqlTest("real PostgreSQL SQL preserves featured order and explicit empty selecti
       return response.json();
     };
     const initial = await getFeatured();
-    expect(initial.models).toHaveLength(10);
+    expect(initial.models.map((model: { modelId: string }) => model.modelId).sort()).toEqual([
+      "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-nano-banana-2.1", "midjourney-blend", "gpt-image-2",
+      "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "mai-image-2.7-flash",
+    ].sort());
+    expect(initial.models.find((model: { id: string }) => model.id === modelId("gpt-image-2.6-sunburst"))).toMatchObject({ enabled: false, isFeatured: false });
     expect(initial.featuredModelIds).toEqual([
       "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-nano-banana-2.1", "midjourney-blend", "gpt-image-2",
     ].map(modelId));
@@ -83,7 +87,7 @@ sqlTest("real PostgreSQL SQL preserves featured order and explicit empty selecti
       expect((await request(featuredPath, "GET", undefined, role)).status).toBe(role ? 403 : 401);
       expect((await request(featuredPath, "PUT", { modelConfigIds: [] }, role)).status).toBe(role ? 403 : 401);
     }
-    const ordered = ["gemini-3.1-flash-image-preview-official", "gpt-image-2.5-flare", "midjourney-blend"].map(modelId);
+    const ordered = ["mai-image-2.7-flash", "gpt-image-2.6-flare", "midjourney-blend"].map(modelId);
     const saved = await request(featuredPath, "PUT", { modelConfigIds: ordered });
     const savedBody = await saved.json();
     expect(saved.status).toBe(200);
@@ -101,8 +105,20 @@ sqlTest("real PostgreSQL SQL preserves featured order and explicit empty selecti
     const publicBody = await publicResponse.json();
     expect(publicBody.models.filter((model: { isFeatured: boolean }) => model.isFeatured).map((model: { id: string }) => model.id)).toEqual(ordered);
     expect(JSON.stringify(publicBody)).not.toMatch(/fixture-mark|encrypted_credentials|providerId|providerName|providerEnabled|hasCredentials/);
-    expect((await request(featuredPath, "PUT", { modelConfigIds: [modelId("grok-imagine-image-2.0")] })).status).toBe(400);
+    expect((await request(featuredPath, "PUT", { modelConfigIds: [modelId("gpt-image-2.6-sunburst")] })).status).toBe(400);
     expect((await getFeatured()).featuredModelIds).toEqual(ordered);
+    const retired = [
+      ["80000000-0000-4000-8000-000000000010", "grok-imagine-image-2.0"],
+      ["80000000-0000-4000-8000-000000000011", "gemini-3.1-flash-image-preview-official"],
+    ];
+    for (const [id, upstream] of retired) {
+      await query("INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,enabled) VALUES($1,$2,$3,$3,ARRAY['generate'],true)", [id, MARK_IMAGE_PROVIDER_ID, upstream]);
+      const rejected = await request(featuredPath, "PUT", { modelConfigIds: [id] });
+      expect(rejected.status).toBe(400);
+      expect((await rejected.json()).error).toBe("INVALID_FEATURED_MODEL");
+      expect((await getFeatured()).featuredModelIds).toEqual(ordered);
+    }
+    expect((await getFeatured()).models.some((model: { id: string }) => retired.some(([id]) => model.id === id))).toBe(false);
     // The actual DDL, not a string assertion, enforces the persisted maximum and rejects NULL entries.
     await expect(query("UPDATE model_presentation_settings SET featured_model_ids=$1::uuid[]", [Array(6).fill(ordered[0])])).rejects.toMatchObject({ code: "23514" });
     await expect(query("UPDATE model_presentation_settings SET featured_model_ids=ARRAY[NULL]::uuid[]")).rejects.toMatchObject({ code: "23514" });

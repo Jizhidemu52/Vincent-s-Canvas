@@ -9,6 +9,66 @@ import { compiledCanvasGenerationRecord, createCanvasGenerationRecord } from "@/
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { defaultConfig } from "@/stores/use-config-store";
 import { displayHooksHarness } from "./helpers/display-hooks-harness";
+import { batchHarness, settleBatch } from "./canvas-batch-test-harness";
+
+test("queue delivery diagnostics cannot replace the original batch task success or create another submission", async () => {
+    const h = batchHarness();
+    const run = h.draft("original").runBatchImageEdit();
+    await settleBatch();
+    const submission = h.submissions[0];
+    submission.finish.resolve({ batchId: submission.id, failures: [{ index: 0, reason: "Queue delivery pending" }],
+        tasks: [{ id: "original-task", itemIndex: 0, status: "success", resultUrls: ["result:original-task"] }] });
+    await run;
+
+    expect(h.render().batchEditItems[0]).toMatchObject({ status: "success", requestId: submission.requestId, resultUrl: "result:original-task" });
+    expect(h.render().batchEditItems[0].failureReason).toBeUndefined();
+    const result = h.nodes.current.find(node => node.metadata.sourceTaskId === "original-task");
+    expect(result.metadata).toMatchObject({ status: "success", content: "result:original-task" });
+    expect(result.metadata.errorDetails).toBeUndefined();
+    expect(result.metadata.imageTask).toBeUndefined();
+    expect(h.assets).toHaveLength(1);
+    expect(h.notices).toEqual(["success:批量改图完成：1 张"]);
+    await h.render().runBatchImageEdit();
+    expect(h.submissions).toHaveLength(1);
+    expect(h.controls).toEqual([]);
+    h.unmount();
+});
+
+test.each([
+    { status: "failed", reason: "Original task failed", totals: "成功 0 张，失败 1 张，取消 0 张" },
+    { status: "cancelled", reason: "Original task cancelled", totals: "成功 0 张，失败 0 张，取消 1 张" },
+])("queue delivery diagnostics do not double-count an original $status task", async ({ status, reason, totals }) => {
+    const h = batchHarness();
+    const run = h.draft("original").runBatchImageEdit();
+    await settleBatch();
+    const submission = h.submissions[0];
+    submission.finish.resolve({ batchId: submission.id, failures: [{ index: 0, reason: "Queue delivery pending" }],
+        tasks: [{ id: "original-task", itemIndex: 0, status, resultUrls: [], failureReason: reason }] });
+    await run;
+
+    expect(h.render().batchEditItems[0]).toMatchObject({ status, failureReason: reason, requestId: submission.requestId });
+    expect(h.nodes.current.find(node => node.metadata.generationOrigin).metadata).toMatchObject({ status: "error", errorDetails: reason });
+    expect(h.assets).toHaveLength(0);
+    expect(h.notices).toEqual([`warning:批量改图完成，${totals}`]);
+    expect(h.submissions).toHaveLength(1);
+    h.unmount();
+});
+
+test("a batch item rejected without an original task remains failed", async () => {
+    const h = batchHarness();
+    const run = h.draft("rejected").runBatchImageEdit();
+    await settleBatch();
+    const submission = h.submissions[0];
+    submission.finish.resolve({ batchId: submission.id, failures: [{ index: 0, reason: "Admission rejected" }], tasks: [] });
+    await run;
+
+    expect(h.render().batchEditItems[0]).toMatchObject({ status: "failed", failureReason: "Admission rejected" });
+    expect(h.nodes.current.find(node => node.metadata.generationOrigin).metadata).toMatchObject({ status: "error", errorDetails: "Admission rejected" });
+    expect(h.assets).toHaveLength(0);
+    expect(h.notices).toEqual(["warning:批量改图完成，成功 0 张，失败 1 张，取消 0 张"]);
+    expect(h.submissions).toHaveLength(1);
+    h.unmount();
+});
 
 test("multi-file selection keeps all supported images in natural filename order", () => {
     const files = ["10.png", "2.png", "1.png"].map(name => new File(["image"], name, { type: "image/png" }));

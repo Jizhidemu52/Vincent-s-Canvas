@@ -11,7 +11,7 @@ const dialog = (page: Page) => page.getByRole("dialog", { name: "批量一键改
 const prompt = (page: Page) => dialog(page).getByRole("textbox", { name: "批量改图提示词", exact: true });
 const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
-async function batchApi(page: Page, api: MockCanvasApi) {
+async function batchApi(page: Page, api: MockCanvasApi, deliveryPending = false) {
     const batches = new Map<string, any[]>();
     const controls: Array<{ batchId: string; action: string }> = [];
     const resultBytes = new Map<string, Buffer>();
@@ -43,7 +43,8 @@ async function batchApi(page: Page, api: MockCanvasApi) {
             return task;
         });
         batches.set(batchId, tasks);
-        return route.fulfill({ status: 201, json: { batchId, tasks, failures: [], prompt: input.prompt, optimized: false } });
+        const failures = deliveryPending ? tasks.map((task: any) => ({ index: task.itemIndex, reason: "Queue delivery pending" })) : [];
+        return route.fulfill({ status: 201, json: { batchId, tasks, failures, queuePending: deliveryPending, prompt: input.prompt, optimized: false } });
     });
     await page.route(/\/api\/tasks\/batches\/[^/]+\/(pause|resume|cancel)$/, route => {
         const parts = new URL(route.request().url()).pathname.split("/");
@@ -106,6 +107,47 @@ async function originalNodes(page: Page, projectId: string) {
         }));
     }, projectId);
 }
+
+test("a queue delivery warning keeps the original task success and unchanged source without resubmitting", async ({ page, api }, info) => {
+    const f = await batchApi(page, api, true), projectId = await newCanvas(page);
+    const source = sourcesA[0];
+    await open(page);
+    await fill(page, promptA, [source]);
+    await submit(page, api, 1);
+    const batchId = [...f.batches.keys()][0], task = f.batches.get(batchId)![0];
+    const requestId = api.batchSubmissions[0].requestId;
+    await expect(dialog(page).getByText("等待中", { exact: true })).toHaveCount(1);
+    await expect.poll(() => api.document(projectId)?.nodes.some((node: any) => node.metadata?.imageTask?.requestId === `${requestId}:0`)).toBe(true);
+    const original = (await originalNodes(page, projectId)).find(node => node.title === source.name)!;
+    expect(original).toMatchObject({ sha256: sha(source.bytes), bytes: source.bytes.length });
+
+    f.finish(batchId);
+    await expect(dialog(page).getByText("批次 1 · 已结束 · 1/1", { exact: true })).toBeVisible();
+    await expect(dialog(page).getByText("成功", { exact: true })).toHaveCount(1);
+    await expect(dialog(page).getByText("失败", { exact: true })).toHaveCount(0);
+    await expect(dialog(page).getByRole("button", { name: "一键生图", exact: true })).toBeDisabled();
+    await expect.poll(() => api.document(projectId)?.nodes.find((node: any) => node.metadata?.sourceTaskId === task.id)?.metadata.status).toBe("success");
+    const resultNode = api.document(projectId)!.nodes.find((node: any) => node.metadata?.sourceTaskId === task.id)!;
+    expect(resultNode.metadata.errorDetails).toBeUndefined();
+    expect(resultNode.metadata.imageTask).toBeUndefined();
+    const completed = await originalNodes(page, projectId);
+    expect(completed).toHaveLength(2);
+    expect(completed.find(node => node.id === original.id)).toEqual(original);
+    expect(completed.find(node => node.sourceTaskId === task.id)).toMatchObject({ sourceNodeId: original.id, sha256: sha(f.resultBytes.get(task.id)!) });
+    await page.screenshot({ path: info.outputPath("queue-warning-original-success.png") });
+
+    await dialog(page).getByRole("button", { name: /^关\s*闭$/ }).click();
+    await open(page);
+    await expect(dialog(page).getByText("成功", { exact: true })).toHaveCount(1);
+    await expect(dialog(page).getByRole("button", { name: "一键生图", exact: true })).toBeDisabled();
+    await page.reload();
+    await expect(page.getByRole("button", { name: "上传素材", exact: true })).toBeVisible();
+    expect(await originalNodes(page, projectId)).toEqual(completed);
+    expect(api.batchSubmissions).toHaveLength(1);
+    expect(api.batchSubmissions[0].requestId).toBe(requestId);
+    expect(api.submissions).toHaveLength(0);
+    expect(f.controls).toEqual([]);
+});
 
 test("two canvas batches run independently, keep targeted controls and preserve originals through reverse completion and close/reopen", async ({ page, api }, info) => {
     const f = await batchApi(page, api), projectId = await newCanvas(page);

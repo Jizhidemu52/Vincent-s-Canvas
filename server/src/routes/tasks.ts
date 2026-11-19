@@ -308,7 +308,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
       admission = { id: batchId, owner: claimed.token };
       for (const [index, item] of input.items.entries()) {
         try {
-          await enqueueTask(db, cache, {
+          const task = await enqueueTask(db, cache, {
             ...prepared,
             // Each batch item owns different originals; never reuse the representative source snapshot.
             seedreamPreflightResult: undefined,
@@ -323,6 +323,14 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
             batchId,
             batchAdmission: admission.owner,
           });
+          if (task.queuePending) {
+            await recordBatchAdmissionFailure(db, batchId, admission.owner, {
+              index,
+              reason: "任务已保存，正在等待队列投递；请勿重复提交",
+              code: "TASK_QUEUE_PENDING",
+              admitted: true,
+            });
+          }
         } catch (error) {
           if (error instanceof PromptOptimizationError && error.code === "BATCH_SUBMISSION_INTERRUPTED") throw error;
           const reason =

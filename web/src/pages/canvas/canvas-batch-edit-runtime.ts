@@ -266,8 +266,10 @@ export async function runCanvasBatchImageEdit({
             const completedBatchItems = new Map<string, { status: "failed" | "cancelled"; failureReason: string }>();
             const completedBatchResultNodes = new Map<string, string>();
             const successfulBatchTasks: Array<{ entry: (typeof prepared)[number]; resultUrl: string; sourceTaskId: string }> = [];
+            const taskItemIndexes = new Set(result.tasks.map(task => task.itemIndex));
 
             for (const failure of result.failures) {
+                if (taskItemIndexes.has(failure.index)) continue;
                 const entry = prepared[failure.index];
                 if (!entry) continue;
                 failedCount += 1;

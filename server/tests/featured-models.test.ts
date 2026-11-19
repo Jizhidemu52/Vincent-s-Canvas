@@ -26,6 +26,9 @@ const ids = {
   official: "20000000-0000-4000-8000-000000000009",
   openToken: "20000000-0000-4000-8000-000000000010",
   other: "20000000-0000-4000-8000-000000000011",
+  gpt26Flare: "20000000-0000-4000-8000-000000000012",
+  gpt26Sunburst: "20000000-0000-4000-8000-000000000013",
+  mai27: "20000000-0000-4000-8000-000000000014",
   missing: "20000000-0000-4000-8000-000000000099",
 };
 const defaultIds = [ids.flare, ids.sunburst, ids.nano21, ids.blend, ids.gpt2];
@@ -43,11 +46,13 @@ function model(id = ids.flare, modelId = "gpt-image-2.5-flare", overrides: Recor
 }
 
 function catalog() {
-  // Deliberately not preset order: defaults must not depend on SQL/name ordering.
   return [
+    model(ids.mai27, "mai-image-2.7-flash"),
+    model(ids.gpt26Sunburst, "gpt-image-2.6-sunburst", { enabled: false }),
+    model(ids.gpt26Flare, "gpt-image-2.6-flare"),
     model(ids.official, "gemini-3.1-flash-image-preview-official"),
     model(ids.openToken, "gpt-image-2", { providerId: ids.openToken, providerName: "OpenToken", protocol: "openai", providerBaseUrl: "https://api.opentoken.io/v1" }),
-    model(ids.grok, "grok-imagine-image-2.0", { enabled: false }),
+    model(ids.grok, "grok-imagine-image-2.0"),
     model(ids.video, "happyhorse-1.1", { capabilities: ["video"] }),
     model(ids.gpt2, "gpt-image-2"),
     model(ids.blend, "midjourney-blend", { capabilities: ["generate"] }),
@@ -66,6 +71,8 @@ describe("featured image model presentation", () => {
     ["same name on another provider", { providerId: ids.other, providerName: "APIMart 平台" }, false],
     ["wrong protocol", { protocol: "openai" }, false],
     ["unknown preset", { modelId: "unregistered-image" }, false],
+    ["retired Grok preset", { modelId: "grok-imagine-image-2.0" }, false],
+    ["retired official Nano preset", { modelId: "gemini-3.1-flash-image-preview-official" }, false],
     ["disabled model remains an admin candidate", { enabled: false }, true],
     ["disabled provider remains an admin candidate", { providerEnabled: false }, true],
     ["editing without generation", { capabilities: ["edit"] }, false],
@@ -77,39 +84,39 @@ describe("featured image model presentation", () => {
     expect(isFeaturedModelCandidate(model(ids.flare, "gpt-image-2.5-flare", overrides))).toBe(expected);
   });
 
-  test("defaults select the first five eligible Mark presets, including Blend but excluding chat, video and disabled Grok", () => {
+  test("defaults select the first five eligible Mark presets, excluding retired models and disabled current choices", () => {
     const rows = catalog();
     expect(defaultFeaturedModelIds(rows)).toEqual(defaultIds);
     expect(defaultFeaturedModelIds([...rows].reverse())).toEqual(defaultIds);
     expect(rows.filter(isFeaturedModelCandidate).map(row => row.id).sort()).toEqual([
-      ids.flare, ids.sunburst, ids.nano21, ids.blend, ids.gpt2, ids.grok, ids.official,
+      ids.flare, ids.sunburst, ids.nano21, ids.blend, ids.gpt2, ids.gpt26Flare, ids.gpt26Sunburst, ids.mai27,
     ].sort());
   });
 
   test("defaults skip disabled providers and fill from later eligible presets", () => {
     const rows = catalog().map(row => row.id === ids.flare ? { ...row, providerEnabled: false } : row);
-    expect(defaultFeaturedModelIds(rows)).toEqual([ids.sunburst, ids.nano21, ids.blend, ids.gpt2, ids.official]);
+    expect(defaultFeaturedModelIds(rows)).toEqual([ids.sunburst, ids.nano21, ids.blend, ids.gpt2, ids.gpt26Flare]);
   });
 
   test("only an absent setting uses defaults; explicit empty and stale-only settings stay empty", () => {
     const rows = catalog();
     expect(resolveFeaturedModelIds(rows, null)).toEqual(defaultIds);
     expect(resolveFeaturedModelIds(rows, [])).toEqual([]);
-    expect(resolveFeaturedModelIds(rows, [ids.missing, ids.grok, ids.chat, ids.video, ids.openToken])).toEqual([]);
+    expect(resolveFeaturedModelIds(rows, [ids.missing, ids.grok, ids.official, ids.gpt26Sunburst, ids.chat, ids.video, ids.openToken])).toEqual([]);
   });
 
   test("configured order is preserved while duplicates, unavailable entries and excess selections are removed", () => {
     const rows = catalog();
-    expect(resolveFeaturedModelIds(rows, [ids.official, ids.missing, ids.sunburst, ids.official, ids.openToken, ids.blend]))
-      .toEqual([ids.official, ids.sunburst, ids.blend]);
-    expect(resolveFeaturedModelIds(rows, [ids.official, ids.gpt2, ids.blend, ids.nano21, ids.sunburst, ids.flare]))
-      .toEqual([ids.official, ids.gpt2, ids.blend, ids.nano21, ids.sunburst]);
+    expect(resolveFeaturedModelIds(rows, [ids.mai27, ids.missing, ids.sunburst, ids.mai27, ids.openToken, ids.blend]))
+      .toEqual([ids.mai27, ids.sunburst, ids.blend]);
+    expect(resolveFeaturedModelIds(rows, [ids.mai27, ids.gpt2, ids.blend, ids.nano21, ids.sunburst, ids.flare]))
+      .toEqual([ids.mai27, ids.gpt2, ids.blend, ids.nano21, ids.sunburst]);
   });
 
   test("presentation copies every row, preserves configuration identity and places featured selections ahead of Mark then OpenToken", () => {
     const rows = catalog();
     const before = structuredClone(rows);
-    const shown = applyModelPresentation(rows, [ids.official, ids.blend]);
+    const shown = applyModelPresentation(rows, [ids.mai27, ids.blend]);
     expect(rows).toEqual(before);
     expect(shown).toHaveLength(rows.length);
     for (const row of shown) {
@@ -118,10 +125,10 @@ describe("featured image model presentation", () => {
       expect(row).toMatchObject({ id: original.id, modelId: original.modelId, providerId: original.providerId });
       expect(typeof row.isFeatured).toBe("boolean");
       expect(Number.isInteger(row.displayOrder)).toBe(true);
-      if (![ids.official, ids.blend].includes(row.id)) expect(row.displayOrder).toBeGreaterThanOrEqual(1000);
+      if (![ids.mai27, ids.blend].includes(row.id)) expect(row.displayOrder).toBeGreaterThanOrEqual(1000);
     }
     const byId = new Map(shown.map(row => [row.id, row]));
-    expect(byId.get(ids.official)).toMatchObject({ isFeatured: true, displayOrder: 0 });
+    expect(byId.get(ids.mai27)).toMatchObject({ isFeatured: true, displayOrder: 0 });
     expect(byId.get(ids.blend)).toMatchObject({ isFeatured: true, displayOrder: 1 });
     expect(byId.get(ids.flare)!.displayOrder).toBeLessThan(byId.get(ids.sunburst)!.displayOrder);
     expect(byId.get(ids.sunburst)!.displayOrder).toBeLessThan(byId.get(ids.nano21)!.displayOrder);
@@ -140,6 +147,7 @@ describe("read-only demo featured model presentation", () => {
     expect(visible.filter(row => row.isFeatured).map(row => row.id)).toEqual(defaultIds);
     expect(visible.filter(row => row.isFeatured).map(row => row.displayOrder)).toEqual([0, 1, 2, 3, 4]);
     expect(visible.some(row => row.id === ids.grok)).toBe(false);
+    expect(visible.some(row => row.id === ids.official || row.id === ids.gpt26Sunburst)).toBe(false);
     expect(visible.filter(row => [ids.chat, ids.video].includes(row.id)).every(row => row.isFeatured === false)).toBe(true);
     expect(rows).toEqual(before);
   });
@@ -259,9 +267,9 @@ describe("featured model configuration HTTP contract", () => {
     expect(body.featuredModelIds).toEqual(defaultIds);
     expect(body.maxFeatured).toBe(5);
     expect(body.models.map((row: { id: string }) => row.id).sort()).toEqual([
-      ids.flare, ids.sunburst, ids.nano21, ids.blend, ids.gpt2, ids.grok, ids.official,
+      ids.flare, ids.sunburst, ids.nano21, ids.blend, ids.gpt2, ids.gpt26Flare, ids.gpt26Sunburst, ids.mai27,
     ].sort());
-    expect(body.models.find((row: { id: string }) => row.id === ids.grok)).toMatchObject({ enabled: false, isFeatured: false });
+    expect(body.models.find((row: { id: string }) => row.id === ids.gpt26Sunburst)).toMatchObject({ enabled: false, isFeatured: false });
     expect(state.storedIds).toBeNull();
     expect(state.connects).toBe(0);
     expect(state.statements.every(({ sql }) => sql.startsWith("SELECT"))).toBe(true);
@@ -269,7 +277,7 @@ describe("featured model configuration HTTP contract", () => {
 
   test("PUT persists custom order atomically and GET/public models use that same order", async () => {
     const { state, url } = await serve();
-    const selected = [ids.official, ids.blend, ids.flare];
+    const selected = [ids.mai27, ids.gpt26Flare, ids.blend];
     const response = await put(url, { modelConfigIds: selected });
     expect(response.status).toBe(200);
     expect((await response.json()).featuredModelIds).toEqual(selected);
@@ -320,7 +328,7 @@ describe("featured model configuration HTTP contract", () => {
     ["non-array field", { modelConfigIds: ids.flare }],
     ["non-UUID entry", { modelConfigIds: ["gpt-image-2.5-flare"] }],
     ["duplicate entry", { modelConfigIds: [ids.flare, ids.flare] }],
-    ["six entries", { modelConfigIds: [ids.flare, ids.sunburst, ids.nano21, ids.blend, ids.gpt2, ids.official] }],
+    ["six entries", { modelConfigIds: [ids.flare, ids.sunburst, ids.nano21, ids.blend, ids.gpt2, ids.mai27] }],
     ["unexpected field", { modelConfigIds: [ids.flare], ignored: true }],
   ])("rejects %s as VALIDATION_ERROR before accessing the database", async (_label, input) => {
     const { state, url } = await serve();
@@ -335,7 +343,9 @@ describe("featured model configuration HTTP contract", () => {
   test.each([
     ["unknown config", ids.missing, null],
     ["non-Mark provider", ids.openToken, null],
-    ["disabled model", ids.grok, null],
+    ["disabled model", ids.gpt26Sunburst, null],
+    ["retired Grok model", ids.grok, null],
+    ["retired official Nano model", ids.official, null],
     ["chat preset", ids.chat, null],
     ["video preset", ids.video, null],
     ["wrong protocol", ids.flare, { protocol: "openai" }],

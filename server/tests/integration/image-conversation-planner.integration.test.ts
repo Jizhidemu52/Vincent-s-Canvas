@@ -29,20 +29,19 @@ integration("isolated image conversation planner billing and loopback provider",
     fixture = await createIsolatedPostgres();
     const app = express();
     app.use(express.json({ limit: "20mb" }));
-    app.post(["/responses", "/chat/completions", "/alternate/responses", "/alternate/chat/completions"], (request, response) => {
+    app.use((request, _response, next) => {
       calls++;
       requests.push({ path: request.path, body: request.body });
+      next();
+    });
+    app.post(["/responses", "/alternate/responses"], (request, response) => {
       if (mode === "disconnect" || mode === "lookup-disconnect" && calls === 2) { request.socket.destroy(); return; }
       if (mode === "rejected") { response.status(503).json({ error: { message: "loopback-only unavailable" } }); return; }
-      if (mode === "invalid-json") { response.type("application/json").send('{"choices":['); return; }
+      if (mode === "invalid-json") { response.type("application/json").send('{"output":['); return; }
       const reply = plannerReply();
       if (mode === "lookup-loop" || ["lookup", "lookup-disconnect"].includes(mode) && calls === 1) reply.toolCalls = [{ id: `history-${calls}`, type: "function", function: { name: IMAGE_CONVERSATION_HISTORY_TOOL, arguments: JSON.stringify({ versionIds: [plannerIds.original] }) } }];
       if (mode === "invalid-plan") reply.toolCalls.push(reply.toolCalls[0]!);
-      if (request.path.endsWith("/chat/completions")) {
-        response.json({ choices: [{ message: { role: "assistant", content: "", tool_calls: reply.toolCalls }, finish_reason: "tool_calls" }] });
-      } else {
-        response.json({ status: "completed", output: reply.toolCalls.map(call => ({ type: "function_call", status: "completed", call_id: call.id, ...call.function })) });
-      }
+      response.json({ status: "completed", output: reply.toolCalls.map(call => ({ type: "function_call", status: "completed", call_id: call.id, ...call.function })) });
     });
     server = app.listen(0, "127.0.0.1");
     await new Promise<void>(done => server.once("listening", done));
@@ -109,11 +108,16 @@ integration("isolated image conversation planner billing and loopback provider",
     expect(calls).toBe(2);
     expect(lookup.selections).toEqual([{ versionIds: [plannerIds.original], imageNos: [] }]);
     expect(lookup.validations()).toBe(1);
+    expect(requests.map(request => request.path)).toEqual(["/responses", "/responses"]);
     expect(requests[0]!.body).toMatchObject({ tool_choice: "required" });
     expect(requests[0]!.body.tools).toHaveLength(2);
-    expect(requests[1]!.body.messages.some((message: any) => message.role === "tool" && message.tool_call_id === "history-1")).toBe(true);
-    expect(JSON.stringify(requests[1]!.body.messages)).toContain("data:image/png;base64,BAUG");
-    expect(requests[1]!.body.messages.at(-1)).toEqual({ role: "user", content: plannerText });
+    expect(requests[1]!.body.input).toContainEqual({ type: "function_call", call_id: "history-1", name: IMAGE_CONVERSATION_HISTORY_TOOL, arguments: JSON.stringify({ versionIds: [plannerIds.original] }) });
+    const lookupOutput = requests[1]!.body.input.find((item: any) => item.type === "function_call_output" && item.call_id === "history-1");
+    expect(lookupOutput).toBeDefined();
+    expect(JSON.parse(lookupOutput.output)).toMatchObject({ versions: expect.arrayContaining([expect.objectContaining({ id: plannerIds.original, previewed: true })]) });
+    expect(JSON.stringify(requests[1]!.body.input)).toContain("data:image/png;base64,BAUG");
+    expect(requests[1]!.body.input.at(-1)).toEqual({ role: "user", content: plannerText });
+    expect(requests[1]!.body).not.toHaveProperty("messages");
     expect(await reservation(current.reservationId)).toEqual({ status: "captured", credits: 7 });
     expect(await usage(current.user.id)).toHaveLength(1);
   });
@@ -137,11 +141,13 @@ integration("isolated image conversation planner billing and loopback provider",
     const current = await prepare();
     expect(await current.prepared.run()).toEqual(plannerEdit());
     expect(calls).toBe(1);
-    expect(requests[0]!.path).toBe("/chat/completions");
+    expect(requests[0]!.path).toBe("/responses");
     expect(requests[0]!.body).toMatchObject({ model: IMAGE_CONVERSATION_PLANNER_MODEL_ID, stream: false, parallel_tool_calls: false,
-      tool_choice: { type: "function", function: { name: "plan_image_conversation" } } });
+      tool_choice: { type: "function", name: "plan_image_conversation" }, include: ["reasoning.encrypted_content"] });
     expect(requests[0]!.body.tools).toHaveLength(1);
-    expect(requests[0]!.body.messages.at(-1)).toEqual({ role: "user", content: plannerText });
+    expect(requests[0]!.body.tools[0]).toMatchObject({ type: "function", name: "plan_image_conversation", parameters: { type: "object" } });
+    expect(requests[0]!.body.input.at(-1)).toEqual({ role: "user", content: plannerText });
+    expect(requests[0]!.body).not.toHaveProperty("messages");
     expect(await balance(current.user.id)).toBe(93);
     expect(await reservation(current.reservationId)).toEqual({ status: "captured", credits: 7 });
     expect(await usage(current.user.id)).toEqual([{ board_key: "gpt-chat", prompt: plannerText, status: "success" }]);
@@ -163,7 +169,7 @@ integration("isolated image conversation planner billing and loopback provider",
     const side = await prepare({ toolKey: "canvas-design-chat" });
     expect(side.prepared.modelConfigId).toBe(alternateModelId);
     await side.prepared.run();
-    expect(requests.map(request => request.path)).toEqual(["/chat/completions", "/alternate/chat/completions"]);
+    expect(requests.map(request => request.path)).toEqual(["/responses", "/alternate/responses"]);
     expect(await reservation(side.reservationId)).toEqual({ status: "captured", credits: 13 });
     expect(await expectedRejection(prepare({ toolKey: "canvas-chat" }))).toMatchObject({ code: "CHAT_MODEL_NOT_CONFIGURED" });
     expect(calls).toBe(2);

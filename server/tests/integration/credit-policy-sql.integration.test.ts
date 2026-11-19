@@ -183,21 +183,26 @@ sqlTest("credit policy is authorized, durable and read on every new task without
     await settleReservation(db, "policy-batch-collision:0", "release");
     expect(await balance()).toBe(1000);
 
-    // SQL commits before queue delivery. A queue outage must not rewrite a held
-    // task to a zero-price failure or leak its hold; retry can deliver the same ID.
+    const beforeQueueOutage = queued.length;
     queueFails = true;
     const interruptedBatch = await request("/api/tasks/batch", "POST", batchBody("policy-queue-outage"), designerId);
     expect(interruptedBatch.status).toBe(201);
     const interruptedBody = await interruptedBatch.json();
     expect(interruptedBody.tasks).toHaveLength(1);
-    expect(interruptedBody.failures).toHaveLength(1);
+    expect(interruptedBody.failures).toEqual([{ index: 0, code: "TASK_QUEUE_PENDING", reason: "原任务结果待核查，请查询原任务或联系管理员；不要重复生成。" }]);
+    expect((await query("SELECT admission_failures FROM batch_tasks WHERE id=$1", [interruptedBody.batchId])).rows[0].admission_failures)
+      .toEqual([{ index: 0, code: "TASK_QUEUE_PENDING", reason: "任务已保存，正在等待队列投递；请勿重复提交", admitted: true }]);
     expect(interruptedBody.tasks[0]).toMatchObject({ status: "waiting", credits: 13 });
     expect(await balance()).toBe(987);
     expect((await query("SELECT status,credits FROM tasks WHERE request_id='policy-queue-outage:0'")).rows).toEqual([{ status: "waiting", credits: 13 }]);
     queueFails = false;
     const recoveredBatch = await request("/api/tasks/batch", "POST", batchBody("policy-queue-outage"), designerId);
     expect(recoveredBatch.status).toBe(201);
-    expect((await recoveredBatch.json()).tasks[0].id).toBe(interruptedBody.tasks[0].id);
+    expect(await recoveredBatch.json()).toEqual(interruptedBody);
+    const recoveredRead = await request("/api/tasks/batches/by-request/policy-queue-outage", "GET", undefined, designerId);
+    expect(recoveredRead.status).toBe(200);
+    expect(await recoveredRead.json()).toEqual(interruptedBody);
+    expect(queued.length).toBe(beforeQueueOutage);
     expect(await balance()).toBe(987);
     expect((await query("SELECT id FROM credit_reservations WHERE request_id='policy-queue-outage:0'")).rows).toHaveLength(1);
     await settleReservation(db, "policy-queue-outage:0", "release");

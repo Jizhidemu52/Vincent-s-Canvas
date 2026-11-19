@@ -129,13 +129,25 @@ sqlSuite("owner-bound, read-only board history across browsers", () => {
 
   test("each exact business board separates canonical quick actions, canvas and ambiguous legacy origins", async () => {
     for (const [board, id] of boardTaskIds) {
-      const response = await get(board);
-      expect(response.status).toBe(200);
-      const body = await response.json();
-      const expected = [id, ...(legacyIds.has(board) ? [legacyIds.get(board)!] : [])].sort();
-      expect(body.tasks.map((task: any) => task.id).sort()).toEqual(expected);
-      expect(body.hasMore).toBe(false);
-      expect(body.nextCursor).toBeNull();
+      const expectedIds = [id, ...(legacyIds.has(board) ? [legacyIds.get(board)!] : []),
+        ...(board === "image-edit" ? [...ordinaryIds, legacyIds.get("image-generation")!] : [])];
+      const expected = (await fixture.db.query("SELECT id FROM tasks WHERE id=ANY($1::uuid[]) ORDER BY queued_at DESC,id DESC", [expectedIds])).rows.map(row => row.id);
+      const seen: string[] = [];
+      let cursor: string | null = null, pages = 0;
+      do {
+        const response = await get(board, cursor ? `&cursor=${encodeURIComponent(cursor)}` : "");
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        expect(body.tasks.length).toBeLessThanOrEqual(30);
+        expect(body.tasks.every((task: any) => task.userId === owner)).toBe(true);
+        seen.push(...body.tasks.map((task: any) => task.id));
+        expect(body.hasMore).toBe(body.nextCursor !== null);
+        cursor = body.nextCursor; pages++;
+        expect(pages).toBeLessThanOrEqual(4);
+      } while (cursor);
+      expect(pages).toBe(board === "image-edit" ? 4 : 1);
+      expect(seen).toEqual(expected);
+      expect(new Set(seen).size).toBe(expectedIds.length);
     }
   });
 

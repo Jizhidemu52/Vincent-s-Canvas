@@ -166,6 +166,8 @@ describe("explicit image pipelines are isolated from ordinary task admission", (
     expect(f.queued()).toBe(1);
     expect(f.preflights()).toBe(2);
     const persisted = f.statements.find(({ sql }) => sql.startsWith("UPDATE tasks SET model_config_id="));
-    expect(persisted?.values.slice(0, 3)).toEqual([modelConfigId, "video", { ...parameters, tool: "video" }]);
+    expect(persisted?.values.slice(0, 3)).toEqual([modelConfigId, "video", {
+      ...parameters, tool: "video", referenceCount: 0, upstreamBillingSeconds: 6, videoMode: "text",
+    }]);
   });
 });

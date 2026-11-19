@@ -540,7 +540,11 @@ isolated("durable PostgreSQL batch admission recovery", () => {
     const accepted = await response!.json();
     expect(accepted.submissionComplete).toBe(true);
     expect(accepted.tasks).toHaveLength(3);
-    expect(accepted.failures).toHaveLength(3);
+    expect(accepted.failures).toEqual([0, 1, 2].map(index => ({
+      index, code: "TASK_QUEUE_PENDING", reason: "原任务结果待核查，请查询原任务或联系管理员；不要重复生成。",
+    })));
+    expect((await query("SELECT admission_failures FROM batch_tasks WHERE id=$1", [accepted.batchId])).rows[0]!.admission_failures)
+      .toEqual([0, 1, 2].map(index => ({ index, code: "TASK_QUEUE_PENDING", reason: "任务已保存，正在等待队列投递；请勿重复提交", admitted: true })));
     expect(
       accepted.tasks.every(
         (task: any) => task.status === "waiting" && task.credits === 7,
@@ -558,12 +562,19 @@ isolated("durable PostgreSQL batch admission recovery", () => {
       fresh,
     );
     expect(await get.json()).toEqual(accepted);
-    expect((await request(user, "/api/tasks/batch", value, fresh)).status).toBe(
-      200,
-    );
+    const repeated = await request(user, "/api/tasks/batch", value, fresh);
+    expect(repeated.status).toBe(200);
+    expect(await repeated.json()).toEqual(accepted);
     expect(await state(user)).toEqual(saved);
     expect(optimized.length - before).toBe(1);
     expect(queued.length).toBe(beforeRecoveryQueue);
+    await query("UPDATE tasks SET status='success',result_urls='[\"/api/assets/reconciled/content\"]'::jsonb WHERE batch_id=$1", [accepted.batchId]);
+    const completed = await (await request(user, `/api/tasks/batches/by-request/${value.requestId}`, undefined, fresh)).json();
+    expect(completed.tasks.map((task: { id: string }) => task.id)).toEqual(accepted.tasks.map((task: { id: string }) => task.id));
+    expect(completed.tasks.every((task: { status: string }) => task.status === "success")).toBe(true);
+    expect(completed.failures).toEqual(accepted.failures);
+    expect(queued.length).toBe(beforeRecoveryQueue);
+    expect((await state(user)).holds).toEqual(saved.holds);
   });
 
   test("known quota rejections remain explicit after router restart and never reserve rejected items", async () => {

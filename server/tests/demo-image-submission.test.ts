@@ -34,7 +34,7 @@ const productionCode = ts.transpileModule([
   ]),
   await declarations("../src/apimart-image.ts", [
     "runApiMartImageTask", "stepApiMartImageTask", "readTaskId", "readStatus", "readOutputUrls", "readFailureMessage", "providerMessage", "object", "string",
-    "IMAGE_STATUSES", "IMAGE_FAILURE_STATUSES", "isMarkImageModel", "MARK_IMAGE_MODELS",
+    "IMAGE_STATUSES", "IMAGE_FAILURE_STATUSES", "isMarkImageModel", "isMaiImageModel", "MARK_IMAGE_MODELS",
     "imageReferences", "buildImageRequest", "validateInlineReferences", "normalizeModelId", "normalizeAspect",
     "normalizeGptResolution", "normalizeGeminiResolution", "referencePayload", "imageDataUrl", "GPT_RATIOS", "GEMINI_RATIOS",
   ]),
