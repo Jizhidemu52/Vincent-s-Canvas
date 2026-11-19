@@ -22,6 +22,7 @@ test("asset copy feedback is bound to its asset, lasts 1200ms and retains clipbo
     await card("文本A").getByRole("button", { name: /^查\s*看$/ }).click();
     const drawer = page.getByRole("dialog", { name: "素材详情", exact: true });
     const copy = drawer.getByRole("button", { name: "复制文本", exact: true });
+    await expect(page.locator(".ant-drawer-content-wrapper").filter({ has: drawer })).not.toHaveClass(/ant-drawer-panel-motion-/);
     await page.clock.install(); await page.clock.pauseAt(new Date());
     await copy.click(); await expect(copy).toHaveText("已复制 ✓");
     expect((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, "\n")).toBe("原文 A\n保持换行");
