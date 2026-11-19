@@ -325,6 +325,7 @@ test("changing a legacy or uploaded image draft model never rewrites historical 
 });
 
 test("plain image selection restores archived inputs, rapid A/B draft switches are scoped and saved across reload", async ({ page, api }) => {
+    await page.clock.install();
     const original = await scene(page, api);
     await select(page, "result-a");
     await expect(editor(page)).toHaveValue(INPUT);
@@ -332,20 +333,27 @@ test("plain image selection restores archived inputs, rapid A/B draft switches a
     await assertReferencePreview(page, "source");
     await panel(page).locator(".cw-reference-preview").scrollIntoViewIfNeeded();
     await expect(panel(page).locator(".cw-reference-preview")).toBeInViewport();
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
     await page.evaluate(() => {
         const samples: { input: number; selection: number }[] = []; (window as any).__draftSwitchSamples = samples;
         document.addEventListener("input", event => { if ((event.target as Element).matches("textarea.cw-prompt")) samples.push({ input: performance.now(), selection: 0 }); }, true);
         document.addEventListener("pointerdown", event => { if ((event.target as Element).closest("[data-node-id]") && samples.at(-1) && !samples.at(-1)!.selection) samples.at(-1)!.selection = performance.now(); }, true);
     });
-    await editor(page).fill("A 独立快速草稿");
-    await select(page, "result-b", true);
-    await expect(editor(page)).toHaveValue("B 原始用户输入");
-    await editor(page).fill("B 独立快速草稿");
-    await select(page, "result-a", true);
-    await expect(editor(page)).toHaveValue("A 独立快速草稿");
-    const elapsed = await page.evaluate(() => (window as any).__draftSwitchSamples.map((sample: any) => sample.selection - sample.input));
-    expect(elapsed).toHaveLength(2); for (const duration of elapsed) { expect(duration).toBeGreaterThan(0); expect(duration).toBeLessThan(180); }
-    console.log(`Draft selection delays: ${elapsed.map((value: number) => `${value.toFixed(1)} ms`).join(", ")}`);
+    try {
+        await editor(page).fill("A 独立快速草稿");
+        await page.clock.runFor(179);
+        await select(page, "result-b", true);
+        await expect(editor(page)).toHaveValue("B 原始用户输入");
+        await editor(page).fill("B 独立快速草稿");
+        await page.clock.runFor(179);
+        await select(page, "result-a", true);
+        await expect(editor(page)).toHaveValue("A 独立快速草稿");
+        const elapsed = await page.evaluate(() => (window as any).__draftSwitchSamples.map((sample: any) => sample.selection - sample.input));
+        expect(elapsed).toEqual([179, 179]);
+        console.log(`Controlled draft selection delays: ${elapsed.join(", ")} ms`);
+    } finally {
+        await page.clock.resume();
+    }
     await expect.poll(() => node(api, "result-a").metadata.draftPrompt).toBe("A 独立快速草稿");
     await expect.poll(() => node(api, "result-b").metadata.draftPrompt).toBe("B 独立快速草稿");
     expect(node(api, "result-a").metadata.generationRecord).toEqual(original.nodes[1]!.metadata.generationRecord);
@@ -385,6 +393,7 @@ test("viewing and normalizing settings leaves source metadata untouched; intenti
 });
 
 test("deleted source remains an editable reference; replay uses exact archived input and one undo/redo includes result and edge", async ({ page, api }, info) => {
+    await page.clock.install();
     const original = await scene(page, api);
     await select(page, "original-reference"); await page.keyboard.press("Delete");
     await expect.poll(() => api.document(PROJECT)!.nodes.length).toBe(2);
@@ -396,17 +405,23 @@ test("deleted source remains an editable reference; replay uses exact archived i
     expect(node(api, "result-a").metadata.size).toBeUndefined();
     const before = structuredClone(api.document(PROJECT)!);
     before.nodes.find((item: any) => item.id === "result-a").metadata.draftPrompt = "新草稿不得污染再来一张";
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
     await page.evaluate(() => {
         const sample = { input: 0, replay: 0 }; (window as any).__rapidReplaySample = sample;
         document.addEventListener("input", event => { if ((event.target as Element).matches("textarea.cw-prompt")) sample.input = performance.now(); }, true);
         document.addEventListener("click", event => { if ((event.target as Element).closest("button")?.textContent?.includes("再来一张")) sample.replay = performance.now(); }, true);
     });
-    await editor(page).fill("新草稿不得污染再来一张");
-    api.taskStatus = "queued";
-    await panel(page).getByRole("button", { name: "再来一张", exact: true }).click({ force: true });
-    const elapsed = await page.evaluate(() => { const sample = (window as any).__rapidReplaySample; return sample.replay - sample.input; });
-    expect(elapsed).toBeGreaterThan(0); expect(elapsed).toBeLessThan(180);
-    console.log(`Rapid archived replay: ${elapsed.toFixed(1)} ms`);
+    try {
+        await editor(page).fill("新草稿不得污染再来一张");
+        await page.clock.runFor(179);
+        api.taskStatus = "queued";
+        await panel(page).getByRole("button", { name: "再来一张", exact: true }).click({ force: true });
+        const elapsed = await page.evaluate(() => { const sample = (window as any).__rapidReplaySample; return sample.replay - sample.input; });
+        expect(elapsed).toBe(179);
+        console.log(`Controlled archived replay: ${elapsed} ms`);
+    } finally {
+        await page.clock.resume();
+    }
     await expect.poll(() => api.submissions.length).toBe(1);
     expect(api.submissions[0]!.prompt).toBe(FINAL);
     assertSubmittedReference(api, "source");
@@ -514,6 +529,7 @@ test("record controls remain usable in both languages and themes without changin
 });
 
 test("toolbar undo flushes a sub-180ms draft before undoing and preserves the prior move and redo", async ({ page, api }, info) => {
+    await page.clock.install();
     await scene(page, api);
     await select(page, "result-a");
     const box = await page.locator('[data-node-id="result-a"]').boundingBox();
@@ -528,27 +544,22 @@ test("toolbar undo flushes a sub-180ms draft before undoing and preserves the pr
     const undo = page.getByTestId("canvas-top-tool-rail").getByRole("button", { name: "撤销", exact: true });
     const redo = page.getByTestId("canvas-top-tool-rail").getByRole("button", { name: "重做", exact: true });
     await expect(undo).toBeEnabled();
-    const undoBox = await undo.boundingBox();
-    if (!undoBox) throw new Error("Undo button is missing");
-    const inputSession = await page.context().newCDPSession(page);
-    await editor(page).focus();
-    await page.keyboard.press("Control+a");
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
     await page.evaluate(() => {
         const sample = { input: 0, undo: 0 }; (window as any).__draftUndoSample = sample;
         document.addEventListener("input", event => { if ((event.target as Element).matches("textarea.cw-prompt")) sample.input = performance.now(); }, true);
         document.addEventListener("click", event => { if ((event.target as Element).closest('[data-usage-control="undo"]')) sample.undo = performance.now(); }, true);
     });
+    let elapsed = 0;
     try {
-        await Promise.all([
-            inputSession.send("Input.insertText", { text: "不到180毫秒就撤销的新草稿" }),
-            inputSession.send("Input.dispatchMouseEvent", { type: "mousePressed", x: undoBox.x + undoBox.width / 2, y: undoBox.y + undoBox.height / 2, button: "left", clickCount: 1 }),
-            inputSession.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: undoBox.x + undoBox.width / 2, y: undoBox.y + undoBox.height / 2, button: "left", clickCount: 1 }),
-        ]);
+        await editor(page).fill("不到180毫秒就撤销的新草稿");
+        await page.clock.runFor(179);
+        await undo.click({ force: true });
+        elapsed = await page.evaluate(() => { const sample = (window as any).__draftUndoSample; return sample.undo - sample.input; });
+        expect(elapsed).toBe(179);
     } finally {
-        await inputSession.detach();
+        await page.clock.resume();
     }
-    const elapsed = await page.evaluate(() => { const sample = (window as any).__draftUndoSample; return sample.undo - sample.input; });
-    expect(elapsed).toBeGreaterThan(0); expect(elapsed).toBeLessThan(180);
     // Allow the old draft/history timer to settle; DOM checks do not depend on the longer cloud-save debounce.
     await page.waitForTimeout(750);
     const afterUndo = structuredClone(api.document(PROJECT)!);
@@ -556,7 +567,7 @@ test("toolbar undo flushes a sub-180ms draft before undoing and preserves the pr
     const evidence = info.outputPath("rapid-toolbar-undo-state.json");
     await writeFile(evidence, JSON.stringify({ elapsedMs: elapsed, moved, movedBox, afterUndoBox, afterUndo, redoEnabled: await redo.isEnabled() }, null, 2));
     await info.attach("rapid-toolbar-undo-state", { path: evidence, contentType: "application/json" });
-    console.log(`Rapid toolbar undo: ${elapsed.toFixed(1)} ms; position=${JSON.stringify(node(api, "result-a").position)}; draft=${JSON.stringify(node(api, "result-a").metadata.draftPrompt)}; redo=${await redo.isEnabled()}`);
+    console.log(`Controlled toolbar undo: ${elapsed} ms; position=${JSON.stringify(node(api, "result-a").position)}; draft=${JSON.stringify(node(api, "result-a").metadata.draftPrompt)}; redo=${await redo.isEnabled()}`);
     expect(afterUndoBox?.x).toBe(movedBox?.x); expect(afterUndoBox?.y).toBe(movedBox?.y);
     await expect(redo).toBeEnabled();
     await select(page, "result-a"); await expect(editor(page)).toHaveValue(INPUT);
