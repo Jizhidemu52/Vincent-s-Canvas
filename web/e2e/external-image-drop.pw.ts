@@ -171,10 +171,16 @@ test("leaving an image tool aborts late extraction and does not write the destin
     const form = await readyImage(page);
     expect(await dropText(form, "https://drop.example.test/late-tool.png")).toBe(true);
     await expect.poll(request.started).toBe(true);
-    await page.getByRole("link", { name: "对话改图", exact: true }).first().click();
-    await expect(page).toHaveURL(/\/chat$/);
-    request.release();
-    await expect(page.getByRole("textbox", { name: "对话内容", exact: true })).toBeEnabled();
+    const aborted = page.waitForEvent("requestfailed", { predicate: value => value.url() === "https://drop.example.test/late-tool.png" });
+    try {
+        await page.getByRole("link", { name: "对话改图", exact: true }).first().click();
+        await expect(page).toHaveURL(/\/chat$/);
+        await expect(page.getByRole("textbox", { name: "对话内容", exact: true })).toBeEnabled();
+        await expect(page.getByRole("textbox", { name: "图像提示词", exact: true })).toHaveCount(0);
+        expect((await aborted).failure()?.errorText).toBe("net::ERR_ABORTED");
+    } finally {
+        request.release();
+    }
     await expect(page.getByRole("button", { name: "移除 拖入图片.png", exact: true })).toHaveCount(0);
     expect(api.assetBytes.size).toBe(0);
     expect(api.submissions).toHaveLength(0);
