@@ -2,6 +2,7 @@ import type { AiTextMessage } from "@/services/api/image";
 import type { CanvasAgentSnapshot } from "./canvas-agent-ops";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { createCanvasBatchRootIndex, isCanvasBatchChildHidden } from "./canvas-batch-visibility";
+import { hasCanvasImageSource } from "./canvas-image-source";
 
 type Content = Exclude<AiTextMessage["content"], string>;
 export const CANVAS_CONTEXT_LIMITS = { nodes: 24, images: 5, videos: 2, text: 12_000 };
@@ -63,7 +64,7 @@ export async function buildCanvasAssistantContext(snapshot: CanvasAgentSnapshot,
             item.reading = "已作为显式参考提供";
         } else if (options.includeVisibleMedia !== true && !scope.selected && !scope.previewing) {
             item.reading = "未启用可见素材读取";
-        } else if (node.metadata?.content || node.metadata?.storageKey) {
+        } else if (node.type === CanvasNodeType.Image ? hasCanvasImageSource(node.metadata) : (node.metadata?.content || node.metadata?.storageKey)) {
             try {
                 if (node.type === CanvasNodeType.Image && imageCount < CANVAS_CONTEXT_LIMITS.images) {
                     imageCount++;

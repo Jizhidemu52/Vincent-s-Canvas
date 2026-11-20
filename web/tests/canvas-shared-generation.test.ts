@@ -57,6 +57,16 @@ describe("shared canvas generation relationships", () => {
 });
 
 describe("shared canvas generation plans", () => {
+    test("a cloud-only target is the original input and its common alias is not a second reference", () => {
+        const assetId = "b3000000-0000-4000-8000-000000000001";
+        const target = node("target", CanvasNodeType.Image, { serverAssetId: assetId });
+        const common = node("common", CanvasNodeType.Image, { content: `/api/assets/${assetId}/content` });
+        const settings = config("image", { composerContent: "修改 @[node:target]，参考 @[node:common]" });
+        const plan = resolveSharedGenerationPlan("target", "config", { nodes: [settings, target, common], connections: [targetEdge("target"), edge("common", "config")] });
+        expect(plan.context.referenceImages).toHaveLength(1);
+        expect(plan.context.referenceImages[0]).toMatchObject({ id: "target", serverAssetId: assetId, dataUrl: `/api/assets/${assetId}/content` });
+        expect(plan.prompt).toBe("修改 图片1，参考 图片1");
+    });
     test("keeps each target first, shared references ordered, and other targets out of the task", () => {
         const settings = config("image", {
             composerContent: "用 @[node:logo] 修改 @[node:a]，参考 @[node:common]。",

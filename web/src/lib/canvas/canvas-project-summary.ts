@@ -1,5 +1,6 @@
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { selectCanvasCoverNode } from "../../../../shared/canvas-cover";
+import { canvasImageSource } from "./canvas-image-source";
 
 export type CanvasProjectSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "updatedAt" | "persistenceConflict"> & {
     nodeCount: number;
@@ -17,7 +18,7 @@ export function canvasProjectSummary(project: CanvasProject): CanvasProjectSumma
         id: project.id, title: project.title, createdAt: project.createdAt, updatedAt: project.updatedAt,
         persistenceConflict: project.persistenceConflict,
         nodeCount: project.nodes.length, connectionCount: project.connections.length,
-        cover: image ? { storageKey: image.metadata?.storageKey, content: image.metadata?.content } : null,
+        cover: image ? { storageKey: image.metadata?.storageKey, content: canvasImageSource(image.metadata) } : null,
     };
     summaries.set(project, summary);
     return summary;

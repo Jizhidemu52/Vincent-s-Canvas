@@ -1,7 +1,8 @@
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { hasCanvasImageSource } from "./canvas-image-source";
 
 export function isCanvasPdfImage(node: CanvasNodeData) {
-    return node.type === CanvasNodeType.Image && Boolean(node.metadata?.storageKey || node.metadata?.content);
+    return node.type === CanvasNodeType.Image && hasCanvasImageSource(node.metadata);
 }
 
 /** Batch roots are covers, not additional files; expand in explicit child order. */

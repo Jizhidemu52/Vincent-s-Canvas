@@ -2,6 +2,7 @@ import { canvasGenerationDraft, canvasNodeGenerationReferences } from "./canvas-
 import type { CanvasConnection, CanvasNodeData, CanvasNodeMetadata, CanvasStoredImageReference } from "@/types/canvas";
 import type { CanvasSelectionReference } from "./canvas-selection-references";
 import type { AiConfig } from "@/stores/use-config-store";
+import { canvasImageSource } from "./canvas-image-source";
 
 /** The editor owns mutable input; generationRecord always remains historical evidence. */
 export function canvasGenerationEditorState(node: CanvasNodeData, nodes: CanvasNodeData[], connections: CanvasConnection[], config: AiConfig) {
@@ -37,7 +38,7 @@ export function canvasContinueFromImagePatch(node: CanvasNodeData): Partial<Canv
         id: node.id, referenceKey: `source:${node.id}`, sourceNodeId: node.id, origin: "canvas", role: "以此图作为编辑原图。",
         name: node.metadata?.originalFileName || node.title || node.id, originalFileName: node.metadata?.originalFileName,
         imageName: node.metadata?.imageName, imageVersion: node.metadata?.imageVersion,
-        type: node.metadata?.mimeType || "image/png", content: node.metadata?.content || "", storageKey: node.metadata?.storageKey,
+        type: node.metadata?.mimeType || "image/png", content: canvasImageSource(node.metadata), storageKey: node.metadata?.storageKey,
     }] };
 }
 

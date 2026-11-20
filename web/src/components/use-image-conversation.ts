@@ -40,6 +40,7 @@ export type ConversationSourceImage = {
     title: string;
     image: string;
     storageKey?: string;
+    serverAssetId?: string;
     width?: number;
     height?: number;
 };
@@ -530,7 +531,6 @@ export function useImageConversation(ownerId: string, options: ImageConversation
             if (receipt || localRef.current.create || viewRef.current?.snapshot.pendingTurn || !images.length) return;
             if (purpose === "new_base" && images.length !== 1) throw new Error("每轮只能指定一张修改底图。");
             const selected = new Map(images.map((image) => [image.id, image]));
-            if (selected.size !== images.length) throw new Error("添加的图片重复，请重新选择。");
             const sourceId = idRef.current,
                 key = sourceId || "new";
             const assertCurrent = () => {
@@ -539,15 +539,15 @@ export function useImageConversation(ownerId: string, options: ImageConversation
                     throw new Error("当前账号或会话已变化，未加入其他会话。");
             };
             assertCurrent();
-            const candidates = images.map(
+            const candidates = [...selected.values()].map(
                 (image) => callbacks.current.canvasImages?.find((item) => item.id === image.id) || image,
             );
             const resolved = await Promise.all(
                 candidates.map(async (image) => {
-                    const source = serverMediaId(image.image)
-                        ? image.image
-                        : (image.storageKey ? await readMediaSource(image.storageKey) : null) ||
-                          (await readUploadedMedia(ownerId, image.storageKey || image.image));
+                    const assetId = image.serverAssetId || serverMediaId(image.image);
+                    if (assetId) return { ...image, assetId };
+                    const source = (image.storageKey ? await readMediaSource(image.storageKey) : null) ||
+                        (await readUploadedMedia(ownerId, image.storageKey || image.image));
                     return { ...image, assetId: source ? serverMediaId(source) : "" };
                 }),
             );

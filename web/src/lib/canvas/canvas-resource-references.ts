@@ -1,6 +1,7 @@
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/lib/seedance-video";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
+import { canvasImageSource, hasCanvasImageSource } from "./canvas-image-source";
 
 export type CanvasResourceKind = "image" | "video" | "audio" | "text";
 
@@ -162,7 +163,7 @@ function createResourceReference(node: CanvasNodeData, kind: CanvasResourceKind,
         kind,
         label,
         title: node.title || label,
-        previewUrl: node.metadata?.content,
+        previewUrl: node.type === CanvasNodeType.Image ? canvasImageSource(node.metadata) : node.metadata?.content,
         text: node.type === CanvasNodeType.Text ? node.metadata?.content || node.metadata?.prompt : undefined,
         active,
     };
@@ -197,7 +198,7 @@ function isResourceNode(node: CanvasNodeData) {
 }
 
 function resourceKind(node: CanvasNodeData): CanvasResourceKind | null {
-    if (node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey)) return "image";
+    if (node.type === CanvasNodeType.Image && hasCanvasImageSource(node.metadata)) return "image";
     if (node.type === CanvasNodeType.Video && (node.metadata?.content || node.metadata?.storageKey)) return "video";
     if (node.type === CanvasNodeType.Audio && (node.metadata?.content || node.metadata?.storageKey)) return "audio";
     if (node.type === CanvasNodeType.Text && (node.metadata?.content || node.metadata?.prompt)) return "text";

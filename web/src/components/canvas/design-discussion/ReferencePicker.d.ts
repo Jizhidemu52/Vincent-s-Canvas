@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 
-export type ReferencePickerItem = { id: string; title: string; image: string; storageKey?: string; width?: number; height?: number; kind?: string };
+export type ReferencePickerItem = { id: string; title: string; image: string; storageKey?: string; serverAssetId?: string; width?: number; height?: number; kind?: string };
 export type ReferencePickerProps = {
     open: boolean;
     items?: ReferencePickerItem[];

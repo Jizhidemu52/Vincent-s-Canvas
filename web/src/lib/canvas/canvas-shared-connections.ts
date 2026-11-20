@@ -1,4 +1,5 @@
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
+import { hasCanvasImageSource } from "./canvas-image-source";
 
 /** Incoming images can be independent jobs; never infer jobs from generated output edges. */
 export function getConfigImageInputs(configId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): CanvasNodeData[] {
@@ -9,7 +10,7 @@ export function getConfigImageInputs(configId: string, nodes: CanvasNodeData[], 
     const ids = new Set(connections.filter(edge => edge.toNodeId === configId && edge.kind !== "generation-output").map(edge => edge.fromNodeId));
     return [...ids].flatMap(id => {
         const node = byId.get(id);
-        return node?.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey) && !excluded.has(`node:${id}`) ? [node] : [];
+        return node?.type === CanvasNodeType.Image && hasCanvasImageSource(node.metadata) && !excluded.has(`node:${id}`) ? [node] : [];
     });
 }
 

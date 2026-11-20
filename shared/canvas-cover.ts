@@ -1,8 +1,8 @@
-type CoverNode = { id: string; type: string; metadata?: { content?: string; storageKey?: string; status?: string; sourceTaskId?: string; generationOrigin?: unknown; generationRecord?: { createdAt?: string } } };
+type CoverNode = { id: string; type: string; metadata?: { content?: string; storageKey?: string; serverAssetId?: string; status?: string; sourceTaskId?: string; generationOrigin?: unknown; generationRecord?: { createdAt?: string } } };
 
 /** User choice wins; otherwise prefer the newest completed generated image. */
 export function selectCanvasCoverNode<T extends CoverNode>(nodes: readonly T[], preferredId?: string): T | undefined {
-    const images = nodes.filter(node => node.type === "image" && node.metadata?.status !== "loading" && node.metadata?.status !== "error" && (node.metadata?.storageKey || node.metadata?.content));
+    const images = nodes.filter(node => node.type === "image" && node.metadata?.status !== "loading" && node.metadata?.status !== "error" && (node.metadata?.storageKey || node.metadata?.content || node.metadata?.serverAssetId));
     const preferred = preferredId ? images.find(node => node.id === preferredId) : undefined;
     if (preferred) return preferred;
     let generated: T | undefined;

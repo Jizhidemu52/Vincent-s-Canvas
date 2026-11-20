@@ -28,6 +28,18 @@ function snapshot(nodes: CanvasNodeData[]): CanvasHistorySnapshot {
 }
 
 describe("portable whole-canvas media and server validator compatibility", () => {
+    test.each([undefined, "", "blob:http://localhost/expired"])("saved cloud media with %s browser content is preserved without upload", async content => {
+        const source = project([node("cloud", CanvasNodeType.Image, { serverAssetId: assetId(99), content, storageKey: "image:cached" })]);
+        source.history = { past: [snapshot(source.nodes)], future: [] };
+        const before = structuredClone(source), { calls, resolve } = captureResolver();
+        const result = await portableCanvasMedia(source, resolve);
+        expect(calls).toEqual([]);
+        expect(result.nodes[0]!.metadata).toEqual({ content: assetUrl(99), serverAssetId: assetId(99) });
+        expect(result.history?.past[0]?.nodes[0]?.metadata?.content).toBe(assetUrl(99));
+        expect(source).toEqual(before);
+        expect(validate(result)).toEqual([assetId(99)]);
+    });
+
     test("image, video and audio content retain graph geometry and pass server validation after conversion", async () => {
         const source = project([
             node("image", CanvasNodeType.Image, { content: "data:image/png;base64,AAECA/8=", mimeType: "image/png", originalFileName: "原图.png", naturalWidth: 1441, naturalHeight: 2117 }),

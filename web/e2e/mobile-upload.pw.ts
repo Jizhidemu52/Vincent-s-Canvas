@@ -113,7 +113,13 @@ test("mobile canvas and short-screen discussion upload remain reachable", async 
     await expect(upload).toBeEnabled();
     await expectReachable(upload);
     await chooseImage(page, upload, ["discussion-gallery.png"]);
-    await expectOriginal(panel.getByRole("img", { name: "discussion-gallery.png", exact: true }));
+    const reference = panel.locator(".studio-reference").filter({ has: page.getByRole("img", { name: "discussion-gallery.png", exact: true }) });
+    await expect(reference.locator("img")).toHaveAttribute("data-loaded", "true");
+    await reference.getByRole("button", { name: /^查看参考图\d+原图$/ }).click();
+    const preview = page.getByRole("dialog");
+    await expectOriginal(preview.locator("img"));
+    await preview.getByRole("button").filter({ has: page.getByRole("img", { name: "close", exact: true }) }).click();
+    await expect(preview).toHaveCount(0);
     await panel.locator(".discussion-settings > summary").click();
     await expectReachable(panel.getByRole("button", { name: "发送讨论", exact: true }));
     await expectReachable(panel.getByRole("textbox", { name: "输入设计需求" }));

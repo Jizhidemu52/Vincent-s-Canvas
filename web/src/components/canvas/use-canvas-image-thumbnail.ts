@@ -6,6 +6,7 @@ import type { ImageThumbnailLease } from "@/lib/image-thumbnail-cache";
 import type { CanvasNodeData } from "@/types/canvas";
 import { acquireServerImageThumbnail, serverImagePreviewOwner } from "@/services/server-image-thumbnails";
 import { useUserStore } from "@/stores/use-user-store";
+import { canvasImageSource } from "@/lib/canvas/canvas-image-source";
 
 type PreviewImage = { source: string; url: string; thumbnail: boolean; edge: ImageThumbnailEdge | 0; lease: ImageThumbnailLease | null };
 type PreviewState = Omit<PreviewImage, "lease"> & { loaded: boolean; failed: boolean; placeholderUrl: string; request: number };
@@ -13,11 +14,11 @@ type PreviewState = Omit<PreviewImage, "lease"> & { loaded: boolean; failed: boo
 /** Display-only URL: never write this value into node metadata or media references. */
 export function useCanvasImageThumbnail(node: CanvasNodeData, edge: ImageThumbnailEdge | 0) {
     const storageKey = node.metadata?.storageKey;
-    const content = node.metadata?.content || "";
+    const content = canvasImageSource(node.metadata);
     const width = node.metadata?.naturalWidth || 0;
     const height = node.metadata?.naturalHeight || 0;
     const owner = useUserStore(serverImagePreviewOwner);
-    const source = `${owner || ""}\n${storageKey || ""}\n${content}`;
+    const source = `${owner || ""}\n${storageKey || ""}\n${node.metadata?.serverAssetId || ""}\n${content}`;
     const [attempt, setAttempt] = useState(0);
     const [originalOnly, setOriginalOnly] = useState<string | null>(null);
     const displayed = useRef<PreviewImage | null>(null);

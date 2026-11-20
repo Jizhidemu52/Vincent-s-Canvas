@@ -8,11 +8,13 @@ import { resolveMediaUrl } from "@/services/file-storage";
 import { useImagePreview } from "@/hooks/use-image-preview";
 import { readImageMeta } from "@/lib/image-utils";
 import { canvasServerThumbnailUrl } from "@/lib/canvas/canvas-image-thumbnail";
+import { serverAssetContentUrl } from "@/lib/canvas/canvas-image-source";
 
 type CanvasPersistedMediaPreviewProps = {
     kind: "image" | "video";
     url?: string;
     storageKey?: string;
+    serverAssetId?: string;
     alt?: string;
     className: string;
     controls?: boolean;
@@ -22,31 +24,33 @@ type CanvasPersistedMediaPreviewProps = {
 };
 
 /** Resolves local Blob-backed media only when its chat/card preview mounts. */
-export function CanvasPersistedMediaPreview({ kind, url = "", storageKey, alt = "", className, controls = false, placeholderClassName = "", width, height }: CanvasPersistedMediaPreviewProps) {
+export function CanvasPersistedMediaPreview({ kind, url = "", storageKey, serverAssetId, alt = "", className, controls = false, placeholderClassName = "", width, height }: CanvasPersistedMediaPreviewProps) {
     const t = useUiText();
-    const source = { type: kind, content: url, storageKey };
+    const sourceUrl = serverAssetContentUrl(serverAssetId) || url;
+    const source = { type: kind, content: sourceUrl, storageKey };
     const needsResolution = needsCanvasNodeMediaPreviewResolution(source);
-    const [previewUrl, setPreviewUrl] = useState(() => (needsResolution ? "" : url));
+    const [previewUrl, setPreviewUrl] = useState(() => (needsResolution ? "" : sourceUrl));
     const [loadedThumbnail, setLoadedThumbnail] = useState("");
-    const sourceKey = `${storageKey || ""}:${url}`;
+    const sourceKey = `${storageKey || ""}:${serverAssetId || ""}:${sourceUrl}`;
     const [dimensions, setDimensions] = useState<{ source: string; width?: number; height?: number } | null>(null);
-    const needsDimensions = kind === "image" && Boolean(storageKey) && !canvasServerThumbnailUrl(url, 256) && !(width && height);
+    const needsDimensions = kind === "image" && Boolean(storageKey) && !canvasServerThumbnailUrl(sourceUrl, 256) && !(width && height);
     const resolvedDimensions = dimensions?.source === sourceKey ? dimensions : null;
+    const isInlineOriginal = kind === "image" && !storageKey && /^(blob:|data:)/.test(sourceUrl);
     useEffect(() => {
         if (!needsDimensions) return;
         let current = true;
-        void resolveImageUrl(storageKey, url).then(readImageMeta).then(meta => {
+        void resolveImageUrl(storageKey, sourceUrl).then(readImageMeta).then(meta => {
             if (current) setDimensions({ source: sourceKey, width: meta.width, height: meta.height });
         }).catch(() => { if (current) setDimensions({ source: sourceKey }); });
         return () => { current = false; };
-    }, [needsDimensions, sourceKey, storageKey, url]);
-    const thumbnail = useImagePreview({ dataUrl: url, storageKey, width: width || resolvedDimensions?.width, height: height || resolvedDimensions?.height }, 256, kind === "image" && (!needsDimensions || Boolean(resolvedDimensions)));
+    }, [needsDimensions, sourceKey, sourceUrl, storageKey]);
+    const thumbnail = useImagePreview({ dataUrl: sourceUrl, storageKey, width: width || resolvedDimensions?.width, height: height || resolvedDimensions?.height }, 256, kind === "image" && !isInlineOriginal && (!needsDimensions || Boolean(resolvedDimensions)));
 
     useEffect(() => {
         let active = true;
         if (kind === "image") return;
         if (!needsResolution) {
-            setPreviewUrl(url);
+            setPreviewUrl(sourceUrl);
             return;
         }
         setPreviewUrl("");
@@ -60,9 +64,10 @@ export function CanvasPersistedMediaPreview({ kind, url = "", storageKey, alt = 
         return () => {
             active = false;
         };
-    }, [kind, needsResolution, storageKey, url]);
+    }, [kind, needsResolution, serverAssetId, sourceUrl, storageKey]);
 
-    if (kind === "image" ? !thumbnail : !previewUrl) return <span aria-label={t("正在恢复媒体预览")} className={`block animate-pulse bg-muted ${placeholderClassName || className}`} />;
+    const imageSource = isInlineOriginal ? sourceUrl : thumbnail;
+    if (kind === "image" ? !imageSource : !previewUrl) return <span aria-label={t("正在恢复媒体预览")} className={`block animate-pulse bg-muted ${placeholderClassName || className}`} />;
     if (kind === "video") return <video src={previewUrl} controls={controls} preload="metadata" className={className} />;
-    return <img src={thumbnail} alt={alt} {...canvasImageRenderProps()} className={`cw-persisted-preview ${className}`} data-loaded={loadedThumbnail === thumbnail} onLoad={() => setLoadedThumbnail(thumbnail)} />;
+    return <img src={imageSource} alt={alt} {...canvasImageRenderProps()} className={`cw-persisted-preview ${className}`} data-loaded={loadedThumbnail === imageSource} onLoad={() => setLoadedThumbnail(imageSource)} />;
 }

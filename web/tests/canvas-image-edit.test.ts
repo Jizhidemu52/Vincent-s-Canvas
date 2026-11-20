@@ -2,10 +2,22 @@ import { expect, test } from "bun:test";
 import { applyCanvasImageEdit, rollbackCanvasImageEdit } from "@/lib/canvas/canvas-image-edit";
 import { editorDocumentSize, editorPoint, editorRect } from "@/lib/canvas/image-editor-document";
 import { buildNodeGenerationContext } from "@/components/canvas/canvas-node-generation";
+import { canvasImageSource } from "@/lib/canvas/canvas-image-source";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const node: CanvasNodeData = { id: "original", type: CanvasNodeType.Image, title: "原图", position: { x: 20, y: 40 }, width: 300, height: 200, metadata: { content: "blob:original", storageKey: "image:original", prompt: "Original prompt", naturalWidth: 900, naturalHeight: 600, originalFileName: "shirt.jpg" } };
 const image = { url: "blob:edited", storageKey: "image:edited", width: 600, height: 600, bytes: 2048, mimeType: "image/png" };
+
+test("editing a cloud original drops only its obsolete asset shortcut so the new pixels remain authoritative", () => {
+    const assetId = "b3000000-0000-4000-8000-000000000001";
+    const original = { ...node, metadata: { ...node.metadata, serverAssetId: assetId, content: `/api/assets/${assetId}/content` } };
+    const edited = applyCanvasImageEdit([original], original, image)[0]!;
+    expect(edited.metadata?.serverAssetId).toBeUndefined();
+    expect(canvasImageSource(edited.metadata)).toBe(image.url);
+    expect(edited.metadata?.compareSources?.[0]?.content).toBe(original.metadata.content);
+    expect(original.metadata.serverAssetId).toBe(assetId);
+    expect(rollbackCanvasImageEdit([edited], [original], image.storageKey)).toEqual([original]);
+});
 
 test("manual edit replaces the selected node in place and preserves its provenance and references", () => {
     const other = { ...node, id: "other" };

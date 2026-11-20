@@ -1,3 +1,5 @@
+import { serverAssetContentUrl } from "./canvas-image-source";
+
 type MediaObject = Record<string, unknown>;
 export type PortableMediaResolver = (input: { storageKey?: string; url: string; mimeType?: string; name?: string }) => Promise<string>;
 const mediaFields = new Set(["url", "dataUrl", "src", "poster", "thumbnail", "coverUrl", "posterUrl", "thumbnailUrl", "previewUrl", "imageUrl", "videoUrl", "audioUrl", "resultUrl", "downloadUrl"]);
@@ -31,18 +33,21 @@ export async function portableCanvasMedia<T>(document: T, resolve: PortableMedia
         const input = value as MediaObject;
         const key = typeof input.storageKey === "string" ? input.storageKey : undefined;
         const isMedia = mediaContext || Boolean(key) || /^(image|video|audio)(\/|$)/.test(String(input.type)) || Boolean(input.referenceKey);
+        const cloudSource = isMedia && typeof input.serverAssetId === "string" ? serverAssetContentUrl(input.serverAssetId) : "";
         const output: MediaObject = {};
         for (const [name, child] of Object.entries(input)) {
             if (name === "storageKey") continue;
             const isUrl = mediaFields.has(name) || (name === "content" && isMedia);
             const primaryKey = ["content", "url", "dataUrl", "src"].includes(name) ? key : undefined;
-            if (isUrl && typeof child === "string" && (primaryKey || needsUpload(child))) {
+            if (cloudSource && ["content", "url", "dataUrl", "src"].includes(name) && typeof child === "string") {
+                output[name] = cloudSource;
+            } else if (isUrl && typeof child === "string" && (primaryKey || needsUpload(child))) {
                 output[name] = await resolveOnce({ storageKey: primaryKey, url: child, mimeType: typeof input.mimeType === "string" ? input.mimeType : undefined, name: typeof input.originalFileName === "string" ? input.originalFileName : undefined });
             } else output[name] = await visit(child, name === "metadata" ? isMedia : name === "references" || name === "manualImageReferences", name);
         }
-        if (key && !["content", "url", "dataUrl", "src"].some(name => typeof input[name] === "string")) {
+        if ((key || cloudSource) && !["content", "url", "dataUrl", "src"].some(name => typeof input[name] === "string")) {
             const name = field === "references" || field === "images" ? "dataUrl" : field === "metadata" || field === "manualImageReferences" ? "content" : "url";
-            output[name] = await resolveOnce({ storageKey: key, url: "", mimeType: typeof input.mimeType === "string" ? input.mimeType : undefined });
+            output[name] = cloudSource || await resolveOnce({ storageKey: key, url: "", mimeType: typeof input.mimeType === "string" ? input.mimeType : undefined });
         }
         return output;
     }

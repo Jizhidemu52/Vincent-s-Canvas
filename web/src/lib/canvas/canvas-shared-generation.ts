@@ -5,6 +5,7 @@ import { seedanceReferenceLabel } from "@/lib/seedance-video";
 import type { ImageReferenceItem, ReferenceImage } from "@/types/image";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import { resolveCanvasImageReferences } from "./canvas-image-references";
+import { hasCanvasImageSource } from "./canvas-image-source";
 
 type CanvasSnapshot = { nodes: CanvasNodeData[]; connections: CanvasConnection[] };
 export type SharedGenerationPlan = {
@@ -89,7 +90,7 @@ export function resolveSharedGenerationPlan(targetId: string, configId: string, 
 
 function resourceInput(node: CanvasNodeData): NodeGenerationInput | null {
     // Empty media placeholders may carry a draft prompt, but are not text inputs.
-    if (node.type !== CanvasNodeType.Text && !node.metadata?.content && !node.metadata?.storageKey) return null;
+    if (node.type === CanvasNodeType.Image ? !hasCanvasImageSource(node.metadata) : node.type !== CanvasNodeType.Text && !node.metadata?.content && !node.metadata?.storageKey) return null;
     const input = generationInputForNode(node);
     return input?.type === "text" && !input.text?.trim() ? null : input;
 }
@@ -101,6 +102,8 @@ function validateInputType(mode: CanvasGenerationMode, type: string) {
 
 function sameImage(first: ReferenceImage, second: ReferenceImage) {
     return first.id === second.id || Boolean(first.storageKey && first.storageKey === second.storageKey)
+        || Boolean(first.serverAssetId && first.serverAssetId === second.serverAssetId)
+        || Boolean(first.sourceAssetId && first.sourceAssetId === second.sourceAssetId)
         || Boolean(first.dataUrl && first.dataUrl === second.dataUrl) || Boolean(first.url && first.url === second.url);
 }
 

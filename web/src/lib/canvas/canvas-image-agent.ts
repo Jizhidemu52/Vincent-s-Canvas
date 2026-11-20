@@ -11,6 +11,7 @@ import type { ImageAgentRegionSelection } from "@/lib/image-agent/mask";
 import { compileImageAgentPrompt, imageAgentSpecText } from "../../../../shared/image-agent/compile";
 import { ImageAgentPlanningError, parseImageAgentEditSpec, parseImageAgentReview, type ImageAgentEditSpec, type ImageAgentRepairPreparationIssue, type ImageAgentReview } from "../../../../shared/image-agent-iteration";
 import { designRequirementsText, type DesignRequirements } from "../../../../shared/image-agent-documents";
+import { canvasImageSource, hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 
 export type CanvasImageAgentRecord = {
     baseImageId?: string;
@@ -48,17 +49,17 @@ export function canvasImageAgentCatalog(messages: CanvasAssistantMessage[], node
             ...(image.attachmentId && typeof message?.detail?.prompt === "string" ? { prompt: message.detail.prompt } : {}),
             ...(image.attachmentId && record ? { parentId: record.baseImageId, workId: record.workId, note: record.note, spec: record.spec } : {}) };
     });
-    const findNodeImage = (node: CanvasNodeData) => catalog.find(image => image.nodeId === node.id && source(image) === (node.metadata?.storageKey || node.metadata?.content || ""));
+    const findNodeImage = (node: CanvasNodeData) => catalog.find(image => image.nodeId === node.id && source(image) === (node.metadata?.storageKey || canvasImageSource(node.metadata) || ""));
     const ancestors = new Set<string>();
     const addNode = (node: CanvasNodeData): CanvasImageAgentImage | undefined => {
         const existing = findNodeImage(node);
         if (existing) return existing;
-        if (ancestors.has(node.id) || node.type !== CanvasNodeType.Image || (!node.metadata?.content && !node.metadata?.storageKey)) return;
+        if (ancestors.has(node.id) || node.type !== CanvasNodeType.Image || !hasCanvasImageSource(node.metadata)) return;
         ancestors.add(node.id);
         const record = node.metadata?.imageAgent;
         const parent = record?.parentNodeId ? nodes.find(item => item.id === record.parentNodeId) : undefined;
         const parentImage = parent && addNode(parent);
-        const reference = { id: node.id, type: CanvasNodeType.Image, title: node.title, dataUrl: node.metadata?.content, storageKey: node.metadata?.storageKey };
+        const reference = { id: node.id, type: CanvasNodeType.Image, title: node.title, dataUrl: canvasImageSource(node.metadata), storageKey: node.metadata?.storageKey, serverAssetId: node.metadata?.serverAssetId };
         const image: CanvasImageAgentImage = { id: `canvas-image:${node.id}`, label: `图${catalog.length + 1}`, name: node.title,
             kind: record ? "generated" : "upload", nodeId: node.id, reference, dataUrl: reference.dataUrl, storageKey: reference.storageKey,
             // Keep a missing ancestor's identity so original/previous cannot

@@ -7,6 +7,7 @@ import { useUiText } from "@/lib/i18n";
 import { resolveImageUrl } from "@/services/image-storage";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { canvasImageSource, hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 
 export function CanvasImageViewerDialog({ node, nodes, onSelect, onClose }: { node: CanvasNodeData; nodes: CanvasNodeData[]; onSelect: (id: string) => void; onClose: () => void }) {
     const t = useUiText();
@@ -18,7 +19,7 @@ export function CanvasImageViewerDialog({ node, nodes, onSelect, onClose }: { no
     const [viewport, setViewport] = useState({ width: 1000, height: 600 });
     const stage = useRef<HTMLDivElement>(null);
     const drag = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null);
-    const images = nodes.filter(item => item.type === CanvasNodeType.Image && (item.metadata?.content || item.metadata?.storageKey));
+    const images = nodes.filter(item => item.type === CanvasNodeType.Image && hasCanvasImageSource(item.metadata));
     const index = images.findIndex(item => item.id === node.id);
     const scale = zoom === "fit" ? size ? Math.min(1, (viewport.width - 32) / size.width, (viewport.height - 32) / size.height) : 1 : zoom;
     const changeZoom = useRef<(value: number, x?: number, y?: number) => void>(() => {});
@@ -33,9 +34,9 @@ export function CanvasImageViewerDialog({ node, nodes, onSelect, onClose }: { no
     useEffect(() => {
         let active = true;
         setSource(""); setSize(null); setError(""); setZoom("fit");
-        void resolveImageUrl(node.metadata?.storageKey, node.metadata?.content || "").then(url => { if (active) { if (url) setSource(url); else setError("原图不存在"); } }).catch(error => { if (active) setError(error instanceof Error ? error.message : "原图加载失败"); });
+        void resolveImageUrl(node.metadata?.storageKey, canvasImageSource(node.metadata)).then(url => { if (active) { if (url) setSource(url); else setError("原图不存在"); } }).catch(error => { if (active) setError(error instanceof Error ? error.message : "原图加载失败"); });
         return () => { active = false; };
-    }, [node.id, node.metadata?.storageKey, node.metadata?.content]);
+    }, [node.id, node.metadata?.storageKey, node.metadata?.content, node.metadata?.serverAssetId]);
     useEffect(() => {
         const box = stage.current;
         if (!box) return;

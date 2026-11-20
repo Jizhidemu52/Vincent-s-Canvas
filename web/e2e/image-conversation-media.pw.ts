@@ -298,7 +298,7 @@ test("selected canvas originals can be added to the conversation draft without r
     await page.screenshot({ path: info.outputPath("canvas-selected-original-draft.png"), animations: "disabled" });
 });
 
-test("selected duplicate canvas nodes sharing an original add one draft attachment without reupload or submission", async ({
+for (const source of ["cloud-url", "asset-only", "stale-blob"] as const) test(`selected duplicate canvas nodes sharing an original (${source}) add one draft attachment without reupload or submission`, async ({
     page,
     api,
 }, info) => {
@@ -318,7 +318,7 @@ test("selected duplicate canvas nodes sharing an original add one draft attachme
                 height: 256,
                 position: { x: 0, y: 0 },
                 metadata: {
-                    content: `/api/assets/${libraryId}/content`,
+                    ...(source === "asset-only" ? {} : { content: source === "stale-blob" ? "blob:http://localhost/expired-original" : `/api/assets/${libraryId}/content` }),
                     serverAssetId: libraryId,
                     status: "success",
                     naturalWidth: 256,
@@ -354,6 +354,9 @@ test("selected duplicate canvas nodes sharing an original add one draft attachme
     expect(api.assets.size).toBe(before);
     expect(writes).toEqual([]);
     expect(api.submissions).toEqual([]);
+    await expect(panel.getByRole("alert")).toHaveCount(0);
+    await panel.getByRole("button", { name: "添加选中图片", exact: true }).click();
+    await expect(panel.locator("[data-draft-asset-id]")).toHaveCount(1);
     await page.screenshot({ path: info.outputPath("canvas-duplicate-original-draft.png"), animations: "disabled" });
 });
 

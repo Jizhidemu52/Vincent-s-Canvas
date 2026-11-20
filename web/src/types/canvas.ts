@@ -188,6 +188,7 @@ export type CanvasAssistantReference = {
     title: string;
     dataUrl?: string;
     storageKey?: string;
+    serverAssetId?: string;
     text?: string;
 };
 

@@ -9,6 +9,7 @@ import { canvasImageBaseName, canvasImageVersion } from "@/lib/canvas/canvas-ima
 import { videoFileExtension } from "../../../../shared/video-output";
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { isEmptyCanvasDesignTemplateReferenceForConfig } from "@/lib/canvas/canvas-design-template-reference";
+import { canvasImageSource, hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 
 export type NodeGenerationContext = {
     prompt: string;
@@ -279,15 +280,16 @@ function generationLabel(type: NodeGenerationInput["type"], index: number) {
 }
 
 function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
-    if (node.type !== CanvasNodeType.Image || (!node.metadata?.content && !node.metadata?.storageKey)) return null;
+    if (node.type !== CanvasNodeType.Image || !hasCanvasImageSource(node.metadata)) return null;
     return {
         id: node.id,
         name: node.metadata.originalFileName || node.title || node.id,
         originalFileName: node.metadata.originalFileName,
         imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node),
         type: node.metadata.mimeType || "image/png",
-        dataUrl: node.metadata.content || "",
+        dataUrl: canvasImageSource(node.metadata),
         storageKey: node.metadata.storageKey,
+        serverAssetId: node.metadata.serverAssetId,
         bytes: node.metadata.bytes,
         width: node.metadata.naturalWidth,
         height: node.metadata.naturalHeight,

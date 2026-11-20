@@ -10,6 +10,15 @@ const byId = new Map([red, blue, green].map((node) => [node.id, node]));
 const sync = (refs: CanvasSelectionReference[], ids: string[], map = byId) => syncCanvasSelectionReferences(refs, new Set(ids), map);
 
 describe("canvas selection reference composition", () => {
+    test("cloud-only selection remains usable and updates its durable identity without losing the role", () => {
+        const assetId = "b3000000-0000-4000-8000-000000000001";
+        const cloud = image("cloud", { content: undefined, storageKey: undefined, serverAssetId: assetId });
+        const map = new Map([[cloud.id, cloud]]);
+        const selected = sync([], [cloud.id], map);
+        expect(selected[0]).toMatchObject({ dataUrl: `/api/assets/${assetId}/content`, serverAssetId: assetId });
+        const before = [{ ...selected[0]!, serverAssetId: undefined, role: "只改颜色" }];
+        expect(sync(before, [], map)[0]).toMatchObject({ serverAssetId: assetId, role: "只改颜色" });
+    });
     test("single click adds the selected image and selecting another appends it", () => {
         const selected = sync([], ["red"]);
         expect(selected[0]).toMatchObject({ id: "canvas:red", canvasNodeId: "red", dataUrl: "blob:red", storageKey: "stored-red" });

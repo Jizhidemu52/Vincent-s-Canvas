@@ -82,7 +82,9 @@ async function restoreReference(reference) {
 }
 function nodeReferenceMetadata(node) {
     const serverAssetId = node.metadata?.serverAssetId;
-    const image = node.metadata?.content || (typeof serverAssetId === "string" ? `/api/assets/${serverAssetId}/content` : "");
+    const image = typeof serverAssetId === "string" && serverAssetId.trim()
+        ? `/api/assets/${encodeURIComponent(serverAssetId.trim())}/content`
+        : node.metadata?.content || "";
     return {
         id: node.id,
         title: node.title || "画布图片",
@@ -92,6 +94,7 @@ function nodeReferenceMetadata(node) {
         height: node.metadata?.naturalHeight,
         bytes: node.metadata?.bytes,
         type: node.metadata?.mimeType,
+        serverAssetId,
         kind: node.metadata?.sourceTaskId ? "result" : "reference",
         taskId: node.metadata?.sourceTaskId,
     };
@@ -112,9 +115,9 @@ const resultNodeId = (nodes, task, index) => {
         : designResultNodeId(task, index);
 };
 function appendReferences(current, incoming) {
-    const added = Array.from(new Map(incoming.map((reference) => [reference.id, reference])).values()).filter(
-        (reference) => !current.some((item) => item.id === reference.id),
-    );
+    const identity = (reference) => reference.serverAssetId || reference.storageKey || reference.image || reference.id;
+    const existing = new Set(current.map(identity));
+    const added = Array.from(new Map(incoming.map((reference) => [identity(reference), reference])).values()).filter((reference) => !existing.has(identity(reference)));
     if (current.length + added.length > 4)
         throw new Error("本轮讨论最多 4 张参考图；请先移除不需要的图片，已有参考未改动。");
     return added.length ? [...current, ...added] : current;

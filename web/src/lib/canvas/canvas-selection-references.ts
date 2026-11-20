@@ -1,6 +1,7 @@
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import type { ReferenceImage } from "@/types/image";
 import { canvasImageBaseName, canvasImageVersion, originalCanvasImageFileName } from "@/lib/canvas/canvas-image-filename";
+import { canvasImageSource, hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 
 export type CanvasSelectionReference = ReferenceImage & { canvasNodeId?: string };
 
@@ -13,17 +14,17 @@ export function syncCanvasSelectionReferences(
     const selected = new Map<string, CanvasSelectionReference>();
     const imageIds = Array.from(selectedIds).filter(id => {
         const node = nodeById.get(id);
-        return node?.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey);
+        return node?.type === CanvasNodeType.Image && hasCanvasImageSource(node.metadata);
     });
     const referenceIds = new Set([...current.flatMap(reference => reference.canvasNodeId ? [reference.canvasNodeId] : []), ...imageIds]);
     for (const id of referenceIds) {
         const node = nodeById.get(id);
-        if (node?.type !== CanvasNodeType.Image || !(node.metadata?.content || node.metadata?.storageKey)) continue;
-        const content = node.metadata.content || "";
+        if (node?.type !== CanvasNodeType.Image || !hasCanvasImageSource(node.metadata)) continue;
+        const content = canvasImageSource(node.metadata);
         selected.set(id, {
             id: `canvas:${id}`, canvasNodeId: id, name: node.title || "画布图片",
             type: node.metadata.mimeType || "image/png", dataUrl: content, url: content,
-            storageKey: node.metadata.storageKey,
+            storageKey: node.metadata.storageKey, serverAssetId: node.metadata.serverAssetId,
             originalFileName: originalCanvasImageFileName(node),
             imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node),
         });
@@ -35,7 +36,7 @@ export function syncCanvasSelectionReferences(
         // A removed canvas node does not invalidate its already attached image snapshot.
         if (!updated) { next.push(reference); continue; }
         const unchanged = reference.name === updated.name && reference.type === updated.type &&
-            reference.dataUrl === updated.dataUrl && reference.url === updated.url && reference.storageKey === updated.storageKey && reference.originalFileName === updated.originalFileName && reference.imageName === updated.imageName && reference.imageVersion === updated.imageVersion;
+            reference.dataUrl === updated.dataUrl && reference.url === updated.url && reference.storageKey === updated.storageKey && reference.serverAssetId === updated.serverAssetId && reference.originalFileName === updated.originalFileName && reference.imageName === updated.imageName && reference.imageVersion === updated.imageVersion;
         next.push(unchanged ? reference : { ...updated, role: reference.role });
         selected.delete(reference.canvasNodeId);
     }

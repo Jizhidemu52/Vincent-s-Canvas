@@ -32,7 +32,7 @@ export function applyCanvasImageEdit(nodes: CanvasNodeData[], original: CanvasNo
         if (!affected.has(node.id)) return node;
         const originalName = originalCanvasImageFileName(node) || "edited-image";
         return { ...node, height: node.width * image.height / image.width, metadata: {
-            ...node.metadata, content: image.url, storageKey: image.storageKey, naturalWidth: image.width, naturalHeight: image.height,
+            ...node.metadata, content: image.url, storageKey: image.storageKey, serverAssetId: undefined, naturalWidth: image.width, naturalHeight: image.height,
             mimeType: image.mimeType, bytes: image.bytes, status: "success" as const, errorDetails: undefined, freeResize: false,
             originalFileName: originalName.replace(/\.[^.]+$/, "") + (image.mimeType === "image/jpeg" ? ".jpg" : ".png"),
             imageName: canvasImageBaseName(current), imageVersion: canvasImageVersion(current) + 1,

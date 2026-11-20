@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { PDFDict, PDFDocument, PDFName, PDFRawStream } from "pdf-lib";
 
 import { canvasImageExportSelection, createCanvasImagePdfExport, type CanvasImagePdfProgress } from "@/lib/canvas/canvas-image-pdf";
@@ -12,6 +12,23 @@ const tinyJpeg = new Blob([Buffer.from("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////
 function node(id: string, title = "方案.png", metadata: CanvasNodeData["metadata"] = {}): CanvasNodeData {
     return { id, title, type: CanvasNodeType.Image, position: { x: 0, y: 0 }, width: 400, height: 400, metadata: { content: `test:${id}`, ...metadata } };
 }
+
+test("cloud-only original ZIP export reads the durable asset and preserves its exact bytes", async () => {
+    const assetId = "b3000000-0000-4000-8000-000000000001";
+    const original = node("cloud", "cloud.png", { content: undefined, serverAssetId: assetId });
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async input => {
+        expect(input).toBe(`/api/assets/${assetId}/content`);
+        return new Response(redWide);
+    });
+    try {
+        const result = await createCanvasImagePdfExport({ nodes: [original], setName: "cloud", mode: "images" });
+        expect(result.imageCount).toBe(1);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const files = await readZip(result.blob);
+        expect([...files.keys()]).toEqual(["001_cloud_v1.png"]);
+        expect(new Uint8Array(await files.get("001_cloud_v1.png")!.arrayBuffer())).toEqual(new Uint8Array(await redWide.arrayBuffer()));
+    } finally { fetchMock.mockRestore(); }
+});
 
 test("box selection exports exactly its eight images, excludes text and unselected images, and never falls back from empty", () => {
     const images = Array.from({ length: 9 }, (_, index) => node(`image-${index}`));

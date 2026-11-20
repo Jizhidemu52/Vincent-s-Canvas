@@ -19,6 +19,15 @@ test("keeps the first visual occurrence of a duplicate image", () => {
     expect(dedupeImageReferences([ref("same", "upload"), ref("same", "canvas"), ref("next")]).map((item) => item.referenceKey)).toEqual(["upload:same", "upload:next"]);
 });
 
+test("cloud identifiers and content URLs share one original identity across different local copies", () => {
+    const assetId = "b3000000-0000-4000-8000-000000000001";
+    const first = { ...ref("canvas", "canvas"), serverAssetId: assetId, storageKey: "image:local" };
+    const library = { ...ref("library", "asset"), sourceAssetId: assetId, storageKey: "image:other" };
+    const urlOnly = { ...ref("url"), dataUrl: `/api/assets/${assetId}/content` };
+    expect(dedupeImageReferences([first, library, urlOnly, ref("distinct")])).toEqual([first, ref("distinct")]);
+    expect(dedupeImageReferences([urlOnly, library, first])).toEqual([urlOnly]);
+});
+
 test("moves one reference without disturbing the other visual positions", () => {
     expect(moveImageReference([ref("a"), ref("b"), ref("c")], 2, 0).map((item) => item.id)).toEqual(["c", "a", "b"]);
 });

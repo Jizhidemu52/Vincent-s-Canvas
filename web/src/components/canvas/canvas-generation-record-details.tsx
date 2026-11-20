@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button, Tooltip } from "antd";
+import { hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 import { Copy, GitBranch, RotateCcw } from "lucide-react";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { DisplayText, DisplayTranslationScope, useDisplayText } from "@/hooks/use-display-text";
@@ -60,7 +61,7 @@ export function CanvasGenerationRecordDetails({ node, draftPrompt, derivatives =
         </> : <p className="opacity-60" data-testid="canvas-generation-prompt-missing">{t("未记录生成提示词")}</p>}
         {onContinue || (record && onRegenerate) ? <div className="flex flex-wrap items-center gap-1">
             {record && onRegenerate ? <Tooltip title={t("使用原提示词、原参考图和原参数，新增结果，不覆盖当前图")}><Button size="small" type="text" icon={<RotateCcw className="size-3.5" />} disabled={disabled} onClick={onRegenerate}>{t("再来一张")}</Button></Tooltip> : null}
-            {onContinue && (node.metadata?.content || node.metadata?.storageKey) ? <Tooltip title={t("将当前图设为参考，清空草稿，原生成档案不变")}><Button size="small" type="text" icon={<GitBranch className="size-3.5" />} disabled={disabled} onClick={onContinue}>{t("基于此图继续")}</Button></Tooltip> : null}
+            {onContinue && hasCanvasImageSource(node.metadata) ? <Tooltip title={t("将当前图设为参考，清空草稿，原生成档案不变")}><Button size="small" type="text" icon={<GitBranch className="size-3.5" />} disabled={disabled} onClick={onContinue}>{t("基于此图继续")}</Button></Tooltip> : null}
         </div> : null}
         {derivatives.length ? <details className="min-w-0" data-testid="canvas-generation-derivatives" onToggle={event => setDerivativesExpanded(event.currentTarget.open)}><summary className="cursor-pointer py-1">{t("衍生（{count}）", { count: derivatives.length })}</summary>
             <DisplayTranslationScope visible={derivativesExpanded}><div className="mt-1 max-h-40 space-y-1 overflow-y-auto">{derivatives.map(child => {

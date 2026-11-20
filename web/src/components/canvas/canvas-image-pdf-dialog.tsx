@@ -31,7 +31,7 @@ export function CanvasImagePdfDialog({ nodes, defaultSelectedIds = [], defaultNa
     const chosen = new Set(chosenIds);
     const ordered = [...chosenIds.map((id) => byId.get(id)!), ...available.filter((node) => !chosen.has(node.id))];
     const overLimit = chosenIds.length > CANVAS_IMAGE_PDF_LIMITS.images;
-    const mediaIdentity = chosenIds.map(id => { const node = byId.get(id)!; return `${id}:${node.metadata?.storageKey || ""}:${node.metadata?.content || ""}`; }).join("\n");
+    const mediaIdentity = chosenIds.map(id => { const node = byId.get(id)!; return `${id}:${node.metadata?.storageKey || ""}:${node.metadata?.serverAssetId || ""}:${node.metadata?.content || ""}`; }).join("\n");
     const cancel = () => { job.current?.abort(); job.current = null; exporting.current = false; setBusy(false); setProgress(null); };
     const close = () => { cancel(); onClose(); };
 
@@ -96,7 +96,7 @@ export function CanvasImagePdfDialog({ nodes, defaultSelectedIds = [], defaultNa
                         return <div key={node.id} role="listitem" className="flex items-center gap-3 rounded-lg px-2 py-2" style={{ background: chosen.has(node.id) ? token.controlItemBgActive : token.colorFillQuaternary }}>
                             <Checkbox aria-label={t("选择 {value1}", { value1: name })} checked={chosen.has(node.id)} disabled={busy} onChange={() => toggle(node.id)} />
                             <span className="w-5 shrink-0 text-center text-xs tabular-nums" style={{ color: token.colorTextSecondary }}>{index >= 0 ? index + 1 : "—"}</span>
-                            <CanvasPersistedMediaPreview kind="image" url={node.metadata?.content} storageKey={node.metadata?.storageKey} alt={name} className="size-12 shrink-0 rounded object-contain" />
+                            <CanvasPersistedMediaPreview kind="image" url={node.metadata?.content} storageKey={node.metadata?.storageKey} serverAssetId={node.metadata?.serverAssetId} alt={name} className="size-12 shrink-0 rounded object-contain" />
                             <Tooltip title={name}><span className="min-w-0 flex-1 truncate text-sm">{name}</span></Tooltip>
                             <div className="flex shrink-0"><Tooltip title={t("上移")}><Button size="small" type="text" aria-label={t("上移 {value1}", { value1: name })} icon={<ArrowUp size={15} />} disabled={busy || index <= 0} onClick={() => move(node.id, -1)} /></Tooltip><Tooltip title={t("下移")}><Button size="small" type="text" aria-label={t("下移 {value1}", { value1: name })} icon={<ArrowDown size={15} />} disabled={busy || index < 0 || index === chosenIds.length - 1} onClick={() => move(node.id, 1)} /></Tooltip></div>
                         </div>;

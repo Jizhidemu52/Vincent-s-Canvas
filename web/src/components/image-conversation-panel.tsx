@@ -280,7 +280,7 @@ function OwnedImageConversationPanel({
     const selectedCanvasImages = (options.canvasImages || []).filter((item) =>
         options.selectedCanvasImageIds?.includes(item.id),
     );
-    const addImages = (items: Array<{ id: string; title: string; image: string }>) => state.attachImages(items);
+    const addImages = (items: Array<{ id: string; title: string; image: string; storageKey?: string; serverAssetId?: string; width?: number; height?: number }>) => state.attachImages(items);
     const baseVersion = (version: ImageVersion) => {
         void state.selectBase(version.assetId, `图${version.imageNo} · ${version.label}`);
     };

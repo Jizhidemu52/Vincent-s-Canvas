@@ -14,12 +14,13 @@ const canvasImage = (image) =>
 const asCanvasItem = (item) =>
     item &&
     typeof item.id === "string" &&
-    (canvasImage(item.image) || (typeof item.storageKey === "string" && /^image:[a-z0-9_-]+$/i.test(item.storageKey)))
+    (canvasImage(item.image) || (typeof item.storageKey === "string" && /^image:[a-z0-9_-]+$/i.test(item.storageKey)) || assetId.test(item.serverAssetId || ""))
         ? {
               id: item.id,
               title: item.title || "未命名图片",
               image: canvasImage(item.image) ? item.image : "",
               storageKey: item.storageKey,
+              serverAssetId: item.serverAssetId,
               width: item.width,
               height: item.height,
               kind: item.kind || "reference",
@@ -31,6 +32,7 @@ const asAssetItem = (asset) =>
               id: asset.id,
               title: asset.filename || "未命名素材",
               image: asset.contentUrl,
+              serverAssetId: asset.id,
               thumbnail: `/api/assets/${asset.id}/thumb?w=256`,
               kind: "reference",
           }
@@ -217,12 +219,13 @@ export function ReferencePicker({
         setChooseError("");
         try {
             await latest.current.onChoose?.(
-                Array.from(selected.values(), ({ id, title, image, kind, storageKey, width, height }) => ({
+                Array.from(selected.values(), ({ id, title, image, kind, storageKey, serverAssetId, width, height }) => ({
                     id,
                     title,
                     image,
                     kind,
                     storageKey,
+                    serverAssetId,
                     width,
                     height,
                 })),
@@ -367,6 +370,7 @@ export function ReferencePicker({
                                             kind="image"
                                             url={item.image}
                                             storageKey={item.storageKey}
+                                            serverAssetId={item.serverAssetId}
                                             width={item.width}
                                             height={item.height}
                                             alt=""

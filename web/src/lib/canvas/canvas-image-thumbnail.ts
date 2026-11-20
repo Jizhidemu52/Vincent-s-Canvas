@@ -1,4 +1,5 @@
 import type { CanvasNodeData } from "@/types/canvas";
+import { canvasImageSource } from "./canvas-image-source";
 
 export const imageThumbnailEdges = [256, 512, 1024] as const;
 export type ImageThumbnailEdge = (typeof imageThumbnailEdges)[number];
@@ -18,7 +19,7 @@ export function canvasServerThumbnailUrl(content: string, edge: ImageThumbnailEd
 /** 0 means original. Never enlarge a small source or soften a near-native view. */
 export function canvasImagePreviewEdge(node: CanvasNodeData, scale: number, dpr = 1): ImageThumbnailEdge | 0 {
     if (node.type !== "image") return 0;
-    const serverImage = canvasServerThumbnailUrl(node.metadata?.content || "", 256);
+    const serverImage = canvasServerThumbnailUrl(canvasImageSource(node.metadata), 256);
     if (!node.metadata?.storageKey && !serverImage) return 0;
     const width = node.metadata?.naturalWidth || 0;
     const height = node.metadata?.naturalHeight || 0;

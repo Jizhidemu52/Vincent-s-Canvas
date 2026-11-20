@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { canvasServerThumbnailUrl, type ImageThumbnailEdge } from "@/lib/canvas/canvas-image-thumbnail";
+import { canvasImageSource } from "@/lib/canvas/canvas-image-source";
 import type { ImageThumbnailLease } from "@/lib/image-thumbnail-cache";
 
 const code = ts.transpileModule(readFileSync(new URL("../src/components/canvas/use-canvas-image-thumbnail.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
@@ -47,6 +48,7 @@ function harness(
         "@/services/image-storage": { resolveImageUrl: async () => { originalCalls++; return original(); } },
         "@/services/image-thumbnails": { acquireImageThumbnail: () => { thumbnailCalls++; return thumbnail(); } },
         "@/lib/canvas/canvas-image-thumbnail": { canvasServerThumbnailUrl },
+        "@/lib/canvas/canvas-image-source": { canvasImageSource },
         "@/stores/use-user-store": { useUserStore: (selector: (state: { owner: string }) => unknown) => selector({ owner }) },
         "@/services/server-image-thumbnails": {
             serverImagePreviewOwner: (state: { owner: string }) => state.owner,

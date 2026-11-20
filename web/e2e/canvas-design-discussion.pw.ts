@@ -189,9 +189,22 @@ test("discussion stays conversational and generated thumbnails continue the same
     await expect(panel.locator(".discussion-results img")).toHaveCount(1);
     await expect.poll(() => panel.locator(".discussion-results img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
     expect(api.submissions).toHaveLength(1);
-    const resultSource = await panel.locator(".discussion-results img").getAttribute("src");
+    await panel.getByRole("button", { name: "查看生成图：克制的灰蓝配色", exact: true }).click();
+    const preview = page.getByRole("dialog");
+    const resultBytes = await preview.locator("img").evaluate(async (img: HTMLImageElement) => [
+        ...new Uint8Array(await (await fetch(img.src)).arrayBuffer()),
+    ]);
+    await page.keyboard.press("Escape");
+    await expect(preview).toHaveCount(0);
     await panel.getByRole("button", { name: "围绕这张聊", exact: true }).click();
-    await expect(panel.locator(".studio-reference img")).toHaveAttribute("src", resultSource!);
+    await expect(panel.locator(".studio-reference img")).toHaveAttribute("data-loaded", "true");
+    await panel.getByRole("button", { name: "查看参考图1原图", exact: true }).click();
+    const referenceBytes = await preview.locator("img").evaluate(async (img: HTMLImageElement) => [
+        ...new Uint8Array(await (await fetch(img.src)).arrayBuffer()),
+    ]);
+    expect(referenceBytes).toEqual(resultBytes);
+    await page.keyboard.press("Escape");
+    await expect(preview).toHaveCount(0);
     await expect(panel.locator(".discussion-focus")).toContainText("此图已作为当前修改对象");
     await composer.fill("袖口对比有点强，你觉得怎么改更协调？只讨论。");
     await composer.press("Enter");

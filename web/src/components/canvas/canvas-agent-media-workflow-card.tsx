@@ -162,7 +162,7 @@ export function CanvasAgentMediaWorkflowCard({
                                 {card.initialReferenceSummary.items.map((reference) => {
                                     const node = referenceNodes.find(node => node.id === reference.nodeId);
                                     return <Tooltip title={<DisplayText text={node?.title || reference.label} />} key={reference.nodeId}><span className="inline-flex items-center gap-1 rounded border px-2 py-1" style={{ borderColor: theme.node.stroke }}>
-                                        {node ? <CanvasPersistedMediaPreview kind="image" url={node.metadata?.content} storageKey={node.metadata?.storageKey} alt="" className="size-7 rounded object-cover" /> : null}{reference.label}{node?.title ? <> · <DisplayText text={node.title} /></> : null}
+                                        {node ? <CanvasPersistedMediaPreview kind="image" url={node.metadata?.content} storageKey={node.metadata?.storageKey} serverAssetId={node.metadata?.serverAssetId} alt="" className="size-7 rounded object-cover" /> : null}{reference.label}{node?.title ? <> · <DisplayText text={node.title} /></> : null}
                                     </span></Tooltip>;
                                 })}
                             </div>

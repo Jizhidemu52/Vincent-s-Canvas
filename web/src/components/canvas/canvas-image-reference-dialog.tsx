@@ -3,6 +3,7 @@ import { Button, Checkbox, Empty, Modal, theme } from "antd";
 import { useEffect, useMemo, useState } from "react";
 
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 import { useCanvasImageThumbnail } from "./use-canvas-image-thumbnail";
 
 type Props = { open: boolean; nodes: CanvasNodeData[]; selectedReferenceKeys: string[]; onConfirm: (nodeIds: string[]) => void; onClose: () => void };
@@ -10,7 +11,7 @@ type Props = { open: boolean; nodes: CanvasNodeData[]; selectedReferenceKeys: st
 export function CanvasImageReferenceDialog({ open, nodes, selectedReferenceKeys, onConfirm, onClose }: Props) {
     const t = useUiText();
     const { token } = theme.useToken();
-    const available = useMemo(() => nodes.filter((node) => node.type === CanvasNodeType.Image && Boolean(node.metadata?.content)), [nodes]);
+    const available = useMemo(() => nodes.filter((node) => node.type === CanvasNodeType.Image && hasCanvasImageSource(node.metadata)), [nodes]);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const existingIds = useMemo(() => new Set(selectedReferenceKeys.map(key => key.replace(/^(?:node|canvas|connection|source):/, ""))), [selectedReferenceKeys]);
     const availableIds = useMemo(() => new Set(available.map(node => node.id)), [available]);

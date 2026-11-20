@@ -6,6 +6,7 @@ import { createZip } from "@/lib/zip";
 import { resolveImageUrl } from "@/services/image-storage";
 import type { CanvasNodeData } from "@/types/canvas";
 import { isCanvasPdfImage } from "./canvas-image-export-selection";
+import { canvasImageSource } from "./canvas-image-source";
 export { canvasImageExportSelection, isCanvasPdfImage } from "./canvas-image-export-selection";
 
 export type CanvasImagePdfMode = "merged" | "separate" | "images" | "png" | "jpg";
@@ -126,7 +127,7 @@ export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions,
 }
 
 async function loadCanvasPdfImage(node: CanvasNodeData, signal?: AbortSignal) {
-    const url = await resolveImageUrl(node.metadata?.storageKey, node.metadata?.content || "");
+    const url = await resolveImageUrl(node.metadata?.storageKey, canvasImageSource(node.metadata));
     if (!url) throw new Error("找不到原图，请重新打开画布后重试");
     checkCanvasImageAbort(signal);
     const response = await fetch(url, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]) });

@@ -16,6 +16,7 @@ import { canvasMediaPlaybackProps } from "@/lib/canvas/canvas-media-render-quali
 import { canvasImageRenderProps } from "@/lib/canvas/canvas-image-render-quality";
 import { needsCanvasNodeMediaPreviewResolution, resolveCanvasNodeMediaPreview } from "@/lib/canvas/canvas-node-media-preview";
 import { canvasNodeHasImagePreview, canvasNodeRenderingStyle, shouldUseCanvasNodeOverview } from "@/lib/canvas/canvas-node-rendering";
+import { canvasImageSource, hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 import { canvasNodeResizePointerDelta, resolveCanvasNodeResize, type CanvasResizeHandle } from "@/lib/canvas/canvas-node-resize";
 import { shouldRenderCanvasNodeControls } from "@/lib/canvas/canvas-node-controls-visibility";
 import { canvasNodeEffectiveHover } from "@/lib/canvas/canvas-node-hover-state";
@@ -178,7 +179,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const [isEditingContent, setIsEditingContent] = useState(false);
     const [textDraft, setTextDraft] = useState(data.metadata?.content || "");
     const [localResizePreview, setLocalResizePreview] = useState<CanvasResizeBounds | null>(null);
-    const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content);
+    const hasImageContent = data.type === CanvasNodeType.Image && hasCanvasImageSource(data.metadata);
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content || data.metadata?.storageKey);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content);
     const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
@@ -731,7 +732,7 @@ function ResourceLabelBadge({ reference, theme }: { reference: CanvasResourceRef
 
 function ImageNodeContent(props: NodeContentRendererProps) {
     const t = useUiText();
-    const hasImageSource = Boolean(props.node.metadata?.content || props.node.metadata?.storageKey);
+    const hasImageSource = hasCanvasImageSource(props.node.metadata);
     if (!hasImageSource && props.isBatchRoot) {
         const content =
             props.node.metadata?.status === "loading" ? (
@@ -888,7 +889,7 @@ function ImageContent({
 }
 
 function useCanvasNodeMediaPreview(node: CanvasNodeData) {
-    const content = node.metadata?.content || "";
+    const content = canvasImageSource(node.metadata);
     const storageKey = node.metadata?.storageKey;
     const source = { type: node.type, content, storageKey };
     const needsResolution = needsCanvasNodeMediaPreviewResolution(source);

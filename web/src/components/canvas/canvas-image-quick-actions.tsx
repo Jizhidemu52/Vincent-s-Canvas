@@ -7,6 +7,7 @@ import { useCanvasGraphStore } from "@/stores/canvas/canvas-graph-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { quickImageTitle, type QuickImageAction } from "@/lib/quick-image-tools";
 import type { CanvasNodeData } from "@/types/canvas";
+import { hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 
 /** Image selection actions stay on the right, separate from the creation rail. */
 export function CanvasImageQuickActions({ node, onRun }: { node: CanvasNodeData; onRun: (node: CanvasNodeData, action: QuickImageAction) => Promise<void> }) {
@@ -16,7 +17,7 @@ export function CanvasImageQuickActions({ node, onRun }: { node: CanvasNodeData;
     const pending = useCanvasGraphStore(state => state.nodes.some(item => item.metadata?.quickImageAction && item.metadata?.generationRecord?.sourceNodeId === node.id && (item.metadata.imageTask || item.metadata.status === "loading")));
     const [running, setRunning] = useState<QuickImageAction>();
     const busy = Boolean(running || pending || node.metadata?.imageTask || node.metadata?.status === "loading");
-    const disabled = !enabled || busy || !(node.metadata?.content || node.metadata?.storageKey);
+    const disabled = !enabled || busy || !hasCanvasImageSource(node.metadata);
     const run = async (action: QuickImageAction) => { if (disabled) return; setRunning(action); try { await onRun(node, action); } finally { setRunning(undefined); } };
     return <aside aria-label={uiText("图片快捷处理")} data-testid="canvas-image-quick-actions" className="absolute right-3 top-[76px] z-30 w-[232px] max-w-[calc(100%-24px)] rounded-xl border p-3 max-sm:top-20 max-sm:w-[192px]" style={{ background: theme.toolbar.panel, color: theme.node.text, borderColor: theme.toolbar.border }} onPointerDown={event => event.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between gap-2 text-xs"><strong>{uiText("图片")}</strong><span style={{ color: theme.node.muted }}>{node.metadata?.naturalWidth || Math.round(node.width)} × {node.metadata?.naturalHeight || Math.round(node.height)}</span></div>

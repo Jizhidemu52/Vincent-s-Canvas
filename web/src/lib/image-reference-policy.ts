@@ -3,6 +3,7 @@ import { AVIF_REFERENCE_UNSUPPORTED_MESSAGE } from "../../../shared/generation-e
 import { uiText } from "./i18n";
 import { imageModelProfile } from "./image-model-settings";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
+import { serverMediaId } from "@/services/canvas-media-links";
 
 export type ImageReferenceValidation = {
     valid: boolean;
@@ -83,10 +84,11 @@ export function moveImageReference<T>(references: T[], fromIndex: number, toInde
 }
 
 export function imageReferenceIdentity(reference: ImageReferenceItem) {
+    const assetId = reference.serverAssetId || reference.sourceAssetId || serverMediaId(reference.url || "") || serverMediaId(reference.dataUrl || "");
+    if (assetId) return `server-asset:${assetId}`;
     if (reference.storageKey) return `storage:${reference.storageKey}`;
     if (reference.url && !reference.url.startsWith("data:")) return `url:${reference.url}`;
     if (reference.dataUrl && !reference.dataUrl.startsWith("data:")) return `url:${reference.dataUrl}`;
-    if (reference.sourceAssetId) return `asset:${reference.sourceAssetId}`;
     return `reference:${reference.referenceKey}`;
 }
 

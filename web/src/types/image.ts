@@ -10,6 +10,7 @@ export type ReferenceImage = {
     dataUrl: string;
     url?: string;
     storageKey?: string;
+    serverAssetId?: string;
     sourceAssetId?: string;
     bytes?: number;
     width?: number;

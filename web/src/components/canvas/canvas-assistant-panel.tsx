@@ -179,6 +179,7 @@ import {
     readCanvasContextVideo,
     readCanvasConversationImage,
 } from "@/lib/canvas/canvas-assistant-media";
+import { canvasImageSource, hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 import { buildCanvasConversationHistory } from "@/lib/canvas/canvas-assistant-history";
 import { canvasAssistantDisplayMessage } from "@/lib/canvas/canvas-assistant-output";
 import { useChatBottomFollow } from "@/hooks/use-chat-bottom-follow";
@@ -415,6 +416,7 @@ function ServerCanvasAssistantPanel(props: CanvasAssistantPanelRenderState) {
                 ? `/api/assets/${node.metadata.serverAssetId}/content`
                 : node.metadata?.content || "",
             storageKey: node.metadata?.storageKey,
+            serverAssetId: node.metadata?.serverAssetId,
             width: node.metadata?.naturalWidth,
             height: node.metadata?.naturalHeight,
         }));
@@ -4288,6 +4290,7 @@ const LegacyCanvasAssistantPanel = memo(function LegacyCanvasAssistantPanel({
                                 kind={latestResult.mediaType}
                                 url={latestResult.url}
                                 storageKey={latestResult.storageKey}
+                                serverAssetId={latestResult.serverAssetId}
                                 alt=""
                                 className="size-9 rounded object-cover"
                             />
@@ -4330,6 +4333,7 @@ const LegacyCanvasAssistantPanel = memo(function LegacyCanvasAssistantPanel({
                                     kind="image"
                                     url={videoConfirmation.selectedImage.url}
                                     storageKey={videoConfirmation.selectedImage.storageKey}
+                                    serverAssetId={videoConfirmation.selectedImage.serverAssetId}
                                     alt={t("已选首帧")}
                                     className="size-12 rounded-md object-cover"
                                 />
@@ -5542,6 +5546,7 @@ function AssistantReferenceChip({
                 kind="image"
                 url={item.dataUrl}
                 storageKey={item.storageKey}
+                serverAssetId={item.serverAssetId}
                 alt={display(item.title)}
                 className="size-full rounded-lg object-contain"
             />
@@ -6372,6 +6377,7 @@ function referenceToImage(reference: CanvasAssistantReference & { dataUrl: strin
         type: "image/png",
         dataUrl: reference.dataUrl,
         storageKey: reference.storageKey,
+        serverAssetId: reference.serverAssetId,
     };
 }
 
@@ -6386,13 +6392,14 @@ function fileToDataUrl(file: File) {
 }
 
 function nodeToReference(node: CanvasNodeData): CanvasAssistantReference | null {
-    if (node.type === CanvasNodeType.Image && node.metadata?.content) {
+    if (node.type === CanvasNodeType.Image && hasCanvasImageSource(node.metadata)) {
         return {
             id: node.id,
             type: node.type,
             title: node.title,
-            dataUrl: node.metadata.content,
+            dataUrl: canvasImageSource(node.metadata),
             storageKey: node.metadata.storageKey,
+            serverAssetId: node.metadata.serverAssetId,
         };
     }
     if (node.type === CanvasNodeType.Text && node.metadata?.content) {
@@ -6402,7 +6409,12 @@ function nodeToReference(node: CanvasNodeData): CanvasAssistantReference | null 
 }
 
 function buildAssistantReferences(nodes: CanvasNodeData[]) {
-    return nodes.map(nodeToReference).filter((item): item is CanvasAssistantReference => Boolean(item));
+    const unique = new Map<string, CanvasAssistantReference>();
+    nodes.map(nodeToReference).filter((item): item is CanvasAssistantReference => Boolean(item)).forEach((item) => {
+        const key = item.serverAssetId || item.storageKey || item.dataUrl || item.id;
+        if (!unique.has(key)) unique.set(key, item);
+    });
+    return [...unique.values()];
 }
 
 function canvasChatProfile(

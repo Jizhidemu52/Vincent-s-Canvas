@@ -13,6 +13,14 @@ const archive: CanvasGenerationRecord = {
 const result = { ...image("blue"), metadata: { ...image("blue").metadata, prompt: archive.prompt, generationRecord: archive } };
 
 describe("node-owned generation editor", () => {
+    test("continue from a cloud-only result retains the durable original in its saved draft", () => {
+        const assetId = "b3000000-0000-4000-8000-000000000001";
+        const cloud = { ...result, metadata: { serverAssetId: assetId } };
+        const patch = canvasContinueFromImagePatch(cloud);
+        expect(patch.draftImageReferences?.[0]?.content).toBe(`/api/assets/${assetId}/content`);
+        const state = canvasGenerationEditorState({ ...cloud, metadata: { ...cloud.metadata, ...patch } }, [cloud], [], defaultConfig);
+        expect(state.references[0]?.dataUrl).toBe(`/api/assets/${assetId}/content`);
+    });
     test("selecting a result recalls original inputs, not the output itself", () => {
         const state = canvasGenerationEditorState(result, [original, result], [], defaultConfig);
         expect(state.prompt).toBe("blue");
