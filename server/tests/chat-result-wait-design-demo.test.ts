@@ -1,8 +1,7 @@
 import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
+import { designDiscussionRequest as designInput } from "./fixtures/design-discussion-request";
 
-const { designSessionRequest } = await import(new URL("../../web/src/components/canvas/design-discussion/design-session.mjs", import.meta.url).href);
-const designInput = designSessionRequest({ prompt: "只讨论针织衫，保留六颗纽扣与两个口袋，不生成图片。", references: [], previews: [], mode: "discuss" });
 const designContent = JSON.stringify({ message: "保留六颗纽扣与两个口袋，仅讨论配色。", questions: [], proposals: [], sources: [], trendStatus: "未实时检索" });
 
 for (const model of ["gpt-6.2-sol", "gemini-4-carbon"]) test(`demo ${model} design waiting preserves the no-profile contract and rejects injected private deadlines`, async () => {
@@ -94,7 +93,7 @@ for (const model of ["gpt-6.2-sol", "gemini-4-carbon"]) test(`demo ${model} desi
     expect(errors).toContain('toolKey: "canvas-design-chat"');
     expect(errors).toContain("modelConfigId:");
     expect(errors).toContain("configurationVersion: 0");
-    for (const secret of ["isolated-design-wait-key", "private upstream echo", designInput.input.at(-1).content]) expect(errors).not.toContain(secret);
+    for (const secret of ["isolated-design-wait-key", "private upstream echo", designInput.input.at(-1)!.content]) expect(errors).not.toContain(secret);
     expect(output.match(/TEST_CHAT_BUDGET=180000/g)).toHaveLength(4);
     expect(output).not.toContain("TEST_CHAT_BUDGET=600000");
 }, 15_000);

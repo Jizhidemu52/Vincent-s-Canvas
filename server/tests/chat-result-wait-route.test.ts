@@ -8,14 +8,14 @@ import * as transport from "../src/provider-submission-transport";
 import { createChatRouter } from "../src/routes/chat";
 import { requestLogging } from "../src/request-logging";
 import { encryptSecret } from "../src/security";
+import { designDiscussionRequest } from "./fixtures/design-discussion-request";
 
 const prompt = "继续把衬衫改成蓝色";
 const input = { requestId: "wait-request-1", toolKey: "canvas-chat", profile: "canvas-assistant",
     profileContext: { stage: "plan", currentUserText: prompt, imageCatalog: [], previewImageIds: [], newCreation: false, workNote: "" },
     input: [{ role: "user", content: prompt }], tools: [] };
 const completed = (content = "已继续检查，可以按这次要求调整。") => Response.json({ choices: [{ message: { content }, finish_reason: "stop" }], usage: { prompt_tokens: 50, completion_tokens: 8, total_cost: 0.2 } });
-const { designSessionRequest } = await import(new URL("../../web/src/components/canvas/design-discussion/design-session.mjs", import.meta.url).href);
-const designInput = { ...designSessionRequest({ prompt: "只讨论针织衫，保留六颗纽扣与两个口袋，不生成图片。", references: [], previews: [], mode: "discuss" }), profile: undefined, profileContext: undefined };
+const designInput = { ...designDiscussionRequest, profile: undefined, profileContext: undefined };
 const designContent = JSON.stringify({ message: "保留六颗纽扣与两个口袋，仅讨论配色。", questions: [], proposals: [], sources: [], trendStatus: "未实时检索" });
 const designCompleted = () => Response.json({ id: "resp-design", object: "response", status: "completed", output: [
     { id: "msg-design", type: "message", status: "completed", role: "assistant", content: [{ type: "output_text", text: designContent }] },
@@ -250,7 +250,7 @@ test("disconnecting the browser never resubmits and late completion releases the
     });
 });
 
-test("the actual no-profile design request waits on one resolved Sol Responses call without adding tools", async () => {
+test("a no-profile design API request waits on one resolved Sol Responses call without adding tools", async () => {
     await fixture(async state => {
         const fallback = setTimeout(() => state.release(designCompleted()), 500);
         let response: Response;
@@ -296,7 +296,7 @@ test.each(["application/json", "text/event-stream"])("design 524 is one failed s
             code: "UPSTREAM_REQUEST_FAILED", name: "ChatProtocolError", phase: accept === "text/event-stream" ? "response" : "request", elapsedMs: expect.any(Number),
             upstreamStatus: 524, upstreamReason: "service_unavailable", correlationId: "wait-fixture-correlation", toolKey: "canvas-design-chat", modelConfigId: "wait-model", configurationVersion: 1,
         }]]);
-        expect(JSON.stringify(state.logs)).not.toContain(designInput.input.at(-1).content);
+        expect(JSON.stringify(state.logs)).not.toContain(designInput.input.at(-1)!.content);
         expect(state.intervals.size).toBe(0);
     }, { toolKey: "canvas-design-chat", model: "gpt-6.2-sol", provider: () => new Response("private-fixture-key private upstream echo", { status: 524 }) });
 });

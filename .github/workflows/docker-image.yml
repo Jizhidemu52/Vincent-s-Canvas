@@ -138,7 +138,9 @@ jobs:
           bun install --cwd server --frozen-lockfile
           bun install --cwd shared --frozen-lockfile
           cd web
-          bunx playwright install --with-deps chromium
+          sudo env PATH="$PATH" GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" RUNNER_OS="$RUNNER_OS" \
+            python3 -B "$GITHUB_WORKSPACE/ops/release/ci-playwright-deps.py"
+          bunx playwright install chromium
       - name: Install isolated migration SQL fixture runtime
         shell: bash
         run: |
