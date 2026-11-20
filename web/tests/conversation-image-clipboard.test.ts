@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { pastedImageFiles } from "@/lib/clipboard-images";
 import { prepareCanvasImageFormat } from "@/lib/canvas/canvas-image-encoding";
+import { serverAssetContentUrl } from "@/lib/canvas/canvas-image-source";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 type ClipboardModule = typeof import("@/lib/conversation-image-clipboard");
@@ -78,6 +79,7 @@ function harness(options: {
         },
     };
     const canvas = moduleWith<CanvasClipboardModule>("lib/canvas/canvas-image-clipboard.ts", {
+        "./canvas-image-source": { serverAssetContentUrl },
         "@/services/image-storage": {
             getImageBlob: async (key: string) => { storedKeys.push(key); return options.stored ? options.stored() : options.original || png; },
             resolveImageUrl: async (key?: string, content?: string) => { resolutions.push([key, content]); return options.resolve ? options.resolve(key, content) : content || ""; },
@@ -104,6 +106,21 @@ function harness(options: {
 }
 
 describe("conversation image clipboard original and HTTP contract", () => {
+    test("cloud-only and evicted originals survive conversation copy and paste without fetching display URLs", async () => {
+        for (const metadata of [
+            { storageKey: undefined, content: undefined, serverAssetId: "cloud-original" },
+            { storageKey: "image:evicted", content: "blob:expired", serverAssetId: "cloud-original" },
+        ]) {
+            const h = harness({ stored: async () => null });
+            expect(await h.copyConversationImage(image("cloud", metadata))).toBe("page");
+            const files = await h.pastedConversationImageFiles(data(h.token()));
+            expect(files).toHaveLength(1);
+            expect(await files![0].arrayBuffer()).toEqual(await png.arrayBuffer());
+            expect(h.resolutions).toEqual([[metadata.storageKey, "/api/assets/cloud-original/content"]]);
+            expect(h.fetched.map(request => request.source)).toEqual(["/api/assets/cloud-original/content"]);
+        }
+    });
+
     test("HTTP writes one opaque token synchronously and returns the exact original bytes/name/type", async () => {
         const pending = deferred<Blob | null>();
         const h = harness({ stored: () => pending.promise });

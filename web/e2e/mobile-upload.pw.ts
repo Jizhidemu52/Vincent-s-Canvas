@@ -1,7 +1,8 @@
 import type { Locator, Page } from "@playwright/test";
-import { test, expect, newCanvas, IMAGE } from "./fixtures";
+import { test, expect, newCanvas, IMAGE, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
 import { activeWorkbench, workbenchPanes, readWorkbenchRegistry } from "./headless-workbench";
+import { expectPersistedReferenceOriginal } from "./reference-image-assertions";
 
 const file = (name: string) => ({ name, mimeType: "image/png", buffer: IMAGE });
 const videoModel = { id: "10000000-0000-4000-8000-000000000003", name: "隔离视频模型", modelId: "wan2.7", capabilities: ["video"], creditCost: 0, rmbCost: 0 };
@@ -18,7 +19,14 @@ async function chooseImage(page: Page, trigger: Locator, names: string[]) {
 
 async function expectOriginal(image: Locator) {
     await expect(image).toBeVisible();
-    expect(Buffer.from(await image.evaluate(async (element: HTMLImageElement) => [...new Uint8Array(await (await fetch(element.src)).arrayBuffer())]))).toEqual(IMAGE);
+    expect(Buffer.from(await image.evaluate(async (element: HTMLImageElement) => [...new Uint8Array(await (await fetch(element.src)).arrayBuffer())])).equals(IMAGE)).toBe(true);
+}
+
+async function expectGalleryReference(page: Page, api: MockCanvasApi, name: string) {
+    await expectPersistedReferenceOriginal(page, name);
+    const uploads = [...api.assets.values()].filter(asset => asset.filename === name);
+    expect(uploads).toHaveLength(1);
+    expect(api.assetBytes.get(uploads[0].id)?.equals(IMAGE)).toBe(true);
 }
 
 async function expectReachable(control: Locator) {
@@ -51,8 +59,8 @@ for (const width of [320, 390]) {
         await chooseImage(page, upload, ["gallery-product.png", "gallery-detail.png"]);
         await expect(dialog).not.toBeVisible();
         const tray = page.getByRole("region", { name: "参考图", exact: true });
-        await expectOriginal(tray.getByRole("img", { name: "gallery-product.png", exact: true }));
-        await expectOriginal(tray.getByRole("img", { name: "gallery-detail.png", exact: true }));
+        await expectGalleryReference(page, api, "gallery-product.png");
+        await expectGalleryReference(page, api, "gallery-detail.png");
         await expect(tray.getByText("上传", { exact: true })).toHaveCount(2);
         await expect(workbenchPanes(page).first().locator('[aria-label="参考图"] img')).toHaveCount(0);
         const registry = await readWorkbenchRegistry(page);
@@ -60,8 +68,8 @@ for (const width of [320, 390]) {
         await page.reload();
         await expect(workbenchPanes(page).first()).toBeHidden();
         await expect(tray.locator("img")).toHaveCount(2);
-        await expectOriginal(tray.getByRole("img", { name: "gallery-product.png", exact: true }));
-        await expectOriginal(tray.getByRole("img", { name: "gallery-detail.png", exact: true }));
+        await expectGalleryReference(page, api, "gallery-product.png");
+        await expectGalleryReference(page, api, "gallery-detail.png");
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         await page.screenshot({ path: info.outputPath(`image-uploaded-${width}.png`), animations: "disabled" });
         expect(api.assets.size).toBe(2);
@@ -149,7 +157,7 @@ test("short mobile picker retains corrupt-image errors and accepts an explicit r
     await page.screenshot({ path: info.outputPath("gallery-upload-error-short-screen.png"), animations: "disabled" });
     await chooseImage(page, upload, ["retry-gallery.png"]);
     await expect(dialog).not.toBeVisible();
-    await expectOriginal(page.getByRole("region", { name: "参考图", exact: true }).getByRole("img", { name: "retry-gallery.png", exact: true }));
+    await expectGalleryReference(page, api, "retry-gallery.png");
     expect(api.submissions).toHaveLength(0);
 });
 

@@ -4,6 +4,7 @@ import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test, expect, fixturePng, IMAGE, newCanvas, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
+import { expectPersistedReferenceOriginal } from "./reference-image-assertions";
 
 const owner = "00000000-0000-4000-8000-000000000099";
 const secondOwner = "00000000-0000-4000-8000-000000000088";
@@ -53,7 +54,7 @@ async function upload(page: Page, trigger: Locator, name: string, bytes = IMAGE)
 
 async function original(image: Locator, bytes = IMAGE) {
     await expect(image).toBeVisible();
-    expect(Buffer.from(await image.evaluate(async (element: HTMLImageElement) => [...new Uint8Array(await (await fetch(element.src)).arrayBuffer())]))).toEqual(bytes);
+    expect(Buffer.from(await image.evaluate(async (element: HTMLImageElement) => [...new Uint8Array(await (await fetch(element.src)).arrayBuffer())])).equals(bytes)).toBe(true);
 }
 
 test("upload without generation reaches an independent browser and owner isolation, then reuses one cloud original", async ({ page, context, api, baseURL }, info) => {
@@ -87,18 +88,19 @@ test("upload without generation reaches an independent browser and owner isolati
         })).toBe(0);
         await page.goto("/image?tool=image-edit");
         await upload(page, page.getByRole("button", { name: "上传图片", exact: true }).first(), "只上传不生成.png");
-        await original(page.getByRole("region", { name: "参考图", exact: true }).getByRole("img", { name: "只上传不生成.png", exact: true }));
+        await expectPersistedReferenceOriginal(page, "只上传不生成.png");
         expect(api.submissions).toHaveLength(0); expect(server.writes).toHaveLength(1);
         await expect(remote.getByText("只上传不生成.png", { exact: true }).first()).toBeVisible({ timeout: 27_000 });
         expect(server.lists.every(read => read.cursor === null && (read.limit === "60" || read.limit === null))).toBe(true);
         const id = [...api.assets.keys()][0]!;
+        expect(api.assetBytes.get(id)?.equals(IMAGE)).toBe(true);
         expect(await remote.evaluate(async id => [...new Uint8Array(await (await fetch(`/api/assets/${id}/content`)).arrayBuffer())], id)).toEqual([...IMAGE]);
         await remote.screenshot({ path: info.outputPath("independent-browser-assets.png"), animations: "disabled" });
         await remote.reload(); await expect(remote.getByText("只上传不生成.png", { exact: true }).first()).toBeVisible();
         await expect(other.getByText("只上传不生成.png", { exact: true })).toHaveCount(0);
         expect(await other.evaluate(async id => (await fetch(`/api/assets/${id}/content`)).status, id)).toBe(404);
         await page.reload();
-        await original(page.getByRole("region", { name: "参考图", exact: true }).getByRole("img", { name: "只上传不生成.png", exact: true }));
+        await expectPersistedReferenceOriginal(page, "只上传不生成.png");
         await page.getByRole("textbox", { name: "图像提示词", exact: true }).fill("保留原图构图，仅将背景改为浅色");
         await page.getByRole("button", { name: "开始编辑", exact: true }).click();
         await expect.poll(() => api.submissions.length).toBe(1);
@@ -122,8 +124,9 @@ test("picker cloud failure never inserts local-only success and explicit retry s
     await page.screenshot({ path: info.outputPath("cloud-upload-failure-mobile.png"), animations: "disabled" });
     server.fail(false); await upload(page, trigger, "失败后重试.png");
     await expect(dialog).not.toBeVisible();
-    await original(page.getByRole("region", { name: "参考图", exact: true }).getByRole("img", { name: "失败后重试.png", exact: true }));
+    await expectPersistedReferenceOriginal(page, "失败后重试.png");
     expect(api.assets.size).toBe(1); expect(server.writes).toHaveLength(2); expect(api.submissions).toHaveLength(0);
+    expect([...api.assetBytes.values()][0]?.equals(IMAGE)).toBe(true);
 });
 
 test("video and creative uploads save exact originals before any generation", async ({ page, context, api }, info) => {

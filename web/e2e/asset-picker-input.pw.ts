@@ -2,6 +2,7 @@ import { test, expect, IMAGE } from "./fixtures";
 import type { Page } from "@playwright/test";
 import { toolDefinitions } from "../../shared/feature-catalog";
 import { activeWorkbench, workbenchPanes } from "./headless-workbench";
+import { expectPersistedReferenceOriginal } from "./reference-image-assertions";
 
 const owner = "00000000-0000-4000-8000-000000000099";
 const imageId = "79000000-0000-4000-8000-000000000001";
@@ -115,9 +116,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         await page.screenshot({ path: testInfo.outputPath(`selected-footer-${viewport.width}.png`), animations: "disabled" });
         await confirm.click();
         await expect(dialog).not.toBeVisible();
-        const reference = page.getByRole("region", { name: "参考图", exact: true }).getByRole("img", { name: "原图24", exact: true });
-        await expect(reference).toBeVisible();
-        expect(Buffer.from(await reference.evaluate(async (element: HTMLImageElement) => [...new Uint8Array(await (await fetch(element.src)).arrayBuffer())]))).toEqual(IMAGE);
+        await expectPersistedReferenceOriginal(page, "原图24");
         await expect(page.getByText("已加入参考图", { exact: true })).toBeVisible();
         expect(api.submissions).toHaveLength(0);
     });
