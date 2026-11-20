@@ -5,7 +5,7 @@ import { App, Button, Modal, Tooltip } from "antd";
 import { Sparkles } from "lucide-react";
 import { createClientId } from "@/lib/client-id";
 import { optimizeImagePrompt } from "@/services/api/image";
-import { completedPromptCompilation, getPromptCompilation, PromptCompilationUncertainError, type PublicPromptCompilation, type PromptInputData } from "@/services/api/prompt-compilations";
+import { observePromptCompilation, PromptCompilationUncertainError, type PublicPromptCompilation, type PromptInputData } from "@/services/api/prompt-compilations";
 import type { AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
@@ -42,16 +42,20 @@ export function PromptOptimizeButton({ config, prompt, references = [], operatio
     const ownerId = useUserStore(state => state.user?.id);
     const lock = useRef(false);
     const mounted = useRef(true);
+    const activeRequest = useRef<AbortController | undefined>(undefined);
+    const pendingContext = useRef<{ context: OptimizationContext; revision: number } | undefined>(undefined);
     const busyChange = useRef(onBusyChange);
     busyChange.current = onBusyChange;
     useEffect(() => {
         mounted.current = true;
-        return () => { mounted.current = false; if (lock.current) busyChange.current?.(false); };
+        const unsubscribe = useUserStore.subscribe(state => {
+            if (pendingContext.current?.context.ownerId !== state.user?.id) activeRequest.current?.abort();
+        });
+        return () => { mounted.current = false; unsubscribe(); activeRequest.current?.abort(); if (lock.current) busyChange.current?.(false); };
     }, []);
     const pendingInput = useRef<PromptInputData | undefined>(undefined);
     const supported = operationType !== "upscale";
     const fieldsKey = JSON.stringify(fields);
-    const pendingContext = useRef<{ context: OptimizationContext; revision: number } | undefined>(undefined);
     const latestContext = { ownerId, scopeKey, configKey: JSON.stringify(config), operationType, scene, toolKey, prompt, fieldsKey, references };
     const current = useRef(latestContext);
     const revision = useRef(0);
@@ -75,10 +79,13 @@ export function PromptOptimizeButton({ config, prompt, references = [], operatio
         pendingInput.current = input;
         const context = pendingContext.current || { context: current.current, revision: revision.current };
         pendingContext.current = context;
+        const controller = new AbortController();
+        activeRequest.current = controller;
         try {
             const result = pending
-                ? completedPromptCompilation(await getPromptCompilation(requestId).catch(error => { throw new PromptCompilationUncertainError(requestId, undefined, error); }), requestId)
-                : await optimizeImagePrompt(config, input, references, { requestId, operationType, toolKey });
+                ? await observePromptCompilation(requestId, { signal: controller.signal })
+                : await optimizeImagePrompt(config, input, references, { requestId, operationType, toolKey, signal: controller.signal });
+            controller.signal.throwIfAborted();
             if (!mounted.current) return;
             setPending(undefined);
             pendingInput.current = undefined;
@@ -93,10 +100,14 @@ export function PromptOptimizeButton({ config, prompt, references = [], operatio
             setPreview(next);
         } catch (error) {
             if (!mounted.current) return;
-            if (error instanceof PromptCompilationUncertainError) setPending(requestId);
-            else { setPending(undefined); pendingInput.current = undefined; pendingContext.current = undefined; }
-            message.error(displayNotice(error instanceof Error ? error.message : uiText("提示词优化失败")));
-        } finally { lock.current = false; if (mounted.current) { setBusy(false); onBusyChange?.(false); } }
+            if (error instanceof PromptCompilationUncertainError || controller.signal.aborted) {
+                setPending(requestId);
+                if (!controller.signal.aborted) message.warning(displayNotice(error instanceof Error ? error.message : uiText("提示词优化失败")));
+            } else {
+                setPending(undefined); pendingInput.current = undefined; pendingContext.current = undefined;
+                message.error(displayNotice(error instanceof Error ? error.message : uiText("提示词优化失败")));
+            }
+        } finally { if (activeRequest.current === controller) activeRequest.current = undefined; lock.current = false; if (mounted.current) { setBusy(false); onBusyChange?.(false); } }
     };
     const difference = preview ? promptTextDifference(preview.context.prompt, preview.result.prompt) : undefined;
     const stale = Boolean(preview && !isCurrent(preview));

@@ -27,7 +27,7 @@ export type PromptCompilerRuntime = {
   resolveOptimizer(id: string): Promise<PromptOptimizer>;
   readSource(actor: PromptActor, url: string): Promise<PromptSource>;
 };
-export type PromptCompileOptions = { versionId?: string; optimizerModelConfigId?: string };
+export type PromptCompileOptions = { versionId?: string; optimizerModelConfigId?: string; onAccepted?: (compilation: AdminPromptCompilation) => void };
 const designFieldsSchema = z.object({
   targetProduct: z.string().trim().max(500).optional(),
   keepDetails: z.string().trim().max(2000).optional(),
@@ -59,6 +59,13 @@ const normalInput = (input: PromptInput) => { const { compilationId: _id, ...res
 
 export class PromptCompiler {
   constructor(readonly store: PromptRecipeStore, readonly runtime: PromptCompilerRuntime) {}
+
+  compileForResponse(actor: PromptActor, data: PromptCompilationRequest, prefer?: string | null) {
+    if (!prefer?.split(",").some(value => value.trim().toLowerCase() === "respond-async")) return this.compile(actor, data);
+    return new Promise<AdminPromptCompilation>((resolve, reject) => {
+      void this.compile(actor, data, { onAccepted: resolve }).then(resolve, reject);
+    });
+  }
 
   async compile(actor: PromptActor, data: PromptCompilationRequest, options: PromptCompileOptions = {}): Promise<AdminPromptCompilation> {
     const request = promptCompilationRequestSchema.parse(data);
@@ -125,14 +132,14 @@ export class PromptCompiler {
     };
     if (prior) {
       if (prior.inputHash !== inputHash) throw new PromptOptimizationError("PROMPT_REQUEST_CHANGED", "输入、图片或模型配置已改变，请重新优化后生成", 409);
-      return checkedResult(await this.waitForResult(prior.id, actor.id));
+      return checkedResult(options.onAccepted && !reused ? prior : await this.waitForResult(prior.id, actor.id));
     }
     const claim = await this.store.claim({ userId: actor.id, requestId: request.requestId, inputHash, recipeKey: active.recipe.key, recipeVersionId: active.version.id,
       details: { adminTest, modelConfigId: optimizer?.id ?? `server-template:${promptChainRevision}`, targetModelConfigId: target.id, inputSnapshot: { promptInput: request.promptInput, sourceUrls: request.sourceUrls },
         ...(minimal ? { method } : {}),
         optimized: false, rawResponse: null, latencyMs: null, inputTokens: null, outputTokens: null, actualCost: null, estimatedCost: null, currency: "CNY", completedAt: null },
     });
-    if (!claim.execute) return checkedResult(await this.waitForResult(claim.id, actor.id));
+    if (!claim.execute) return checkedResult(options.onAccepted ? (await this.store.getCompilation(claim.id, actor.id))! : await this.waitForResult(claim.id, actor.id));
     const started = performance.now();
     const payload = { recipe: active.recipe.key, target_model: target.modelId,
       model_style: isVideo ? "video" : request.promptInput.scene === "reverse-prompt" ? "natural" : /midjourney/i.test(target.modelId) ? "tags" : request.promptInput.mode === "edit" ? "edit" : "natural",
@@ -147,6 +154,7 @@ export class PromptCompiler {
       const current = await this.store.getCompilation(claim.id, actor.id);
       if (!current) throw new PromptOptimizationError("PROMPT_COMPILATION_NOT_FOUND", "优化记录不存在", 404);
       if (current.status !== "optimizing") return checkedResult(current);
+      if (!template) options.onAccepted?.(current);
       if (template) {
         assertPromptOutputContent(template.prompt, [system], outputOptions);
         await this.store.finish(claim.id, "success", { prompt: template.prompt, summaryZh: template.summaryZh, questions: [], optimized: false,

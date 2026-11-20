@@ -138,3 +138,41 @@ test("a late optimization response never replaces a newer draft", async ({ page 
     await expect(page.getByRole("dialog")).not.toBeVisible();
     await expect(input).toHaveValue("新要求：只改成红色，原有文字不变。");
 });
+
+for (const delivery of ["accepted", "lost-response"] as const) {
+    test(`asynchronous optimization ${delivery} retrieves the original result automatically without replay`, async ({ page }, info) => {
+        let requestId = "", queries = 0, postCount = 0, allowComplete = false;
+        await page.route("**/api/prompt-compilations", route => {
+            postCount++;
+            expect(route.request().headers().prefer).toBe("respond-async");
+            requestId = route.request().postDataJSON().requestId;
+            return delivery === "accepted"
+                ? route.fulfill({ status: 202, json: { compilation: { id: "original-compilation", requestId, status: "optimizing", optimized: false } } })
+                : route.fulfill({ status: 504, contentType: "text/html", body: "fixture lost response" });
+        });
+        await page.route("**/api/prompt-compilations/by-request/*", route => {
+            expect(route.request().method()).toBe("GET");
+            expect(new URL(route.request().url()).pathname.split("/").at(-1)).toBe(requestId);
+            queries++;
+            const ready = allowComplete && queries >= 3;
+            return route.fulfill({ json: { compilation: { id: "original-compilation", requestId, status: ready ? "success" : "optimizing", optimized: ready,
+                ...(ready ? { prompt: "仅把指定区域改为蓝色，保留 6 颗纽扣和原有文字。" } : {}) } } });
+        });
+        const input = page.getByRole("textbox", { name: "原始提示词" });
+        const original = await input.inputValue();
+        await page.getByRole("button", { name: "一键优化提示词", exact: true }).click();
+        await expect.poll(() => queries).toBeGreaterThan(0);
+        await expect(page.getByRole("button", { name: /正在优化提示词/ })).toBeVisible();
+        await page.screenshot({ path: info.outputPath("observing-original.png"), animations: "disabled" });
+        allowComplete = true;
+        const preview = page.getByRole("dialog", { name: "核对提示词优化" });
+        await expect(preview).toBeVisible();
+        await expect(input).toHaveValue(original);
+        expect(postCount).toBe(1); expect(queries).toBeGreaterThanOrEqual(3); expect(taskPosts).toHaveLength(0);
+        await expect(page.locator(".ant-modal")).not.toHaveClass(/ant-zoom-(?:appear|enter)/);
+        await page.screenshot({ path: info.outputPath("original-result-recovered.png"), animations: "disabled" });
+        await page.getByRole("button", { name: "确认应用", exact: true }).click();
+        await expect(input).toHaveValue("仅把指定区域改为蓝色，保留 6 颗纽扣和原有文字。");
+        expect(postCount).toBe(1); expect(taskPosts).toHaveLength(0);
+    });
+}

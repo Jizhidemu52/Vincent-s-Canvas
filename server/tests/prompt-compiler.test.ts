@@ -32,6 +32,74 @@ async function fixture(invoke: PromptOptimizer["invoke"] = async () => ({ conten
 }
 
 describe("prompt compiler lifecycle", () => {
+  test("async acceptance is durable before provider completion and duplicate requests never invoke again", async () => {
+    const release = Promise.withResolvers<{ content: string }>();
+    const f = await fixture(() => release.promise);
+    const input = request();
+    try {
+      const accepted = await f.compiler.compileForResponse(actor, input, "respond-async");
+      expect(accepted.status).toBe("optimizing");
+      expect((await f.store.byRequest(actor.id, input.requestId))?.id).toBe(accepted.id);
+      expect(f.calls).toHaveLength(1);
+      const duplicate = await f.compiler.compileForResponse(actor, input, "respond-async");
+      expect(duplicate.id).toBe(accepted.id); expect(duplicate.status).toBe("optimizing");
+      const aliasInput = { ...input, requestId: randomUUID() };
+      const alias = await f.compiler.compileForResponse(actor, aliasInput, "respond-async");
+      expect(alias.status).toBe("optimizing"); expect(alias.cacheHit).toBe(true);
+      expect(f.calls).toHaveLength(1);
+      await expect(f.compiler.compileForResponse(actor, { ...input, promptInput: { ...input.promptInput, userText: "changed" } }, "respond-async")).rejects.toMatchObject({ code: "PROMPT_REQUEST_CHANGED" });
+      release.resolve({ content: good });
+      expect((await f.compiler.waitForResult(accepted.id, actor.id)).status).toBe("success");
+      expect((await f.store.byRequest(actor.id, aliasInput.requestId))?.status).toBe("success");
+      expect(await f.store.byRequest("other-owner", input.requestId)).toBeNull();
+      expect(f.calls).toHaveLength(1);
+    } finally { release.resolve({ content: good }); }
+  });
+  test("async acceptance preserves later failure and pre-admission rejection", async () => {
+    const release = Promise.withResolvers<{ content: string }>();
+    const f = await fixture(() => release.promise);
+    const input = request();
+    try {
+      const accepted = await f.compiler.compileForResponse(actor, input, "RESPOND-ASYNC");
+      release.reject(new Error("provider response lost"));
+      const result = await f.compiler.waitForResult(accepted.id, actor.id);
+      expect(result.status).toBe("failed"); expect(result.upstreamOutcome).toBe("unknown");
+      expect(f.calls).toHaveLength(1);
+      const invalid = request(); invalid.promptInput.fields = { keepDetails: ["invalid"] };
+      await expect(f.compiler.compileForResponse(actor, invalid, "respond-async")).rejects.toMatchObject({ code: "PROMPT_FIELDS_INVALID" });
+      expect(await f.store.byRequest(actor.id, invalid.requestId)).toBeNull();
+      expect(f.calls).toHaveLength(1);
+    } finally { release.resolve({ content: good }); }
+  });
+  test("ordinary callers still wait for the same final result", async () => {
+    const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<{ content: string }>();
+    const f = await fixture(() => { entered.resolve(); return release.promise; });
+    let finished = false;
+    const pending = f.compiler.compileForResponse(actor, request()).then(result => { finished = true; return result; });
+    try {
+      await entered.promise;
+      expect(finished).toBe(false);
+      release.resolve({ content: good });
+      expect((await pending).status).toBe("success"); expect(f.calls).toHaveLength(1);
+    } finally { release.resolve({ content: good }); await pending; }
+  });
+  test("explicit compilation reuse never returns an optimizing result with an unqueryable new request ID", async () => {
+    const release = Promise.withResolvers<{ content: string }>();
+    const f = await fixture(() => release.promise);
+    const input = request();
+    const accepted = await f.compiler.compileForResponse(actor, input, "respond-async");
+    const replay = { ...input, requestId: randomUUID(), promptInput: { ...input.promptInput, compilationId: accepted.id } };
+    let responded = false;
+    const response = f.compiler.compileForResponse(actor, replay, "respond-async").then(value => { responded = true; return value; });
+    try {
+      await Bun.sleep(10);
+      expect(responded).toBe(false);
+      expect(await f.store.byRequest(actor.id, replay.requestId)).toBeNull();
+      release.resolve({ content: good });
+      expect(await response).toMatchObject({ id: accepted.id, status: "success" });
+      expect(f.calls).toHaveLength(1);
+    } finally { release.resolve({ content: good }); await response; }
+  });
   test("product and carried constraints stay complete user data, never system instructions", async () => {
     const f = await fixture();
     const fields = { targetProduct: "  左侧红色毛衫  ", keepDetails: "  保留领口和五粒扣  ", carryoverRequirements: [" 保留原图商标位置 ", "不要改袖长"], unrelated: { preserved: true } };

@@ -13,13 +13,18 @@ const code = ts.transpileModule(readFileSync(new URL("../src/components/prompt-o
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const compilation = { id: "compilation-id", requestId: "compile-request", status: "success", prompt: "Final optimized prompt", optimized: true, summaryZh: "已优化" };
 
-function harness(compile: (...args: any[]) => Promise<unknown>, query: (id: string) => Promise<unknown> = async () => compilation) {
+function harness(compile: (...args: any[]) => Promise<unknown>, query: (id: string, signal?: AbortSignal) => Promise<unknown> = async () => compilation) {
     const state: any[] = [];
     const applied: unknown[] = [], notices: string[] = [];
+    const errors: string[] = [];
+    const subscribers = new Set<(state: any) => void>();
     const cleanups: Array<() => void> = [];
     let cursor = 0, ownerId = "employee-a";
     let rendered: ReactElement<any>;
-    const userStore = Object.assign((select: (state: any) => unknown) => select({ user: { id: ownerId } }), { getState: () => ({ user: { id: ownerId } }) });
+    const userStore = Object.assign((select: (state: any) => unknown) => select({ user: { id: ownerId } }), {
+        getState: () => ({ user: { id: ownerId } }),
+        subscribe: (listener: (state: any) => void) => { subscribers.add(listener); return () => subscribers.delete(listener); },
+    });
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
         react: { ...React,
@@ -27,9 +32,12 @@ function harness(compile: (...args: any[]) => Promise<unknown>, query: (id: stri
             useState: (initial: unknown) => { const index = cursor++; if (!(index in state)) state[index] = initial; return [state[index], (value: unknown) => { state[index] = value; }]; },
             useEffect: (callback: () => void | (() => void)) => { const index = cursor++; if (!(index in state)) { state[index] = true; const cleanup = callback(); if (cleanup) cleanups.push(cleanup); } },
         },
-        antd: { App: { useApp: () => ({ message: { success: (text: string) => notices.push(text), warning: (text: string) => notices.push(text), error: (text: string) => notices.push(text) } }) }, Button: () => null, Modal: () => null, Tooltip: () => null },
+        antd: { App: { useApp: () => ({ message: { success: (text: string) => notices.push(text), warning: (text: string) => notices.push(text), error: (text: string) => { errors.push(text); notices.push(text); } } }) }, Button: () => null, Modal: () => null, Tooltip: () => null },
         "@/services/api/image": { optimizeImagePrompt: compile },
-        "@/services/api/prompt-compilations": { getPromptCompilation: query, completedPromptCompilation, PromptCompilationUncertainError },
+        "@/services/api/prompt-compilations": {
+            getPromptCompilation: query, completedPromptCompilation, PromptCompilationUncertainError,
+            observePromptCompilation: async (id: string, options: { signal?: AbortSignal }) => completedPromptCompilation(await query(id, options.signal).catch(error => { throw new PromptCompilationUncertainError(id, undefined, error); }), id),
+        },
         "@/lib/client-id": { createClientId: () => "compile-request" },
         "@/stores/use-user-store": { useUserStore: userStore },
     };
@@ -45,7 +53,9 @@ function harness(compile: (...args: any[]) => Promise<unknown>, query: (id: stri
         preview: () => rendered.props.children[1],
         apply: () => rendered.props.children[1].props.footer.props.children[1].props.onClick(),
         cancel: () => rendered.props.children[1].props.onCancel(),
-        applied, notices, changeOwner: () => { ownerId = "employee-b"; }, unmount: () => { cleanups.forEach(cleanup => cleanup()); },
+        applied, notices, errors,
+        changeOwner: (next = "employee-b") => { ownerId = next; subscribers.forEach(listener => listener({ user: { id: ownerId } })); },
+        unmount: () => { cleanups.forEach(cleanup => cleanup()); },
     };
 }
 
@@ -263,4 +273,75 @@ test("carryover fields are frozen and changed requirements cannot receive a stal
     finish(compilation); await tick();
     expect(view.applied).toEqual([]);
     expect(view.notices[0]).toContain("未覆盖当前内容");
+});
+
+test("a paused observation stays query-only and is not presented as a red optimization failure", async () => {
+    let posts = 0;
+    const view = harness(async () => { posts++; throw new PromptCompilationUncertainError("compile-request"); });
+    view.render().props.onClick(); await tick();
+    expect(view.render().props.children).toBe("查询原优化请求");
+    expect(view.errors).toEqual([]);
+    view.render().props.onClick(); await tick();
+    expect(posts).toBe(1);
+    view.render();
+    expect(view.preview().props.open).toBe(true);
+    expect(view.applied).toEqual([]);
+});
+
+test("unmount aborts an in-flight optimization without querying or applying a late result", async () => {
+    let signal: AbortSignal | undefined;
+    let resolve!: (value: unknown) => void;
+    const view = harness(async (_config, _input, _references, options) => {
+        signal = options.signal;
+        return new Promise(done => { resolve = done; });
+    });
+    view.render().props.onClick();
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    resolve(compilation); await tick();
+    expect(view.applied).toEqual([]);
+    expect(view.notices).toEqual([]);
+});
+
+test("an account switch aborts the observer and cannot turn the old request into a new POST", async () => {
+    let posts = 0, queries = 0;
+    let signal: AbortSignal | undefined;
+    const view = harness(async (_config, _input, _references, options) => {
+        posts++;
+        signal = options.signal;
+        return await new Promise((_resolve, reject) => options.signal?.addEventListener("abort", () => reject(options.signal.reason), { once: true }));
+    }, async () => { queries++; return compilation; });
+    view.render().props.onClick();
+    view.changeOwner(); await tick();
+    expect(signal?.aborted).toBe(true);
+    expect(view.render().props.loading).toBe(false);
+    view.render().props.onClick(); await tick();
+    expect(posts).toBe(1);
+    expect(queries).toBe(0);
+    expect(view.errors).toEqual([]);
+    view.changeOwner("employee-a");
+    view.render().props.onClick(); await tick();
+    expect(posts).toBe(1);
+    expect(queries).toBe(1);
+    expect(view.applied).toEqual([]);
+});
+
+test("manual observation is abortable and preserves changed input instead of auto-applying its result", async () => {
+    let querySignal: AbortSignal | undefined;
+    let resolve!: (value: unknown) => void;
+    const view = harness(async () => { throw new PromptCompilationUncertainError("compile-request"); }, async (_id, signal) => {
+        querySignal = signal;
+        return new Promise(done => { resolve = done; });
+    });
+    view.render().props.onClick(); await tick();
+    view.render().props.onClick();
+    expect(querySignal).toBeInstanceOf(AbortSignal);
+    expect(view.render().props.loading).toBe(true);
+    expect(view.errors).toEqual([]);
+    view.render("Changed while observing");
+    resolve(compilation); await tick();
+    view.render("Changed while observing");
+    expect(view.preview().props.open).toBe(false);
+    expect(view.applied).toEqual([]);
+    expect(view.notices.at(-1)).toContain("未覆盖当前内容");
 });

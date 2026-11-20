@@ -11,7 +11,7 @@ export function createPromptCompilationsRouter(compiler: PromptCompiler) {
   const router = Router();
   router.use((_request, response, next) => { response.set("Cache-Control", "no-store"); next(); });
   router.post("/", route(async (request, response) => {
-    const compilation = await compiler.compile((request as AuthenticatedRequest).auth, promptCompilationRequestSchema.parse(request.body));
+    const compilation = await compiler.compileForResponse((request as AuthenticatedRequest).auth, promptCompilationRequestSchema.parse(request.body), request.get("Prefer"));
     response.status(compilation.status === "optimizing" ? 202 : 200).json({ compilation: publicPromptCompilation(compilation) });
   }));
   router.get("/by-request/:requestId", route(async (request, response) => {

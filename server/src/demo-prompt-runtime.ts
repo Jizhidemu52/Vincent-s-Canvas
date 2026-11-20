@@ -65,7 +65,7 @@ export async function handleDemoPromptRecipes(request: Request, compiler: Prompt
   try {
     if (isPublic) {
       if (path === publicRoot && request.method === "POST") {
-        const value = await compiler.compile(actor, promptCompilationRequestSchema.parse(await request.json()));
+        const value = await compiler.compileForResponse(actor, promptCompilationRequestSchema.parse(await request.json()), request.headers.get("Prefer"));
         return json({ compilation: publicPromptCompilation(value) }, value.status === "optimizing" ? 202 : 200);
       }
       const match = path.match(/^\/api\/prompt-compilations\/by-request\/([^/]+)$/);
