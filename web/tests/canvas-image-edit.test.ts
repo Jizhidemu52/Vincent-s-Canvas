@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { applyCanvasImageEdit, rollbackCanvasImageEdit } from "@/lib/canvas/canvas-image-edit";
+import { applyCanvasImageEdit, createCanvasImageEditVersion, rollbackCanvasImageEdit } from "@/lib/canvas/canvas-image-edit";
 import { editorDocumentSize, editorPoint, editorRect } from "@/lib/canvas/image-editor-document";
 import { buildNodeGenerationContext } from "@/components/canvas/canvas-node-generation";
 import { canvasImageSource } from "@/lib/canvas/canvas-image-source";
@@ -47,6 +47,16 @@ test("editing either a batch cover or its primary child keeps both images synchr
 test("missing or concurrently replaced images cannot be overwritten by a late editor save", () => {
     expect(() => applyCanvasImageEdit([], node, image)).toThrow("已被移除");
     expect(() => applyCanvasImageEdit([{ ...node, metadata: { ...node.metadata, content: "blob:new" } }], node, image)).toThrow("已发生变化");
+});
+
+test("changing only the cloud original rejects late saves and preserves the prior cloud provenance", () => {
+    const original = { ...node, metadata: { serverAssetId: "first" } };
+    const changed = { ...original, metadata: { serverAssetId: "second" } };
+    expect(() => applyCanvasImageEdit([changed], original, image)).toThrow("已发生变化");
+    expect(() => createCanvasImageEditVersion([changed], original, image, "edited", node.position)).toThrow("已发生变化");
+    const edited = createCanvasImageEditVersion([original], original, image, "edited", node.position);
+    expect(edited.metadata?.compareSources?.[0]?.content).toBe("/api/assets/first/content");
+    expect(edited.metadata?.serverAssetId).toBeUndefined();
 });
 
 test("a failed write restores only this edit, retaining unrelated changes", () => {

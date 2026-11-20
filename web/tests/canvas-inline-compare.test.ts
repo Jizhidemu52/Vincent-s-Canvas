@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
+
+test("cloud provenance keeps the original address even when the display URL expires", () => {
+    for (const content of [undefined, "blob:expired"]) {
+        const input = { content, storageKey: "image:evicted", serverAssetId: "cloud-original", title: "原图" };
+        const snapshot = canvasCompareSource(input);
+        expect(snapshot).toEqual({ type: "image", content: "/api/assets/cloud-original/content", storageKey: "image:evicted", label: "原图" });
+        input.serverAssetId = "other";
+        expect(snapshot.content).toBe("/api/assets/cloud-original/content");
+    }
+});
 import { clampInlineComparePercent, inlineComparePercentFromClientX, inlineCompareSources } from "@/lib/canvas/canvas-inline-compare";
 import { portableCanvasMedia } from "@/lib/canvas/canvas-portable-media";
 import { collectCanvasExportMedia, restoreCanvasExportMedia } from "@/lib/canvas/canvas-export-media";

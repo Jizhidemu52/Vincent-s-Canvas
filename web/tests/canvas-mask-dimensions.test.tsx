@@ -8,6 +8,7 @@ import ts from "typescript";
 import { canvasMaskEditImageSettings, readCanvasMaskImageSize, type CanvasImageMaskEditPayload } from "@/components/canvas/canvas-node-mask-edit-dialog";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { canvasMaskAdaptationPlan } from "@/lib/canvas/canvas-mask-adaptation";
+import { canvasImageSource, hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 import { imageTaskParameters } from "@/services/api/image";
 import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
 import { buildApiMartImageRequest } from "../../server/src/apimart-image";
@@ -126,6 +127,7 @@ async function submitFromProject(sourceSize: { width: number; height: number }, 
         estimateUsage: () => ({ configured: true, credits: 0 }), buildGenerationConfig: () => globalConfig, imageModelProfile: () => markProfile,
         ensureCanvasModelsReady: async () => ({}), resolveCanvasToolModel: () => ({ model: markModel.id }), canvasMaskAdaptationPlan,
         uploadImage: async (value: string) => ({ storageKey: `stored-${value}` }),
+        canvasImageSource, hasCanvasImageSource, resolveImageUrl: async (_key: string, fallback: string) => fallback, isImageSourceCurrent: () => true,
         adaptCanvasMaskInputs: async () => ({ sourceDataUrl: "adapted-source", maskDataUrl: "adapted-mask" }),
         loadMaskModule: async () => ({ canvasMaskEditImageSettings, readCanvasMaskImageSize: async (value: string) => value === "source" ? sourceSize : maskSize }),
         isAiConfigReady: (config: AiConfig) => { seen.push(config); return false; }, handleMissingModelConfig: () => {},

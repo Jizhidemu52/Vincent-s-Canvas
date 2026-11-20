@@ -1,7 +1,8 @@
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex } from "@noble/hashes/utils";
 import { CanvasNodeType, type CanvasCompareSource, type CanvasNodeData } from "@/types/canvas";
-import { getImageBlob } from "@/services/image-storage";
+import { getImageBlob, resolveImageUrl } from "@/services/image-storage";
+import { canvasImageSource, hasCanvasImageSource } from "./canvas-image-source";
 import { inlineCompareSources } from "./canvas-inline-compare";
 import { canvasDifferenceLayout, canvasDifferencePixels, compareContainRect } from "./canvas-image-pixels";
 import { checkCanvasImageAbort, imageWorkerSupported, requireCanvasImageFallback, runCanvasImageTask, yieldCanvasImageTask, type CanvasImageTaskOptions } from "./canvas-image-worker";
@@ -19,10 +20,11 @@ export function canvasDifferenceNotice(layout: ReturnType<typeof canvasDifferenc
 export function canvasComparePreviewScale(width: number, height: number, viewportWidth: number, viewportHeight: number, zoom: CanvasCompareZoom) {
     return zoom === "fit" ? Math.min(1, Math.max(1, viewportWidth) / width, Math.max(1, viewportHeight) / height) : zoom;
 }
-export function canvasCompareImages(nodes: CanvasNodeData[]) { return nodes.filter(node => node.type === CanvasNodeType.Image && Boolean(node.metadata?.content || node.metadata?.storageKey)); }
+export function canvasCompareImages(nodes: CanvasNodeData[]) { return nodes.filter(node => node.type === CanvasNodeType.Image && hasCanvasImageSource(node.metadata)); }
 
-type CompareMedia = { content?: string; storageKey?: string };
+type CompareMedia = { content?: string; storageKey?: string; serverAssetId?: string };
 function sameCompareMedia(a: CompareMedia | undefined, b: CompareMedia | undefined) {
+    if (a?.serverAssetId || b?.serverAssetId) return Boolean(canvasImageSource(a) && canvasImageSource(a) === canvasImageSource(b));
     if (a?.storageKey && b?.storageKey) return a.storageKey === b.storageKey;
     return Boolean(a?.content && b?.content && a.content === b.content);
 }
@@ -94,8 +96,10 @@ export async function loadCanvasCompareImage(node: CanvasNodeData, signal?: Abor
     let blob = node.metadata?.storageKey ? await getImageBlob(node.metadata.storageKey) : null;
     checkCanvasImageAbort(signal);
     if (!blob) {
-        if (!node.metadata?.content) throw new Error("原图不可用，请重新上传图片");
-        const response = await fetch(node.metadata.content, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]) });
+        const url = await resolveImageUrl(node.metadata?.storageKey, canvasImageSource(node.metadata));
+        checkCanvasImageAbort(signal);
+        if (!url) throw new Error("原图不可用，请重新上传图片");
+        const response = await fetch(url, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]) });
         if (!response.ok) throw new Error("图片加载失败，请检查原图是否可访问");
         blob = await response.blob();
     }

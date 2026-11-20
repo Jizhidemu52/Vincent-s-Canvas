@@ -7,6 +7,18 @@ const imageNode = (id: string, metadata: CanvasNodeMetadata = {}): CanvasNodeDat
 const source = (id: string, label?: string): CanvasCompareSource => ({ type: "image", content: `blob:${id}`, storageKey: `image:${id}`, ...(label ? { label } : {}) });
 
 describe("comparison immutable media identity", () => {
+    test("cloud-only images remain selectable and match their durable snapshots, never expired display URLs", () => {
+        const cloud = imageNode("cloud", { content: undefined, storageKey: undefined, serverAssetId: "original" });
+        const stale = imageNode("stale", { content: "blob:expired", serverAssetId: "original" });
+        const snapshot = imageNode("snapshot", { content: "/api/assets/original/content", storageKey: undefined });
+        const unrelated = imageNode("unrelated", { content: "blob:expired", serverAssetId: "other" });
+        expect(canvasCompareImages([cloud, stale])).toEqual([cloud, stale]);
+        expect(canvasCompareSameImage(cloud, stale)).toBe(true);
+        expect(canvasCompareSameImage(stale, snapshot)).toBe(true);
+        expect(canvasCompareSameImage(stale, unrelated)).toBe(false);
+        const result = imageNode("result", { serverAssetId: "result", compareSources: [{ type: "image", content: "/api/assets/original/content" }] });
+        expect(canvasCompareSources([cloud, result], result)).toEqual({ images: [cloud], automatic: true });
+    });
     test("matching storage keys survive changed display URLs and different keys override matching URLs", () => {
         const original = imageNode("before");
         expect(canvasCompareSameImage(original, imageNode("copy", { storageKey: "image:before", content: "blob:rehydrated" }))).toBe(true);

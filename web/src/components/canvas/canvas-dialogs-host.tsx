@@ -1,6 +1,7 @@
 import { useUiText } from "@/lib/i18n";
-import { lazy, memo, Suspense, useMemo } from "react";
-import { Button, Input, Modal } from "antd";
+import { lazy, memo, Suspense, useEffect, useMemo, useState } from "react";
+import { Alert, Button, Input, Modal, Spin } from "antd";
+import { canvasImageSource, hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 import { useCanvasGraphStore } from "@/stores/canvas/canvas-graph-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -74,7 +75,29 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
     const superResolveNode = superResolveNodeId ? nodeById.get(superResolveNodeId) || null : null;
     const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
+    const sourceNode = (localToolsEnabled ? cropNode || splitNode || upscaleNode : null) || (maskEditEnabled ? maskEditNode : null) || (angleEditEnabled ? angleNode : null);
+    const sourceKey = sourceNode?.metadata?.storageKey;
+    const sourceContent = canvasImageSource(sourceNode?.metadata);
+    const sourceRequest = sourceNode ? JSON.stringify([projectId, sourceNode.id, sourceKey, sourceContent]) : "";
+    const [resolved, setResolved] = useState({ request: "", url: "", error: "" });
+    const [sourceRetry, setSourceRetry] = useState(0);
+    const dialogSource = resolved.request === sourceRequest ? resolved.url : "";
+    const sourceError = resolved.request === sourceRequest ? resolved.error : "";
+    const closeSourceDialog = () => { setCropNodeId(null); setSplitNodeId(null); setUpscaleNodeId(null); setMaskEditNodeId(null); setAngleNodeId(null); };
+    useEffect(() => {
+        if (!sourceRequest) return;
+        let active = true;
+        setResolved({ request: sourceRequest, url: "", error: "" });
+        void import("@/services/image-storage").then(module => module.resolveImageUrl(sourceKey, sourceContent)).then(url => {
+            if (!url) throw new Error("原图片不存在，请重新添加图片");
+            if (active) setResolved({ request: sourceRequest, url, error: "" });
+        }).catch(error => { if (active) setResolved({ request: sourceRequest, url: "", error: error instanceof Error ? error.message : "图片读取失败" }); });
+        return () => { active = false; };
+    }, [sourceRequest, sourceKey, sourceContent, sourceRetry]);
     return <>
+                <Modal title={t("读取原图")} open={Boolean(sourceRequest && !dialogSource)} onCancel={closeSourceDialog} footer={sourceError ? <Button onClick={() => setSourceRetry(value => value + 1)}>{t("重试")}</Button> : null} centered>
+                    {sourceError ? <Alert type="error" showIcon message={sourceError} /> : <div className="grid h-28 place-items-center"><Spin /></div>}
+                </Modal>
                 {localToolsEnabled && compareImageIds ? <Suspense fallback={null}><CanvasImageCompareDialog nodes={nodes} initialIds={compareImageIds} onClose={() => setCompareImageIds(null)} /></Suspense> : null}
                 {localToolsEnabled && templateSourceId !== undefined ? <Suspense fallback={null}><CanvasDesignTemplateDialog hasReference={Boolean(templateSourceId)} onApply={applyDesignTemplate} onClose={() => setTemplateSourceId(undefined)} /></Suspense> : null}
                 {renameGroup ? <Suspense fallback={null}><CanvasGroupNameDialog key={renameGroup.id} initialName={renameGroup.name} onClose={() => setRenameGroup(null)} onSave={saveGroupName} /></Suspense> : null}
@@ -84,7 +107,7 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
                     <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>{t("修改名称不改变图片内容或版本号。图片下载时会附带当前版本。")}</p>
                 </Modal>
                 {imageExport ? <Suspense fallback={null}><CanvasImagePdfDialog nodes={imageExport.nodes} defaultSelectedIds={imageExport.ids} defaultMode={imageExport.mode} defaultName={currentProject?.title || t("图片集")} onClose={() => setImageExport(null)} /></Suspense> : null}
-                {imageDownload?.projectId === projectId && nodes.some(node => node.id === imageDownload.node.id && node.metadata?.content === imageDownload.node.metadata?.content && node.metadata?.storageKey === imageDownload.node.metadata?.storageKey) ? <Suspense fallback={null}><CanvasImageDownloadDialog node={imageDownload.node} variants={imageDownload.variants} onClose={() => setImageDownload(null)} /></Suspense> : null}
+                {imageDownload?.projectId === projectId && nodes.some(node => node.id === imageDownload.node.id && node.metadata?.content === imageDownload.node.metadata?.content && node.metadata?.storageKey === imageDownload.node.metadata?.storageKey && node.metadata?.serverAssetId === imageDownload.node.metadata?.serverAssetId) ? <Suspense fallback={null}><CanvasImageDownloadDialog node={imageDownload.node} variants={imageDownload.variants} onClose={() => setImageDownload(null)} /></Suspense> : null}
 
                 {infoNode ? (
                     <Suspense fallback={null}>
@@ -92,22 +115,23 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
                     </Suspense>
                 ) : null}
 
-                {localToolsEnabled && manualEditNode?.metadata?.content ? (
+                {localToolsEnabled && manualEditNode && hasCanvasImageSource(manualEditNode.metadata) ? (
                     <Suspense fallback={null}>
                         <CanvasImageEditorDialog key={`${projectId}:${manualEditNode.id}`} node={manualEditNode} initialTool={state.manualEditInitialTool} onClose={() => setManualEditNode(null)} onConfirm={saveManualImageEdit} />
                     </Suspense>
                 ) : null}
 
-                {localToolsEnabled && cropNode?.metadata?.content ? (
+                {localToolsEnabled && cropNode && sourceNode === cropNode && dialogSource ? (
                     <Suspense fallback={null}>
-                        <CanvasNodeCropDialog key={cropNode.id} dataUrl={cropNode.metadata.content} open={Boolean(cropNode)} onClose={() => setCropNodeId(null)} onConfirm={(crop) => cropImageNode(cropNode!, crop)} />
+                        <CanvasNodeCropDialog key={sourceRequest} dataUrl={dialogSource} open onClose={() => setCropNodeId(null)} onConfirm={(crop) => cropImageNode(cropNode, crop)} />
                     </Suspense>
                 ) : null}
 
-                {maskEditEnabled && maskEditNode?.metadata?.content ? (
+                {maskEditEnabled && maskEditNode && sourceNode === maskEditNode && dialogSource ? (
                     <Suspense fallback={null}>
                         <CanvasNodeMaskEditDialog
-                            dataUrl={maskEditNode.metadata.content}
+                            key={sourceRequest}
+                            dataUrl={dialogSource}
                             open={Boolean(maskEditNode)}
                             config={effectiveConfig}
                             model={selectedMaskEditModel}
@@ -119,25 +143,25 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
                     </Suspense>
                 ) : null}
 
-                {localToolsEnabled && splitNode?.metadata?.content ? (
+                {localToolsEnabled && splitNode && sourceNode === splitNode && dialogSource ? (
                     <Suspense fallback={null}>
-                        <CanvasNodeSplitDialog key={splitNode.id} dataUrl={splitNode.metadata.content} open={Boolean(splitNode)} onClose={() => setSplitNodeId(null)} onConfirm={(params) => splitImageNode(splitNode!, params)} />
+                        <CanvasNodeSplitDialog key={sourceRequest} dataUrl={dialogSource} open onClose={() => setSplitNodeId(null)} onConfirm={(params) => splitImageNode(splitNode, params)} />
                     </Suspense>
                 ) : null}
 
-                {localToolsEnabled && upscaleNode?.metadata?.content ? (
+                {localToolsEnabled && upscaleNode && sourceNode === upscaleNode && dialogSource ? (
                     <Suspense fallback={null}>
-                        <CanvasNodeUpscaleDialog dataUrl={upscaleNode.metadata.content} open={Boolean(upscaleNode)} onClose={() => setUpscaleNodeId(null)} onConfirm={(params) => void upscaleImageNode(upscaleNode!, params)} />
+                        <CanvasNodeUpscaleDialog key={sourceRequest} dataUrl={dialogSource} open onClose={() => setUpscaleNodeId(null)} onConfirm={(params) => void upscaleImageNode(upscaleNode, params)} />
                     </Suspense>
                 ) : null}
 
-                <Modal title={t("AI 超分")} open={Boolean(superResolveNode?.metadata?.content)} centered footer={null} onCancel={() => setSuperResolveNodeId(null)}>
+                <Modal title={t("AI 超分")} open={Boolean(superResolveNode && hasCanvasImageSource(superResolveNode.metadata))} centered footer={null} onCancel={() => setSuperResolveNodeId(null)}>
                     <div className="py-8 text-center text-base font-medium">{t("暂未实现")}</div>
                 </Modal>
 
-                {angleEditEnabled && angleNode?.metadata?.content ? (
+                {angleEditEnabled && angleNode && sourceNode === angleNode && dialogSource ? (
                     <Suspense fallback={null}>
-                        <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} />
+                        <CanvasNodeAngleDialog key={sourceRequest} dataUrl={dialogSource} open onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode, params)} />
                     </Suspense>
                 ) : null}
 

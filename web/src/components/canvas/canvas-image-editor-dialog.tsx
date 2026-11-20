@@ -10,6 +10,7 @@ import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/ima
 import { EDITOR_MAX_DIMENSION, editorDocumentSize, editorImageBlob, editorPoint, editorRect, editorSizeError, paintEditorMark, renderEditorDocument, type EditorPoint, type EditorRect, type EditorResizeMode, type ImageEditorMark, type ImageEditorOperation } from "@/lib/canvas/image-editor-document";
 import type { CanvasNodeData } from "@/types/canvas";
 import { editorRectangles, editorRectangleMove } from "@/lib/canvas/image-editor-document";
+import { canvasImageSource } from "@/lib/canvas/canvas-image-source";
 
 type Tool = "select" | "brush" | "erase" | "rectangle" | "arrow" | "text" | "mosaic";
 type Gesture = { pointerId: number; tool: Tool; start: EditorPoint; end: EditorPoint; points: EditorPoint[]; movingIndex?: number };
@@ -76,7 +77,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, initialTool 
         const source = new Image();
         source.crossOrigin = "anonymous";
         setLoadError("");
-        void resolveImageUrl(node.metadata?.storageKey, node.metadata?.content || "").then(url => {
+        void resolveImageUrl(node.metadata?.storageKey, canvasImageSource(node.metadata)).then(url => {
             if (!active) return;
             if (!url) throw new Error("原图片不存在，请重新添加图片");
             source.onload = () => {

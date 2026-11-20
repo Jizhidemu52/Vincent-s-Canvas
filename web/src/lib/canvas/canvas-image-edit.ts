@@ -7,7 +7,7 @@ import { fitNodeSize } from "./canvas-node-size";
 export function createCanvasImageEditVersion(nodes: CanvasNodeData[], original: CanvasNodeData, image: UploadedImage, id: string, position: CanvasNodeData["position"]): CanvasNodeData {
     const current = nodes.find(node => node.id === original.id);
     if (!current || current.type !== CanvasNodeType.Image) throw new Error("原图片节点已被移除，无法保存编辑");
-    if (current.metadata?.storageKey !== original.metadata?.storageKey || current.metadata?.content !== original.metadata?.content) throw new Error("原图片已发生变化，请重新打开编辑");
+    if (current.metadata?.storageKey !== original.metadata?.storageKey || current.metadata?.content !== original.metadata?.content || current.metadata?.serverAssetId !== original.metadata?.serverAssetId) throw new Error("原图片已发生变化，请重新打开编辑");
     return { id, type: CanvasNodeType.Image, title: `${current.title || "图片"}_编辑`, position, ...fitNodeSize(image.width, image.height), metadata: {
         content: image.url, storageKey: image.storageKey, naturalWidth: image.width, naturalHeight: image.height, mimeType: image.mimeType, bytes: image.bytes,
         status: "success", prompt: current.metadata?.prompt, imageName: `${canvasImageBaseName(current)}_编辑`, imageVersion: canvasImageVersion(current) + 1,
@@ -20,7 +20,7 @@ export function applyCanvasImageEdit(nodes: CanvasNodeData[], original: CanvasNo
     const current = nodes.find(node => node.id === original.id);
     if (!current || current.type !== CanvasNodeType.Image) throw new Error("原图片节点已被移除，无法保存编辑");
     if (current.metadata?.storageKey === image.storageKey) return nodes; // A persistence retry, not a second edit.
-    if (current.metadata?.storageKey !== original.metadata?.storageKey || current.metadata?.content !== original.metadata?.content) {
+    if (current.metadata?.storageKey !== original.metadata?.storageKey || current.metadata?.content !== original.metadata?.content || current.metadata?.serverAssetId !== original.metadata?.serverAssetId) {
         throw new Error("原图片已发生变化，请取消后重新打开编辑，避免覆盖新结果");
     }
     const affected = new Set([current.id]);

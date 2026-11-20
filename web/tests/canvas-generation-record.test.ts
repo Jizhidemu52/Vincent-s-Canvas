@@ -28,6 +28,14 @@ test("generation snapshots preserve reference identity/order/storage independent
     expect(collectImageStorageKeys(result)).toEqual(new Set(["image:source", "image:upload"]));
 });
 
+test("generation archive retains the durable cloud original after a display blob expires", () => {
+    const cloud = { ...source, metadata: { ...source.metadata, serverAssetId: "cloud-original", content: "blob:expired" } };
+    const saved = createCanvasGenerationRecord({ id: "cloud-run", sourceNodeId: source.id, prompt: "保持织纹", generationType: "edit", config: defaultConfig, nodes: [cloud],
+        references: [{ id: source.id, name: source.title, type: "image/png", dataUrl: "/api/assets/cloud-original/content", storageKey: "image:source" }] });
+    cloud.metadata.serverAssetId = "changed";
+    expect(canvasGenerationRecordReferences(saved)[0]).toMatchObject({ dataUrl: "/api/assets/cloud-original/content", storageKey: "image:source" });
+});
+
 test("three interleaved model results retain their own immutable prompt/model after serialization and draft edits", () => {
     const inputs = ["model-a", "model-b", "model-c"].map((model, index) => ({ model, prompt: `独立提示词 ${index}` }));
     const results = inputs.map(({ model, prompt }, index): CanvasNodeData => ({ ...source, id: `result-${index}`, metadata: {

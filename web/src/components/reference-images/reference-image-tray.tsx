@@ -7,7 +7,7 @@ import { moveImageReference, type ImageReferenceValidation } from "@/lib/image-r
 import { INTERNAL_IMAGE_DRAG } from "@/lib/dropped-images";
 import type { ImageReferenceItem } from "@/types/image";
 import { imageReferenceRoleOptions } from "@/lib/image-reference-prompt";
-import { WorkbenchImage } from "@/components/workbench-image";
+import { CanvasPersistedMediaPreview } from "@/components/canvas/canvas-persisted-media-preview";
 import { DisplayText, useDisplayText } from "@/hooks/use-display-text";
 
 type Props = {
@@ -59,6 +59,8 @@ export function ReferenceImageTray({ references, loading, fixedReferenceKey, val
                 {references.map((item, index) => (
                     <div
                         key={item.referenceKey}
+                        role="group"
+                        aria-label={display(item.name)}
                         draggable={item.referenceKey !== fixedReferenceKey}
                         onDragStart={(event) => { if (item.referenceKey !== fixedReferenceKey) { event.dataTransfer.setData(INTERNAL_IMAGE_DRAG, item.referenceKey); setDraggingKey(item.referenceKey); } }}
                         onDragEnd={() => setDraggingKey(null)}
@@ -67,7 +69,7 @@ export function ReferenceImageTray({ references, loading, fixedReferenceKey, val
                         className={`group w-36 shrink-0 rounded-md border border-border bg-muted/30 p-1 transition ${draggingKey === item.referenceKey ? "opacity-50" : ""}`}
                     >
                         <div className="relative h-24 overflow-hidden rounded-md bg-muted">
-                        <WorkbenchImage src={item.dataUrl} alt={display(item.name)} loading="lazy" decoding="async" className="size-full object-contain" />
+                        <CanvasPersistedMediaPreview kind="image" url={item.dataUrl} storageKey={item.storageKey} serverAssetId={item.serverAssetId} width={item.width} height={item.height} alt={display(item.name)} className="wb-preview-image size-full object-contain" />
                         <span className="absolute left-1 top-1 rounded bg-black/65 px-1.5 py-0.5 text-xs font-medium text-white">{uiText("图片{count}", { count: index + 1 })}</span>
                         <Tag className="absolute bottom-1 left-1 m-0 max-w-[70px] truncate border-0 bg-black/65 px-1.5 py-0.5 text-xs text-white"><DisplayText text={item.originLabel} /></Tag>
                         {item.referenceKey !== fixedReferenceKey ? <><span className="absolute right-1 bottom-1 rounded bg-black/65 p-1 text-white" aria-hidden="true"><GripVertical className="size-3" /></span>

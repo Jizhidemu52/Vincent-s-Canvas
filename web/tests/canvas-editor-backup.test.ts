@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { audioExtension } from "@/lib/canvas/canvas-export-loader";
+import { hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 import { videoFileExtension } from "../../shared/video-output";
 import type { backupCanvasEditorDraft, downloadCanvasEditorNode } from "../src/pages/canvas/canvas-editor-file-actions";
 
@@ -60,10 +61,10 @@ describe("on-demand canvas node download", () => {
         let loadVariants = async () => ({ variants: "fixture" });
         let resolveMedia = async (_key?: string, fallback = "") => fallback;
         let owner = { user: { id: "owner-a" }, status: "authenticated" };
-        const run: typeof downloadCanvasEditorNode = new Function("CanvasNodeType", "uiText", "audioExtension", "videoFileExtension", "loadCanvasExport", "resolveMediaUrl", "useUserStore", `${code}; return downloadCanvasEditorNode;`)(
+        const run: typeof downloadCanvasEditorNode = new Function("CanvasNodeType", "uiText", "audioExtension", "videoFileExtension", "loadCanvasExport", "resolveMediaUrl", "useUserStore", "hasCanvasImageSource", `${code}; return downloadCanvasEditorNode;`)(
             CanvasNodeType, (text: string) => text, audioExtension, videoFileExtension,
             async () => ({ loadCanvasImageVariants: () => loadVariants(), downloadCanvasContent: (...args: unknown[]) => events.push(args), downloadCanvasImage: (...args: unknown[]) => events.push({ direct: args }) }),
-            (key?: string, fallback?: string) => resolveMedia(key, fallback), { getState: () => owner },
+            (key?: string, fallback?: string) => resolveMedia(key, fallback), { getState: () => owner }, hasCanvasImageSource,
         );
         const options = {
             projectId: "project", nodesRef: { current: [node] }, savedProjectIdRef: { current: "project" },
@@ -88,7 +89,13 @@ describe("on-demand canvas node download", () => {
         await state.run();
         expect(state.events.slice(-3)).toEqual(["loading", { direct: [state.node, "png"] }, "done"]);
     });
-    for (const change of ["project", "image", "owner", "session"]) test(`late variant loading cannot open choices after the ${change} changes`, async () => {
+    test("cloud-only images reach the direct download action without a display URL", async () => {
+        const state = downloadHarness();
+        state.node.metadata = { serverAssetId: "cloud-original" };
+        await state.run();
+        expect(state.events).toEqual(["loading", { direct: [state.node, "original"] }, "done"]);
+    });
+    for (const change of ["project", "image", "cloud", "owner", "session"]) test(`late variant loading cannot open choices after the ${change} changes`, async () => {
         const state = downloadHarness();
         state.options.showOptions = true;
         const gate = Promise.withResolvers<{ variants: string }>();
@@ -96,6 +103,7 @@ describe("on-demand canvas node download", () => {
         const running = state.run();
         if (change === "project") state.options.savedProjectIdRef.current = "next-project";
         if (change === "image") state.options.nodesRef.current = [{ ...state.node, metadata: { content: "blob:replacement", storageKey: "image:replacement" } }];
+        if (change === "cloud") state.options.nodesRef.current = [{ ...state.node, metadata: { ...state.node.metadata, serverAssetId: "changed-original" } }];
         if (change === "owner") state.setOwner("owner-b");
         if (change === "session") state.setOwner("owner-a", "unauthenticated");
         gate.resolve({ variants: "stale" });

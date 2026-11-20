@@ -1,4 +1,5 @@
 import { useUiLocale, useUiText } from "@/lib/i18n";
+import { hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 import { useCanvasDiagnosticsEnabled } from "@/lib/canvas/use-canvas-diagnostics-enabled";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { App, Dropdown, Menu, Modal, Segmented, Select, Tooltip, type MenuProps } from "antd";
@@ -175,7 +176,7 @@ export function CanvasNodeHoverToolbar({
     const isImage = node.type === CanvasNodeType.Image;
     const isVideo = node.type === CanvasNodeType.Video;
     const isAudio = node.type === CanvasNodeType.Audio;
-    const hasImage = isImage && Boolean(node.metadata?.content);
+    const hasImage = isImage && hasCanvasImageSource(node.metadata);
     const hasVideo = isVideo && Boolean(node.metadata?.content);
     const hasAudio = isAudio && Boolean(node.metadata?.content);
     const isText = node.type === CanvasNodeType.Text;

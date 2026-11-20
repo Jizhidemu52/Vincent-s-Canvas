@@ -143,7 +143,9 @@ test("node editing displays the original and two auxiliaries in the same order u
     ]);
     const markup = renderToStaticMarkup(<QueryClientProvider client={new QueryClient()}><CanvasNodePromptPanel node={source} canvasNodes={[source]} isRunning={false} onPromptChange={noop} onConfigChange={noop} onGenerate={noop} onStop={noop} /></QueryClientProvider>);
     expect(markup).toContain("当前原图");
-    expect(markup.indexOf('alt="原始产品"')).toBeLessThan(markup.indexOf('alt="配色"'));
+    expect(markup.indexOf('aria-label="原始产品"')).toBeGreaterThanOrEqual(0);
+    expect(markup.indexOf('aria-label="原始产品"')).toBeLessThan(markup.indexOf('aria-label="配色"'));
+    expect(markup.indexOf('aria-label="配色"')).toBeLessThan(markup.indexOf('aria-label="花型"'));
     expect(markup).toContain("图片3");
 });
 

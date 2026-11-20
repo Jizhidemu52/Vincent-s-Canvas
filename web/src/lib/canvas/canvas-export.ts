@@ -16,6 +16,7 @@ import { exportModelMetadata } from "@/lib/model-display";
 import { encodeCanvasProject } from "./canvas-project-codec";
 import { mapCanvasAsyncPool } from "./canvas-async-pool";
 import { checkCanvasImageAbort, type CanvasImageTaskOptions } from "./canvas-image-worker";
+import { canvasImageSource, serverAssetContentUrl } from "./canvas-image-source";
 
 export async function exportCanvasProjects(projects: CanvasProject[], fileName = uiText("自由画布"), options: ZipOptions = {}) {
     saveAs(await createCanvasProjectsArchive(projects, {}, options), `${safeFileName(fileName)}.zip`);
@@ -69,7 +70,8 @@ export async function downloadCanvasImage(node: CanvasNodeData, format: CanvasIm
     options.onProgress?.({ percent: 0, label: "正在读取原图" });
     let blob = node.metadata?.storageKey ? await getImageBlob(node.metadata.storageKey) : null;
     if (!blob) {
-        const response = await fetch(node.metadata?.content || "", { signal: AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(30_000)]) });
+        const source = canvasImageSource(node.metadata);
+        const response = await fetch(source, { credentials: serverMediaId(source) ? "include" : "same-origin", signal: AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(30_000)]) });
         if (!response.ok) throw new Error("无法读取图片，请重新打开画布后再试");
         blob = await response.blob();
     }
@@ -88,8 +90,8 @@ export async function loadCanvasImageVariants(node: CanvasNodeData, sources: {
 } = {}) {
     const source = node.metadata?.storageKey
         ? await (sources.readMediaSource || readMediaSource)(node.metadata.storageKey)
-        : node.metadata?.content;
-    const assetId = serverMediaId(source || "");
+        : canvasImageSource(node.metadata);
+    const assetId = serverMediaId(serverAssetContentUrl(node.metadata?.serverAssetId) || source || "");
     return assetId ? (sources.fetchVariants || fetchServerAssetVariants)(assetId) : null;
 }
 

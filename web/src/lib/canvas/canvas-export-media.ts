@@ -1,3 +1,5 @@
+import { serverAssetContentUrl } from "./canvas-image-source";
+
 const archivePrefix = "canvas-archive:";
 const mediaFields = new Set(["url", "dataUrl", "src", "poster", "thumbnail", "coverUrl", "posterUrl", "thumbnailUrl", "previewUrl", "imageUrl", "videoUrl", "audioUrl", "resultUrl", "downloadUrl"]);
 const referenceFields = new Set(["references", "referenceUrls", "manualImageReferences", "resultUrls", "sourceUrls"]);
@@ -66,10 +68,14 @@ export async function collectCanvasExportMedia<T>(document: T, options: {
         }
         const input = value as MediaRecord;
         const isMedia = mediaContext || typeof input.storageKey === "string" || /^(image|video|audio)(\/|$)/.test(String(input.type || input.kind || input.mediaType || input.mimeType)) || Boolean(input.referenceKey);
+        const serverSource = isMedia && typeof input.serverAssetId === "string" ? serverAssetContentUrl(input.serverAssetId) : "";
+        const sourceField = ["content", "url", "dataUrl", "src"].find(name => typeof input[name] === "string") || (field === "metadata" ? "content" : "dataUrl");
+        const serverKey = serverSource ? await download(serverSource) : null;
         const output: MediaRecord = {};
         for (const [name, child] of Object.entries(input)) {
-            output[name] = await visit(child, name === "metadata" || name === "content" ? isMedia : referenceFields.has(name), name);
+            output[name] = serverSource && name === sourceField ? child : await visit(child, name === "metadata" || name === "content" ? isMedia : referenceFields.has(name), name);
         }
+        if (serverKey) output[sourceField] = `${archivePrefix}${serverKey}`;
         const primary = ["content", "url", "dataUrl", "src"].find(name => typeof output[name] === "string" && (output[name] as string).startsWith(archivePrefix));
         if (primary) output.storageKey = (output[primary] as string).slice(archivePrefix.length);
         return output;

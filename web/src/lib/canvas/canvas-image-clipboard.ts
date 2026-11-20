@@ -1,6 +1,7 @@
 import { getImageBlob, resolveImageUrl } from "@/services/image-storage";
 import { prepareCanvasImageFormat } from "./canvas-image-encoding";
 import type { CanvasNodeData } from "@/types/canvas";
+import { serverAssetContentUrl } from "./canvas-image-source";
 
 type ImageClipboardOptions = { signal?: AbortSignal; assertCurrent?: () => void; original?: Promise<Blob>; text?: string };
 
@@ -11,7 +12,8 @@ export async function loadCanvasClipboardImage(node: CanvasNodeData, options: Im
     let blob = node.metadata?.storageKey ? await getImageBlob(node.metadata.storageKey) : null;
     check();
     if (!blob) {
-        const source = await resolveImageUrl(node.metadata?.storageKey, node.metadata?.storageKey ? "" : node.metadata?.content || "");
+        const fallback = serverAssetContentUrl(node.metadata?.serverAssetId) || (node.metadata?.storageKey ? "" : node.metadata?.content || "");
+        const source = await resolveImageUrl(node.metadata?.storageKey, fallback);
         check();
         if (!source) throw new Error("原图暂时无法读取");
         const response = await fetch(source, { signal: AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(30000)]) });

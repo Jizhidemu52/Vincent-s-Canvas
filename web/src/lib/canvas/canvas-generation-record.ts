@@ -1,4 +1,5 @@
 import { resolveCanvasNodeImageReferences } from "./canvas-image-references";
+import { canvasImageSource, hasCanvasImageSource } from "./canvas-image-source";
 import type { AiConfig } from "@/stores/use-config-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationRecord, type CanvasNodeData, type CanvasNodeMetadata, type CanvasStoredImageReference } from "@/types/canvas";
 import type { ImageReferenceItem, ReferenceImage } from "@/types/image";
@@ -19,7 +20,7 @@ export function createCanvasGenerationRecord(input: {
             const sourceNodeId = item.canvasNodeId || item.sourceNodeId || (source && (!item.origin || item.origin === "canvas" || item.origin === "connection") ? source.id : undefined);
             return { id: reference.id, referenceKey: item.referenceKey || (sourceNodeId ? `node:${sourceNodeId}` : `reference:${reference.id}`),
                 name: reference.name, role: reference.role, originalFileName: reference.originalFileName, imageName: reference.imageName, imageVersion: reference.imageVersion,
-                type: reference.type, content: reference.storageKey && source?.metadata?.storageKey === reference.storageKey ? source.metadata.content || "" : reference.dataUrl,
+                type: reference.type, content: reference.storageKey && source?.metadata?.storageKey === reference.storageKey ? canvasImageSource(source.metadata) : reference.dataUrl,
                 storageKey: reference.storageKey, sourceNodeId, origin: item.origin === "asset" ? "asset" : sourceNodeId || item.origin === "canvas" ? "canvas" : "upload", order };
         }),
         parameters: { model: config.model, size: config.size, quality: config.quality, imageOptions: config.imageOptions || "", systemPrompt: config.systemPrompt || "", count: 1, generationType: input.generationType },
@@ -95,7 +96,7 @@ export function canvasGenerationRecordConfig(record: CanvasGenerationRecord, con
 /** Variations are explicit edits of this result; the archived original run stays immutable. */
 export function createCanvasVariationRecord(node: CanvasNodeData, strength: "subtle" | "strong", id: string): CanvasGenerationRecord {
     const original = node.metadata?.generationRecord;
-    if (node.type !== CanvasNodeType.Image || !original || (!node.metadata?.content && !node.metadata?.storageKey)) throw new Error("这张图片没有完整生成档案，请先恢复历史输入。");
+    if (node.type !== CanvasNodeType.Image || !original || !hasCanvasImageSource(node.metadata)) throw new Error("这张图片没有完整生成档案，请先恢复历史输入。");
     if (node.metadata.imageTask || node.metadata.status === "loading") throw new Error("当前图片任务尚未完成，请先查询原任务。");
     const instruction = strength === "subtle"
         ? "以参考图为基准制作轻微变体：保持主体、结构、构图与主色不变，仅微调细节和质感。"
@@ -106,7 +107,7 @@ export function createCanvasVariationRecord(node: CanvasNodeData, strength: "sub
         prompt, inputPrompt: prompt, promptInput: undefined, submittedPrompt: undefined,
         parameters: { ...original.parameters, count: 1, generationType: "edit" },
         references: [{ id: node.id, referenceKey: `node:${node.id}`, name: node.title || "变体原图", type: node.metadata.mimeType || "image/png",
-            content: node.metadata.content || "", storageKey: node.metadata.storageKey, sourceNodeId: node.id, origin: "canvas", order: 0,
+            content: canvasImageSource(node.metadata), storageKey: node.metadata.storageKey, sourceNodeId: node.id, origin: "canvas", order: 0,
             originalFileName: node.metadata.originalFileName, imageName: node.metadata.imageName, imageVersion: node.metadata.imageVersion }],
     };
 }

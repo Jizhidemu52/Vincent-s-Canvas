@@ -30,12 +30,32 @@ test("a direct current server URL resolves variants without consulting local sto
     })).toBe(variants);
 });
 
+test("cloud-only and expired display URLs resolve variants from the authoritative server asset", async () => {
+    for (const metadata of [
+        { content: "", serverAssetId: primaryId },
+        { content: "blob:expired", serverAssetId: primaryId },
+        { content: "blob:expired", storageKey: "image:evicted", serverAssetId: primaryId },
+    ]) {
+        expect(await loadCanvasImageVariants(node(metadata), {
+            readMediaSource: async () => null,
+            fetchVariants: async id => { expect(id).toBe(primaryId); return variants; },
+        })).toBe(variants);
+    }
+});
+
 test("creative edits do not reuse the old task result or a stale server URL", async () => {
     const edited = node({ storageKey: "image:edited", content: variant(originalId).url, imageTask: { taskId: "old-task", requestId: "old-request", ownerId: "owner", projectId: "project", resultIndex: 0 } });
     expect(await loadCanvasImageVariants(edited, {
         readMediaSource: async () => null,
         fetchVariants: async () => { throw new Error("must not query old variants"); },
     })).toBeNull();
+});
+
+test("the current server asset wins over an older cached source link", async () => {
+    expect(await loadCanvasImageVariants(node({ storageKey: "image:restored", serverAssetId: primaryId }), {
+        readMediaSource: async () => variant(originalId).url,
+        fetchVariants: async id => { expect(id).toBe(primaryId); return variants; },
+    })).toBe(variants);
 });
 
 test("ordinary local images do not request server variants", async () => {

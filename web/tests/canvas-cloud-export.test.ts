@@ -27,6 +27,58 @@ function project(): CanvasProject {
 }
 
 describe("cloud canvas offline ZIP backup", () => {
+    test("cloud IDs replace missing and expired display sources throughout undo and chat snapshots", async () => {
+        const original = project();
+        const serverAssetId = imageUrl.split("/")[3];
+        original.nodes[0].metadata = { serverAssetId };
+        original.history!.past[0].nodes = [{ ...original.nodes[0], metadata: { serverAssetId, content: "blob:expired", storageKey: "image:evicted" } }];
+        original.history!.past[0].chatSessions = structuredClone(original.chatSessions);
+        original.history!.past[0].chatSessions[0].messages[0].attachments = [];
+        original.history!.past[0].chatSessions[0].messages[0].references = [{ id: "old-ref", name: "historical reference", type: "image/png", dataUrl: "", serverAssetId }];
+        original.chatSessions[0].messages[0].attachments = [];
+        original.chatSessions[0].messages[0].references = [{ id: "ref", name: "reference", type: "image/png", dataUrl: "blob:expired-reference", serverAssetId }];
+        const originalJson = JSON.stringify(original);
+        const calls: string[] = [];
+        const entries = await readZip(await createCanvasProjectsArchive([original], {
+            getImageBlob: async () => null,
+            getMediaBlob: async () => null,
+            fetchBlob: async path => { calls.push(path); return files.get(path)!; },
+        }));
+        expect(calls).toEqual([imageUrl]);
+        expect(entries.has("missing.txt")).toBe(false);
+        const manifest = JSON.parse(await entries.get("projects.json")!.text()) as CanvasExportFile;
+        expect(manifest.projects[0].files).toHaveLength(1);
+        const file = manifest.projects[0].files[0];
+        expect(new Uint8Array(await entries.get(file.path)!.arrayBuffer())).toEqual(sourceBytes);
+        const restored = decodeCanvasProject(restoreCanvasExportMedia(manifest.projects[0].project, new Map([[file.storageKey, "blob:offline-original"]])));
+        for (const metadata of [restored.nodes[0].metadata, restored.history!.past[0].nodes[0].metadata]) {
+            expect(metadata.content).toBe("blob:offline-original");
+            expect(metadata.storageKey).toBe(file.storageKey);
+            expect(metadata.serverAssetId).toBeUndefined();
+        }
+        expect(restored.chatSessions[0].messages[0].references![0]).toMatchObject({ dataUrl: "blob:offline-original", storageKey: file.storageKey });
+        expect(restored.chatSessions[0].messages[0].references![0].serverAssetId).toBeUndefined();
+        expect(restored.history!.past[0].chatSessions[0].messages[0].references![0].serverAssetId).toBeUndefined();
+        expect(restored.history!.past[0].chatSessions[0].messages[0].references![0].dataUrl).toBe("blob:offline-original");
+        expect(JSON.stringify(original)).toBe(originalJson);
+    });
+
+    test("a forbidden authoritative cloud ID is recorded without fetching a stale display source", async () => {
+        const original = project();
+        original.history = undefined;
+        original.chatSessions = [];
+        original.nodes[0].metadata = { serverAssetId: imageUrl.split("/")[3], content: posterUrl };
+        const calls: string[] = [];
+        const entries = await readZip(await createCanvasProjectsArchive([original], {
+            fetchBlob: async path => { calls.push(path); throw new Error("403 当前员工无权查看原件"); },
+        }));
+        expect(calls).toEqual([imageUrl]);
+        expect(await entries.get("missing.txt")!.text()).toContain("403 当前员工无权查看原件");
+        const manifest = JSON.parse(await entries.get("projects.json")!.text()) as CanvasExportFile;
+        expect(manifest.projects[0].files).toHaveLength(0);
+        expect(manifest.projects[0].project.nodes[0].metadata).toEqual(original.nodes[0].metadata);
+    });
+
     test("importing original bytes does not retain another employee's server authorization identifiers", () => {
         const restored = restoreCanvasExportMedia({ metadata: { storageKey: "image:archive-original", content: "canvas-archive:image:archive-original", serverAssetId: "old-employee-asset", assetId: "old-employee-asset" } }, new Map([["image:archive-original", "blob:new-browser"]]));
         expect(restored.metadata.content).toBe("blob:new-browser");
@@ -85,7 +137,7 @@ describe("cloud canvas offline ZIP backup", () => {
     });
 
     test("never downloads prompt text, text-node contents, lookalike endpoints or cross-origin URLs", async () => {
-        const document = { prompt: imageUrl, nodes: [{ type: "text", metadata: { content: imageUrl } }], url: `https://outside.example${imageUrl}`, other: { url: `${imageUrl}/extra` }, credentialUrl: { url: `https://user:password@canvas.example${imageUrl}` }, malformed: { url: "http://" } };
+        const document = { prompt: imageUrl, nodes: [{ type: "text", metadata: { content: imageUrl, serverAssetId: imageUrl.split("/")[3] } }], url: `https://outside.example${imageUrl}`, other: { url: `${imageUrl}/extra` }, credentialUrl: { url: `https://user:password@canvas.example${imageUrl}` }, malformed: { url: "http://" } };
         const result = await collectCanvasExportMedia(document, { origin: "https://canvas.example", fetchBlob: async () => { throw new Error("must not fetch"); } });
         expect(result.document).toEqual(document);
         expect(result.blobs.size).toBe(0);
