@@ -70,6 +70,20 @@ const retryableRead = (error: unknown) =>
         ([408, 429].includes(error.status) || (error.status >= 500 && error.status < 600)));
 const readSignal = (signal: AbortSignal) => AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
 
+async function mapConcurrent<T, R>(items: T[], limit: number, worker: (item: T, index: number) => Promise<R>) {
+    const results = new Array<R>(items.length);
+    let cursor = 0;
+    const run = async () => {
+        while (true) {
+            const index = cursor++;
+            if (index >= items.length) return;
+            results[index] = await worker(items[index], index);
+        }
+    };
+    await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), items.length) }, run));
+    return results;
+}
+
 export function useImageConversation(ownerId: string, options: ImageConversationOptions) {
     const api = useMemo(() => createImageConversationApi(ownerId), [ownerId]);
     const storage = useMemo(() => createWorkspaceStorage("app_state"), [ownerId]);
@@ -461,8 +475,8 @@ export function useImageConversation(ownerId: string, options: ImageConversation
             if (files.length + draft.attachments.length > 16) throw new Error("每轮最多添加 16 张图片。");
             if (files.some((file) => !file.type.startsWith("image/")))
                 throw new Error("此会话入口目前只接收图片原件。");
-            let conversationId = id;
-            for (const file of files) {
+            if (!files.length) return;
+            const uploadFile = async (file: File) => {
                 const assetId = await uploadServerAsset(
                     file,
                     { source: "image-conversation" },
@@ -474,28 +488,19 @@ export function useImageConversation(ownerId: string, options: ImageConversation
                     },
                 );
                 signal.throwIfAborted();
-                if (!conversationId) {
-                    const snapshot = await create(assetId, signal);
-                    conversationId = snapshot.id;
-                } else {
-                    const key = conversationId;
-                    await save((current) => {
-                        const currentDraft = current.drafts[key] || emptyConversationDraft();
-                        return {
-                            ...current,
-                            drafts: {
-                                ...current.drafts,
-                                [key]: {
-                                    ...currentDraft,
-                                    attachments: mergeConversationAttachments(currentDraft.attachments, [
-                                        { assetId, name: file.name },
-                                    ]),
-                                },
-                            },
-                        };
-                    });
-                }
+                return { assetId, name: file.name };
+            };
+            let conversationId = id;
+            let filesToUpload = files;
+            if (!conversationId) {
+                const first = await uploadFile(files[0]!);
+                const snapshot = await create(first.assetId, signal);
+                conversationId = snapshot.id;
+                filesToUpload = files.slice(1);
             }
+            await mapConcurrent(filesToUpload, 4, async (file) => {
+                await addAttachments([await uploadFile(file)], conversationId!);
+            });
         });
     const addAttachments = async (items: ConversationAttachment[], key: string) => {
         await save((current) => {
@@ -558,8 +563,7 @@ export function useImageConversation(ownerId: string, options: ImageConversation
                 const newIncomingCount = prepared.filter((image) => !currentIds.has(image.assetId!)).length;
                 if (currentIds.size + newIncomingCount > 16) throw new Error("每轮最多添加 16 张图片。");
             }
-            const attachments: ConversationAttachment[] = [];
-            for (const image of prepared) {
+            const attachments = await mapConcurrent(prepared, 4, async (image) => {
                 assertCurrent();
                 let assetId = image.assetId;
                 if (!assetId) {
@@ -575,8 +579,8 @@ export function useImageConversation(ownerId: string, options: ImageConversation
                     if (!assetId) throw new Error("图片原件未保存为正式素材，未添加到会话。");
                 }
                 assertCurrent();
-                attachments.push({ assetId, name: image.title, ...(purpose ? { purpose } : {}) });
-            }
+                return { assetId, name: image.title, ...(purpose ? { purpose } : {}) };
+            });
             await addAttachments([...new Map(attachments.map((item) => [item.assetId, item])).values()], key);
             setNotice("图片已加入本轮草稿，尚未发送或生成。");
         });

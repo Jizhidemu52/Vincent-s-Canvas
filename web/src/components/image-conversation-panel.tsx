@@ -55,10 +55,32 @@ function ConversationThumbnail({
     className: string;
     edge?: 256 | 1024;
 }) {
-    const source = useImagePreview({ dataUrl: assetUrl(assetId) }, edge);
+    const target = useRef<HTMLElement | null>(null);
+    const [visible, setVisible] = useState(false);
+    useEffect(() => {
+        if (typeof IntersectionObserver === "undefined") {
+            setVisible(true);
+            return;
+        }
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries.some((entry) => entry.isIntersecting)) {
+                    observer.disconnect();
+                    setVisible(true);
+                }
+            },
+            { rootMargin: "200px" },
+        );
+        if (target.current) observer.observe(target.current);
+        return () => observer.disconnect();
+    }, [assetId, edge]);
+    const source = useImagePreview({ dataUrl: assetUrl(assetId) }, edge, visible);
     const [failed, setFailed] = useState("");
     return source && source !== failed ? (
         <img
+            ref={(node) => {
+                target.current = node;
+            }}
             src={source}
             alt={alt}
             loading="lazy"
@@ -68,6 +90,9 @@ function ConversationThumbnail({
         />
     ) : (
         <span
+            ref={(node) => {
+                target.current = node;
+            }}
             aria-label="缩略预览暂不可用，可点击查看原图"
             className={cn("grid place-items-center gap-1 bg-muted/30 text-xs text-muted-foreground", className)}
         >
