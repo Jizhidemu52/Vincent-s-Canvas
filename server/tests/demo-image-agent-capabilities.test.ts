@@ -14,7 +14,7 @@ test("demo image-agent handler checks actual selected model capabilities and lea
     let selectedModel: { capabilities: unknown } | undefined;
     const create = spyOn(markProvider, "createDemoMarkProvider").mockImplementation(input => {
         const result = originalCreate(input);
-        selectedModel = result.models.find(model => model.modelId === "gemini-4-carbon");
+        selectedModel = result.models.find(model => model.modelId === "gpt-6.2-sol");
         return result;
     });
     let demoFetch: DemoFetch | undefined;

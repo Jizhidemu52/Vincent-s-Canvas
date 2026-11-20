@@ -31,7 +31,7 @@ test("an explicit legacy Sonnet demo fixture keeps Messages and SSE regardless o
   const port = reservation.port;
   reservation.stop(true);
   // The open demo has no administrator writes. Pin the legacy shared model in
-  // this isolated child only; the ordinary Carbon default is tested separately.
+  // this isolated child only; the ordinary Sol default is tested separately.
   const policyUrl = new URL("../src/chat-model-policy.ts", import.meta.url);
   const script = `
     const { mock } = await import("bun:test");

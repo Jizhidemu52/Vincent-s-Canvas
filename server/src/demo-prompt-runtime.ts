@@ -7,6 +7,7 @@ import { promptRuntimeModelFingerprint, promptSourceFromBytes } from "./prompt-r
 import { PromptOptimizationError } from "./prompt-safety";
 import { resolveDemoToolConfiguration } from "./demo-tool-configuration";
 import { CHAT_COMPLETION_PROTOCOLS, requestChatCompletion } from "./routes/chat";
+import { validatePromptOptimizerResponse } from "./prompt-optimizer-response";
 
 type Asset = { id: string; ownerUserId: string; mimeType: string; byteSize?: number; bytes: Uint8Array; deletedAt?: string };
 type Configuration = {
@@ -37,7 +38,7 @@ export function createDemoPromptCompiler(store: PromptRecipeStore, config: Confi
       if (!apiKey) throw new PromptOptimizationError("PROMPT_MODEL_NOT_CONFIGURED", "扩写模型的服务端凭据未配置，未提交生成", 503);
       const upstream = { model_id: String(model.modelId), base_url: String(provider.baseUrl), protocol: String(provider.protocol), encrypted_credentials: null };
       return { id: String(model.id), modelId: String(model.modelId), fingerprint: promptRuntimeModelFingerprint(model, provider), estimatedRmbCost: Number(model.rmbCost) > 0 ? Number(model.rmbCost) : null,
-        invoke: (system, content) => requestChatCompletion(upstream, { apiKey }, { input: [{ role: "system", content: system }, { role: "user", content }], tools: [], privateProfile: true, claude: { thinking: false, stream: false, maxTokens: 4096 }, gemini: { maxOutputTokens: 4096 } }),
+        invoke: async (system, content) => validatePromptOptimizerResponse(await requestChatCompletion(upstream, { apiKey }, { input: [{ role: "system", content: system }, { role: "user", content }], tools: [], privateProfile: true, claude: { thinking: false, stream: false, maxTokens: 4096 }, gemini: { maxOutputTokens: 4096 } }), upstream.model_id),
       };
     },
     readSource: async (actor, url) => {

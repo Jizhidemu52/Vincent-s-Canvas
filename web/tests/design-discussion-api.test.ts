@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { createApi } from "../src/services/api/design-discussion.mjs";
 import { assistantRequest } from "../src/components/canvas/design-discussion/design-assistant.mjs";
 import { designSessionRequest, requestDesignSession } from "../src/components/canvas/design-discussion/design-session.mjs";
@@ -14,6 +14,102 @@ const image = `/api/assets/${assetId}/content`;
 const reference = { id: "local-reference", title: "针织原图.png", image: "data:image/png;base64,c291cmNl" };
 const envelope = (data: unknown) => Response.json({ code: 0, data, msg: "ok" });
 type Call = { path: string; options?: RequestInit };
+
+describe("formal design discussion result waiting", () => {
+    const frame = (value: Record<string, unknown>) => `data: ${JSON.stringify(value)}\n\n`;
+    const waiting = frame({ type: "chat_waiting", message: "正在等待模型完成当前请求，不会重复提交。" });
+    const completed = { content: JSON.stringify({ message: "保留四颗门襟扣，只讨论领口改色。", questions: [], proposals: [], sources: [], trendStatus: "未实时检索" }), toolCalls: [], stopReason: "stop" };
+    const terminal = frame({ type: "chat_result", result: completed });
+    const sse = (text: string) => new Response(text, { headers: { "Content-Type": "text/event-stream; charset=utf-8" } });
+    const request = () => designSessionRequest({ prompt: "只讨论领口改色", mode: "discuss", references: [], previews: [] });
+
+    test("the exact design entry waits once with bounded server-timeout headroom and does not change its body", async () => {
+        const calls: Call[] = [], phases: string[] = [];
+        const deadline = spyOn(AbortSignal, "timeout");
+        try {
+            const api = createApi(async (path: string, options?: RequestInit) => {
+                calls.push({ path, options });
+                return sse(waiting + terminal);
+            });
+            const body = request();
+            expect(await api.assistant(body, ownerId, { onChatWaiting: (value: string) => phases.push(value) })).toEqual(completed);
+            expect(calls).toHaveLength(1);
+            expect(calls[0].path).toBe("/api/chat/responses");
+            expect(calls[0].options?.credentials).toBe("same-origin");
+            expect(new Headers(calls[0].options?.headers).get("Accept")).toBe("text/event-stream");
+            expect(new Headers(calls[0].options?.headers).get("x-canvas-owner-id")).toBe(ownerId);
+            expect(JSON.parse(String(calls[0].options?.body))).toEqual(body);
+            expect(deadline).toHaveBeenCalledWith(195000);
+            expect(phases).toEqual(["正在等待模型完成当前请求，不会重复提交。"]);
+        } finally { deadline.mockRestore(); }
+    });
+
+    test("legacy assistant profiles retain their JSON transport and existing deadline", async () => {
+        const calls: Call[] = [];
+        const deadline = spyOn(AbortSignal, "timeout");
+        try {
+            const api = createApi(async (path: string, options?: RequestInit) => { calls.push({ path, options }); return envelope(completed); });
+            expect(await api.assistant({ ...request(), profile: "creative-chat" }, ownerId)).toEqual(completed);
+            expect(new Headers(calls[0].options?.headers).has("Accept")).toBe(false);
+            expect(deadline).toHaveBeenCalledWith(180000);
+            expect(deadline).not.toHaveBeenCalledWith(195000);
+        } finally { deadline.mockRestore(); }
+    });
+
+    test("waiting updates progress but never becomes a design reply or history message", async () => {
+        const calls: Call[] = [], progress: any[] = [];
+        const history = [{ role: "user", content: "四颗门襟扣不变。" }];
+        const api = createApi(async (path: string, options?: RequestInit) => {
+            calls.push({ path, options });
+            return path === "/api/auth/session" ? envelope({ user: { id: ownerId, status: "active" } }) : sse(waiting + terminal);
+        });
+        const result = await requestDesignSession(api, ownerId, { prompt: "只讨论领口改色", mode: "discuss", references: [], history, onProgress: (step: any) => progress.push(step) });
+        expect(result.message).toBe("保留四颗门襟扣，只讨论领口改色。");
+        expect(result.proposals).toEqual([]);
+        expect(progress).toContainEqual({ id: "assistant", label: "正在等待模型完成当前请求，不会重复提交。", status: "running" });
+        expect(history).toEqual([{ role: "user", content: "四颗门襟扣不变。" }]);
+        expect(JSON.stringify(result)).not.toContain("不会重复提交");
+        expect(calls.filter(call => call.options?.method === "POST")).toHaveLength(1);
+        expect(calls.some(call => call.path.startsWith("/api/tasks") || call.path.startsWith("/api/assets"))).toBe(false);
+    });
+
+    test.each([
+        { code: "UPSTREAM_REQUEST_FAILED", message: "Chat Completions Provider 524: 对话模型上游服务暂时不可用，本次不会自动重新提交。" },
+        { code: "CHAT_REQUEST_TIMEOUT", message: "对话模型处理超时，本次没有重发。" },
+    ])("preserves $code after waiting without a second submission", async failure => {
+        let calls = 0;
+        const api = createApi(async () => { calls++; return sse(waiting + frame({ type: "error", error: failure })); });
+        await expect(api.assistant(request(), ownerId)).rejects.toThrow(failure.message);
+        expect(calls).toBe(1);
+    });
+
+    test("an early HTTP 502 retains the safe upstream 524 error without reading it as SSE", async () => {
+        let calls = 0;
+        const message = "Chat Completions Provider 524: 对话模型上游服务暂时不可用，本次不会自动重新提交。";
+        const api = createApi(async () => { calls++; return Response.json({ error: "UPSTREAM_REQUEST_FAILED", message }, { status: 502 }); });
+        await expect(api.assistant(request(), ownerId)).rejects.toMatchObject({ message, status: 502 });
+        expect(calls).toBe(1);
+    });
+
+    test.each([waiting, waiting + 'data: {"type":"chat_result","result":', waiting + terminal.trimEnd(), waiting + terminal + terminal])("rejects missing, truncated or duplicate final data without retry %#", async value => {
+        let calls = 0;
+        const api = createApi(async () => { calls++; return sse(value); });
+        await expect(api.assistant(request(), ownerId)).rejects.toThrow();
+        expect(calls).toBe(1);
+    });
+
+    test("disconnect after a heartbeat fails once and releases the response stream", async () => {
+        let calls = 0, reads = 0;
+        const response = new Response(new ReadableStream<Uint8Array>({ pull(controller) {
+            if (reads++ === 0) controller.enqueue(new TextEncoder().encode(waiting));
+            else controller.error(new DOMException("connection interrupted", "AbortError"));
+        } }), { headers: { "Content-Type": "text/event-stream" } });
+        const api = createApi(async () => { calls++; return response; });
+        await expect(api.assistant(request(), ownerId)).rejects.toMatchObject({ name: "AbortError" });
+        expect(calls).toBe(1);
+        expect(response.body?.locked).toBe(false);
+    });
+});
 
 function uploadFixture(upload: Record<string, unknown>) {
     const calls: Call[] = [];

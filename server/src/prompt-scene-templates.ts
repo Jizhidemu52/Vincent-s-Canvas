@@ -143,8 +143,8 @@ export function compileSceneTemplate(input: PromptInput, fields: Record<string, 
       const craft = text("craft");
       if (!craft && !instruction) return;
       main = t(`${referenceCount > 1 ? "按各参考图的明确分工，把指定图案" : "把图片1的图案"}呈现为${craft || "下方指定工艺"}效果${text("craftFabric") ? `，承载面料为${text("craftFabric")}` : ""}。`, `${referenceCount > 1 ? "Following the assigned role of each reference image, render the specified artwork" : "Render the artwork in Image 1"} as ${craft || "the craft specified below"}${text("craftFabric") ? ` on ${text("craftFabric")}` : ""}.`);
-      keep = t("保留未明确要求修改的可见元素、颜色、轮廓和数量；未明确允许调整的相对位置保持不变，组合或重排仅限明确指定的范围。主体完整入镜、四边留出背景边距；在指定构图内表现工艺质感。", "Preserve visible elements, colors, contours and counts unless explicitly requested otherwise. Keep relative positions unchanged except within the explicitly allowed scope of composition or rearrangement. Show the complete motif with margins on all sides; express the craft in the specified composition.");
-      summaryZh = "按指定工艺呈现完整图案，仅按明确要求调整元素排布。";
+      keep = t("保留未明确要求修改的可见元素、颜色、轮廓和数量；未明确允许调整的相对位置保持不变，组合或重排仅限明确指定的范围。取景、裁切和构图以明确要求为准；仅在未指定时，默认主体完整入镜、四边留出背景边距。在指定构图内表现工艺质感。", "Preserve visible elements, colors, contours and counts unless explicitly requested otherwise. Keep relative positions unchanged except within the explicitly allowed scope of composition or rearrangement. Follow explicit framing, cropping and composition requirements; only when unspecified, show the complete motif with margins on all sides. Express the craft in the specified composition.");
+      summaryZh = "按指定工艺呈现图案，取景和元素排布遵循明确要求。";
       break;
     }
     case "series-recipe": {

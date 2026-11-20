@@ -4,7 +4,7 @@ import { z } from "zod";
 import { writeAudit } from "../audit";
 import type { AppConfig } from "../config";
 import type { Database } from "../db";
-import { resolveToolExecution } from "../tool-configuration";
+import { resolveToolExecution, type ToolConfiguration } from "../tool-configuration";
 import { decryptSecret } from "../security";
 import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "../provider-submission-transport";
 import type { AuthenticatedRequest } from "../types";
@@ -23,6 +23,7 @@ import { createProductCandidatesRouter, type ProductCandidatesRouterOptions } fr
 import { imageAgentVisionError } from "../../../shared/image-agent-capabilities";
 import { type ProviderChatImageAccess, supportsProviderChatImages } from "../provider-chat-images";
 import { acceptsChatResultWait, chatResultTimeoutMs, chatResultWaitHeaders, startChatResultWait, type ChatResultWaitClock } from "../chat-result-wait";
+import { currentCorrelationId } from "../request-logging";
 
 type ResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 export type ResponseInput =
@@ -113,9 +114,12 @@ function chatErrorMetadata(error: unknown) {
     return metadata;
 }
 
-export function chatFailureMetadata(error: unknown, elapsedMs: number, fallbackPhase: "request" | "response") {
+type ChatFailureIdentity = Pick<ToolConfiguration, "toolKey" | "modelConfigId" | "configurationVersion">;
+
+export function chatFailureMetadata(error: unknown, elapsedMs: number, fallbackPhase: "request" | "response", identity?: ChatFailureIdentity) {
     const diagnostics = readProviderSubmissionDiagnostics(error);
     const metadata = chatErrorMetadata(error);
+    const correlationId = currentCorrelationId();
     return {
         code: metadata.timeout ? metadata.code : diagnostics?.code || metadata.code,
         name: metadata.name,
@@ -123,6 +127,8 @@ export function chatFailureMetadata(error: unknown, elapsedMs: number, fallbackP
         elapsedMs: Math.max(0, Math.round(elapsedMs)),
         ...(error instanceof ChatProtocolError && error.upstreamStatus !== undefined ? { upstreamStatus: error.upstreamStatus } : {}),
         ...(error instanceof ChatProtocolError && error.upstreamReason ? { upstreamReason: error.upstreamReason } : {}),
+        ...(correlationId ? { correlationId } : {}),
+        ...(identity ? { toolKey: identity.toolKey, modelConfigId: identity.modelConfigId, configurationVersion: identity.configurationVersion } : {}),
     };
 }
 
@@ -145,6 +151,7 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
         let billingReservationId: string | null = null;
         let providerInFlight = false;
         let waiting: ReturnType<typeof startChatResultWait> | undefined;
+        let failureIdentity: ChatFailureIdentity | undefined;
         let resultTimeoutMs = 180_000;
         const socket = request.socket;
         const hadRemoteAddress = Boolean(socket?.remoteAddress);
@@ -170,6 +177,7 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
             const prepared = await prepareChatProfileInput(parsed, options.loadProfileRules ? profile => options.loadProfileRules!(profile, actor) : undefined);
             let input = prepared.input;
             const execution = await resolveToolExecution(db, { ...input, operationType: "chat" });
+            failureIdentity = execution;
             const result = await db.query<ChatModel & { capabilities: string[] }>(
                 `SELECT m.model_id,m.capabilities,p.base_url,p.protocol,p.encrypted_credentials
                  FROM model_configs m JOIN providers p ON p.id=m.provider_id
@@ -195,7 +203,7 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
 
             const credentials = JSON.parse(decryptSecret(model.encrypted_credentials, config.PROVIDER_ENCRYPTION_KEY)) as Record<string, string>;
             input = imageAgentModelInput(model, input);
-            input = { ...input, waitForResult: acceptsChatResultWait(request.get("accept"), input.privateProfile) && !(isClaudeMessagesModel(model) && input.claude?.stream) };
+            input = { ...input, waitForResult: acceptsChatResultWait(request.get("accept"), input.privateProfile, execution.toolKey) && !(isClaudeMessagesModel(model) && input.claude?.stream) };
             resultTimeoutMs = chatResultTimeoutMs(model, input);
             billingReservationId = await beginChatBilling(db, {
                 requestId: input.requestId, userId: actor.id,
@@ -291,7 +299,7 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
             if (usageRequestId) await finishUsageChat(db, usageRequestId, disconnected() ? "interrupted" : "failed").catch(() => undefined);
             const diagnostics = readProviderSubmissionDiagnostics(error);
             const metadata = chatErrorMetadata(error);
-            console.error("Chat request failed", chatFailureMetadata(error, performance.now() - startedAt, response.headersSent ? "response" : "request"));
+            console.error("Chat request failed", chatFailureMetadata(error, performance.now() - startedAt, response.headersSent ? "response" : "request", failureIdentity));
             if (disconnected()) return;
             if (waiting) {
                 waiting.fail(chatResultWaitFailure(error, resultTimeoutMs));

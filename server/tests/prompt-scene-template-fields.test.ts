@@ -156,4 +156,33 @@ describe("deterministic scene field coverage", () => {
     expect(output?.prompt).not.toMatch(/在原构图内|within the original composition/);
     expect(output?.summaryZh).not.toContain("不裁切或重新排列");
   });
+
+  test.each(["zh", "en"] as const)("craft framing defaults defer to explicit close-ups from every instruction field in %s", language => {
+    const request = "只展示中央花瓣的局部特写，允许裁切图案，不展示完整图案。";
+    for (const source of ["userText", "description", "instruction"] as const) {
+      const fields = { craft: "刺绣", craftFabric: "棉布", ...(source === "userText" ? {} : { [source]: request }) };
+      const output = compile("pattern-craft", fields, source === "userText" ? request : "", 1, language);
+      expect(output).toBeDefined();
+      expect(output?.prompt).toContain(request);
+      expect(output?.prompt).toContain(language === "zh"
+        ? "取景、裁切和构图以明确要求为准；仅在未指定时，默认主体完整入镜、四边留出背景边距。"
+        : "Follow explicit framing, cropping and composition requirements; only when unspecified, show the complete motif with margins on all sides.");
+      expect(output?.prompt).not.toContain(language === "zh"
+        ? "。主体完整入镜、四边留出背景边距；"
+        : ". Show the complete motif with margins on all sides;");
+      expect(output?.summaryZh).not.toContain("完整图案");
+      expect(output?.summaryZh).toContain("取景");
+    }
+  });
+
+  test.each(["zh", "en"] as const)("craft templates retain complete-motif framing as an unspecified default in %s", language => {
+    const output = compile("pattern-craft", { craft: "刺绣", craftFabric: "棉布" }, "", 1, language);
+    expect(output).toBeDefined();
+    expect(output?.prompt).toContain(language === "zh"
+      ? "仅在未指定时，默认主体完整入镜、四边留出背景边距。"
+      : "only when unspecified, show the complete motif with margins on all sides.");
+    expect(output?.prompt).toContain(language === "zh"
+      ? "保留未明确要求修改的可见元素、颜色、轮廓和数量"
+      : "Preserve visible elements, colors, contours and counts unless explicitly requested otherwise");
+  });
 });

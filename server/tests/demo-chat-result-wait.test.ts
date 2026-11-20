@@ -15,7 +15,13 @@ test("demo private Carbon negotiates waiting before the original response, valid
     } });
     const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
     const port = reservation.port; reservation.stop(true);
-    const child = Bun.spawn([process.execPath, "--no-env-file", "src/demo-server.ts"], {
+    const policyUrl = new URL("../src/chat-model-policy.ts", import.meta.url);
+    const serverUrl = new URL("../src/demo-server.ts", import.meta.url);
+    const bootstrap = `import { mock } from "bun:test";
+      const policy = await import(${JSON.stringify(policyUrl.href)});
+      mock.module(${JSON.stringify(fileURLToPath(policyUrl))}, () => ({ ...policy, INITIAL_CHAT_MODEL_ID: "gemini-4-carbon" }));
+      await import(${JSON.stringify(serverUrl.href)});`;
+    const child = Bun.spawn([process.execPath, "--no-env-file", "--eval", bootstrap], {
         cwd: fileURLToPath(new URL("..", import.meta.url)), stdout: "ignore", stderr: "pipe",
         env: { ...process.env, DEMO_STATE_PATH: ":memory:", DEMO_RECOVERY_FILE: "", DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1",
             OA_LOGIN_ENABLED: "false", AUTH_ENABLED: "true", CREDITS_ENABLED: "false", LOCAL_STANDALONE: "true", ROLE_PORTALS_ENABLED: "false", STANDALONE_WEB_DIR: "", DEMO_PUBLIC_ASSET_ORIGIN: "",

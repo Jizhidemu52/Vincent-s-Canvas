@@ -24,6 +24,17 @@ test("waiting is explicitly negotiated for private profiles and only Carbon gets
     expect(chatResultTimeoutMs({ model_id: "claude-sonnet-5-5" }, { privateProfile: true, waitForResult: true })).toBe(180_000);
 });
 
+test("resolved design discussion may negotiate waiting without impersonating a private profile", () => {
+    expect(acceptsChatResultWait("text/event-stream", undefined, "canvas-design-chat")).toBe(true);
+    for (const toolKey of [undefined, "gpt-chat", "canvas-chat", "image-edit"]) {
+        expect(acceptsChatResultWait("text/event-stream", undefined, toolKey)).toBe(false);
+    }
+    expect(acceptsChatResultWait("application/json", undefined, "canvas-design-chat")).toBe(false);
+    for (const model_id of ["gpt-6.2-sol", "gemini-4-carbon"]) {
+        expect(chatResultTimeoutMs({ model_id }, { waitForResult: true })).toBe(180_000);
+    }
+});
+
 test("waiting sends immediate progress and 15-second heartbeats, then exactly one result without usage", () => {
     const time = clock(), wire: string[] = [];
     const waiting = startChatResultWait(value => { wire.push(value); }, time.value);

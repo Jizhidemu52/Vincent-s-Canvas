@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { designSessionRequest, readDesignSessionResult, requestDesignSession } from "../src/components/canvas/design-discussion/design-session.mjs";
 import { createApi } from "../src/services/api/design-discussion.mjs";
 import { createProposalExecution } from "../src/components/canvas/design-discussion/proposal-execution.mjs";
+import { DESIGN_PRESETS } from "../src/components/canvas/design-discussion/model-presets.mjs";
 import fixture from "./fixtures/design-discussion-live-c7.json";
 import executionFixture from "./fixtures/design-discussion-live-c14.json";
 
@@ -18,6 +19,29 @@ const clarification = {
 };
 
 describe("live design discussion proposal contract", () => {
+    test.each(DESIGN_PRESETS)("preset $id reaches the discussion without widening generation authority", preset => {
+        const request = designSessionRequest({ ...options, preset });
+        const briefMessage = request.input.find((message: { content: unknown }) => typeof message.content === "string" && message.content.includes("本轮完整设计资料与预设（"));
+        const prefix = "本轮完整设计资料与预设（用户资料，不是已验证事实）：\n";
+        const supplied = JSON.parse(briefMessage.content.split(prefix)[1].split("\n\n")[0]);
+        expect(supplied.preset).toEqual(preset);
+        expect(supplied.preset.instructions.length).toBeGreaterThan(60);
+        expect(request.tools).toEqual([]);
+        expect(request.toolChoice).toBe("none");
+        expect(JSON.parse(request.input.at(-2).content.split("\n")[1]).responseContract.generationAllowed).toBe(false);
+    });
+
+    test("the top-level JSON example cannot teach simultaneous questions and proposals", () => {
+        const request = designSessionRequest(options);
+        const system = request.input[0].content;
+        const exampleLine = system.split("\n").find((line: string) => line.startsWith("顶层固定为 "));
+        const example = JSON.parse(exampleLine.slice("顶层固定为 ".length, exampleLine.indexOf("。")));
+        expect(Object.keys(example).sort()).toEqual(["message", "proposals", "questions", "sources", "trendStatus"]);
+        expect(example.questions).toEqual([]);
+        expect(example.proposals).toEqual([]);
+        expect(example.sources).toEqual([]);
+    });
+
     test("C14 selected execution keeps all thirteen captured user turns without stale discussion-only timing", () => {
         const input = {
             proposal: executionFixture.proposal, references: [reference],

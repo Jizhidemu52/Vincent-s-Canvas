@@ -85,7 +85,7 @@ async function failedChat(error: unknown, afterHeaders = false, modelId = "claud
 }
 
 function expectSafeFailureLog(result: Awaited<ReturnType<typeof failedChat>>, code: string, phase: string, name = "Error") {
-    expect(result.logs).toEqual([["Chat request failed", { code, name, phase, elapsedMs: expect.any(Number) }]]);
+    expect(result.logs).toEqual([["Chat request failed", { code, name, phase, elapsedMs: expect.any(Number), toolKey: "gpt-chat", modelConfigId: "chat-model", configurationVersion: 1 }]]);
     const metadata = result.logs[0]![1] as { elapsedMs: number };
     expect(Number.isFinite(metadata.elapsedMs)).toBe(true);
     expect(metadata.elapsedMs).toBeGreaterThanOrEqual(0);
@@ -102,7 +102,7 @@ describe("chat route transport failure classification", () => {
         expect(result.upstreamCalls).toBe(1);
         expect(result.settlements).toEqual([{ reservationId: "held-chat-fixture", success: false }]);
         expect(JSON.parse(result.text)).toMatchObject({ error: "UPSTREAM_REQUEST_FAILED", message: expect.stringContaining("工具选择参数") });
-        expect(result.logs).toEqual([["Chat request failed", { code: "UPSTREAM_REQUEST_FAILED", name: "ChatProtocolError", phase: "request", elapsedMs: expect.any(Number), upstreamStatus: 400, upstreamReason: "tool_choice_unsupported" }]]);
+        expect(result.logs).toEqual([["Chat request failed", { code: "UPSTREAM_REQUEST_FAILED", name: "ChatProtocolError", phase: "request", elapsedMs: expect.any(Number), upstreamStatus: 400, upstreamReason: "tool_choice_unsupported", toolKey: "gpt-chat", modelConfigId: "chat-model", configurationVersion: 1 }]]);
         expect(result.text + JSON.stringify(result.logs)).not.toContain(privateDetail);
         expect(JSON.stringify(result.logs)).not.toContain("private-source-prompt");
     });

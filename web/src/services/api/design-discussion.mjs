@@ -7,10 +7,12 @@ import { designVideoModels } from "../../components/canvas/design-discussion/mod
 import { isImageAgentPlanningIssue } from "../../../../shared/image-agent-iteration.ts";
 import { createImageConversationApi } from "./image-conversations";
 import { createDesignConversationController } from "./design-discussion-conversations";
+import { readClaudeSseResponse } from "./image";
 
 export function createApi(fetcher = globalThis.fetch.bind(globalThis), { projectId = "canvas-island-demo" } = {}) {
-    async function request(path, options = {}) {
+    async function request(path, options = {}, onChatWaiting) {
         const response = await fetcher(path, { credentials: "same-origin", signal: AbortSignal.timeout(20000), ...options });
+        if (response.ok && new Headers(options.headers).get("Accept") === "text/event-stream" && response.headers.get("Content-Type")?.includes("text/event-stream")) return readClaudeSseResponse(response, undefined, undefined, { strictProfile: true, onChatWaiting });
         const body = await response.json().catch(() => null);
         if (!response.ok) {
             const error = new Error(body?.message || body?.msg || body?.error || `接口返回 ${response.status}`);
@@ -27,7 +29,12 @@ export function createApi(fetcher = globalThis.fetch.bind(globalThis), { project
         catalog: () => request("/api/models"),
         health: () => request("/api/health"),
         assets: query => request(`/api/assets?${new URLSearchParams({ kind: "image", limit: "24", ...query })}`),
-        assistant: (body, ownerId) => request("/api/chat/responses", { ...json(body, ownerId), signal: AbortSignal.timeout(180000) }),
+        assistant(body, ownerId, { onChatWaiting } = {}) {
+            const options = json(body, ownerId);
+            const waitForResult = body.toolKey === "canvas-design-chat" && !body.profile;
+            if (waitForResult) options.headers.Accept = "text/event-stream";
+            return request("/api/chat/responses", { ...options, signal: AbortSignal.timeout(waitForResult ? 195000 : 180000) }, onChatWaiting);
+        },
         async upload(reference, ownerId) {
             if (ownedAsset(reference.image)) return { id: reference.id, title: reference.title, image: reference.image };
             const localBlob = typeof location !== "undefined" && reference.image.startsWith(`blob:${location.origin}/`);

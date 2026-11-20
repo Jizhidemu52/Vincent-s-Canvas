@@ -6,6 +6,84 @@ const video = { id: "40000000-0000-4000-8000-000000000115", modelId: "seedance-2
 const catalog = { models: [...models, video], prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: null, configurationVersion: 1 })) };
 const fixtureProposal = { id: "error-proposal", title: "针织展示方向", features: ["保留针织材质", "镜头缓慢推近"], rationale: "仅用于隔离错误状态回归。", prompt: "生成针织服装商品展示视频，缓慢推近，保持针织材质。", referenceIds: [], sourceNotes: [] };
 
+for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: "mobile", width: 390, height: 844 }]) {
+    for (const outcome of ["success", "524", "timeout"]) {
+        test(`design discussion waiting ${outcome} preserves one submission and draft on ${viewport.name}`, async ({ page, context, api }, info) => {
+            const frame = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
+            const waiting = "正在等待模型完成当前请求，不会重复提交。";
+            const error = outcome === "524" ? "Chat Completions Provider 524: 对话模型上游服务暂时不可用，本次不会自动重新提交。" : "对话模型处理超时，本次没有重发。";
+            const result = { content: JSON.stringify({ message: "门襟四颗扣子保持不变，只讨论领口改色。", questions: [], proposals: [], sources: [], trendStatus: "隔离等待回归" }), toolCalls: [], stopReason: "stop" };
+            const requests: any[] = [];
+            await context.route("**/api/models", route => route.fulfill({ json: catalog }));
+            await context.route("**/api/chat/responses", route => {
+                expect(route.request().headers().accept).toBe("text/event-stream");
+                requests.push(route.request().postDataJSON());
+                return route.fulfill({ contentType: "text/event-stream", body: frame({ type: "chat_waiting", message: waiting }) + frame(outcome === "success" ? { type: "chat_result", result } : { type: "error", error: { code: outcome === "524" ? "UPSTREAM_REQUEST_FAILED" : "CHAT_REQUEST_TIMEOUT", message: error } }) });
+            });
+            await page.addInitScript(() => {
+                const original = window.fetch.bind(window);
+                window.fetch = async (...args) => {
+                    const response = await original(...args);
+                    if (!String(args[0]).endsWith("/api/chat/responses") || !response.headers.get("content-type")?.includes("text/event-stream")) return response;
+                    const text = await response.text(), boundary = text.indexOf("\n\n") + 2;
+                    const body = new ReadableStream<Uint8Array>({ start(controller) {
+                        controller.enqueue(new TextEncoder().encode(text.slice(0, boundary)));
+                        (window as any).releaseDesignWaitFixture = () => { controller.enqueue(new TextEncoder().encode(text.slice(boundary))); controller.close(); };
+                    } });
+                    return new Response(body, { status: response.status, headers: response.headers });
+                };
+            });
+            await page.setViewportSize({ width: viewport.width, height: viewport.height });
+            await newCanvas(page);
+            await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
+            const panel = page.getByRole("complementary", { name: "设计讨论面板" });
+            const composer = panel.getByRole("textbox", { name: "输入设计需求" });
+            await expect(panel.getByRole("button", { name: "发送讨论", exact: true })).toBeEnabled();
+            await panel.locator('input[type="file"][accept="image/png,image/jpeg,image/webp"]').setInputFiles({ name: "waiting-reference.png", mimeType: "image/png", buffer: IMAGE });
+            await expect(panel.locator(".studio-reference img")).toHaveCount(1);
+            const referenceSource = await panel.locator(".studio-reference img").getAttribute("src");
+            const prompt = "门襟四颗扣子保持不变，先讨论领口改棕色，不出图。";
+            await composer.fill(prompt);
+            await panel.getByRole("button", { name: "发送讨论", exact: true }).click();
+            const status = panel.locator(".discussion-thinking");
+            await expect(status).toHaveText(waiting);
+            await expect(composer).toBeDisabled();
+            await expect(panel.getByRole("button", { name: "发送讨论", exact: true })).toBeDisabled();
+            await expect(panel.locator(".studio-message.assistant")).toHaveCount(0);
+            await status.scrollIntoViewIfNeeded();
+            await page.screenshot({ path: info.outputPath(`waiting-${outcome}-${viewport.name}.png`), animations: "disabled" });
+            expect(requests).toHaveLength(1);
+            expect(requests[0]).toMatchObject({ toolKey: "canvas-design-chat", tools: [], toolChoice: "none", webSearch: false });
+            await page.evaluate(() => (window as any).releaseDesignWaitFixture());
+            await expect(status).toHaveCount(0);
+            await expect(composer).toBeEnabled();
+            if (outcome === "success") {
+                await expect(panel.locator(".studio-message.assistant")).toContainText("门襟四颗扣子保持不变");
+                await expect(panel.locator(".studio-message.assistant")).not.toContainText(waiting);
+                await expect(composer).toHaveValue("");
+            } else {
+                await expect(panel.getByRole("alert")).toHaveText(error);
+                await expect(composer).toHaveValue(prompt);
+                await expect(panel.locator(".studio-message.assistant")).toHaveCount(0);
+                await expect(panel.locator(".studio-reference img")).toHaveAttribute("src", referenceSource!);
+            }
+            await panel.locator(".studio-composer").scrollIntoViewIfNeeded();
+            await page.screenshot({ path: info.outputPath(`result-${outcome}-${viewport.name}.png`), animations: "disabled" });
+            expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+            expect(requests).toHaveLength(1);
+            expect(api.submissions).toHaveLength(0);
+            if (outcome !== "success") {
+                await page.reload();
+                await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
+                await expect(composer).toHaveValue(prompt);
+                await expect(panel.locator(".studio-reference img")).toHaveCount(1);
+                expect(requests).toHaveLength(1);
+                expect(api.submissions).toHaveLength(0);
+            }
+        });
+    }
+}
+
 test("discussion display settings resize text and panel without altering drafts or creating tasks", async ({ page, context, api }, info) => {
     let chats = 0;
     await context.route("**/api/models", route => route.fulfill({ json: catalog }));

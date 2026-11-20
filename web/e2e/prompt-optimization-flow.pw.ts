@@ -321,12 +321,13 @@ test("native mask editing keeps its explicit instruction and mask, without borro
     expect(api.assetBytes.get(task.sourceUrls[0].split("/")[3])).toEqual(bytes);
 });
 
-test("manual optimizer retains an uncertain request through a failed lookup and only queries it again", async ({ page, api }) => {
+test("manual optimizer retains an uncertain request and resumes GET-only observation through a failed lookup", async ({ page, api }, info) => {
     await setupFlow(page, api);
     let posts = 0, lookups = 0, requestId = "";
     await page.route("**/api/prompt-compilations", route => { posts++; requestId = route.request().postDataJSON().requestId; return route.fulfill({ status: 503, json: { error: "UNKNOWN_SUBMISSION_STATE", message: "isolated uncertain response" } }); });
     await page.route("**/api/prompt-compilations/by-request/**", route => {
-        expect(route.request().url()).toContain(requestId); lookups++;
+        expect(route.request().method()).toBe("GET");
+        expect(new URL(route.request().url()).pathname.split("/").at(-1)).toBe(requestId); lookups++;
         return lookups < 3 ? route.fulfill({ status: 503, json: { message: "isolated lookup unavailable" } }) : route.fulfill({ json: { compilation: { id: randomUUID(), requestId, status: "success", optimized: true, prompt: textOnlyPrompt } } });
     });
     await page.goto("/image");
@@ -335,12 +336,16 @@ test("manual optimizer retains an uncertain request through a failed lookup and 
     await page.getByRole("button", { name: "一键优化提示词", exact: true }).click();
     const query = page.getByRole("button", { name: "查询原优化请求", exact: true });
     await expect(query).toBeEnabled();
-    await query.click(); await expect(query).toBeEnabled();
+    expect(posts).toBe(1); expect(lookups).toBe(1); expect(api.submissions).toHaveLength(0);
+    await expect(input).toHaveValue("钴蓝色针织帽");
     await query.click();
     const preview = page.getByRole("dialog", { name: "核对提示词优化", exact: true });
     await expect(preview.locator("pre").nth(1)).toHaveText(textOnlyPrompt);
     await expect(input).toHaveValue("钴蓝色针织帽");
     expect(posts).toBe(1); expect(lookups).toBe(3); expect(api.submissions).toHaveLength(0);
+    await expect(page.locator(".ant-modal")).not.toHaveClass(/ant-zoom-(?:appear|enter)/);
+    await page.screenshot({ path: info.outputPath("manual-original-request-recovered.png"), animations: "disabled" });
+    await info.attach("original-request-recovery.json", { body: JSON.stringify({ requestId, posts, lookups, imageTasks: api.submissions.length }), contentType: "application/json" });
     await preview.getByRole("button", { name: "确认应用", exact: true }).click();
     await expect(preview).toBeHidden();
     await expect(input).toHaveValue(textOnlyPrompt);

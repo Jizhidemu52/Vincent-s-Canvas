@@ -224,6 +224,103 @@ describe("versioned prompt-chain strategies", () => {
     expect(() => assertMinimalPromptFidelity("保留2枚纽扣与5个口袋，增加1朵花。", "保留5枚纽扣和2个口袋，增加1朵花。")).toThrow("数量与对象");
   });
 
+  test.each([
+    {
+      name: "Sol exact-lettering output with a whitespace description", language: "zh" as const,
+      source: "在图一穿着者左胸添加小字刺绣，文字为“NOVA 73”，保持准确大小写与空格。图一款式、配色、按扣、口袋和白底不变。",
+      prompt: "在图片1的穿着者左胸（画面右侧）添加小字刺绣“NOVA 73”，准确保留大写字母和一个空格。款式、配色、按扣、口袋及白色背景保持不变。",
+      summary: "在图片1的穿着者左胸添加“NOVA 73”小字刺绣，保持款式、配色、按扣、口袋及白底不变。", keepText: ["NOVA 73"],
+    },
+    {
+      name: "Sol English output with placket snaps and both pockets", language: "en" as const,
+      source: "只把图一领口改成深棕色，保持衣身与袖口的原米色、所有拼接位置和4颗门襟按扣。保留2个口袋及每个口袋1颗按扣。请用英文写出最终图像编辑提示词。",
+      prompt: "Recolor only the ribbed collar in Image 1 to dark brown, preserving its shape and knit texture. Keep the body and cuffs their original beige. Leave all panel seams and the placket unchanged, retaining all 4 placket snaps and both pockets with 1 snap each.",
+      summary: "仅将图片1的罗纹领口改为深棕色，保留衣身和袖口的原米色、所有拼接位置、门襟上的4颗按扣，以及2个各有1颗按扣的口袋。", keepText: [],
+    },
+    {
+      name: "Sol English output with a separate on-each-pocket clause", language: "en" as const,
+      source: "只把图一领口改成深棕色，保持衣身与袖口的原米色、所有拼接位置和4颗门襟按扣。保留2个口袋及每个口袋1颗按扣。请用英文写出最终图像编辑提示词。",
+      prompt: "Recolor only the ribbed collar in Image 1 to dark brown, leaving the placket unchanged. Keep the body and cuffs their original beige, preserve all panel seam positions, and retain all 4 placket snaps and both pockets, with 1 snap on each pocket.",
+      summary: "仅将图片1的罗纹领口改为深棕色，保持衣身与袖口原米色、所有拼接位置、门襟及其4颗按扣，并保留2个口袋和每个口袋的1颗按扣。", keepText: [],
+    },
+    {
+      name: "Sol English output with the complete snap-button noun", language: "en" as const,
+      source: "只把图一领口改成深棕色，保持衣身与袖口的原米色、所有拼接位置和4颗门襟按扣。保留2个口袋及每个口袋1颗按扣。请用英文写出最终图像编辑提示词。",
+      prompt: "In Image 1, recolor only the beige ribbed collar to dark brown, preserving its ribbed texture. Keep the body and cuffs their original beige. Leave all panel seams in their original positions and retain the 4 placket snap buttons and both pockets, with 1 snap button on each pocket.",
+      summary: "仅将图片1的罗纹领口改为深棕色，保留衣身和袖口的原米色、所有拼接位置、门襟的4颗按扣，以及2个各带1颗按扣的口袋。", keepText: [],
+    },
+    {
+      name: "Sol body-color output with separate placket and pocket snaps", language: "zh" as const,
+      source: "只把图一衣身浅米色区域改成麻灰，领口和袖口仍为原米色，深棕拼接片保持不变。保留门襟4颗按扣、2个口袋，每个口袋1颗按扣；保持原版型、针织纹理和白底完整单件。",
+      prompt: "仅将图片1衣身的浅米色区域改为带混色肌理的麻灰，领口和袖口保留原米色，深棕拼接片不变。保留门襟的4颗按扣和2个口袋，每个口袋保留1颗按扣。保持原版型和针织纹理，在白底上完整展示单件服装。",
+      summary: "仅将衣身浅米色区域改为麻灰，保留原米色领袖口、深棕拼接、按扣与口袋数量、原版型及针织纹理，白底完整展示单件。", keepText: [],
+    },
+    {
+      name: "Sol explicit placket-count change without changing each pocket snap", language: "zh" as const,
+      source: "把图一门襟4颗按扣改成3颗，仍沿原门襟居中竖向排列。保留2个口袋及各自1颗按扣，版型、拼接、配色和针织纹理不变。",
+      prompt: "将图片1门襟上的4颗按扣改为3颗，仍沿原门襟中心线竖向排列。保留2个口袋及每个口袋原有的1颗按扣，版型、拼接、配色和针织纹理不变。",
+      summary: "仅将门襟按扣由4颗改为居中竖排的3颗，保留2个口袋及各自1颗按扣，版型、拼接、配色和针织纹理不变。", keepText: [],
+    },
+  ])("saved $name passes compilation and cached admission without calling a real provider", async ({ source, prompt, summary, keepText, language }) => {
+    const raw = JSON.stringify({ prompt, summary_zh: summary, avoid: [], keep_text: keepText, questions: [] });
+    const f = await fixture("free-optimize", "minimal", raw, language);
+    const input = request("free-optimize", {}); input.toolKey = "image-edit"; input.promptInput.userText = source;
+    const result = await f.compiler.compile(actor, input);
+    expect(result).toMatchObject({ status: "success", optimized: true, prompt, keepText });
+    expect((await f.compiler.compile(actor, { ...input, requestId: randomUUID(), promptInput: { ...input.promptInput, compilationId: result.id } })).status).toBe("success");
+    expect(f.calls).toHaveLength(1);
+  });
+
+  test("snap aliases and both pockets preserve named counts without admitting swapped or invented counts", () => {
+    const source = "保留4颗门襟按扣和2个口袋，每个口袋1颗按扣。";
+    for (const output of [
+      "Keep 4 placket snaps and both pockets with 1 snap each.",
+      "Keep four placket press-studs and both pockets with one press-stud each.",
+      "Keep four placket press studs and two pockets with one press stud each.",
+      "Keep 4 placket snaps and both pockets, with 1 snap on each pocket.",
+    ]) expect(() => assertMinimalPromptFidelity(output, source)).not.toThrow();
+    for (const output of [
+      "Keep placket snaps and both pockets with 1 snap each.",
+      "Keep 4 placket snaps and pockets with 1 snap each.",
+      "Keep 4 placket snaps and both pockets.",
+      "Keep 5 placket snaps and both pockets with 1 snap each.",
+      "Keep 2 placket snaps and 4 pockets with 1 snap each.",
+      "Keep 1 placket snap and both pockets with 4 snaps each.",
+      "Keep 1 placket snap and both pockets, with 4 snaps on each pocket.",
+      "Keep 4 placket snaps and 1 pocket, with 2 snaps on each pocket.",
+      "Keep 4 placket snaps and both pockets, with 1 snap on each sleeve.",
+    ]) expect(() => assertMinimalPromptFidelity(output, source)).toThrow();
+    expect(() => assertMinimalPromptFidelity("Keep 4 snaps and both pockets.", "保留4颗按扣和口袋。")).toThrow("未经确认的数量");
+    expect(() => assertMinimalPromptFidelity("Keep two press-studs and four pockets.", "保留4颗按扣和2个口袋。")).toThrow("数量与对象");
+    expect(() => assertMinimalPromptFidelity("保留3颗门襟按扣和2个口袋，每个口袋保留1颗按扣。", "把4颗门襟按扣改成3颗，保留2个口袋及各自1颗按扣。")).not.toThrow();
+    expect(() => assertMinimalPromptFidelity("保留1颗门襟按扣和2个口袋，每个口袋保留3颗按扣。", "把4颗门襟按扣改成3颗，保留2个口袋及各自1颗按扣。")).toThrow();
+  });
+
+  test.each([
+    ["snaps", "snap"], ["snap buttons", "snap button"],
+    ["press-studs", "press-stud"], ["press studs", "press stud"],
+  ])("complete %s nouns preserve only the actual per-pocket relation", (plural, single) => {
+    const source = "保留4颗门襟按扣和2个口袋，每个口袋1颗按扣。";
+    for (const relation of [`both pockets with 1 ${single} each`, `both pockets, with 1 ${single} on each pocket`]) {
+      expect(() => assertMinimalPromptFidelity(`Keep 4 placket ${plural} and ${relation}.`, source)).not.toThrow();
+    }
+    for (const output of [
+      `Keep 1 placket ${single} and both pockets, with 4 ${plural} on each pocket.`,
+      `Keep 4 placket ${plural} and both pockets, with 1 ${single} on each sleeve.`,
+      `Keep 4 placket ${plural} and 1 pocket, with 2 ${plural} on each pocket.`,
+      `Keep 4 placket ${plural} and both pockets, with 5 ${plural} on each pocket.`,
+    ]) expect(() => assertMinimalPromptFidelity(output, source)).toThrow();
+  });
+
+  test("whitespace descriptions do not waive unrelated quantities or literal lettering", async () => {
+    const source = "文字为“NOVA 73”，保持准确空格，款式和口袋不变。";
+    expect(() => assertMinimalPromptFidelity("文字为“NOVA 73”，保留一个空格，新增3个口袋。", source)).toThrow("未经确认的数量");
+    expect(() => assertMinimalPromptFidelity("文字为“NOVA 73”，保留一个空格。", "文字为“NOVA 73”，保留3个口袋。")).toThrow("未保留明确指定的数量");
+    const f = await fixture("free-optimize", "minimal", JSON.stringify({ prompt: "添加文字“NOVA73”，保持款式和口袋不变。", summary_zh: "添加指定文字。", avoid: [], keep_text: ["NOVA 73"], questions: [] }));
+    const input = request("free-optimize", {}); input.promptInput.userText = source;
+    expect(await f.compiler.compile(actor, input)).toMatchObject({ status: "failed", errorCode: "PROMPT_TEXT_NOT_PRESERVED" });
+  });
+
   test("explicit quantity changes admit an English elided target and a final-only result", () => {
     const english = "Reduce five buttons to two; keep three pockets.";
     for (const output of [

@@ -2,7 +2,7 @@ import type { PromptInput } from "../../shared/prompt-contracts";
 import { PromptOptimizationError } from "./prompt-safety";
 import { imagePromptInvariantNumbers, instructionsWithoutArtworkLiterals } from "../../shared/image-prompt-invariants";
 
-export const promptChainRevision = "semantic-bindings-v6";
+export const promptChainRevision = "semantic-bindings-v9";
 
 /** Planner instructions stay server-side; only their visual result is submitted. */
 export const minimalPromptPolicy = [
@@ -21,9 +21,10 @@ const hexes = (text: string) => [...text.matchAll(/#[\da-f]{3}(?:[\da-f]{3})?\b/
   return value.length === 4 ? `#${value.slice(1).split("").map(part => part + part).join("")}` : value;
 });
 const englishNumber = "(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand)";
-const quantityPattern = new RegExp(`(?<![A-Za-z\\d#])(\\d+(?:\\.\\d+)?|[零一二两三四五六七八九十百千]{1,8}|${englishNumber}(?:[ -]+(?:and[ -]+)?${englishNumber})*)\\s*(?:颗|粒|枚|个|只|处|条|根|朵|片|瓣|组|排|行|层|厘米|毫米|公分|cm\\b|mm\\b|%|buttons?\\b|pockets?\\b|pieces?\\b|rows?\\b|lines?\\b|layers?\\b|petals?\\b|leaves\\b)`, "giu");
+const quantityPattern = new RegExp(`(?<![A-Za-z\\d#])(\\d+(?:\\.\\d+)?|[零一二两三四五六七八九十百千]{1,8}|${englishNumber}(?:[ -]+(?:and[ -]+)?${englishNumber})*)\\s*(?:颗|粒|枚|个(?!\\s*空格(?:符)?(?:[\\s，,。；;!！?？、]|和|及|与|$))|只|处|条|根|朵|片|瓣|组|排|行|层|厘米|毫米|公分|cm\\b|mm\\b|%|buttons?\\b|(?:placket\\s+)?(?:snaps?|press[ -]studs?)\\b|pockets?\\b|pieces?\\b|rows?\\b|lines?\\b|layers?\\b|petals?\\b|leaves\\b)`, "giu");
+const normalizePocketPair = (text: string) => text.replace(/\bboth\s+(?=pockets\b)/giu, "two ");
 const quantities = (text: string) => {
-  const content = instructionsWithoutArtworkLiterals(text).replace(/\bimage\s*#?\s*\d+\b|图(?:片)?\s*[\d一二三四五六七八九十]+/giu, "")
+  const content = normalizePocketPair(instructionsWithoutArtworkLiterals(text)).replace(/\bimage\s*#?\s*\d+\b|图(?:片)?\s*[\d一二三四五六七八九十]+/giu, "")
     .replace(/单(?=朵|个|只|片|枚|颗|条|行|组|排|层)/gu, "一")
     .replace(/\b(?:a single|single)\s+(?=button|pocket|piece|row|line|layer|petal|leaf)/giu, "one ");
   return new Set([...content.matchAll(quantityPattern)].flatMap(match => [...imagePromptInvariantNumbers(`${match[1]}枚`)]));
@@ -31,18 +32,28 @@ const quantities = (text: string) => {
 const quantityNumber = `(\\d+(?:\\.\\d+)?|[零一二两三四五六七八九十百千]{1,8}|${englishNumber}(?:[ -]+(?:and[ -]+)?${englishNumber})*)`;
 const affirmativeClauses = (text: string) => instructionsWithoutArtworkLiterals(text).split(/[，,。；;!！?？\n]/u)
   .map(clause => clause.split(/不要|不得|禁止|避免|不应|不能|\b(?:do not|don't|never|not|avoid|rather than|instead of)\b/iu)[0]!.trim()).filter(Boolean);
-const quantityEntityAliases: Record<string, string> = { 纽扣: "button", 扣子: "button", button: "button", buttons: "button", 口袋: "pocket", 胸袋: "pocket", pocket: "pocket", pockets: "pocket", 花瓣: "petal", 瓣: "petal", petal: "petal", petals: "petal", 叶片: "leaf", 叶子: "leaf", 片叶: "leaf", leaf: "leaf", leaves: "leaf" };
-const quantityEntities = "纽扣|扣子|口袋|胸袋|花瓣|瓣|叶片|叶子|片叶|buttons?\\b|pockets?\\b|petals?\\b|leaves\\b|leaf\\b";
-const entityQuantityPattern = () => new RegExp(`(?<![A-Za-z\\d#])${quantityNumber}\\s*(?:[枚颗粒个片朵只]\\s*)?(${quantityEntities})`, "giu");
+const quantityEntityAliases: Record<string, string> = { 纽扣: "button", 扣子: "button", button: "button", buttons: "button", 按扣: "snap", snap: "snap", snaps: "snap", "snap button": "snap", "snap buttons": "snap", "press-stud": "snap", "press-studs": "snap", "press stud": "snap", "press studs": "snap", 口袋: "pocket", 胸袋: "pocket", pocket: "pocket", pockets: "pocket", 花瓣: "petal", 瓣: "petal", petal: "petal", petals: "petal", 叶片: "leaf", 叶子: "leaf", 片叶: "leaf", leaf: "leaf", leaves: "leaf" };
+const quantityEntities = "纽扣|扣子|按扣|口袋|胸袋|花瓣|瓣|叶片|叶子|片叶|buttons?\\b|snap buttons?\\b|snaps?\\b|press[ -]studs?\\b|pockets?\\b|petals?\\b|leaves\\b|leaf\\b";
+const quantityEntityLocation = "(?:门襟(?:的)?\\s*|placket\\s+)?";
+const entityQuantityPattern = () => new RegExp(`(?<![A-Za-z\\d#])${quantityNumber}\\s*(?:[枚颗粒个片朵只]\\s*)?${quantityEntityLocation}(${quantityEntities})`, "giu");
 const preservesQuantity = (text: string) => /保留|保持|沿用|原样|不变|\b(?:keep|retain|preserve|unchanged)\b/iu.test(text);
+const pocketSnapQuantity = (clause: string, match: RegExpMatchArray) => {
+  const prefix = clause.slice(0, match.index), suffix = clause.slice(match.index! + match[0].length);
+  return /(?:每个口袋|口袋(?:及|和|与)各自)(?:原有的?|保留|保持|的|仍|有|\s)*$/u.test(prefix)
+    || /^\s+on\s+each\s+pocket\b/iu.test(suffix)
+    || (/\bpockets?\s+with\s*$/iu.test(prefix) && /^\s+each\b/iu.test(suffix));
+};
 const entityQuantities = (text: string, preservationOnly = false) => {
   const result = new Map<string, Set<string>>();
-  const clauses = affirmativeClauses(text).filter(clause => !preservationOnly || preservesQuantity(clause));
-  for (const match of clauses.join("\n").matchAll(entityQuantityPattern())) {
-    const entity = quantityEntityAliases[match[2]!.toLowerCase()]!;
-    const values = result.get(entity) ?? new Set<string>();
-    for (const value of imagePromptInvariantNumbers(`${match[1]}枚`)) values.add(value);
-    result.set(entity, values);
+  for (const clause of affirmativeClauses(text).map(normalizePocketPair)) {
+    for (const match of clause.matchAll(entityQuantityPattern())) {
+      const alias = quantityEntityAliases[match[2]!.toLowerCase()]!;
+      const entity = alias === "snap" && pocketSnapQuantity(clause, match) ? "pocket-snap" : alias;
+      if (preservationOnly && !preservesQuantity(clause) && entity !== "pocket-snap") continue;
+      const values = result.get(entity) ?? new Set<string>();
+      for (const value of imagePromptInvariantNumbers(`${match[1]}枚`)) values.add(value);
+      result.set(entity, values);
+    }
   }
   return result;
 };
@@ -53,8 +64,8 @@ const explicitQuantityChanges = (text: string) => {
   const clauses = instructionsWithoutArtworkLiterals(text).split(/[，,。；;!！?？\n]|\.(?!\d)/u).map(clause => clause.trim());
   const number = quantityNumber.slice(1, -1), unit = "(?:[枚颗粒个片朵只]\\s*)?";
   const change = "(?:改为|改成|改到|减少到|减少至|减至|增加到|增加至|增至|变为|变成)";
-  const operand = `(?<from>${number})\\s*${unit}(?<entity>${quantityEntities})`;
-  const target = `(?<to>${number})\\s*${unit}(?:(?<target>${quantityEntities}))?`;
+  const operand = `(?<from>${number})\\s*${unit}${quantityEntityLocation}(?<entity>${quantityEntities})`;
+  const target = `(?<to>${number})\\s*${unit}(?:${quantityEntityLocation}(?<target>${quantityEntities}))?`;
   const patterns = [
     new RegExp(`(?:把|将)?\\s*${operand}\\s*${change}\\s*${target}`, "giu"),
     new RegExp(`\\b(?:change|reduce|increase|replace)\\s+${operand}\\s+to\\s+${target}`, "giu"),

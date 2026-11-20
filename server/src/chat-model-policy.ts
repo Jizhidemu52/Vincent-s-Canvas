@@ -2,9 +2,9 @@ import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import type { Database } from "./db";
 
 export const DEFAULT_CHAT_MODEL_TOOL_KEY = "gpt-chat";
-export const INITIAL_CHAT_MODEL_ID = "gemini-4-carbon";
+export const INITIAL_CHAT_MODEL_ID = "gpt-6.2-sol";
 export const CANVAS_DESIGN_CHAT_TOOL_KEY = "canvas-design-chat";
-export const INITIAL_CANVAS_DESIGN_CHAT_MODEL_ID = "gemini-4-carbon";
+export const INITIAL_CANVAS_DESIGN_CHAT_MODEL_ID = "gpt-6.2-sol";
 
 export function chatModelBindingKey(toolKey: string) {
   return toolKey === CANVAS_DESIGN_CHAT_TOOL_KEY ? CANVAS_DESIGN_CHAT_TOOL_KEY : DEFAULT_CHAT_MODEL_TOOL_KEY;

@@ -3,7 +3,7 @@ import { expect, spyOn, test } from "bun:test";
 type DemoFetch = (request: Request) => Promise<Response>;
 type DemoModel = { id: string; modelId: string; parameterModelId?: string; providerId: string; capabilities: string[]; creditCost: number; rmbCost: number };
 
-test("open demo ignores legacy OpenToken selections and uses the shared Carbon default for chat and tool continuation", async () => {
+test("open demo ignores legacy OpenToken selections and uses exact Sol defaults for chat, design discussion and tool continuation", async () => {
   const testEnv = {
     LOCAL_STANDALONE: "true",
     OA_LOGIN_ENABLED: "false",
@@ -36,9 +36,9 @@ test("open demo ignores legacy OpenToken selections and uses the shared Carbon d
     const address = String(url);
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     upstreamCalls.push({ url: address, headers: new Headers(init?.headers), body });
-    if (address === "http://mark.test/v1/chat/completions") {
-      const messages = body.messages as Array<{ role: string }>;
-      return Response.json({ choices: [messages.at(-1)?.role === "tool"
+    if (address === "http://mark.test/v1/responses") {
+      const messages = body.input as Array<{ type?: string }>;
+      return Response.json({ choices: [messages.at(-1)?.type === "function_call_output"
         ? { message: { role: "assistant", content: "Tool result accepted." }, finish_reason: "stop" }
         : { message: { role: "assistant", content: null, tool_calls: toolCalls }, finish_reason: "tool_calls" }] });
     }
@@ -63,19 +63,16 @@ test("open demo ignores legacy OpenToken selections and uses the shared Carbon d
     const catalog = await (await request("/api/models")).json();
     const visibleModels = catalog.models as DemoModel[];
     const gptModel = visibleModels.find((model) => model.modelId === "gpt-6-astra")!;
-    const carbon = visibleModels.find(model => model.parameterModelId === "gemini-4-carbon")!;
+    const solId = "d5000000-0000-4000-8000-000000000017";
     const claudeModel = { id: "40000000-0000-4000-8000-000000000125", modelId: "claude-fable-5-1" };
     expect(gptModel).toBeDefined();
-    expect(carbon).toBeDefined();
-    expect(carbon.capabilities).toEqual(["chat", "vision", "tools"]);
-    expect(catalog.tools.find((tool: { toolKey: string }) => tool.toolKey === "gpt-chat").modelConfigId).toBe(carbon.id);
-    expect(catalog.tools.find((tool: { toolKey: string }) => tool.toolKey === "canvas-chat").modelConfigId).toBe(carbon.id);
+    for (const key of ["gpt-chat", "canvas-chat", "canvas-design-chat"]) expect(catalog.tools.find((tool: { toolKey: string }) => tool.toolKey === key).modelConfigId).toBe(solId);
     expect(visibleModels.some((model) => model.modelId === claudeModel.modelId)).toBe(false);
     expect(JSON.stringify(visibleModels)).not.toContain("test-shared-key");
     expect(await (await chat(gptModel.id, { tools })).json()).toMatchObject({ toolCalls, stopReason: "tool_calls" });
-    expect(upstreamCalls.at(-1)!.url).toBe("http://mark.test/v1/chat/completions");
+    expect(upstreamCalls.at(-1)!.url).toBe("http://mark.test/v1/responses");
     expect(upstreamCalls.at(-1)!.headers.get("authorization")).toBe("Bearer test-mark-key");
-    expect(upstreamCalls.at(-1)!.body).toMatchObject({ model: "gemini-4-carbon", stream: false, messages: [{ role: "user", content: "hello" }] });
+    expect(upstreamCalls.at(-1)!.body).toMatchObject({ model: "gpt-6.2-sol", stream: false, input: [{ role: "user", content: "hello" }] });
 
     const claudeResult = await (await chat(claudeModel.modelId, { tools, claude: { thinking: true } })).json();
     expect(claudeResult).toMatchObject({ toolCalls, stopReason: "tool_calls" });
@@ -92,9 +89,9 @@ test("open demo ignores legacy OpenToken selections and uses the shared Carbon d
     });
     expect(continued.headers.get("content-type")).toContain("application/json");
     expect(await continued.json()).toMatchObject({ content: "Tool result accepted.", toolCalls: [], stopReason: "stop" });
-    expect(upstreamCalls.at(-1)!.body).toMatchObject({ model: "gemini-4-carbon", stream: false, messages: [
-      { role: "assistant", content: null, tool_calls: toolCalls },
-      { role: "tool", tool_call_id: "read-1", content: "node contents" },
+    expect(upstreamCalls.at(-1)!.body).toMatchObject({ model: "gpt-6.2-sol", stream: false, input: [
+      { type: "function_call", call_id: "read-1", name: "read_node", arguments: '{"id":"node-1"}' },
+      { type: "function_call_output", call_id: "read-1", output: "node contents" },
     ] });
     expect(upstreamCalls.at(-1)!.body.thinking).toBeUndefined();
     expect(upstreamCalls.at(-1)!.body.output_config).toBeUndefined();
@@ -102,7 +99,7 @@ test("open demo ignores legacy OpenToken selections and uses the shared Carbon d
     const callCount = upstreamCalls.length;
     expect((await chat("unknown-model")).status).toBe(200);
     expect(upstreamCalls).toHaveLength(callCount + 1);
-    expect(upstreamCalls.every(call => call.body.model === "gemini-4-carbon" && call.url === "http://mark.test/v1/chat/completions" && call.body.stream === false)).toBe(true);
+    expect(upstreamCalls.every(call => call.body.model === "gpt-6.2-sol" && call.url === "http://mark.test/v1/responses" && call.body.stream === false)).toBe(true);
   } finally {
     serve.mockRestore();
     log.mockRestore();

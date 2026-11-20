@@ -1056,12 +1056,13 @@ Bun.serve({
         claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number };
       };
       const chatTool = resolveDemoToolConfiguration({ operationType: "chat", toolKey: input.toolKey, modelConfigId: input.modelId }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
+      const chatIdentity = { ...chatTool, configurationVersion: demoToolConfigurations.find(item => item.toolKey === chatTool.toolKey)?.configurationVersion ?? 0 };
       const selectedConfig = demoModels.find(model => model.id === chatTool.modelConfigId);
       const selectedModel = String(selectedConfig?.modelId || "");
       const parsedTools = chatFunctionToolsSchema.safeParse(input.tools);
       if (!parsedTools.success) return json({ error: "INVALID_TOOLS", message: "对话只允许已声明的 function 工具；图片生成必须通过图像任务入口" }, 400);
       input.tools = parsedTools.data;
-      if (input.profile) {
+      if (input.profile || chatTool.toolKey === CANVAS_DESIGN_CHAT_TOOL_KEY) {
         const visionError = imageAgentVisionError(input.profile, selectedConfig?.capabilities);
         if (visionError) return json({ error: "CHAT_VISION_REQUIRED", message: visionError }, 422);
         const prepared = await prepareChatProfileInput({ ...input, input: input.input || [], tools: parsedTools.data }, async profile => (await demoPromptCompiler.store.active(profile)).version.systemPrompt);
@@ -1070,20 +1071,24 @@ Bun.serve({
         if (!provider || !selectedConfig || !apiKey) return json({ error: "PROVIDER_NOT_CONFIGURED", message: "所选对话 API 服务尚未配置服务端密钥" }, 503);
         try {
           const model = { model_id: selectedModel, base_url: String(provider.baseUrl), protocol: String(provider.protocol), encrypted_credentials: null };
+          const privateProfile = prepared.privateRules.length > 0;
           const chatInput = imageAgentModelInput(model, {
             ...prepared.input,
-            waitForResult: acceptsChatResultWait(request.headers.get("accept"), prepared.input.privateProfile),
+            privateProfile,
+            waitForResult: acceptsChatResultWait(request.headers.get("accept"), privateProfile, chatTool.toolKey),
             claude: { ...prepared.input.claude, maxTokens: Math.max(1, Math.min(16_384, Math.floor(prepared.input.claude?.maxTokens || 2048))) },
           });
           if (isClaudeMessagesModel(model) && chatInput.claude?.stream) {
-            return imageAgentClaudeStream(await requestClaudeStream(model, { apiKey }, chatInput), prepared.privateRules, chatInput.tools);
+            const upstream = await requestClaudeStream(model, { apiKey }, chatInput);
+            return privateProfile ? imageAgentClaudeStream(upstream, prepared.privateRules, chatInput.tools)
+              : new Response(upstream.body, { status: upstream.status, headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform" } });
           }
           if (chatInput.waitForResult) return chatResultWaitResponse(async () => {
             const result = validateChatProfileOutput(await requestChatCompletion(model, { apiKey }, chatInput), prepared.privateRules);
             if (!result.content.trim() && !result.toolCalls.length) throw new ChatProtocolError("CHAT_RESPONSE_EMPTY", "模型未返回有效回复；不会自动重新提交。");
             return result;
           }, error => {
-            console.error("Chat request failed", chatFailureMetadata(error, performance.now() - chatStartedAt, "response"));
+            console.error("Chat request failed", chatFailureMetadata(error, performance.now() - chatStartedAt, "response", chatIdentity));
             return chatResultWaitFailure(error, chatResultTimeoutMs(model, chatInput));
           });
           const result = await requestChatCompletion(model, { apiKey }, chatInput);
@@ -1091,7 +1096,10 @@ Bun.serve({
           if (!payload.content.trim() && !payload.toolCalls.length) return json({ error: "CHAT_RESPONSE_EMPTY", message: "模型未返回有效回复；不会自动重新提交。" }, 502, { "cache-control": "no-store" });
           return json(payload, 200, { "cache-control": "no-store" });
         } catch (error) {
+          console.error("Chat request failed", chatFailureMetadata(error, performance.now() - chatStartedAt, "request", chatIdentity));
           if (error instanceof PromptOptimizationError) throw error;
+          const failure = chatResultWaitFailure(error, 180_000);
+          if (failure.code === "CHAT_REQUEST_TIMEOUT") return json({ error: failure.code, message: failure.message }, 504, { "cache-control": "no-store" });
           const transport = readProviderSubmissionDiagnostics(error);
           const code = error instanceof ChatProtocolError ? error.code : transport?.code || "UPSTREAM_REQUEST_FAILED";
           const upstream = error instanceof ChatProtocolError && error.upstreamStatus && error.upstreamReason

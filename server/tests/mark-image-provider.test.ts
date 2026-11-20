@@ -57,7 +57,7 @@ async function fixture(role = "super_admin", encryptionKey: string | undefined =
     }
     if (sql.startsWith("INSERT INTO tool_api_configurations")) {
       const design = values[0] === "canvas-design-chat";
-      expect(values).toEqual(design ? ["canvas-design-chat", MARK_IMAGE_PROVIDER_ID, "gemini-4-carbon"] : [MARK_IMAGE_PROVIDER_ID, "gemini-4-carbon"]);
+      expect(values).toEqual(design ? ["canvas-design-chat", MARK_IMAGE_PROVIDER_ID, "gpt-6.2-sol"] : [MARK_IMAGE_PROVIDER_ID, "gpt-6.2-sol"]);
       expect(sql).toContain("tool_api_configurations.model_config_id IS NULL");
       expect(sql).toContain("tool_api_configurations.updated_by IS NULL");
       expect(sql).toContain("tool_api_configurations.configuration_version=1");
@@ -98,7 +98,9 @@ test("separate Mark configuration is atomic, idempotent, and never returns plain
   expect(data.models.map((model: any) => model.name)).toEqual(MARK_PLATFORM_MODELS.map(model => model.name));
   expect(f.state().models.map(model => model.capabilities)).toEqual(MARK_PLATFORM_MODELS.map(model => [...model.capabilities]));
   expect(f.state().models.find(model => model.modelId === "gemini-4-carbon")!.capabilities).toEqual(["chat", "vision", "tools"]);
-  expect(f.state().chatBinding.modelConfigId).toBe(data.models.find((model: any) => model.modelId === "gemini-4-carbon").id);
+  expect(f.state().models.find(model => model.modelId === "gpt-6.2-sol")!.capabilities).toEqual(["chat", "vision", "tools"]);
+  expect(f.state().chatBinding.modelConfigId).toBe(data.models.find((model: any) => model.modelId === "gpt-6.2-sol").id);
+  expect(f.state().designBinding.modelConfigId).toBe(data.models.find((model: any) => model.modelId === "gpt-6.2-sol").id);
   const encrypted = f.state().provider!.encryptedCredentials;
   expect(JSON.parse(decryptSecret(encrypted, key))).toEqual({ apiKey: "fixture-mark-key" });
   expect(JSON.stringify(data)).not.toContain(encrypted);

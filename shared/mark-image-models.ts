@@ -28,4 +28,5 @@ export const MARK_PLATFORM_MODELS = [
   { demoOrdinal: 16, modelId: "mai-image-2.7-flash", name: "aplmart-mai2.7-flash", description: "快速出图与最多 5 图参考编辑；支持 1K / 2K 文生图", defaultEnabled: true, capabilities: ["generate", "edit", "batch"] as const },
   { demoOrdinal: 14, modelId: "seedream-5-5", name: "豆包生图", description: "图片生成、参考图编辑与透明背景；图层拆分使用独立工作区", defaultEnabled: false, capabilities: ["generate", "edit"] as const },
   { demoOrdinal: 15, modelId: "gemini-4-carbon", name: "aplmart-gemini-4-carbon", description: "文字对话、图文理解与工具调用", defaultEnabled: true, capabilities: ["chat", "vision", "tools"] as const },
+  { demoOrdinal: 17, modelId: "gpt-6.2-sol", name: "aplmart-gpt-6.2-sol", description: "文字对话、图文理解与工具调用", defaultEnabled: true, capabilities: ["chat", "vision", "tools"] as const },
 ] as const;

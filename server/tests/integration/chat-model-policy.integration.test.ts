@@ -19,6 +19,7 @@ integration("isolated PostgreSQL shared chat policy", () => {
   let db: Database;
   let sonnet: string;
   let carbon: string;
+  let sol: string;
   let alternative: string;
   let actorId: string;
   beforeAll(async () => {
@@ -38,21 +39,22 @@ integration("isolated PostgreSQL shared chat policy", () => {
     await db.query("INSERT INTO providers(id,name,protocol,base_url) VALUES($1,'Shared chat test','apimart','https://never-called.invalid')", [MARK_IMAGE_PROVIDER_ID]);
     sonnet = (await db.query("INSERT INTO model_configs(provider_id,name,model_id,capabilities) VALUES($1,'Sonnet test','claude-sonnet-5-5',ARRAY['chat']) RETURNING id", [MARK_IMAGE_PROVIDER_ID])).rows[0].id;
     carbon = (await db.query("INSERT INTO model_configs(provider_id,name,model_id,capabilities) VALUES($1,'Carbon test','gemini-4-carbon',ARRAY['chat','vision','tools']) RETURNING id", [MARK_IMAGE_PROVIDER_ID])).rows[0].id;
+    sol = (await db.query("INSERT INTO model_configs(provider_id,name,model_id,capabilities) VALUES($1,'Sol test','gpt-6.2-sol',ARRAY['chat','vision','tools']) RETURNING id", [MARK_IMAGE_PROVIDER_ID])).rows[0].id;
     alternative = (await db.query("INSERT INTO model_configs(provider_id,name,model_id,capabilities) VALUES($1,'Astra test','gpt-6-astra',ARRAY['chat']) RETURNING id", [MARK_IMAGE_PROVIDER_ID])).rows[0].id;
     actorId = (await db.query("INSERT INTO users(username,display_name) VALUES('chat-policy-designer','Chat policy designer') RETURNING id")).rows[0].id;
   }, 30000);
   afterAll(async () => { await database?.close(); });
 
-  test("first initialization seeds Carbon and preserves old choices, administrative selection and clearing", async () => {
+  test("first initialization seeds Sol and preserves old choices, administrative selection and clearing", async () => {
     const row = async () => (await db.query("SELECT model_config_id,enabled,credit_cost_override,configuration_version FROM tool_api_configurations WHERE tool_key='gpt-chat'")).rows[0];
     await db.query("UPDATE tool_api_configurations SET enabled=false,credit_cost_override=11 WHERE tool_key='gpt-chat'");
     await initializeDefaultChatModel(db);
-    expect(await row()).toMatchObject({ model_config_id: carbon, enabled: false, credit_cost_override: 11, configuration_version: 2 });
-    expect((await db.query("SELECT capabilities FROM model_configs WHERE id=$1", [carbon])).rows[0].capabilities).toEqual(["chat", "vision", "tools"]);
+    expect(await row()).toMatchObject({ model_config_id: sol, enabled: false, credit_cost_override: 11, configuration_version: 2 });
+    expect((await db.query("SELECT capabilities FROM model_configs WHERE id=$1", [sol])).rows[0].capabilities).toEqual(["chat", "vision", "tools"]);
     await initializeDefaultChatModel(db);
     expect((await row()).configuration_version).toBe(2);
     const migration = await readFile(`${migrations}/031_default_chat_model.sql`, "utf8");
-    for (const model of [sonnet, alternative, null]) {
+    for (const model of [sonnet, carbon, alternative, null]) {
       await db.query("UPDATE tool_api_configurations SET model_config_id=$1,updated_by=$2,configuration_version=3 WHERE tool_key='gpt-chat'", [model, actorId]);
       await initializeDefaultChatModel(db);
       await database.exec(migration);

@@ -4,7 +4,7 @@ import { chatUpstreamFailureMessage, readChatUpstreamFailure } from "../src/chat
 const secret = "Bearer private-key https://user:password@private.invalid private-user-prompt";
 
 describe("safe upstream chat failure categories", () => {
-    for (const [status, reason] of [[401, "authentication_failed"], [403, "access_denied"], [402, "balance_insufficient"], [413, "request_too_large"], [429, "rate_limited"], [500, "service_unavailable"], [503, "service_unavailable"]] as const) {
+    for (const [status, reason] of [[401, "authentication_failed"], [403, "access_denied"], [402, "balance_insufficient"], [413, "request_too_large"], [429, "rate_limited"], [500, "service_unavailable"], [503, "service_unavailable"], [524, "service_unavailable"]] as const) {
         test(`${status} is classified from status without exposing or reading the body`, async () => {
             let pulls = 0, cancelled = false;
             const body = new ReadableStream({ pull() { pulls++; throw new Error(secret); }, cancel() { cancelled = true; } }, { highWaterMark: 0 });

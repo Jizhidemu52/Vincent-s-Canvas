@@ -1,4 +1,5 @@
 import type { ChatCompletionResult } from "./routes/chat";
+import { CANVAS_DESIGN_CHAT_TOOL_KEY } from "./chat-model-policy";
 
 export const CHAT_RESULT_TIMEOUT_MS = 180_000;
 export const CARBON_RESULT_TIMEOUT_MS = 600_000;
@@ -10,8 +11,9 @@ export function chatResultTimeoutMs(model: { model_id: string }, input: { privat
         ? CARBON_RESULT_TIMEOUT_MS : CHAT_RESULT_TIMEOUT_MS;
 }
 
-export function acceptsChatResultWait(accept: string | undefined | null, privateProfile: boolean | undefined) {
-    return privateProfile === true && Boolean(accept?.split(",").some(value => value.trim().split(";")[0]?.toLowerCase() === "text/event-stream"));
+export function acceptsChatResultWait(accept: string | undefined | null, privateProfile: boolean | undefined, resolvedToolKey?: string) {
+    return (privateProfile === true || resolvedToolKey === CANVAS_DESIGN_CHAT_TOOL_KEY)
+        && Boolean(accept?.split(",").some(value => value.trim().split(";")[0]?.toLowerCase() === "text/event-stream"));
 }
 
 export const chatResultWaitHeaders = {
