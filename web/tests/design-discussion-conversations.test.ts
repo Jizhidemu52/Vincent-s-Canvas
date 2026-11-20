@@ -241,7 +241,13 @@ describe("right-side conversation-backed image execution", () => {
         await current.controller.start(input());
         const posted = current.posts().find(call => call.path.endsWith("/turns"))!.input as SubmitTurnRequest;
         expect(posted.text).toContain(input().prompt);
-        expect(posted.text).toContain(JSON.stringify(input().proposal.requirementEvidence));
+        expect(posted.text).toContain("  先讨论，保留七颗纽扣。\n  ");
+        expect(posted.text).toContain("保留七颗纽扣。");
+        expect(posted.text).not.toContain("originalText");
+        const saved = current.tasks()[0];
+        expect(saved.proposal.requirementEvidence).toEqual(input().proposal.requirementEvidence);
+        expect(saved.conversationExecution.assets[0]).toMatchObject({ id: reference.id, assetId: conversationIds.asset, title: reference.title });
+        expect(saved.conversationExecution.fingerprint).toContain(reference.id);
         const oversized = fixture();
         await expect(oversized.controller.start({ ...input(), prompt: "原文".repeat(5001) })).rejects.toThrow("10000");
         expect(oversized.calls).toEqual([]);

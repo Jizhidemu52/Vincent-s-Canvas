@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { ImageAgentPlanningError } from "../../shared/image-agent-iteration";
+import { assertImagePromptInvariantCoverage } from "../../shared/image-prompt-invariants";
 import { BillingError } from "../src/billing";
 import { ImageConversationContextError } from "../src/image-conversation-context";
 import { ImageConversationPlannerError } from "../src/image-conversation-planner";
@@ -60,6 +62,26 @@ describe("image conversation runtime error classification", () => {
   test("configuration and private-profile preflight failures are non-retryable binding failures", () => {
     const errors = [new ToolConfigurationError("MODEL_DISABLED", "模型停用"), new ModuleDisabledError("gpt-chat"), new PromptOptimizationError("PLANNER_CONTEXT_INVALID", "资料无效", 422)];
     for (const error of errors) expect(classifyImageConversationError(error)).toEqual({ code: "MODEL_BINDING_UNAVAILABLE", message: error.message, retryable: false });
+  });
+
+  test.each([
+    ["保留6颗纽扣", "保留5颗纽扣", "数量"],
+    ['保留文字“SUN”', '保留文字“MOON”', "文字标识"],
+  ])("image constraint failure preserves the actionable reason for %s without allowing retry", (source, target, detail) => {
+    let failure: unknown;
+    try { assertImagePromptInvariantCoverage(source, target); } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(Error);
+    const classified = classifyImageConversationError(failure);
+    expect(classified).toMatchObject({ code: "PLAN_INVALID", retryable: false });
+    expect(classified?.message).toContain(detail);
+    expect(classified?.message).toContain("未提交图片生成任务");
+  });
+
+  test("image plan validation remains a failed plan without exposing private reference diagnostics", () => {
+    const error = new ImageAgentPlanningError("IMAGE_AGENT_REFERENCES_INVALID", "图片分工必须对应本轮实际底图与参考图，尚未提交生成。",
+      { missingImageIds: ["private-reference"], requiredImageIds: ["private-base"] });
+    expect(classifyImageConversationError(error)).toEqual({ code: "PLAN_INVALID", message: error.message, retryable: false });
+    expect(JSON.stringify(classifyImageConversationError(error))).not.toContain("private-");
   });
 
   test("untyped errors and code-shaped objects stay unclassified so worker dispatch evidence decides uncertainty", () => {

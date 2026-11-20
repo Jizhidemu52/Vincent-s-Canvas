@@ -1,4 +1,6 @@
 import type { TurnError } from "../../shared/image-conversation-contracts";
+import { ImageAgentPlanningError } from "../../shared/image-agent-iteration";
+import { CanvasImagePromptLanguageError } from "../../shared/image-prompt-invariants";
 import { BillingError } from "./billing";
 import type { AppConfig } from "./config";
 import type { Cache, Database } from "./db";
@@ -19,6 +21,9 @@ import { publishEnqueuedTask } from "./tasks";
 import { resolveToolExecution, ToolConfigurationError } from "./tool-configuration";
 
 export function classifyImageConversationError(error: unknown): TurnError | undefined {
+  if (error instanceof CanvasImagePromptLanguageError || error instanceof ImageAgentPlanningError) return {
+    code: "PLAN_INVALID", message: error.message, retryable: false,
+  };
   if (error instanceof ImageConversationPlannerError) return {
     code: error.dispatchOutcome === "unknown" ? "PLANNER_OUTCOME_UNKNOWN"
       : ["INSUFFICIENT_CREDIT", "INSUFFICIENT_CREDITS"].includes(error.code) ? "INSUFFICIENT_CREDITS" : "PLANNER_FAILED",

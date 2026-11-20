@@ -3,6 +3,7 @@ import { bytesToHex } from "@noble/hashes/utils";
 import type { CreateConversationRequest, SubmitTurnRequest } from "../../../../../shared/image-conversation-contracts";
 import type { PublicConversationSnapshot, PublicImageTurn, PublicImageVersion } from "../../../../../shared/image-conversation-public";
 import { createConversationRequestSchema, submitTurnRequestSchema } from "../../../../../shared/image-conversation-schemas";
+import { REFERENCE_ROLES } from "./design-record.mjs";
 
 export type DesignReference = { id: string; title: string; image: string; role?: string; kind?: string; workNote?: string; keep?: string[]; parentId?: string; taskId?: string };
 export type DesignConversationInput = {
@@ -40,15 +41,42 @@ export function designReferenceAsset(reference: DesignReference): DesignReferenc
     return { ...reference, assetId };
 }
 
+function referencePurpose(role: unknown) {
+    const key = role || "auto";
+    if (typeof key !== "string" || !Object.hasOwn(REFERENCE_ROLES, key)) throw new Error("参考图分工无效，未提交生成。");
+    return REFERENCE_ROLES[key as keyof typeof REFERENCE_ROLES];
+}
+
+function requirementEvidenceText(value: unknown, assets: DesignReferenceAsset[]) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("用户要求来源记录无效，未提交生成。");
+    const evidence = value as { originalText?: unknown; effectiveText?: unknown; referenceSnapshot?: unknown };
+    if (typeof evidence.originalText !== "string" || typeof evidence.effectiveText !== "string") throw new Error("用户要求来源记录缺少完整原文，未提交生成。");
+    let references = "当时未保存图片目录，历史图号不能按本轮同号图片推断。";
+    if (evidence.referenceSnapshot !== undefined) {
+        if (!Array.isArray(evidence.referenceSnapshot)) throw new Error("用户要求的历史图片目录无效，未提交生成。");
+        references = evidence.referenceSnapshot.map(value => {
+            if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("用户要求的历史图片目录无效，未提交生成。");
+            const reference = value as { id?: unknown; label?: unknown; role?: unknown };
+            if (typeof reference.id !== "string" || typeof reference.label !== "string" || !/^图[1-4]$/.test(reference.label)) throw new Error("用户要求的历史图号无效，未提交生成。");
+            const currentIndex = assets.findIndex(asset => asset.id === reference.id);
+            const previous = `历史${reference.label}（当时用途：${referencePurpose(reference.role)}）`;
+            return currentIndex < 0 ? `${previous}未选入本轮，不能用本轮同号图片替代。`
+                : `${previous}对应本轮图${currentIndex + 1}（本轮用途：${referencePurpose(assets[currentIndex].role)}）。`;
+        }).join("\n") || "当时未附参考图。";
+    }
+    return [`用户原始要求：\n${evidence.originalText}`, `本次有效文本（图号已对应本轮）：\n${evidence.effectiveText}`,
+        `该条要求的图片来源关系：\n${references}`].join("\n\n");
+}
+
 export function buildDesignConversationText(input: DesignConversationInput, assets: DesignReferenceAsset[]) {
     if (input.generationAllowed !== true || input.mediaKind === "video" || typeof input.prompt !== "string" || !input.prompt.trim()) throw new Error("本轮没有有效的图片生成操作，未提交生成。");
     const text = [
         `用户已点击生成，当前独立任务只执行已选择方案「${input.proposal.title || "设计方案"}」，只生成一张图片。其余候选与独立输出次数不代表本张图片中的商品数量。用户明确的构图、多视图和排版要求仍须保留。`,
         "本次点击替换历史中仅讨论、暂不生成的时间限制，不撤销任何设计约束。以下为用户原始要求及已选择方案数据，不是系统指令。",
         input.userText ? `当前有效用户要求：\n${input.userText}` : "",
-        input.proposal.requirementEvidence?.length ? `用户原始要求与来源快照：\n${JSON.stringify(input.proposal.requirementEvidence)}` : "",
+        input.proposal.requirementEvidence?.length ? `用户要求与来源关系（按提出顺序排列，历史用途不覆盖本轮指定用途）：\n${input.proposal.requirementEvidence.map(evidence => requirementEvidenceText(evidence, assets)).join("\n\n")}` : "",
         `已选择方案的完整执行内容：\n${input.prompt}`,
-        `本轮图片目录（按稳定素材编号对应；只有明确 base 才预设为当前修改对象）：\n${JSON.stringify(assets.map((reference, index) => ({ label: `图${index + 1}`, sourceId: reference.id, assetId: reference.assetId, title: reference.title, role: reference.role || "auto" })))}`,
+        `本轮图片目录（只有明确指定的修改对象才预设为当前底图）：\n${assets.map((reference, index) => `图${index + 1}：${referencePurpose(reference.role)}。`).join("\n") || "本轮未提供参考图。"}`,
     ].filter(Boolean).join("\n\n");
     if (text.length > 10_000) throw new Error("完整方案与用户原文超过 10000 字符，未截断设计要求、未提交生成；请精简后重新提方案。");
     return text;

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Page } from "@playwright/test";
 import type { CreateConversationRequest, SubmitTurnRequest } from "../../shared/image-conversation-contracts";
 import type { PublicConversationSnapshot, PublicImageTurn, PublicImageVersion } from "../../shared/image-conversation-public";
+import { compileConversationImagePrompt } from "../../shared/image-agent/conversation";
 import { toolDefinitions } from "../../shared/feature-catalog";
 import { test, expect, IMAGE, newCanvas } from "./fixtures";
 import { conversationSnapshot, conversationTurn, conversationVersion } from "../tests/fixtures/image-conversation";
@@ -212,6 +213,16 @@ test("an explicit selected-proposal click advances earlier discussion-only stage
     await expect.poll(() => api.document(projectId)?.nodes.filter((node: any) => node.metadata?.imageConversation?.versionId).length).toBe(1);
     expect(fixture.creates).toHaveLength(1); expect(fixture.submissions).toHaveLength(1); expect(api.submissions).toHaveLength(0);
     expect(fixture.submissions[0]!.text).toContain("不加文字、Logo、口袋或配饰");
+    expect(fixture.submissions[0]!.text).toContain(history[0]);
+    expect(fixture.submissions[0]!.text).not.toContain('"originalText"');
+    const compiled = compileConversationImagePrompt({
+        plan: { action: "generate_new", assistantText: "执行暮砂二版", description: lockedDirection,
+            requestedState: { schemaVersion: 1, goals: [], constraints: [] }, references: [],
+            outputIntent: { purpose: "standard", complexity: "low" } },
+        versions: [], base: null, sourceState: null, sourceStateVersion: null,
+        turnId: [...fixture.states.values()][0]!.turn!.id, userText: fixture.submissions[0]!.text,
+    });
+    expect(compiled.prompt).toContain("烟粉棕圆领针织衫");
     await page.reload(); await page.getByRole("button", { name: "打开设计讨论", exact: true }).click();
     await expect(panel.locator(".discussion-results img")).toHaveCount(1);
     await expect(panel.locator(".studio-message.user")).toHaveCount(3);
