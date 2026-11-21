@@ -24,6 +24,7 @@ test.each(["layer-studio", "image", "image-edit", "canvas-image"])("actual Worke
   current.tool_key = toolKey;
   const calls: string[] = [];
   const execute = workerFunction("executeApiMartImage", {
+    config:{APIMART_IMAGE_WEBHOOK_ORIGIN:"https://example.invalid"},imageHookSubmission:()=>{throw Error("a resumed provider task must not configure a new callback");},
     loadSourceAssets: () => { throw new Error("must not reload a submitted task"); },
     stepApiMartImageTask: async (input: Record<string, unknown>) => { expect(input.upstreamTaskId).toBe("upstream-one"); calls.push("query"); return { status: "completed", manifest }; },
     db: { query: async (sql: string, values: unknown[]) => {

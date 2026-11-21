@@ -547,6 +547,11 @@ async function executeApiMartImage(
       const image=editInput.references[0];
       if(editInput.references.length!==1||!image||!task.provider_id)throw new Error("模特取景须使用唯一的同身份全身参考");
       sourceImages=[await tryoutReferenceService(db,config)({ownerId:portraitOwner,tier:"hd",provider:{providerId:task.provider_id,baseUrl:task.base_url!,apiKey:credentials.apiKey||""},sha256:createHash("sha256").update(image.bytes).digest("hex"),taskId:task.id,read:async()=>image})];
+    } else if(config.APIMART_CREATIVE_REFERENCE_TRANSPORT==="provider-upload" && task.tool_key?.startsWith("creative-") && task.operation_type==="inpaint" && !task.workflow_config_id && !task.original_size_source_id && !editInput.mask && !editInput.markup && tryoutModels.some(m=>m.modelId===task.model_id) && /^https:\/\/api\.apimart\.ai(?:\/v1)?\/?$/.test(task.base_url??"")){
+      if(!task.provider_id||editInput.references.some(image=>!image.assetId||image.publicCacheOwner))throw new Error("创意改图需要本人原始素材，尚未提交生成");
+      const ref=tryoutReferenceService(db,config),provider={providerId:task.provider_id,baseUrl:task.base_url!,apiKey:credentials.apiKey||""};
+      sourceImages=[];
+      for(const image of editInput.references)sourceImages.push(await ref({ownerId:task.user_id,taskId:task.id,tier:"hd",provider,sha256:createHash("sha256").update(image.bytes).digest("hex"),read:async()=>image}));
     } else {
       if (!config.PROVIDER_IMAGE_PUBLIC_ORIGIN) throw Object.assign(
         new Error("服务端未配置参考图访问域名；尚未上传到供应商或提交生成，请联系管理员配置 PROVIDER_IMAGE_PUBLIC_ORIGIN"),
@@ -567,7 +572,7 @@ async function executeApiMartImage(
     apiKey: credentials.apiKey || "",
     modelId: task.model_id!,
     submissionKey: task.id,
-    ...(config.APIMART_IMAGE_WEBHOOK_ORIGIN?{imageHook:imageHookSubmission(config,task.id,task.base_url!)}:{}),
+    ...(fresh&&config.APIMART_IMAGE_WEBHOOK_ORIGIN?{imageHook:imageHookSubmission(config,task.id,task.base_url!)}:{}),
     prompt: providerPrompt,
     parameters: task.parameters,
     sourceImages,
@@ -590,7 +595,7 @@ async function executeApiMartImage(
       if (!persisted.rows[0]) throw new VideoSubmissionClaimLost("原上游任务身份已改变");
     },
   }); } catch (error) {
-    if(task.request_id?.startsWith("tryout:"+task.user_id+":")&&error instanceof ApiMartImageProviderFailure&&"referenceDownloadConfirmed" in error&&error.referenceDownloadConfirmed===true){
+    if((task.request_id?.startsWith("tryout:"+task.user_id+":")||(task.tool_key?.startsWith("creative-")&&config.APIMART_CREATIVE_REFERENCE_TRANSPORT==="provider-upload"))&&error instanceof ApiMartImageProviderFailure&&"referenceDownloadConfirmed" in error&&error.referenceDownloadConfirmed===true){
       await invalidateTryoutReferences(db,task.id).catch(()=>console.warn(JSON.stringify({event:"tryout.reference_invalidation_failed",taskId:task.id})));
     }
     if (!(error instanceof ApiMartImageQueryRetryable) || !task.upstream_task_id) throw error;

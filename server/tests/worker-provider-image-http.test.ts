@@ -40,7 +40,7 @@ const providerTask = () => ({ ...newTask(), protocol: "apimart", encrypted_crede
   external_task_path: null, status_value_path: null, success_values: null, failure_values: null,
   poll_interval_ms: null, timeout_seconds: null, upstream_workflow_context: null as WorkflowTaskContext | null });
 
-function harness(options: { origin?: string; failIssue?: boolean; realCacheFailure?: boolean; failQuickValidation?: boolean; sourceAssets?: typeof sources; hotTryoutUrls?:string[] } = {}) {
+function harness(options: { origin?: string; creativeUpload?:boolean; failIssue?: boolean; realCacheFailure?: boolean; failQuickValidation?: boolean; sourceAssets?: typeof sources; hotTryoutUrls?:string[] } = {}) {
   const calls: Array<{ url: string; method: string; payload?: Record<string, any>; form?: FormData }> = [];
   const grants: Record<string, any>[] = [];
   const mediaDispatches: Array<{ kind: "video" | "audio"; task: ReturnType<typeof providerTask> }> = [];
@@ -85,12 +85,12 @@ function harness(options: { origin?: string; failIssue?: boolean; realCacheFailu
   const dependencies = {
     createHash,portraitSourceOwner:async()=>"original-admin",assertPortraitSubmission:async()=>{events.push("validate-portrait-slot");},
     withTransaction:async(_db:unknown,f:(c:typeof db)=>Promise<unknown>)=>f(db),
-    tryoutReferenceService:()=>async(input:{ownerId:string;tier:string;read:()=>Promise<{bytes:Uint8Array}>})=>{expect(input.ownerId).toBe("original-admin");expect(input.tier).toBe("hd");expect((await input.read()).bytes).toEqual(bytes);return "https://provider.invalid/portrait-original.png";},
+    tryoutReferenceService:()=>async(input:{ownerId:string;tier:string;read:()=>Promise<{assetId?:string;bytes:Uint8Array}>})=>{expect(input.ownerId).toBe(options.creativeUpload?newTask().user_id:"original-admin");expect(input.tier).toBe("hd");const source=await input.read();expect(source.bytes).toEqual(bytes);return "https://provider.invalid/"+(options.creativeUpload?source.assetId:"portrait-original")+".png";},
     recordTryoutResult,downloadTryoutResult:(task:Parameters<typeof downloadTryoutResult>[0],doc:unknown,key:string)=>downloadTryoutResult(task,doc,key,async()=>{downloads++;return bytes;}),
     tryoutModels:[{modelId:"gpt-image-2.6-flare"}],
     assertTryoutModuleEnabled:async()=>{events.push("tryout-gate");},
     lookupReadyTryoutInputs:async()=>{events.push("owned-cache-lookup");return options.hotTryoutUrls;},
-    db, cache, storage, config: { PROVIDER_IMAGE_PUBLIC_ORIGIN: options.origin ?? origin, PROVIDER_ENCRYPTION_KEY: Buffer.alloc(32,5).toString("base64") }, ProviderImageAccess: options.realCacheFailure ? ProviderImageAccess : FakeProviderImageAccess,
+    db, cache, storage, config: { APIMART_CREATIVE_REFERENCE_TRANSPORT:options.creativeUpload?"provider-upload":"signed-origin",PROVIDER_IMAGE_PUBLIC_ORIGIN: options.origin ?? origin, PROVIDER_ENCRYPTION_KEY: Buffer.alloc(32,5).toString("base64") }, ProviderImageAccess: options.realCacheFailure ? ProviderImageAccess : FakeProviderImageAccess,
     decryptSecret: (cipher: string, key: string) => { expect([cipher, key]).toEqual(["fixture-encrypted", Buffer.alloc(32,5).toString("base64")]); return JSON.stringify({ apiKey: "fixture-only" }); },
     assertImageEditMaskSupport, imageAgentProviderPrompt, openAiImageParameters, OPENAI_IMAGE_TIMEOUT_MS: 180_000,
     assertWorkflowTaskContext, workflowTaskContext, WorkflowTaskPending, normalizeWorkflowOutputs, parsePromptVariables, readPath, renderTemplate,
@@ -115,6 +115,16 @@ function harness(options: { origin?: string; failIssue?: boolean; realCacheFailu
     loaded: () => loaded, downloads: () => downloads };
 }
 
+test("opted-in official creative edits stage owned full originals in order and never restage or resubmit on query",async()=>{
+  const h=harness({creativeUpload:true,origin:""}),task={...providerTask(),tool_key:"creative-garment-colorway",base_url:"https://api.apimart.ai/v1"};
+  await expect(h.dispatch(task)).rejects.toBeInstanceOf(ApiMartImageTaskPending);
+  expect(h.calls[0]?.payload?.image_urls).toEqual(sources.map(s=>"https://provider.invalid/"+s.assetId+".png"));
+  await h.dispatch(task);expect(h.loaded()).toBe(1);expect(h.calls.filter(c=>c.method==="POST")).toHaveLength(1);
+  for(const denied of [{base_url:"https://provider.invalid/v1"},{base_url:"https://api.apimart.ai.example/v1"},{tool_key:"canvas-edit"},{model_id:"seedream-5-5"}]){
+    const no=harness({creativeUpload:true,origin:""}),input={...providerTask(),tool_key:"creative-garment-colorway",base_url:"https://api.apimart.ai/v1",...denied};
+    await expect(no.dispatch(input)).rejects.toThrow();expect(no.calls).toHaveLength(0);
+  }
+});
 test("admin portrait crop uses the full portrait exactly once, checks the slot before a paid POST and only queries that original after resuming",async()=>{
     const h=harness({sourceAssets:[sources[0]!],origin:""});
     const task={...providerTask(),request_id:"preset-gen:"+newTask().user_id+":fixture:00",source_urls:["/api/assets/"+sources[0]!.assetId+"/content"],parameters:{quality:"high",resolution:"2k",complexity:"medium"}};

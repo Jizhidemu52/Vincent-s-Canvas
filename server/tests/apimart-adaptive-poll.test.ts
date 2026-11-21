@@ -67,6 +67,7 @@ const workerCode = ts.transpileModule(["executeApiMartImage", "executeApiMartVid
 test.each(["image", "video"])("%s worker forwards persisted age on recovery without resetting deadline or ownership", async kind => {
   const requests: string[] = [];
   const dependencies = {
+    config:{APIMART_IMAGE_WEBHOOK_ORIGIN:"https://example.invalid"},imageHookSubmission:()=>{throw Error("original task query must not sign a new submission");},
     storage: { configured: true }, ApiMartImageTaskPending, VideoTaskPending,
     db: { query: async () => { throw new Error("A resumed task's valid deadline must not be rewritten"); } },
     loadSourceAssets: async () => { throw new Error("Old references cannot be loaded again"); },

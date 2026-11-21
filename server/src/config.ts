@@ -44,6 +44,7 @@ const schema = z.object({
     PROMPT_OPTIMIZATION_FALLBACK: z.enum(["off", "original"]).default("off"),
     APIMART_IMAGE_DEFAULTS_ENABLED: z.enum(["true", "false"]).default("false"),
     APIMART_UPLOAD_CACHE_ENABLED: z.enum(["true","false"]).default("true"),
+    APIMART_CREATIVE_REFERENCE_TRANSPORT: z.enum(["signed-origin","provider-upload"]).default("signed-origin"),
     APIMART_UPLOAD_RETENTION_DAYS: z.coerce.number().pipe(z.literal(3)).default(3),
     TRYOUT_REFERENCE_MAX_EDGE: z.coerce.number().int().min(512).max(2048).default(1536),
     TRYOUT_DISPLAY_BEFORE_SAVE:z.enum(["true","false"]).default("true"),
