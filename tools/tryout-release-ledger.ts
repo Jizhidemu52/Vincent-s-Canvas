@@ -3,7 +3,8 @@ import {link,mkdir,open,readFile,unlink} from "node:fs/promises";
 import {join} from "node:path";
 import {paidCases} from "./tryout-release-plan";
 
-type Group=typeof paidCases[number]["group"];
+export type ReleaseGroup=typeof paidCases[number]["group"];
+type Group=ReleaseGroup;
 type Candidate={commit:string;origin:string;sampleHashes:string[];deploymentId:string};
 type Output={slot:number;taskId:string;upstreamId:string;sha256:string;bytes:number};
 const digest=(value:string)=>createHash("sha256").update(value).digest("hex");
@@ -36,11 +37,18 @@ export async function releaseLedger(directory:string,candidate:Candidate){
     };
     const claimFile=(group:Group)=>join(directory,"intent-"+group+".json");
     const doneFile=(slot:number)=>join(directory,"verified-"+slot+".json");
+    function operationIds(group:Group){
+        return casesFor(group).map(c=>{
+            const h=digest(id+":"+c.slot);
+            return h.slice(0,8)+"-"+h.slice(8,12)+"-8"+h.slice(13,16)+"-a"+h.slice(17,20)+"-"+h.slice(20,32);
+        });
+    }
     async function claim(group:Group,inputDigest:string){
         const cases=casesFor(group);
         if(!sha256.test(inputDigest))throw Error("必须锁定请求正文摘要");
         for(const c of cases)for(const prior of c.after)await readFile(doneFile(prior),"utf8");
-        const intent={requestId:"tryout-release-"+id+"-"+cases[0]!.slot,slots:cases.map(c=>c.slot),inputDigest};
+        const ids=operationIds(group);
+        const intent={requestId:ids[0]!,requestIds:ids,slots:cases.map(c=>c.slot),inputDigest};
         const {created,value}=await immutable(claimFile(group),intent);
         if(JSON.stringify(value)!==JSON.stringify(intent))throw Error("受理意图已存在，不得更改原请求");
         return {...value,action:created?"submit-once" as const:"query-only" as const};
@@ -56,5 +64,5 @@ export async function releaseLedger(directory:string,candidate:Candidate){
         const result=await immutable(doneFile(output.slot),output);
         if(JSON.stringify(result.value)!==JSON.stringify(output))throw Error("不得覆盖已验结果");
     }
-    return {claim,verify};
+    return {claim,verify,operationIds,origin:identity.origin};
 }
