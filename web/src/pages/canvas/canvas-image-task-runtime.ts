@@ -14,6 +14,7 @@ import { imageModelProfile } from "@/lib/image-model-settings";
 import { compiledCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
 import { shouldCancelCanvasGeneration } from "@/lib/canvas/canvas-project-async-lifecycle";
 import { imageResultProcessingFailureMessage, isImageResultProcessingFailure } from "@/lib/generation-feedback";
+import {serverMediaId} from "@/services/canvas-media-links";
 
 export type CanvasImageTaskScope = { projectId: string; mounted: boolean; recoveries: Map<string, AbortController>; waitForWriteAccess?: () => Promise<boolean>; isObservationCurrent?: () => boolean };
 type RecoveryOutput = { nodeId: string; status: "success" | "failed"; url?: string; storageKey?: string; error?: string };
@@ -50,7 +51,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                 if (node.id !== nodeId && !primary) return node;
                 return {
                     ...node,
-                    ...(metadata.status === "success" && metadata.naturalWidth && metadata.naturalHeight
+                    ...(!binding.tryoutSwap && metadata.status === "success" && metadata.naturalWidth && metadata.naturalHeight
                         ? fitNodeSize(metadata.naturalWidth, metadata.naturalHeight, node.width, node.height) : {}),
                     metadata: { ...node.metadata, ...metadata, ...(node.metadata?.generationRecord ? { generationRecord: compiledCanvasGenerationRecord(node.metadata.generationRecord, metadata.prompt, metadata.submittedPrompt) } : {}), ...(primary ? { primaryImageId: nodeId } : {}) },
                 };
@@ -225,14 +226,14 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
         async recover(nodeId: string, binding: CanvasImageTaskBinding, signal: AbortSignal, explicit = false) {
             const valid = () => current(nodeId, binding) && !signal.aborted;
             try {
-                await patch(nodeId, binding, { status: "loading", errorDetails: undefined });
+                await patch(nodeId, binding, { status: binding.tryoutSwap?"success":"loading", errorDetails: undefined });
                 const task = await observeCanvasImageTask(binding, {
                     signal, isCurrent: valid,
                     getTask: getQueuedTask, getByRequestId: getQueuedTaskByRequestId,
-                    ...(explicit ? { recoverTask: recoverQueuedTask } : {}),
+                    ...(explicit && !binding.tryoutSwap ? { recoverTask: recoverQueuedTask } : {}),
                     onTask: async task => {
                         if (nodes.current.find(node => node.id === nodeId)?.metadata?.imageTask?.taskId !== task.id) {
-                            await patch(nodeId, binding, { imageTask: { ...binding, taskId: task.id }, sourceTaskId: task.id });
+                            await patch(nodeId, binding, { imageTask: { ...binding, taskId: task.id }, ...(binding.tryoutSwap?{}:{sourceTaskId:task.id}) });
                         }
                     },
                 });
@@ -243,7 +244,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                     const postprocess = task.status !== "cancelled" && isImageResultProcessingFailure(task);
                     const terminal = task.status === "failed" || task.status === "cancelled";
                     await patch(nodeId, binding, {
-                        status: "error", sourceTaskId: task.id,
+                        status: binding.tryoutSwap?"success":"error", ...(binding.tryoutSwap?{}:{sourceTaskId:task.id}),
                         errorDetails: postprocess ? imageResultProcessingFailureMessage : task.failureReason || (terminal ? "原图片任务已失败或取消" : "原图片任务已暂停，提交状态待核查，请勿重复生成。"),
                         ...(postprocess ? { imageTask: { ...binding, taskId: task.id, postprocessFailed: true } } : terminal ? { imageTask: undefined } : {}),
                     });
@@ -258,6 +259,10 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                 // Refill the original node at its existing position, respecting the image ratio.
                 await patch(nodeId, binding, {
                     imageTask: undefined, sourceTaskId: task.id, content: image.url, storageKey: image.storageKey,
+                    ...(target.metadata?.tryout && target.metadata.tryout.kind!=="original"?{
+                        serverAssetId:serverMediaId(url)||undefined,
+                        tryout:{...target.metadata.tryout,...(binding.tryoutSwap?{tier:binding.tryoutSwap.tier,quickTaskId:binding.tryoutSwap.quickTaskId}:{})},
+                    }:{}),
                     naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType,
                     status: "success", errorDetails: undefined, optimizingPrompt: false,
                     // Older task records omit these fields; missing metadata must not erase the saved request.
@@ -267,7 +272,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                 });
             } catch (error) {
                 if (valid() && !(error instanceof Error && error.name === "AbortError")) {
-                    await patch(nodeId, binding, { status: "error", errorDetails: `${error instanceof Error ? error.message : "原图片任务查询失败"}（保留原任务，可重试查询）` }).catch(() => undefined);
+                    await patch(nodeId, binding, { status: binding.tryoutSwap?"success":"error", errorDetails: `${error instanceof Error ? error.message : "原图片任务查询失败"}（保留原任务，可重试查询）` }).catch(() => undefined);
                 }
             }
         },

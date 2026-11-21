@@ -10,3 +10,4 @@ export const tryoutSubmission=z.discriminatedUnion("kind",[
 ]);
 export type TryoutSubmission=z.output<typeof tryoutSubmission>;
 export type TryoutSubmissionInput=z.input<typeof tryoutSubmission>;
+export const refineTryout=z.object({kind:z.literal("refine"),canvasId:common.canvasId,nodeId:common.nodeId,sourceTaskId:uuid}).strict();

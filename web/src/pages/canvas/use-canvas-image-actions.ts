@@ -81,6 +81,7 @@ export function useCanvasImageActions(options: CanvasImageActionsOptions) {
         quickImageNode: (...args: Parameters<ImageActions["quickImageNode"]>) => invoke("quickImageNode", ...args),
         runLocalImageOperation,
         tryoutColorNode: (...args: Parameters<ImageActions["tryoutColorNode"]>) => invoke("tryoutColorNode", ...args),
+        changeTryoutTier: (...args: Parameters<ImageActions["changeTryoutTier"]>) => invoke("changeTryoutTier", ...args),
         makeBoard: (...args: Parameters<ImageActions["makeBoard"]>) => invoke("makeBoard", ...args),
         toggleTryoutPick: (...args: Parameters<ImageActions["toggleTryoutPick"]>) => invoke("toggleTryoutPick", ...args),
     }), [invoke, runLocalImageOperation]);

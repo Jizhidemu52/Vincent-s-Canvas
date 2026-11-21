@@ -2003,7 +2003,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
 
     const {
         createImageReversePromptNodes, saveManualImageEdit, cropImageNode, splitImageNode,
-        maskEditImageNode, upscaleImageNode, generateAngleNode, quickImageNode, runLocalImageOperation, toggleTryoutPick, makeBoard, tryoutColorNode,
+        maskEditImageNode, upscaleImageNode, generateAngleNode, quickImageNode, runLocalImageOperation, toggleTryoutPick, makeBoard, tryoutColorNode, changeTryoutTier,
     } = useCanvasImageActions({
         projectId, nodesRef, designProjectIdRef, savedProjectIdRef, projectSaveQueueRef, runtime: generationRuntime,
         dialogs: canvasDialogs, setDialogNodeId, setContextMenu, handleMissingModelConfig, isAiConfigReady, flushPendingHistory,
@@ -3042,6 +3042,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const renderNodeTools = (toolbarNode: CanvasNodeData, context?: { x: number; y: number }) => <Suspense fallback={null}>
         <CanvasNodeHoverToolbar node={toolbarNode} viewport={viewport}
             onTryout={tryoutEnabled ? ()=>tryoutPanel.change(true) : undefined} onPickTryout={tryoutPanel.open && !toolbarNode.metadata?.locked ? toggleTryoutPick : undefined}
+            onTryoutTier={tryoutEnabled && !toolbarNode.metadata?.locked ? changeTryoutTier : undefined}
             contextMenu={context ? { ...context, onClose: () => setContextMenu(null) } : undefined}
             onKeep={keepNodeToolbar} onLeave={hideNodeToolbar}
             onInfo={node => setInfoNodeId(node.id)} onEditText={openTextEditor}

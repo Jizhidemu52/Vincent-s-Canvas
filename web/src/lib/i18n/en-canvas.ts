@@ -1,5 +1,12 @@
 /** Canvas presentation only: never used to rewrite saved titles, prompts or messages. */
 const enCanvas: Record<string, string> = {
+  "高清档": "HD",
+  "快速档": "Quick",
+  "正在出高清，保留快速档": "Rendering HD; the quick image stays in place",
+  "正在恢复快速档": "Restoring the quick image",
+  "查询切换进度": "Check progress",
+  "出高清": "Render in HD",
+  "恢复快速档": "Restore quick image",
   "高清": "HD",
   "超清": "Ultra HD",
   "{count} 个任务": "{count} tasks",

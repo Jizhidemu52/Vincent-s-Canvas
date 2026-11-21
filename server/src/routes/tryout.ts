@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { Router } from "express";
 import { MARK_GPT26_IMAGE_MODELS } from "../../../shared/mark-image-models";
-import { tryoutSubmission,type TryoutSubmission } from "../../../shared/tryout-submission";
+import { refineTryout,tryoutSubmission,type TryoutSubmission } from "../../../shared/tryout-submission";
 import { colorPrompt,materialPrompt,wearPrompt,tryoutImageOptions } from "../../../shared/tryout-prompts";
 import { assertCanvasOwner } from "../canvas-document";
 import { withTransaction } from "../db-transaction";
@@ -50,8 +50,8 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
             const actor=(req as AuthenticatedRequest).auth;
             assertCanvasOwner(req.headers["x-canvas-owner-id"],actor.id);
             await assertModuleEnabled(db,"canvas-tryout");
-            const input=tryoutSubmission.parse(req.body);
-            const requestId="tryout:"+actor.id+":"+input.requestId;
+            const input=req.body?.kind==="refine"?refineTryout.parse(req.body):tryoutSubmission.parse(req.body);
+            const requestId="tryout:"+actor.id+":"+(input.kind==="refine"?"hd:"+input.sourceTaskId:input.requestId);
             const signature=createHash("sha256").update(JSON.stringify(input)).digest("hex");
             const read=async(query:Pick<Database,"query">)=>{
                 const row=(await query.query<{id:string;prompt:string;signature:string}>(`SELECT id,prompt,parameters->>'tryoutSignature' AS signature FROM tasks WHERE user_id=$1 AND request_id=$2`,[actor.id,requestId])).rows[0];
@@ -60,13 +60,22 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
             };
             const prior=await read(db);
             if(prior){res.json({taskId:prior.id,prompt:prior.prompt});return;}
-            const {prompt,ids}=await recipe(input,db,actor.id),unique=[...new Set(ids)].sort();
+            const original=async(query:Pick<Database,"query">,locked=false)=>{
+                if(input.kind!=="refine")return {...await recipe(input,query,actor.id,locked),kind:input.kind,tier:input.tier};
+                const row=(await query.query(`SELECT prompt,source_urls,parameters->>'tryoutKind' AS kind FROM tasks
+                    WHERE id=$1 AND user_id=$2 AND project_id=$3 AND parameters->>'tryoutNodeId'=$4 AND status='success'
+                    AND parameters->>'tryoutTier'='quick' AND request_id LIKE $5`+(locked?" FOR SHARE":""),[input.sourceTaskId,actor.id,input.canvasId,input.nodeId,"tryout:"+actor.id+":%"])).rows[0];
+                if(!row||!["color","material","wear"].includes(row.kind)||!Array.isArray(row.source_urls)||!row.source_urls.length)throw new BillingError("TRYOUT_ORIGIN_UNAVAILABLE","只能为这张画布上已成功的快速档结果出高清");
+                const ids:string[]=row.source_urls.map((url:string)=>{const id=/^\/api\/assets\/([0-9a-f-]{36})\/content$/i.exec(url)?.[1];if(!id)throw new BillingError("TRYOUT_REFERENCES","快速档原始参考图不可用");return id;});
+                return {prompt:row.prompt as string,ids,kind:row.kind as TryoutSubmission["kind"],tier:"hd" as const};
+            };
+            const spec=await original(db),{prompt,ids}=spec,unique=[...new Set(ids)].sort();
             if(unique.length!==ids.length)throw new BillingError("TRYOUT_REFERENCES","请使用不同的产品、模特或材质图");
             const execution=await resolveToolExecution(db,{operationType:"inpaint",toolKey:"canvas-edit"});
             await assertTryoutImageModel(db,execution.modelConfigId);
             const prepared=await prepareTaskEnqueue(db,{requestId,userId:actor.id,departmentId:actor.departmentId,projectId:input.canvasId,
                 operationType:"inpaint",toolKey:"canvas-edit",modelConfigId:execution.modelConfigId,prompt,optimized:false,priority:"priority",
-                sourceUrls:ids.map(id=>"/api/assets/"+id+"/content"),parameters:{tool:"canvas-edit",...tryoutImageOptions(input.kind,input.tier),tryoutKind:input.kind,tryoutTier:input.tier,tryoutNodeId:input.nodeId,tryoutSignature:signature},
+                sourceUrls:ids.map(id=>"/api/assets/"+id+"/content"),parameters:{tool:"canvas-edit",...tryoutImageOptions(spec.kind,spec.tier),tryoutKind:spec.kind,tryoutTier:spec.tier,tryoutNodeId:input.nodeId,tryoutSignature:signature,...(input.kind==="refine"?{tryoutQuickTaskId:input.sourceTaskId}:{})},
                 creditsEnabled:await policy.credits(),maxInflightTasks:policy.maxInflightTasks,maxPausedTasks:policy.maxPausedTasks});
             const result=await withTransaction(db,async client=>{
                 await client.query("SELECT module_key FROM module_flags WHERE module_key=ANY($1::text[]) ORDER BY module_key FOR SHARE",[["canvas","canvas-tryout","canvas-edit"]]);
@@ -75,6 +84,7 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
                 if(prepared.execution && prepared.execution.modelConfigId!==execution.modelConfigId)throw new BillingError("TRYOUT_MODEL_CHANGED","模型绑定已变更，未提交任务");
                 await assertTryoutImageModel(client,execution.modelConfigId,true);
                 if(input.kind==="material"&&(await recipe(input,client,actor.id,true)).prompt!==prompt)throw new BillingError("TRYOUT_MATERIAL_CHANGED","材质描述已变更，请重新选择后再提交");
+                if(input.kind==="refine"&&JSON.stringify(await original(client,true))!==JSON.stringify(spec))throw new BillingError("TRYOUT_ORIGIN_CHANGED","快速档原始记录已变化，未提交高清任务");
                 const canvas=await client.query("SELECT 1 FROM canvas_documents WHERE owner_user_id=$1 AND external_id=$2 AND NOT deleted FOR SHARE",[actor.id,input.canvasId]);
                 if(!canvas.rows.length)throw new BillingError("TRYOUT_CANVAS_UNAVAILABLE","请先保存到自己的画布");
                 const assets=await client.query("SELECT id FROM assets WHERE id=ANY($1::uuid[]) AND owner_user_id=$2 AND status='ready' AND kind='image' AND deleted_at IS NULL ORDER BY id FOR SHARE",[unique,actor.id]);

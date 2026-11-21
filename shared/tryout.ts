@@ -4,6 +4,7 @@ export type TryoutMeta = {
     picked?: boolean; color?: TryoutColor; material?: { name: string; presetId?: string; assetId?: string };
     model?: { name: string; presetId?: string; assetId?: string };
     products?: string[];
+    quickTaskId?: string;
     timing?: { droppedAt: number; submittedAt?: number; finishedAt?: number; shownAt?: number };
 } & ({kind:"original"; tier?:never; prompt?:never} | {kind:"color" | "material" | "wear"; tier:"quick"|"hd"; prompt:string});
 

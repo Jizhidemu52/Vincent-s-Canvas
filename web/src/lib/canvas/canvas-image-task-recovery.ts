@@ -9,6 +9,7 @@ export type CanvasImageTaskBinding = {
     ownerId: string;
     projectId: string;
     resultIndex: number;
+    tryoutSwap?: {tier:"hd"|"quick";quickTaskId:string};
     /** Retain lookup identity without polling or resuming a locally failed result. */
     postprocessFailed?: true;
 };
