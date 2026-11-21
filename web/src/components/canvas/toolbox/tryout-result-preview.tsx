@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState,type ReactNode} from "react";
 import {temporaryTryoutPreview,retryTryoutSave} from "@/services/api/tryout-result-preview";
 import {watchTaskEvents} from "@/services/api/task-events";
+import {observeQuickDisplay} from "@/lib/tryout/display-timing";
 import {useUserStore} from "@/stores/use-user-store";
 
 export default function TryoutResultPreview({task,owner,children}:{task:string;owner:string;children:ReactNode}){
@@ -29,7 +30,7 @@ export default function TryoutResultPreview({task,owner,children}:{task:string;o
     },[current,task,owner]);
     if(current!==owner||!view)return children;
     return <div className="relative h-full w-full" data-testid="tryout-result-preview">
-        <img src={view.url} alt="上游已返回的试款预览" draggable={false} className="h-full w-full object-contain"/>
+        <img src={view.url} alt="上游已返回的试款预览" onLoad={e=>observeQuickDisplay(e.currentTarget,task,"preview")} draggable={false} className="h-full w-full object-contain"/>
         <div className="wb-surface absolute inset-x-1 bottom-1 rounded px-2 py-1 text-xs" role="status">
             {view.state==="saving"?"已出图，正在保存原图":view.state==="review"?"已出图，原图保存需要管理员核查":"已出图，原图尚未保存"}
             {view.state==="retryable"&&<button type="button" className="ml-2 underline" disabled={busy} onPointerDown={e=>e.stopPropagation()} onMouseDown={e=>e.stopPropagation()} onClick={async e=>{

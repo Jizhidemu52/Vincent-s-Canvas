@@ -200,6 +200,20 @@ import {createTryoutPreviewWriter,readTryoutPreview} from "../../src/tryout-resu
         expect(openTryoutResult(claimed,completion,key)).toBe(supplierUrl);
         await expect(recordTryoutResult(sql.db,claimed,["https://other.example/wrong.png"],key)).rejects.toThrow();
         expect((await sql.db.query("SELECT result_urls,upstream_result_document FROM tasks WHERE id=$1",[claimed.id])).rows[0]).toMatchObject({result_urls:[],upstream_result_document:completion});
+        const displayed=Date.now(),timing={droppedAt:displayed-1500,submittedAt:displayed-1100,shownAt:displayed,source:"preview"};
+        const display=(data=timing,actor=user,header=actor)=>fetch(base.replace(/quick$/,"results/"+claimed.id+"/display"),{method:"POST",headers:{"content-type":"application/json","x-fixture-user":actor,"x-canvas-owner-id":header},body:JSON.stringify(data)});
+        expect((await bindings("/speed",undefined,user)).status).toBe(403);
+        expect((await display({...timing,shownAt:timing.droppedAt})).status).toBe(400);
+        expect((await display(timing,user,other)).status).toBe(403);
+        expect((await display(timing,other)).status).toBe(204);
+        const sampleRow=async()=>(await bindings("/speed")).models.find((m:{modelId:string})=>m.modelId===claimed.model_config_id);
+        expect(await sampleRow()).toMatchObject({totalSamples:0,totalP50:null,totalP90:null});
+        expect((await display()).status).toBe(204);
+        expect((await display({...timing,droppedAt:displayed-7500})).status).toBe(204);
+        expect(await sampleRow()).toMatchObject({totalSamples:1,totalP50:1500,totalP90:1500,admissionSamples:1,admissionP90:400,displaySamples:1});
+        await sql.db.query("UPDATE tasks SET status='paused',paused_kind='result_repair',repair_error_code='RESULT_STORAGE_FAILED' WHERE id=$1",[claimed.id]);
+        expect((await sampleRow()).issues).toContainEqual({modelId:claimed.model_config_id,state:"paused",kind:"result_repair",code:"RESULT_STORAGE_FAILED",hasUpstreamId:true,count:1});
+        await sql.db.query("UPDATE tasks SET status='processing',paused_kind=NULL,repair_error_code=NULL WHERE id=$1",[claimed.id]);
         if(process.env.QUEUE_TEST_REDIS_URL){
             const fixture=await createIsolatedQueueCache();
             try{

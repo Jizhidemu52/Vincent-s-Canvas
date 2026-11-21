@@ -1,6 +1,7 @@
 import { flushSync } from "react-dom";
 import {tryoutNotice} from "@/components/canvas/toolbox/tryout-notice";
 import { createClientUuid } from "@/lib/client-uuid";
+import {trackQuickDisplay} from "@/lib/tryout/display-timing";
 import { canvasImageSource,hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 import { variantSlot,wearSlot } from "@/lib/tryout/placement";
 import { ensureCloudMedia } from "@/services/canvas-cloud-media";
@@ -69,10 +70,12 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
                 throw new Error(typeof payload.error?.message==="string"?payload.error.message:typeof payload.message==="string"?payload.message:"试款提交未获确认（"+res.status+"）");
             }
             const result=await res.json();
+            const submittedAt=Date.now();
             if(typeof result.taskId!=="string"||!result.taskId)throw new Error("缺少任务编号");
             if(notice){finishedNotice=true;await notice.finish({accepted:[result.taskId],rejected:0,unknown:0});}
             if(!await runtime.waitForWriteAccess()||!valid())return;
-            patch({imageTask:{...binding,taskId:result.taskId},sourceTaskId:result.taskId,prompt:result.prompt||prompt,tryout:{...trace,...(wear&&typeof result.model?.name==="string"?{model:{name:result.model.name,...(typeof result.model.presetId==="string"?{presetId:result.model.presetId}:typeof result.model.assetId==="string"?{assetId:result.model.assetId}:{})}}:{}),prompt:result.prompt||prompt,timing:{droppedAt,submittedAt:Date.now()}}});
+            trackQuickDisplay(result.taskId,owner,droppedAt,submittedAt);
+            patch({imageTask:{...binding,taskId:result.taskId},sourceTaskId:result.taskId,prompt:result.prompt||prompt,tryout:{...trace,...(wear&&typeof result.model?.name==="string"?{model:{name:result.model.name,...(typeof result.model.presetId==="string"?{presetId:result.model.presetId}:typeof result.model.assetId==="string"?{assetId:result.model.assetId}:{})}}:{}),prompt:result.prompt||prompt,timing:{droppedAt,submittedAt}}});
             await persist();
             if(valid())void runtime.recoverPending(id);
         }catch(error){

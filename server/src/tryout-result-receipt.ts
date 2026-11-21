@@ -25,7 +25,7 @@ export function openTryoutResult(t:Task,doc:unknown,key:string,now=Date.now()):s
 }
 export async function recordTryoutResult(db:Pick<Database,"query">,t:Task&{execution_token:string},urls:string[],key:string){
     const doc=sealTryoutResult(t,urls,key);
-    const saved=await db.query(`UPDATE tasks SET upstream_result_document=$1,updated_at=now()
+    const saved=await db.query(`UPDATE tasks SET upstream_result_document=$1::jsonb||jsonb_build_object('finishedAt',clock_timestamp()),updated_at=now()
         WHERE id=$2 AND user_id=$3 AND model_config_id=$4 AND upstream_task_id=$5 AND execution_token=$6 AND status='processing'
         AND lease_expires_at>now() AND upstream_result_document IS NULL RETURNING id`,[JSON.stringify(doc),t.id,t.user_id,t.model_config_id,t.upstream_task_id,t.execution_token]);
     if(!saved.rows.length)throw new TaskExecutionLost("试款结果保存权已改变，请核查原单");

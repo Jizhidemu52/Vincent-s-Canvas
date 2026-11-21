@@ -32,4 +32,10 @@ test("super admin binds HD and a stale quick editor cannot overwrite another adm
     await expect(page.getByRole("button",{name:"保存快速档"})).toBeDisabled();
     await page.screenshot({path:info.outputPath("binding-conflict.png")});
     expect(sent).toEqual(["hd","quick"]);
+    await page.route("**/api/admin/tryout-bindings/speed",r=>r.fulfill({json:{days:7,models:[{modelId:model.id,name:"隔离示例模型",issues:[{state:"paused",kind:"result_repair",code:"RESULT_STORAGE_FAILED",hasUpstreamId:true,count:1}],tasks:3,succeeded:2,paused:1,failed:0,...Object.fromEntries(["admission","provider","display","total"].flatMap(k=>[[k+"Samples",k==="display"?0:2],[k+"P50",k==="display"?null:400],[k+"P90",k==="display"?null:2400]]))}]}}));
+    await page.getByRole("tab",{name:"试款速度",exact:true}).click();
+    const speed=page.getByRole("region",{name:"试款速度"});await expect(speed.getByRole("heading",{name:"隔离示例模型"})).toBeVisible();
+    await expect(speed.getByRole("row",{name:/松手 → 首次显示/})).toContainText("2.40 s");await expect(speed.getByRole("row",{name:/收到结果 → 显示回执/})).toContainText("—");
+    await speed.getByText("暂停与失败原因分布").click();await expect(speed.getByText(/有上游 ID：1 单/)).toBeVisible();
+    await page.screenshot({path:info.outputPath("tryout-speed-fixture.png")});
 });

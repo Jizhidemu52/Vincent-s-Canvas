@@ -1,6 +1,6 @@
 import {expect,fixturePng,test} from "./fixtures";
 
-for(const mode of ["acknowledged color","lost submission response","preset material"])test("a background drop costs nothing and a product drop survives reload: "+mode,async({page,api},info)=>{
+for(const mode of ["acknowledged color","lost submission response","preset material","live first display"])test("a background drop costs nothing and a product drop survives reload: "+mode,async({page,api},info)=>{
     const lostAck=mode==="lost submission response",material=mode==="preset material",presetId="60000000-0000-4000-8000-000000000001";
     const project="ba000000-0000-4000-8000-000000000001",asset="ba000000-0000-4000-8000-000000000002",taskId="ba000000-0000-4000-8000-000000000003";
     const png=await page.evaluate(()=>{
@@ -13,6 +13,8 @@ for(const mode of ["acknowledged color","lost submission response","preset mater
     api.documents.set(project,{id:project,revision:1,deleted:false,updatedAt:now,document:{id:project,title:"拖色恢复验证",createdAt:now,updatedAt:now,nodes,connections:[],groups:[],viewport:{x:0,y:0,k:1},backgroundMode:"dots",showImageInfo:false,chatSessions:[],activeChatId:null,history:{past:[],future:[]}}});
     const calls:Array<{requestId:string;nodeId:string;sourceAssetId:string;fallbackHex:string}>=[];
     const inspect=mode==="acknowledged color";
+    const live=mode==="live first display",displays:Array<{source:string;droppedAt:number;submittedAt:number;shownAt:number}>=[];
+    await page.route("**/api/tryout/results/"+taskId+"/display",route=>{expect(route.request().headers()["x-canvas-owner-id"]).toBeTruthy();displays.push(route.request().postDataJSON());return route.fulfill({status:204});});
     api.productCardsEnabled=inspect;
     let visible=false,observations=0,edits=0;
     let card={version:2,view:"flat",background:"白",items:[{category:"针织帽",parts:["帽体","翻边"],material:"罗纹",audience:"unknown",wearPosition:"head",colors:[{name:"蓝",hex:"#263754",part:"帽体"}],pattern:"",primary:true}]};
@@ -65,13 +67,15 @@ for(const mode of ["acknowledged color","lost submission response","preset mater
     await expect.poll(()=>output()?.metadata.imageTask?.taskId).toBe(taskId);
     expect(calls[0]).toMatchObject(material?{sourceAssetId:asset,kind:"material",tier:"quick",material:{presetId}}:{sourceAssetId:asset,fallbackHex:"#263754",kind:"color",tier:"quick",color:{name:"酒红",hex:"#7A1F2B"}});
     const saved=output().metadata.imageTask.requestId;
-    await page.reload();
+    if(!live)await page.reload();
     if(inspect)await expect(page.getByRole("button",{name:"修改产品标签"})).toHaveText(/翻边冷帽/);
     const task=api.tasks.get(taskId)!;api.assetBytes.set(taskId,fixturePng(68));Object.assign(task,{status:"success",resultUrls:["/api/assets/"+taskId+"/content"],completedAt:new Date().toISOString()});
     await expect.poll(()=>output()?.metadata.status,{timeout:35000}).toBe("success");
     expect(output().metadata.imageTask).toBeUndefined();expect(task.requestId).toBe(saved);
     expect(output().metadata.tryout).toMatchObject({kind:material?"material":"color",sourceNodeId:"sample",rootNodeId:"sample"});
     expect(calls).toHaveLength(1);expect(api.submissions).toHaveLength(0);
+    if(live){await expect.poll(()=>displays.length).toBe(1);const d=displays[0];expect(d.source).toBe("original");expect(d.shownAt).toBeGreaterThanOrEqual(d.submittedAt);expect(d.submittedAt).toBeGreaterThanOrEqual(d.droppedAt);}
+    else expect(displays).toHaveLength(0);
     if(lostAck)expect(lookups).toBeGreaterThan(0);
     await page.screenshot({path:info.outputPath("recovered-color.png")});
 });

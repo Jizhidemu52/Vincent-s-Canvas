@@ -3,6 +3,7 @@ import { Router } from "express";
 import { outfitTryout,refineTryout,tryoutSubmission,tryoutBatch,TRYOUT_BATCH_MAX,type TryoutSubmission } from "../../../shared/tryout-submission";
 import {outfitRecipe} from "../tryout-outfit";
 import {readTryoutPreview} from "../tryout-result-preview";
+import {firstDisplay,noteFirstDisplay} from "../tryout-speed";
 import {z} from "zod";
 import { colorPrompt,materialPrompt,wearPrompt,tryoutImageOptions } from "../../../shared/tryout-prompts";
 import { assertCanvasOwner,CanvasDocumentError } from "../canvas-document";
@@ -41,6 +42,12 @@ async function recipe(input:TryoutSubmission,db:Pick<Database,"query">,ownerId:s
 }
 export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm?:ReturnType<typeof createTryoutPrewarm>) {
     const router=Router();
+    router.post("/results/:id/display",async(req,res,next)=>{try{
+        const owner=(req as unknown as AuthenticatedRequest).auth.id;
+        assertCanvasOwner(req.headers["x-canvas-owner-id"],owner);
+        await noteFirstDisplay(db,owner,z.string().uuid().parse(req.params.id),firstDisplay.parse(req.body));
+        res.status(204).end();
+    }catch(e){next(e);}});
     router.get("/results/:id/preview",async(req,res,next)=>{try{
         const owner=(req as unknown as AuthenticatedRequest).auth.id;
         assertCanvasOwner(req.headers["x-canvas-owner-id"],owner);

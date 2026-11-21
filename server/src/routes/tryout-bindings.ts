@@ -7,10 +7,14 @@ import type {AuthenticatedRequest} from "../types";
 import {writeAudit} from "../audit";
 import {assertCanvasOwner,CanvasDocumentError} from "../canvas-document";
 import {assertTryoutImageModel,bindingColumns,listTryoutModels} from "../tryout-model-bindings";
+import {tryoutSpeedReport} from "../tryout-speed";
 
 export function createTryoutBindingsAdmin(db:Database){
     const router=Router();
     router.use(requireRole("super_admin"));
+    router.get("/speed",async(_req,res,next)=>{try{
+        res.set("Cache-Control","private, no-store").json(await tryoutSpeedReport(db));
+    }catch(e){next(e);}});
     router.get("/",async(_req,res,next)=>{try{
         const [slots,models]=await Promise.all([db.query("SELECT "+bindingColumns+" FROM tryout_model_bindings ORDER BY tier"),listTryoutModels(db)]);
         res.set("Cache-Control","no-store").json({bindings:slots.rows,models});
