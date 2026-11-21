@@ -1,7 +1,7 @@
 import { flushSync } from "react-dom";
 import { createClientUuid } from "@/lib/client-uuid";
 import { canvasImageSource,hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
-import { variantSlot } from "@/lib/tryout/placement";
+import { variantSlot,wearSlot } from "@/lib/tryout/placement";
 import { ensureCloudMedia } from "@/services/canvas-cloud-media";
 import { serverMediaId } from "@/services/canvas-media-links";
 import { flushCanvasPersistence,useCanvasStore } from "@/stores/canvas/use-canvas-store";
@@ -9,7 +9,8 @@ import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType,type CanvasNodeMetadata } from "@/types/canvas";
 import type { CanvasImageActionRuntimeContext } from "./canvas-image-actions-runtime";
 import type { DropColor } from "@/components/canvas/toolbox/tryout-swatch";
-import { colorPrompt } from "../../../../shared/tryout-prompts";
+import { colorPrompt,wearPrompt } from "../../../../shared/tryout-prompts";
+import type {TryoutMeta} from "../../../../shared/tryout";
 import type { TryoutSubmissionInput } from "../../../../shared/tryout-submission";
 
 export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
@@ -19,10 +20,11 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
         if(!owner||!isCurrent()||source?.type!==CanvasNodeType.Image||!hasCanvasImageSource(source.metadata)||source.metadata.status==="loading"||source.metadata.status==="error"||source.metadata.proposalBoard||source.metadata.tryout?.kind==="wear")return;
         const metadata=source.metadata,url=canvasImageSource(metadata),rootNodeId=metadata.tryout?.rootNodeId||source.id;
         const color="hex" in swatch?{name:swatch.name,hex:swatch.hex,...(swatch.library?{library:swatch.library}:{}),...(swatch.code?{code:swatch.code}:{})}:null;
-        const material="hex" in swatch?null:{name:swatch.name,presetId:swatch.presetId,assetId:swatch.assetId};
-        if(!color&&!material?.assetId&&!material?.presetId)return;
-        const prompt=color?colorPrompt(null,null,color,regionHex):"试材质："+swatch.name,id=createClientUuid(),requestId=createClientUuid();
-        const trace={version:1,rootNodeId,sourceNodeId:source.id,tier:"quick",prompt,timing:{droppedAt},...(color?{kind:"color",color} as const:{kind:"material",material:material!} as const)} as const;
+        const wear="model" in swatch?swatch:null;
+        const material="hex" in swatch||"model" in swatch?null:{name:swatch.name,presetId:swatch.presetId,assetId:swatch.assetId};
+        if(!wear&&!color&&!material?.assetId&&!material?.presetId)return;
+        const prompt=wear?wearPrompt([null]):color?colorPrompt(null,null,color,regionHex):"试材质："+swatch.name,id=createClientUuid(),requestId=createClientUuid();
+        const trace:TryoutMeta={version:1,rootNodeId,sourceNodeId:source.id,tier:"quick",prompt,timing:{droppedAt},...(wear?{kind:"wear",model:{name:wear.name,...("auto" in wear.model?{}:wear.model)},products:[source.id]} as const:color?{kind:"color",color} as const:{kind:"material",material:material!} as const)};
         const binding={projectId,ownerId:owner,requestId:"tryout:"+owner+":"+requestId,resultIndex:0};
         const output=()=>nodesRef.current.find(n=>n.id===id);
         const valid=()=>isCurrent()&&output()?.metadata?.imageTask?.requestId===binding.requestId;
@@ -34,7 +36,7 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
         };
         context.flushPendingHistory();
         flushSync(()=>setField("nodes",prev=>[...prev,{id,type:CanvasNodeType.Image,title:source.title+" · "+swatch.name,width:source.width,height:source.height,
-            position:variantSlot(prev.find(n=>n.id===rootNodeId)??source,prev,source),metadata:{status:"loading",prompt,tryout:trace,imageTask:binding}}]));
+            position:wear?wearSlot(source,prev):variantSlot(prev.find(n=>n.id===rootNodeId)??source,prev,source),metadata:{status:"loading",prompt,tryout:trace,imageTask:binding}}]));
         let uncertain=false;
         try{
             await persist();
@@ -45,8 +47,8 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
             if(!await runtime.waitForWriteAccess()||!valid())return;
             const original=nodesRef.current.find(n=>n.id===sourceId)?.metadata;
             if(!original||canvasImageSource(original)!==url||original.storageKey!==metadata.storageKey)throw new Error("原图已变更，未提交试款");
-            const common={tier:"quick",canvasId:projectId,nodeId:id,requestId,sourceAssetId} as const;
-            const input:TryoutSubmissionInput=color?{...common,kind:"color",color,fallbackHex:regionHex}:{...common,kind:"material",fallbackHex:regionHex,material:material!.presetId?{presetId:material!.presetId}:{assetId:material!.assetId!}};
+            const common={tier:"quick",canvasId:projectId,nodeId:id,requestId} as const;
+            const input:TryoutSubmissionInput=wear?{...common,kind:"wear",model:wear.model,productAssetIds:[sourceAssetId]}:color?{...common,sourceAssetId,kind:"color",color,fallbackHex:regionHex}:{...common,sourceAssetId,kind:"material",fallbackHex:regionHex,material:material!.presetId?{presetId:material!.presetId}:{assetId:material!.assetId!}};
             uncertain=true;
             const res=await fetch("/api/tryout/quick",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","X-Canvas-Owner-Id":owner},body:JSON.stringify(input)});
             if(!res.ok){

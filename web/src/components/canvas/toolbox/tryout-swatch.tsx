@@ -8,7 +8,8 @@ import {useUserStore} from "@/stores/use-user-store";
 
 export type KitMaterial=TryoutKit["materials"][number];
 export type TryoutChip=KitColor|KitMaterial;
-export type DropColor=(nodeId:string,chip:TryoutChip,regionHex:string,droppedAt:number)=>Promise<void>;
+export type WearChip={name:string;model:import("../../../../../shared/model-match").ModelSelection};
+export type DropColor=(nodeId:string,chip:TryoutChip|WearChip,regionHex:string,droppedAt:number)=>Promise<void>;
 const maps=new WeakMap<HTMLImageElement,{url:string;map:Promise<ProductRegions>}>();
 function regionMap(img:HTMLImageElement) {
     const existing=maps.get(img);

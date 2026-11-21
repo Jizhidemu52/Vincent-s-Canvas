@@ -55,7 +55,7 @@ export function createAdminMaterialPresetsRouter(db:Database){
                 if(id&&!previous)return null;
                 const entry=fields.parse({...previous&&{name:previous.name,description:previous.description,status:previous.status,sortOrder:previous.sortOrder,thumbAssetId:previous.thumbAssetId},...change});
                 if(entry.thumbAssetId){
-                    const ok=await client.query("SELECT 1 FROM assets WHERE id=$1 AND kind='image' AND status='ready' AND deleted_at IS NULL AND visibility_scope='company' AND COALESCE(metadata->>'source','') NOT IN ('material-library','model-library') FOR SHARE",[entry.thumbAssetId]);
+                    const ok=await client.query("SELECT 1 FROM assets WHERE id=$1 AND kind='image' AND status='ready' AND deleted_at IS NULL AND visibility_scope='company' AND COALESCE(metadata->>'source','') NOT IN ('material-library','model-library','model-preset-library') FOR SHARE",[entry.thumbAssetId]);
                     if(!ok.rows.length)throw Object.assign(new Error("示意图必须是可供员工查看的公司图片"),{status:400});
                 }
                 const values=[entry.name,entry.description,entry.thumbAssetId,entry.status,entry.sortOrder];

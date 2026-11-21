@@ -1,6 +1,7 @@
 import type {DropColor} from "./tryout-swatch";
 import { TryoutPalette } from "./tryout-palette";
 import {TryoutMaterials} from "./tryout-materials";
+import {TryoutModels} from "./tryout-models";
 import { useState } from "react";
 import { ChevronUp, LayoutPanelLeft, LoaderCircle } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -47,6 +48,7 @@ export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onCl
         {body?<div className="max-h-[min(55vh,460px)] overflow-auto border-t p-3" style={{borderColor:theme.toolbar.border}}>
             <TryoutPalette onColor={onColor} writable={writable} beforeEdit={beforeEdit}/>
             <TryoutMaterials onColor={onColor} writable={writable} beforeEdit={beforeEdit}/>
+            <TryoutModels nodeId={count===1&&!node?.metadata?.proposalBoard&&node?.metadata?.tryout?.kind!=="wear"?node?.id:undefined} writable={writable} onDrop={onColor}/>
             {!count?<p className="mb-2" style={{color:theme.node.muted}}>{t(selectedCount?"这个工具只对图片可用":"选中图片后可用")}</p>:null}
             {board?.version===2 ? <fieldset className="grid gap-2" disabled={busy||node?.metadata?.locked}>
                 <legend className="mb-2 font-semibold">{t("提案板排版")}</legend>

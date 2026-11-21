@@ -5,6 +5,8 @@ import { createCache, createDatabase, type Cache, type Database } from "./db";
 import { classifyResultFailure, pauseOwnedTask, startTaskRepairScheduler, type PausedKind } from "./task-repair";
 import { decryptSecret } from "./security";
 import {tryoutReferenceService,invalidateTryoutReferences,pruneTryoutReferences,lookupReadyTryoutInputs} from "./tryout-reference";
+import {publishedPortrait} from "./model-library";
+import {createTryoutPrewarm} from "./tryout-prewarm";
 import {assertModuleEnabled as assertTryoutModuleEnabled} from "./module-flags";
 import {MARK_GPT26_IMAGE_MODELS as tryoutModels} from "../../shared/mark-image-models";
 import { settleReservation } from "./billing";
@@ -115,6 +117,7 @@ let repairScheduler: ReturnType<typeof startTaskRepairScheduler> | undefined;
 let repairWork: Promise<void> | undefined;
 let usageRollupTimer: ReturnType<typeof setInterval> | undefined;
 let usageRollupWork: Promise<void> | null = null;
+let portraitTimer:ReturnType<typeof setInterval>|undefined,portraitWork:Promise<void>|undefined;
 let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
 const activeTaskIds = new Set<string>();
 
@@ -496,8 +499,9 @@ async function executeApiMartImage(
     await assertTryoutModuleEnabled(db,"canvas-tryout");
     tryout={tier,provider:{providerId:task.provider_id,baseUrl:task.base_url!,apiKey:credentials.apiKey||""}};
   }
-  const hot=tryout?await lookupReadyTryoutInputs(db,config,{...tryout,ownerId:task.user_id,taskId:task.id,sourceUrls:task.source_urls}):undefined;
-  const sourceAssets = !fresh||hot ? [] : await loadSourceAssets(task.source_urls, task.user_id, isSeedream55 ? 1 : 4, isSeedream55 ? 30 * 1024 * 1024 : undefined);
+  const presetId=tryout&&task.parameters.tryoutKind==="wear"&&typeof task.parameters.tryoutPresetId==="string"?task.parameters.tryoutPresetId:undefined;
+  const hot=tryout?await lookupReadyTryoutInputs(db,config,{...tryout,ownerId:task.user_id,taskId:task.id,sourceUrls:task.source_urls,presetId}):undefined;
+  const sourceAssets = !fresh||hot ? [] : await loadSourceAssets(task.source_urls, task.user_id, isSeedream55 ? 1 : 4, isSeedream55 ? 30 * 1024 * 1024 : undefined,presetId);
   if (task.request_id?.startsWith("ic:") && !task.upstream_task_id && !task.upstream_submission_started_at) validateConversationTaskSources(task, sourceAssets);
   if (task.original_size_source_id && !task.upstream_task_id && !task.upstream_submission_started_at) {
     const { hashes } = task.parameters.originalSizeReplay as { hashes: string[] };
@@ -522,7 +526,7 @@ async function executeApiMartImage(
       const uploaded:string[]=[];
       for(const image of editInput.references){
         if(!image.assetId)throw new Error("试款参考图缺少素材身份，未提交生成");
-        uploaded.push(await reference({...tryout,ownerId:task.user_id,taskId:task.id,sha256:createHash("sha256").update(image.bytes).digest("hex"),read:async()=>image}));
+        uploaded.push(await reference({...tryout,...(image.publicCacheOwner?{companyPortrait:true as const}:{}),ownerId:image.publicCacheOwner??task.user_id,taskId:task.id,sha256:createHash("sha256").update(image.bytes).digest("hex"),read:async()=>image}));
       }
       sourceImages=uploaded;
     } else {
@@ -848,6 +852,7 @@ function joinUrl(base: string, path: string) {
 }
 
 type SourceAsset = ProviderVideoSource & {
+  publicCacheOwner?:string;
   assetId?: string;
   etag?: string;
   objectKey: string;
@@ -856,31 +861,32 @@ type SourceAsset = ProviderVideoSource & {
   filename: string;
 };
 
-async function loadSourceAssets(urls: string[], userId: string, concurrency = 4, maxBytes?: number): Promise<SourceAsset[]> {
+async function loadSourceAssets(urls: string[], userId: string, concurrency = 4, maxBytes?: number,presetId?:string): Promise<SourceAsset[]> {
   const assets: SourceAsset[] = [];
   let nextIndex = 0;
   const worker = async () => {
     while (nextIndex < urls.length) {
       const index = nextIndex++;
-      assets[index] = await loadSourceAsset(urls[index]!, userId, maxBytes);
+      assets[index] = await loadSourceAsset(urls[index]!, userId, maxBytes,index===0?presetId:undefined);
     }
   };
   await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), urls.length) }, worker));
   return assets;
 }
 
-async function loadSourceAsset(url: string, userId: string, maxBytes?: number): Promise<SourceAsset> {
+async function loadSourceAsset(url: string, userId: string, maxBytes?: number,presetId?:string): Promise<SourceAsset> {
   const match = url.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i);
   if (!match) throw new Error("参考图不是公司素材地址");
   const result = await db.query<{
+    owner_user_id?:string;
     object_key: string;
     mime_type: string;
     filename: string;
     byte_size: number;
     metadata?: Record<string, unknown>;
   }>(
-    "SELECT object_key,mime_type,filename,byte_size::int,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL",
-    [match[1], userId],
+    presetId?`SELECT a.owner_user_id,a.object_key,a.mime_type,a.filename,a.byte_size::int,a.metadata FROM model_presets p JOIN assets a ON ${publishedPortrait} WHERE a.id=$1 AND p.id=$2`:"SELECT object_key,mime_type,filename,byte_size::int,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL",
+    [match[1], presetId??userId],
   );
   const asset = result.rows[0];
   if (!asset) throw new Error("参考图不存在或无权访问");
@@ -888,6 +894,7 @@ async function loadSourceAsset(url: string, userId: string, maxBytes?: number): 
   const object = await readSourceAssetObject(storage, asset.object_key);
   return {
     assetId: match[1]!,
+    ...(presetId&&asset.owner_user_id?{publicCacheOwner:asset.owner_user_id}:{}),
     etag: object.ETag,
     objectKey: asset.object_key,
     bytes: maxBytes ? await readBoundedImage(object.Body!.transformToWebStream(), maxBytes, asset.byte_size) : await object.Body!.transformToByteArray(),
@@ -1099,6 +1106,7 @@ function shutdown(signal: string) {
   clearInterval(queueReconciliationTimer);
   repairWork = repairScheduler?.stop();
   clearInterval(usageRollupTimer);
+  clearInterval(portraitTimer);
   void workerHealth?.stop();
   console.log(JSON.stringify({ event: "worker.draining", signal, activeTasks: activeTaskIds.size, graceSeconds: config.WORKER_SHUTDOWN_GRACE_SECONDS }));
   // Do not clear leases, refund, or abort submitted work. Active tasks retain
@@ -1145,6 +1153,9 @@ async function runUsageRollups() {
   try { await usageRollupWork; } finally { usageRollupWork = null; }
 }
 if (!stopping) {
+  const warm=createTryoutPrewarm(db,storage,config);
+  const refresh=()=>{if(!portraitWork&&!stopping)portraitWork=warm.maintain(()=>stopping).catch(()=>console.warn(JSON.stringify({event:"tryout.preset_prewarm_unavailable"}))).finally(()=>{portraitWork=undefined;});};
+  refresh();portraitTimer=setInterval(refresh,48*3600_000);
   void runUsageRollups();
   usageRollupTimer = setInterval(() => void runUsageRollups(), 60_000);
 }
@@ -1155,6 +1166,7 @@ await Promise.all(workers);
 await queueReconciliation;
 await repairWork;
 await usageRollupWork;
+await portraitWork;
 await workerHealth?.stop();
 await Promise.allSettled([db.end(), cache.quit()]);
 clearTimeout(shutdownTimer);

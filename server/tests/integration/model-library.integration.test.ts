@@ -1,0 +1,66 @@
+import {expect,test} from "bun:test";
+import express,{type ErrorRequestHandler} from "express";
+import {randomUUID} from "node:crypto";
+import {createIsolatedPostgres} from "../helpers/isolated-postgres";
+import {createAdminModelPresetsRouter,createModelLibraryRouter} from "../../src/routes/model-presets";
+import {resolvePortrait,lockPreset} from "../../src/model-library";
+import {modelIdentities,modelFramings,pickModel} from "../../../shared/model-match";
+import type {ObjectStorage} from "../../src/object-storage";
+import type {ProductCardItem} from "../../../shared/product-card";
+
+test("matching uses actual wearing position, compatible defaults and last child, and no card never delays the quick path",()=>{
+    const presets=modelIdentities.flatMap(m=>modelFramings.map(f=>({...m,id:m.identity+f,assetId:randomUUID(),framing:f})));
+    const personal=[{id:"p",name:"默认",audience:"men" as const}];
+    expect(pickModel(presets,null,{assetId:"p"},personal)).toEqual({presetId:"white-womanfull"});
+    expect(pickModel(presets,{audience:"women",wearPosition:"neck"},{assetId:"p"},personal)).toEqual({presetId:"white-womanhead"});
+    expect(pickModel(presets,{audience:"men",wearPosition:"foot"},{assetId:"p"},personal)).toEqual({assetId:"p"});
+    expect(pickModel(presets,{audience:"men",wearPosition:"foot"})).toEqual({presetId:"white-manfull"});
+    expect(pickModel(presets,{audience:"kids",wearPosition:"hand"})).toEqual({presetId:"white-girlhalf"});
+    expect(pickModel(presets,{audience:"kids",wearPosition:"head"},{lastChild:"boys"})).toEqual({presetId:"white-boyhead"});
+    expect(pickModel(presets.filter(p=>p.audience==="men"),{audience:"kids",wearPosition:"neck"})).toBeNull();
+});
+(process.env.PGLITE_RUNTIME_PATH?test:test.skip)("reviewed model slots: drafts are private, swaps are explicit, preferences belong to one person",async()=>{
+    const sql=await createIsolatedPostgres(),admin=randomUUID(),user=randomUUID(),other=randomUUID(),[a,b,personal]=[randomUUID(),randomUUID(),randomUUID()];
+    const app=express(),storage={} as ObjectStorage;
+    app.use(express.json(),(req,_res,next)=>{const id=req.get("x-fixture-user");Object.assign(req,{auth:{id,role:id===admin?"super_admin":"designer",departmentId:null}});next();});
+    app.use("/models",createModelLibraryRouter(sql.db,storage));app.use("/admin",createAdminModelPresetsRouter(sql.db,storage));
+    app.use(((err,_req,res,_next)=>res.status(err.status??400).json({message:err.message})) as ErrorRequestHandler);
+    const server=app.listen(0,"127.0.0.1");await new Promise<void>(done=>server.once("listening",done));
+    const http=(id:string,path:string,method="GET",data?:unknown)=>fetch("http://127.0.0.1:"+(server.address() as {port:number}).port+path,{method,headers:{"content-type":"application/json","x-fixture-user":id,"x-canvas-owner-id":id},body:data===undefined?undefined:JSON.stringify(data)});
+    try{
+        for(const id of [admin,user,other])await sql.db.query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Fixture')",[id,id]);
+        for(const id of [a,b,personal])await sql.db.query("INSERT INTO assets(id,owner_user_id,object_key,filename,mime_type,kind,status,metadata) VALUES($1,$2,$3,'fixture.png','image/png','image','ready',$4)",[id,id===personal?user:admin,id,JSON.stringify(id===personal?{source:"model-library",audience:"women",name:"Mine"}:{source:"model-preset-library"})]);
+        expect((await http(user,"/models")).status).toBe(403);
+        await sql.db.query("UPDATE module_flags SET enabled=true WHERE module_key='canvas-tryout'");
+        const catalog=async(id=user)=>(await http(id,"/models")).json();
+        expect((await catalog()).mine[0].id).toBe(personal);expect((await catalog(other)).mine).toHaveLength(0);
+        expect((await http(other,"/models/default","PUT",{assetId:personal})).status).toBe(404);
+        expect((await http(user,"/models/default","PUT",{assetId:personal})).status).toBe(204);
+        expect((await http(other,"/models/mine/"+personal,"DELETE")).status).toBe(404);
+        expect((await http(user,"/models/mine/"+personal,"DELETE")).status).toBe(204);
+        expect((await catalog()).preference.assetId).toBeNull();expect((await catalog()).mine).toHaveLength(0);
+        const draft="/admin/white-boy/head/draft";
+        expect((await http(user,draft,"PUT",{assetId:personal})).status).toBe(403);
+        expect((await http(admin,draft,"PUT",{assetId:personal})).status).toBe(404);
+        const id=(await (await http(admin,draft,"PUT",{assetId:a})).json()).id;
+        expect(typeof id).toBe("string");expect((await catalog()).presets).toHaveLength(0);
+        expect((await http(user,"/models/presets/"+id+"/thumb")).status).toBe(404);
+        const publish=(expectedAssetId:string)=>http(admin,"/admin/"+id+"/publish","POST",{expectedAssetId});
+        expect((await publish(a)).status).toBe(204);expect((await catalog()).presets[0].assetId).toBe(a);
+        expect((await http(admin,"/admin/identities/white-boy","PATCH",{name:"小远",sortOrder:7})).status).toBe(204);
+        expect((await catalog()).presets[0].name).toBe("小远");
+        await http(admin,"/admin/white-boy/full/draft","PUT",{assetId:a});
+        expect((await (await http(admin,"/admin")).json()).presets.find((p:{framing:string})=>p.framing==="full")).toMatchObject({name:"小远",sortOrder:7,status:"draft"});
+        const item:ProductCardItem={category:"帽子",audience:"women",wearPosition:"head",parts:[],colors:[],primary:true,pattern:"",material:"针织"};
+        expect((await resolvePortrait(sql.db,user,{presetIdentity:"white-boy"},item)).assetId).toBe(a);
+        await expect(resolvePortrait(sql.db,user,{auto:true},item)).rejects.toThrow("暂无匹配");
+        expect((await http(admin,draft,"PUT",{assetId:b})).status).toBe(200);
+        expect((await catalog()).presets[0].assetId).toBe(a);
+        expect((await publish(a)).status).toBe(409);expect((await publish(b)).status).toBe(204);
+        await expect(lockPreset(sql.db,id,a)).rejects.toThrow();await lockPreset(sql.db,id,b);
+        expect((await http(admin,"/admin/"+id+"/hide","POST",{expectedAssetId:a})).status).toBe(409);
+        expect((await http(admin,"/admin/"+id+"/hide","POST",{expectedAssetId:b})).status).toBe(204);
+        expect((await catalog()).presets).toHaveLength(0);
+        await expect(lockPreset(sql.db,id,b)).rejects.toThrow();
+    }finally{await new Promise<void>(done=>server.close(()=>done()));await sql.close();}
+},30000);

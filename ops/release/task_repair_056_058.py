@@ -20,7 +20,7 @@ PREVIOUS = "055_mai27_model_catalog.sql"
 FIELDS = ("paused_kind", "repair_attempts", "next_repair_at", "repair_error_code", "original_size_source_id", "reference_download_recheck_at")
 
 
-TRYOUT_TABLES = {"material_presets", "provider_upload_cache", "provider_upload_task_inputs", "asset_fact_cards", "asset_product_card_overrides"}
+TRYOUT_TABLES = {"material_presets", "provider_upload_cache", "provider_upload_task_inputs", "asset_fact_cards", "asset_product_card_overrides", "model_presets", "user_model_defaults"}
 
 
 def reviewed_tail(release):
@@ -75,7 +75,7 @@ CREATE TEMP TABLE prior_flags ON COMMIT DROP AS SELECT to_jsonb(f) AS row FROM p
  THEN RAISE EXCEPTION 'TRYOUT_FLAGS_CHANGED'; END IF;
  IF (SELECT array_agg(name ORDER BY sort_order) FROM public.material_presets) IS DISTINCT FROM ARRAY['粗针','罗纹','绞花','马海毛','摇粒绒','灯芯绒']::text[]
  OR EXISTS (SELECT FROM public.material_presets WHERE status<>'published' OR thumb_asset_id IS NOT NULL)
- OR EXISTS (SELECT FROM public.asset_fact_cards) OR EXISTS (SELECT FROM public.asset_product_card_overrides) OR EXISTS (SELECT FROM public.provider_upload_cache) OR EXISTS (SELECT FROM public.provider_upload_task_inputs)
+ OR EXISTS (SELECT FROM public.model_presets) OR EXISTS (SELECT FROM public.user_model_defaults) OR EXISTS (SELECT FROM public.asset_fact_cards) OR EXISTS (SELECT FROM public.asset_product_card_overrides) OR EXISTS (SELECT FROM public.provider_upload_cache) OR EXISTS (SELECT FROM public.provider_upload_task_inputs)
  THEN RAISE EXCEPTION 'TRYOUT_UNSAFE_INITIAL_STATE'; END IF;"""
     exclusions = ",".join("'" + name + "'" for name in sorted(exempt))
     protected = support.json_sql([row for row in baseline["tables"] if row["name"] not in exempt])
@@ -126,7 +126,7 @@ def verify_after(before, after, release, instance):
             require_unchanged(old[name], new[name], "REPAIR_UNRELATED_ROWS_CHANGED")
     require(new["tasks"]["count"] == old["tasks"]["count"] and new["schema_migrations"]["count"] == old["schema_migrations"]["count"] + len(tail), "REPAIR_ROW_COUNT_CHANGED")
     if combined:
-        require([new[name]["count"] for name in sorted(TRYOUT_TABLES)] == [0, 0, 6, 0, 0], "TRYOUT_UNSAFE_INITIAL_STATE")
+        require([new[name]["count"] for name in sorted(TRYOUT_TABLES)] == [0, 0, 6, 0, 0, 0, 0], "TRYOUT_UNSAFE_INITIAL_STATE")
 
 
 class Preparation(support.Usage048):

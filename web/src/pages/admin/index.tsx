@@ -23,6 +23,7 @@ import { filterAdminAccounts } from "./account-ux";
 
 const ApiConfigurationHub = lazy(() => import("./components/api-configuration-hub").then((module) => ({ default: module.ApiConfigurationHub })));
 const MaterialPresetsPanel=lazy(()=>import("./components/material-presets-panel"));
+const ModelPresetsPanel=lazy(()=>import("./components/model-presets-panel"));
 const MarkImageProviderPanel = lazy(() => import("./components/mark-image-provider-panel").then((module) => ({ default: module.MarkImageProviderPanel })));
 const UsageAnalyticsPanel = lazy(() => import("./components/usage-analytics-panel").then((module) => ({ default: module.UsageAnalyticsPanel })));
 const HistoryManagementPanel = lazy(() => import("./components/task-history-panels").then((module) => ({ default: module.HistoryManagementPanel })));
@@ -142,6 +143,7 @@ export default function AdminPage() {
         { key: "usage-analysis", label: "使用分析" },
         { key: "mark-images", label: markPlatformAdminTabLabel },
         { key:"materials",label:"材质库管理" },
+        { key:"model-library",label:"模特库管理" },
         { key: "history", label: "历史记录" },
         { key: "projects", label: "项目素材" },
         { key: "batch", label: "批量任务" },
@@ -276,7 +278,7 @@ export default function AdminPage() {
                     {[
                         { label: "成员管理", keys: ["accounts", "groups", "performance"] },
                         { label: "模型与服务", keys: ["api", "mark-images"] },
-                        { label: "内容", keys: ["projects", "materials", "history", "release-notes"] },
+                        { label: "内容", keys: ["projects", "materials", "model-library", "history", "release-notes"] },
                         { label: "运维", keys: ["modules", "usage-analysis", "batch", "audit", "integrations"] },
                     ].map((group) => {
                         const tabs = adminTabOptions.filter((tab) => group.keys.includes(tab.key));
@@ -445,6 +447,7 @@ export default function AdminPage() {
                             {
                                 key:"materials",label:staticUiText("材质库管理"),children:isAdmin?<MaterialPresetsPanel/>:null,
                             },
+                            {key:"model-library",label:staticUiText("模特库管理"),children:isAdmin?<ModelPresetsPanel/>:null},
                             {
                                 key: "history",
                                 label: staticUiText("历史记录"),
