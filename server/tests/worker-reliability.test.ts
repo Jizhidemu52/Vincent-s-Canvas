@@ -1,3 +1,4 @@
+import { classifyResultFailure, pauseOwnedTask } from "../src/task-repair";
 import { expect, test } from "bun:test";
 import { disposeProviderResults } from "../src/media-result-file";
 import ts from "typescript";
@@ -20,7 +21,7 @@ function productionFunctions(names: string[], dependencies: Record<string, unkno
     return node.getText(source);
   }).join("\n");
   const js = ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-  return new Function(...Object.keys(dependencies), `${js}; return { ${names.join(",")}${extra} };`)(...Object.values(dependencies));
+  return new Function("classifyResultFailure", "pauseOwnedTask", ...Object.keys(dependencies), `${js}; return { ${names.join(",")}${extra} };`)(classifyResultFailure, pauseOwnedTask, ...Object.values(dependencies));
 }
 
 test("queue read failures back off and recover without ending the worker or losing a later task", async () => {
@@ -81,7 +82,7 @@ test("graceful shutdown is idempotent, stops reconciliation and enforces a bound
   const cleared: unknown[] = [], exits: number[] = [];
   let healthStops = 0;
   const worker = productionFunctions(["shutdown"], {
-    stopping: false, queueReconciliationTimer: "reconcile-timer", usageRollupTimer: "usage-rollup-timer", shutdownTimer: undefined,
+    stopping: false, repairTimer: "repair-timer", queueReconciliationTimer: "reconcile-timer", usageRollupTimer: "usage-rollup-timer", shutdownTimer: undefined,
     workerHealth: { stop: async () => { healthStops++; } },
     activeTaskIds: new Set(["active"]), config: { WORKER_SHUTDOWN_GRACE_SECONDS: 1200 },
     console: { log() {}, error() {} }, process: { exit: (code: number) => exits.push(code) },
@@ -90,7 +91,7 @@ test("graceful shutdown is idempotent, stops reconciliation and enforces a bound
   });
   worker.shutdown("SIGTERM"); worker.shutdown("SIGINT");
   expect(healthStops).toBe(1);
-  expect(cleared).toEqual(["reconcile-timer", "usage-rollup-timer"]);
+  expect(cleared).toEqual(["reconcile-timer", "repair-timer", "usage-rollup-timer"]);
   expect(scheduled).toHaveLength(1);
   expect(scheduled[0]!.milliseconds).toBe(1_200_000);
   expect(exits).toEqual([]);

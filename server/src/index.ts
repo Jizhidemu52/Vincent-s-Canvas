@@ -197,7 +197,7 @@ app.use(
   requireSession,
   requireAccountReady,
   protectModelIdentity,
-  createTasksRouter(db, cache, readCreditsEnabled, undefined, { maxInflightTasks: config.USER_MAX_INFLIGHT_TASKS, promptCompiler }),
+  createTasksRouter(db, cache, readCreditsEnabled, undefined, { maxInflightTasks: config.USER_MAX_INFLIGHT_TASKS, maxRepairAttempts: config.RESULT_REPAIR_MAX_ATTEMPTS, promptCompiler }),
 );
 app.use(
   "/api/admin/tasks",

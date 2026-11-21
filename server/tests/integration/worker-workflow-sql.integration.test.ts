@@ -1,3 +1,4 @@
+import { classifyResultFailure, pauseOwnedTask } from "../../src/task-repair";
 import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import ts from "typescript";
@@ -52,7 +53,7 @@ async function fixture(providerFetch: (url: string, init?: RequestInit) => Promi
     joinUrl: (base: string, path: string) => base + path,
     storeResults: async (task: { id: string }) => { stored++; return [`/api/assets/${task.id}/content`]; },
   };
-  const worker = new Function(...Object.keys(dependencies), `${code};return {runTask}`)(...Object.values(dependencies)) as { runTask(id: string): Promise<void> };
+  const worker = new Function("classifyResultFailure", "pauseOwnedTask", ...Object.keys(dependencies), `${code};return {runTask}`)(classifyResultFailure, pauseOwnedTask, ...Object.values(dependencies)) as { runTask(id: string): Promise<void> };
   const task = async () => {
     const id = randomUUID();
     await sql.db.query("INSERT INTO tasks(id,request_id,user_id,project_id,operation_type,model_config_id,prompt) VALUES($1,$2,$3,'workflow-fixture','image_generation',$4,'shirt')", [id, `workflow-${id}`, user, model]);

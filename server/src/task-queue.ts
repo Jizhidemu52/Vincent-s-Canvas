@@ -38,7 +38,7 @@ return 1`;
 
 const keys = [READY_QUEUE, DELAYED_QUEUE, DELAYED_PRIORITY];
 
-export async function scheduleQueuedTask(cache: Cache, id: string, readyScore: number, availableAt = Date.now(), now = Date.now()) {
+export async function scheduleQueuedTask(cache: Pick<Cache, "eval">, id: string, readyScore: number, availableAt = Date.now(), now = Date.now()) {
   await cache.eval(scheduleScript, { keys, arguments: [id, String(availableAt), String(now), String(readyScore)] });
 }
 

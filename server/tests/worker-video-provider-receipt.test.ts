@@ -1,3 +1,4 @@
+import { classifyResultFailure, pauseOwnedTask, requeueRepairs } from "../src/task-repair";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import ts from "typescript";
@@ -10,7 +11,7 @@ import { disposeProviderResults } from "../src/media-result-file";
 import { acquireModelLease, releaseModelLease, TaskExecutionLost } from "../src/model-concurrency";
 import { ProviderSubmissionRejected, submissionWasNotSent } from "../src/provider-submission-policy";
 import { Seedream55OutputLimitExceeded } from "../src/seedream55-image";
-import { TASK_LEASE_SECONDS, transitionTask } from "../src/tasks";
+import { TASK_LEASE_SECONDS } from "../src/tasks";
 import { readApiMartVideoReceipt, saveApiMartVideoReceipt } from "../src/video-provider-receipt";
 import { WorkflowTaskPending } from "../src/workflow-task-context";
 import { createIsolatedPostgres } from "./helpers/isolated-postgres";
@@ -30,7 +31,7 @@ function worker(dependencies: Record<string, unknown>, runTask = false) {
   };
   const names = ["executeProvider", "executeApiMartVideo", "assertTaskExecution", ...(runTask ? ["runTask"] : [])];
   const code = names.map(name => source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name)!.getText(source)).join("\n");
-  return new Function(...Object.keys(deps), `${ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText};return {${names.join(",")}}`)(...Object.values(deps));
+  return new Function("classifyResultFailure", "pauseOwnedTask", ...Object.keys(deps), `${ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText};return {${names.join(",")}}`)(classifyResultFailure, pauseOwnedTask, ...Object.values(deps));
 }
 const url = "https://provider-results.example/original.mp4?signature=private%2Fvalue";
 const task = () => ({ id: randomUUID(), user_id: randomUUID(), model_config_id: randomUUID(), model_id: "gemini-omni-1.2-flash",
@@ -159,9 +160,8 @@ integration("Worker completion receipt actual SQL recovery", () => {
     expect((await query("SELECT status FROM credit_reservations WHERE request_id=$1", [requestId])).rows[0].status).toBe("held");
     expect(captures).toBe(0); expect(providerQueries).toBe(1); expect(decryptions).toBe(1);
 
-    // Resume through the real transition, then make provider access impossible.
-    // runTask reloads the receipt from SQL with a new execution token.
-    expect(await transitionTask(fixture.db, cache, taskId, "resume", false)).not.toBeNull();
+    await query("UPDATE tasks SET next_repair_at=now() WHERE id=$1 AND paused_kind='result_repair'", [taskId]);
+    expect(await requeueRepairs(fixture.db, cache, { maxAttempts: 3 })).toBe(1);
     await query("UPDATE tasks SET poll_deadline_at=now()-interval '1 day' WHERE id=$1", [taskId]);
     await query("UPDATE providers SET encrypted_credentials=NULL,base_url='' WHERE id=$1", [providerId]);
     await api.runTask(taskId);
@@ -178,7 +178,7 @@ integration("Worker completion receipt actual SQL recovery", () => {
     expect(providerQueries).toBe(1); expect(downloads).toBe(2); expect(captures).toBe(1);
   });
 
-  test("unknown completion, foreign image manifests and a foreign-identity video receipt all retain the original model slot", async () => {
+  test("queryable video releases its slot; foreign manifests and receipts block recovery and settlement", async () => {
     for (const kind of ["unknown", "layer-decompose", "layer-generate", "foreign"] as const) {
       const { taskId, modelId, requestId, state } = await createTask(kind);
       const original = kind === "unknown" ? null : kind.startsWith("layer-") ? { version: 1, mode: kind === "layer-decompose" ? "decompose" : "generate", items: [] }
@@ -197,7 +197,8 @@ integration("Worker completion receipt actual SQL recovery", () => {
       await api.runTask(taskId);
       const paused = await state();
       expect(paused).toMatchObject({ status: "paused", attempts: 1, receipt: original });
-      expect(paused.model_slot_token).not.toBeNull(); expect(paused.model_slot_expires_at).not.toBeNull();
+      if (kind === "unknown") { expect(paused.model_slot_token).toBeNull(); expect(paused.model_slot_expires_at).toBeNull(); }
+      else { expect(paused.model_slot_token).not.toBeNull(); expect(paused.model_slot_expires_at).not.toBeNull(); }
       expect(imageStorageCalls).toBe(0); expect(imageSettlementCalls).toBe(0);
       expect(paused.failure_reason).not.toContain("可恢复原任务继续下载和保存");
       expect(queries).toBe(kind === "unknown" ? 1 : 0);

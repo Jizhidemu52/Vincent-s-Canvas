@@ -1,3 +1,5 @@
+import { taskRepairMessage } from "./task-repair";
+
 /** Employee-facing task failures. Raw provider diagnostics remain in task storage/admin APIs. */
 export const IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX = "渠道原件已保存到素材库，但图片后处理未完成";
 export const IMAGE_RESULT_POSTPROCESS_FAILURE_CODE = "IMAGE_RESULT_PROCESSING_FAILED";
@@ -58,7 +60,8 @@ export function publicTaskFailurePayload(body: unknown): unknown {
     const task = (item: unknown) => {
         if (!item || typeof item !== "object" || Array.isArray(item)) return item;
         const data = item as Record<string, unknown>;
-        if (!data.failureReason) return item;
+        const repairMessage = taskRepairMessage(data);
+        if (!data.failureReason && !repairMessage) return item;
         const { lastFailure: raw, ...rest } = data;
         const detail = raw && typeof raw === "object" ? raw as Record<string, unknown> : undefined;
         // Stable recovery classification is not a raw provider diagnostic. Keep
@@ -66,7 +69,7 @@ export function publicTaskFailurePayload(body: unknown): unknown {
         const safeDetail = detail && ["preflight", "submission", "polling", "download", "result_store", "postprocess"].includes(String(detail.phase))
             && typeof detail.code === "string" && /^[A-Z][A-Z0-9_]{0,79}$/.test(detail.code)
             ? { phase: detail.phase, code: detail.code, ...(typeof detail.httpStatus === "number" && Number.isInteger(detail.httpStatus) && detail.httpStatus >= 100 && detail.httpStatus <= 599 ? { httpStatus: detail.httpStatus } : {}) } : undefined;
-        return { ...rest, ...(safeDetail ? { lastFailure: safeDetail } : {}), failureReason: publicGenerationFailure(data.failureReason, String(data.status || "")) };
+        return { ...rest, ...(safeDetail ? { lastFailure: safeDetail } : {}), failureReason: repairMessage ?? publicGenerationFailure(data.failureReason, String(data.status || "")) };
     };
     const result = { ...value };
     if (value.task) {

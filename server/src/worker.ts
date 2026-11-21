@@ -2,6 +2,7 @@ import { loadConfig } from "./config";
 import { videoFileExtension } from "../../shared/video-output";
 import { randomUUID } from "node:crypto";
 import { createCache, createDatabase, type Cache, type Database } from "./db";
+import { classifyResultFailure, pauseOwnedTask, requeueRepairs, type PausedKind } from "./task-repair";
 import { decryptSecret } from "./security";
 import { settleReservation } from "./billing";
 import { withTransaction } from "./db-transaction";
@@ -53,6 +54,8 @@ import { settleLayerStudioReservation } from "./layer-studio-billing";
 import { readApiMartVideoReceipt, saveApiMartVideoReceipt, type ApiMartVideoReceipt } from "./video-provider-receipt";
 
 type WorkRow = {
+  paused_kind: PausedKind | null;
+  repair_attempts: number;
   id: string;
   request_id: string;
   batch_id: string | null;
@@ -103,6 +106,8 @@ const storage = new ObjectStorage(config);
 let stopping = false;
 let queueReconciliation: Promise<void> | null = null;
 let queueReconciliationTimer: ReturnType<typeof setInterval> | undefined;
+let repairTimer: ReturnType<typeof setInterval> | undefined;
+let repairWork: Promise<void> | undefined;
 let usageRollupTimer: ReturnType<typeof setInterval> | undefined;
 let usageRollupWork: Promise<void> | null = null;
 let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
@@ -124,7 +129,7 @@ async function runTask(taskId: string) {
   );
   if (!claimed.rows[0]) return;
   const details = await db.query<WorkRow>(
-    `SELECT t.id,t.request_id,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.tool_key,t.result_document,t.upstream_result_document,t.prompt,t.parameters,t.source_urls,t.attempts,t.execution_token,t.started_at,t.poll_deadline_at,t.upstream_task_id,t.upstream_submission_started_at,t.upstream_workflow_context,t.priority,t.queued_at,m.model_id,m.provider_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
+    `SELECT t.id,t.request_id,t.paused_kind,t.repair_attempts,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.tool_key,t.result_document,t.upstream_result_document,t.prompt,t.parameters,t.source_urls,t.attempts,t.execution_token,t.started_at,t.poll_deadline_at,t.upstream_task_id,t.upstream_submission_started_at,t.upstream_workflow_context,t.priority,t.queued_at,m.model_id,m.provider_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
         FROM tasks t LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id AND w.enabled=true WHERE t.id=$1 AND t.execution_token=$2`,
     [taskId, executionToken],
   );
@@ -158,6 +163,7 @@ async function runTask(taskId: string) {
   let keepModelSlot = false;
   let providerResults: ProviderResult[] = [];
   try {
+    if (task.repair_attempts > 0 && !task.upstream_task_id) throw new TaskExecutionLost("原任务缺少上游身份，不能重新提交");
     const attempted = await db.query<{ attempts: number }>(
       `UPDATE tasks SET attempts=attempts+CASE WHEN upstream_task_id IS NULL AND upstream_submission_started_at IS NULL THEN 1 ELSE 0 END
        WHERE id=$1 AND execution_token=$2 AND status='processing' RETURNING attempts`, [taskId, executionToken],
@@ -190,7 +196,7 @@ async function runTask(taskId: string) {
         if (isSeedream55) await settleLayerStudioReservation(db, task.request_id, task.result_document!.items.map(item => ({ width: item.width!, height: item.height! })), client);
         else await settleReservation(db, task.request_id, "capture", undefined, client, resultUrls.length);
         await client.query(
-          "UPDATE tasks SET status='success',result_urls=$1,lease_expires_at=NULL,completed_at=now(),updated_at=now() WHERE id=$2",
+          "UPDATE tasks SET status='success',paused_kind=NULL,next_repair_at=NULL,repair_error_code=NULL,failure_reason=NULL,result_urls=$1,lease_expires_at=NULL,completed_at=now(),updated_at=now() WHERE id=$2",
           [JSON.stringify(resultUrls), task.id],
         );
         await client.query(
@@ -214,6 +220,7 @@ async function runTask(taskId: string) {
       return;
     }
     if (error instanceof VideoSubmissionClaimLost || error instanceof TaskExecutionLost) {
+      await pauseOwnedTask(db, task, { kind: "needs_review", code: "TASK_EXECUTION_LOST" }, "执行权或提交回执需要管理员核查，未重新提交", config.RESULT_REPAIR_MAX_ATTEMPTS);
       keepModelSlot = true; outcome = "paused"; return;
     }
     const transportDiagnostics = readProviderSubmissionDiagnostics(error);
@@ -224,15 +231,15 @@ async function runTask(taskId: string) {
       : task.parameters.imageAgentProfile && !(error instanceof PromptOptimizationError) && !(error instanceof AssetObjectError) && !(error instanceof ImageResultPersistenceError)
       ? "图片助手任务未完成，请查询任务状态；服务端已隐藏上游内部详情。"
       : error instanceof Error ? error.message.slice(0, 2_000) : "任务执行失败";
-    if (providerProducedResult) {
-      // Local processing/storage failures must not replay paid work or claim it never happened.
-      await db.query(
-        "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND execution_token=$3 AND status='processing'",
-        [layerOutputLimitFailure ? reason : isSeedream55 && task.upstream_result_document
+    if (providerProducedResult || task.paused_kind === "result_repair" || (error instanceof Error && "code" in error && error.code === "RESULT_DOWNLOAD_FAILED")) {
+      const decision = layerOutputLimitFailure ? { kind: "needs_review" as const, code: "RESULT_OUTPUT_INVALID" } : classifyResultFailure(error, isSeedream55);
+      if (decision.code === "STORAGE_ENOSPC") console.error(JSON.stringify({ event: "worker.result_storage_full", taskId: task.id }));
+      await pauseOwnedTask(db, task, decision,
+        layerOutputLimitFailure ? reason : isSeedream55 && task.upstream_result_document
           ? `${task.tool_key === "layer-studio" ? "部分图层" : "图片"}原件尚未保存；可恢复原任务继续保存，不会重新生成，请勿重复提交`
           : task.operation_type === "video_generation" && task.upstream_result_document
             ? `${reason}；视频上游结果已保存，可恢复原任务继续下载和保存，不会重新生成。`
-          : `${reason}；上游已返回结果，不能直接恢复或重新生成，请先检查已保存素材。`, task.id, executionToken],
+          : `${reason}；上游已返回结果，请检查原任务或已保存素材。`, config.RESULT_REPAIR_MAX_ATTEMPTS,
       );
       outcome = "paused";
     } else if ((task.upstream_task_id || task.upstream_submission_started_at) && !(error instanceof VideoProviderFailure) && !(error instanceof ApiMartImageProviderFailure)
@@ -245,13 +252,10 @@ async function runTask(taskId: string) {
           });
         } catch { /* An invalid or foreign receipt cannot prove upstream completion. */ }
       }
-      // Only an identity-validated durable completion releases upstream capacity;
-      // unknown or still-running work keeps its original reservation.
-      await db.query(
-        "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND execution_token=$3 AND status='processing'",
-        [!keepModelSlot ? `${reason}；视频上游结果已保存，可恢复原任务继续下载和保存，不会重新生成。`
-          : task.upstream_task_id ? `${reason}；已暂停，可恢复查询原任务，不会重新生成` : `${reason}；提交状态待核实，不会自动重新生成`, task.id, executionToken],
-      );
+      const kind = !keepModelSlot ? "result_repair" : task.operation_type === "video_generation" && task.upstream_result_document != null ? "needs_review" : task.upstream_task_id ? "awaiting_query" : "submission_unknown";
+      keepModelSlot = kind === "submission_unknown" || kind === "needs_review";
+      await pauseOwnedTask(db, task, { kind, code: kind === "submission_unknown" ? "SUBMISSION_UNKNOWN" : kind === "awaiting_query" ? "UPSTREAM_QUERY_PENDING" : kind === "needs_review" ? "INVALID_UPSTREAM_RECEIPT" : "RESULT_DOWNLOAD_FAILED" },
+        kind === "result_repair" ? `${reason}；视频上游结果已保存，可恢复原任务继续下载和保存，不会重新生成。` : reason, config.RESULT_REPAIR_MAX_ATTEMPTS);
       outcome = "paused";
     } else if (canAutomaticallyRetryTask(task.operation_type, task.upstream_submission_started_at, task.attempts)) {
       await releaseModelLease(db, cache, modelLease);
@@ -1052,6 +1056,7 @@ function shutdown(signal: string) {
   if (stopping) return;
   stopping = true;
   clearInterval(queueReconciliationTimer);
+  clearInterval(repairTimer);
   clearInterval(usageRollupTimer);
   void workerHealth?.stop();
   console.log(JSON.stringify({ event: "worker.draining", signal, activeTasks: activeTaskIds.size, graceSeconds: config.WORKER_SHUTDOWN_GRACE_SECONDS }));
@@ -1079,6 +1084,12 @@ if (!stopping) workerHealth = startWorkerHealth({
   isRunning: () => !stopping,
 });
 if (!stopping) queueReconciliationTimer = setInterval(() => void reconcileTaskQueue(), 60_000);
+if (!stopping && config.RESULT_REPAIR_ENABLED === "true") repairTimer = setInterval(() => {
+  if (stopping || repairWork) return;
+  repairWork = requeueRepairs(db, cache, { maxAttempts: config.RESULT_REPAIR_MAX_ATTEMPTS })
+    .then(() => undefined, () => { console.error(JSON.stringify({ event: "worker.result_repair_schedule_failed" })); })
+    .finally(() => { repairWork = undefined; });
+}, config.RESULT_REPAIR_INTERVAL_SECONDS * 1000);
 async function runUsageRollups() {
   if (stopping || usageRollupWork) return;
   usageRollupWork = (async () => {
@@ -1105,6 +1116,7 @@ const workers = Array.from({ length: config.WORKER_CONCURRENCY }, () =>
 );
 await Promise.all(workers);
 await queueReconciliation;
+await repairWork;
 await usageRollupWork;
 await workerHealth?.stop();
 await Promise.allSettled([db.end(), cache.quit()]);

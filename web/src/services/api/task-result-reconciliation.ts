@@ -4,7 +4,11 @@ import { isImageResultProcessingFailure } from "@/lib/generation-feedback";
 export type TaskRecoveryKind = "observe" | "resume" | "investigate" | "terminal";
 
 /** A local observation stop is not a server pause or an unknown paid submission. */
-export function classifyTaskRecovery(task?: { status: string; upstreamTaskId?: string | null; errorCode?: string | null; lastFailure?: { phase?: string; code?: string } | null; failureReason?: string | null }): TaskRecoveryKind {
+export function classifyTaskRecovery(task?: { status: string; pausedKind?: string | null; upstreamTaskId?: string | null; errorCode?: string | null; lastFailure?: { phase?: string; code?: string } | null; failureReason?: string | null }): TaskRecoveryKind {
+    if (task?.status === "paused" && task.pausedKind) {
+        if (task.pausedKind === "needs_review") return "terminal";
+        return task.upstreamTaskId && ["result_repair", "awaiting_query"].includes(task.pausedKind) ? "resume" : "investigate";
+    }
     if (task?.status === "paused" && isImageResultProcessingFailure(task)) return "terminal";
     if (task?.status === "paused") return task.upstreamTaskId?.trim() ? "resume" : "investigate";
     if (!task || ["waiting", "processing"].includes(task.status)) return "observe";

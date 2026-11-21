@@ -1,3 +1,4 @@
+import { classifyResultFailure, pauseOwnedTask } from "../../src/task-repair";
 import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import ts from "typescript";
@@ -64,10 +65,10 @@ async function productionWorker(dependencies: Record<string, unknown>) {
     return node.getText(source);
   }).join("\n");
   const js = ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
-  return new Function(...Object.keys(dependencies), `${js};
+  return new Function("classifyResultFailure", "pauseOwnedTask", ...Object.keys(dependencies), `${js};
     async function executeProvider(task) { return task.operation_type === 'video_generation'
       ? executeApiMartVideo(task,{apiKey:'fixture-only'}) : executeApiMartImage(task,{apiKey:'fixture-only'},task.prompt); }
-    return {runTask};`)(...Object.values(dependencies)) as { runTask(id: string): Promise<void> };
+    return {runTask};`)(classifyResultFailure, pauseOwnedTask, ...Object.values(dependencies)) as { runTask(id: string): Promise<void> };
 }
 
 for (const kind of ["video", "image"] as const) integration(`30 mock ${kind}s release worker slots, preserve model inflight quota and recover without a second POST`, async () => {

@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import { taskRepairMessage, type TaskPausedKind } from "../../../../shared/task-repair";
 import { generationErrorMessage, generationSubmissionRejected, imageResultProcessingFailureMessage, isImageResultProcessingFailure } from "@/lib/generation-feedback";
 import { IMAGE_RESULT_POSTPROCESS_FAILURE_CODE } from "../../../../shared/generation-error";
 import { cancelOriginalTask } from "@/lib/generation-task-cancel";
@@ -44,7 +45,7 @@ export type QueuedTaskProgress = {
     estimateReason: string | null;
     retryAfterSeconds: number | null;
 };
-export type QueuedTask = { prompt?: string; summaryZh?: string; userInput?: PromptInputData; optimized?: boolean; id: string; requestId: string; operationType?: string; attempts?: number; status: string; stage?: string; errorCode?: string | null; lastFailure?: { phase?: string; code?: string; httpStatus?: number } | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; resultDocument?: LayerStudioResultDocument | null; failureReason: string | null; createdAt?: string; updatedAt?: string; queuedAt?: string | null; startedAt?: string | null; completedAt?: string | null; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
+export type QueuedTask = { pausedKind?: TaskPausedKind | null; repairAttempts?: number; repairErrorCode?: string | null; nextRepairAt?: string | null; prompt?: string; summaryZh?: string; userInput?: PromptInputData; optimized?: boolean; id: string; requestId: string; operationType?: string; attempts?: number; status: string; stage?: string; errorCode?: string | null; lastFailure?: { phase?: string; code?: string; httpStatus?: number } | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; resultDocument?: LayerStudioResultDocument | null; failureReason: string | null; createdAt?: string; updatedAt?: string; queuedAt?: string | null; startedAt?: string | null; completedAt?: string | null; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
 
 /** The server snapshot keeps exclusion text out of the editable/replay prompt. */
 export function imageTaskPrompts(task: Pick<QueuedTask, "prompt" | "parameters">, fallback = ""): { prompt: string; submittedPrompt?: string } {
@@ -66,7 +67,7 @@ export class QueuedTaskPausedError extends Error {
     readonly recovery: "resume" | "investigate";
     constructor(readonly task: QueuedTask, message?: string) {
         const canRecover = classifyTaskRecovery(task) === "resume";
-        super(`${message || task.failureReason || "任务查询已暂停"}（任务 ${task.id}）。${canRecover ? "可恢复查询原任务，不会重新生成。" : submissionInvestigationMessage}`);
+        super(taskRepairMessage(task) ?? `${message || task.failureReason || "任务查询已暂停"}（任务 ${task.id}）。${canRecover ? "可恢复查询原任务，不会重新生成。" : submissionInvestigationMessage}`);
         this.name = "QueuedTaskPausedError";
         this.taskId = task.id;
         this.requestId = task.requestId;
@@ -81,7 +82,7 @@ export class QueuedTaskFailedError extends Error {
     constructor(readonly task: QueuedTask) {
         const cancelled = task.status === "cancelled";
         const postprocess = !cancelled && isImageResultProcessingFailure(task);
-        super(cancelled ? "任务已取消。" : postprocess ? imageResultProcessingFailureMessage : task.failureReason || "生成任务已失败或取消");
+        super(taskRepairMessage(task) ?? (cancelled ? "任务已取消。" : postprocess ? imageResultProcessingFailureMessage : task.failureReason || "生成任务已失败或取消"));
         this.name = "QueuedTaskFailedError";
         this.taskId = task.id;
         this.requestId = task.requestId;

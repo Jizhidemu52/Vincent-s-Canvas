@@ -5,6 +5,7 @@ import { z } from "zod";
 import { taskSubmissionSchema as singleSchema, batchSubmissionSchema as batchSchema } from "../../../shared/task-contracts";
 
 import { writeAudit } from "../audit";
+import { requeueRepairs, type PausedKind } from "../task-repair";
 import type { Cache, Database } from "../db";
 import { makeCursorPage, parseCursorPage } from "../cursor-pagination";
 import { requireRole } from "../rbac";
@@ -64,8 +65,8 @@ function rejectUnconfiguredImagePipeline(input: { operationType: string; paramet
 const postprocessFailureCondition = `t.status='paused' AND t.failure_reason LIKE '${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：%'`;
 const postprocessFailureSelect = `CASE WHEN ${postprocessFailureCondition} THEN '${IMAGE_RESULT_POSTPROCESS_FAILURE_CODE}' END AS "errorCode",CASE WHEN ${postprocessFailureCondition} THEN jsonb_build_object('phase','postprocess','code','${IMAGE_RESULT_POSTPROCESS_FAILURE_CODE}') END AS "lastFailure"`;
 
-const taskSelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.result_document AS "resultDocument",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.user_input AS "userInput",t.prompt_optimized AS optimized,t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh",${postprocessFailureSelect}`;
-const taskSummarySelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",left(t.prompt,240) AS prompt,t.result_urls AS "resultUrls",t.result_document AS "resultDocument",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh",${postprocessFailureSelect}`;
+const taskSelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.result_document AS "resultDocument",t.priority,t.status,t.paused_kind AS "pausedKind",t.repair_attempts AS "repairAttempts",t.next_repair_at AS "nextRepairAt",t.repair_error_code AS "repairErrorCode",t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.user_input AS "userInput",t.prompt_optimized AS optimized,t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh",${postprocessFailureSelect}`;
+const taskSummarySelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",left(t.prompt,240) AS prompt,t.result_urls AS "resultUrls",t.result_document AS "resultDocument",t.priority,t.status,t.paused_kind AS "pausedKind",t.repair_attempts AS "repairAttempts",t.next_repair_at AS "nextRepairAt",t.repair_error_code AS "repairErrorCode",t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh",${postprocessFailureSelect}`;
 const batchSelect = `b.id,b.tool_key AS "toolKey",b.model_config_id AS "modelConfigId",b.request_id AS "requestId",b.user_id AS "userId",u.display_name AS "userName",b.department_id AS "departmentId",b.project_id AS "projectId",b.operation_type AS "operationType",m.name AS "modelName",b.priority,b.status,b.total_items AS "totalItems",b.completed_items AS "completedItems",b.failed_items AS "failedItems",stats.waiting_items AS "waitingItems",stats.processing_items AS "processingItems",stats.paused_items AS "pausedItems",stats.cancelled_items AS "cancelledItems",stats.planned_credits AS "plannedCredits",stats.consumed_credits AS "consumedCredits",stats.consumed_rmb_cost AS "consumedRmbCost",b.created_at AS "createdAt",b.updated_at AS "updatedAt"`;
 const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COUNT(*) FILTER (WHERE t.status='waiting')::int AS waiting_items,
@@ -77,7 +78,7 @@ const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COALESCE(SUM(t.rmb_cost) FILTER (WHERE t.status='success'),0)::float8 AS consumed_rmb_cost
   FROM tasks t WHERE t.batch_id=b.id) stats ON true`;
 
-export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask, options: { maxInflightTasks?: number; promptCompiler?: PromptCompiler; quickImagePreflight?: typeof preflightStoredQuickImageTask } = {}) {
+export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask, options: { maxRepairAttempts?: number; maxInflightTasks?: number; promptCompiler?: PromptCompiler; quickImagePreflight?: typeof preflightStoredQuickImageTask } = {}) {
   const router = Router();
   router.use((_request, response, next) => {
     const json = response.json.bind(response);
@@ -200,13 +201,24 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
   router.post("/:id/recover", async (request, response, next) => {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
-      const result = await db.query<{ id: string; requestId: string; status: string; operationType: string; upstreamTaskId: string | null; submissionStartedAt: string | null; attempts: number; priority: TaskPriority; queuedAt: string; availableAt: string; errorCode: string | null; failureReason: string | null }>(
+      const result = await db.query<{ id: string; requestId: string; status: string; operationType: string; upstreamTaskId: string | null; submissionStartedAt: string | null; attempts: number; priority: TaskPriority; queuedAt: string; availableAt: string; pausedKind: PausedKind | null; errorCode: string | null; failureReason: string | null }>(
         `SELECT ${taskSelect},t.available_at AS "availableAt" FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.id=$1 AND t.user_id=$2`,
         [request.params.id, actor.id],
       );
       const task = result.rows[0];
       if (!task) {
         response.status(404).json({ error: "NOT_FOUND", message: "任务不存在" });
+        return;
+      }
+      if (task.status === "paused" && task.pausedKind) {
+        const kind = task.pausedKind;
+        if (kind === "submission_unknown" || kind === "needs_review") {
+          response.json({ task, recovered: false, message: kind === "submission_unknown" ? "提交结果待核实，不会自动重发；请联系管理员核查。" : "此任务需要管理员处理，请检查已保存原件。" });
+          return;
+        }
+        const recovered = Boolean(await requeueRepairs(db, cache, { maxAttempts: options.maxRepairAttempts ?? 3, taskId: task.id, ownerId: actor.id }));
+        const fresh = await db.query(`SELECT ${taskSelect} FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.id=$1 AND t.user_id=$2`, [task.id, actor.id]);
+        response.json({ task: fresh.rows[0], recovered, message: !recovered ? "已核对原任务，未重复安排恢复。" : kind === "result_repair" ? "已安排重新保存原结果，不会重新生成或扣费。" : "已恢复原任务查询，不会创建新任务。" });
         return;
       }
       if (task.errorCode === IMAGE_RESULT_POSTPROCESS_FAILURE_CODE) {

@@ -90,6 +90,8 @@ export async function restoreWaitingTasksToQueue(db: Database, cache: Cache) {
               WHEN upstream_submission_started_at IS NULL AND (operation_type='video_generation' OR attempts=0) THEN 'waiting' ELSE 'paused' END,
             failure_reason=CASE WHEN upstream_task_id IS NOT NULL OR (upstream_submission_started_at IS NULL AND (operation_type='video_generation' OR attempts=0)) THEN failure_reason
               ELSE '执行中断，原上游提交状态待核实；已暂停，不能直接恢复或自动重新生成' END,
+            paused_kind=CASE WHEN upstream_task_id IS NULL AND upstream_submission_started_at IS NOT NULL THEN 'submission_unknown'
+              WHEN upstream_task_id IS NULL AND attempts>0 AND operation_type<>'video_generation' THEN 'needs_review' ELSE paused_kind END,
             execution_token=NULL,lease_expires_at=NULL,updated_at=now()
       WHERE status='processing' AND (execution_token IS NOT NULL OR upstream_task_id IS NULL)
         AND (lease_expires_at IS NULL OR lease_expires_at <= now())`,
@@ -469,7 +471,7 @@ export async function transitionTask(
              THEN LEAST(7200,GREATEST(30,(upstream_workflow_context->>'timeoutSeconds')::int)) ELSE 600 END * interval '1 second'
          WHEN operation_type='video_generation' THEN interval '20 minutes' ELSE interval '15 minutes' END
        ELSE poll_deadline_at END,updated_at=now() WHERE id=$1 AND status='paused'
-       AND COALESCE(failure_reason,'') NOT LIKE $2
+       AND paused_kind IS NULL AND COALESCE(failure_reason,'') NOT LIKE $2
        AND (upstream_task_id IS NOT NULL OR (upstream_submission_started_at IS NULL AND (operation_type='video_generation' OR attempts=0))) RETURNING id`,
       [taskId, `${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：%`],
     );

@@ -1,3 +1,4 @@
+import { classifyResultFailure, pauseOwnedTask } from "../src/task-repair";
 import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import express from "express";
@@ -215,7 +216,7 @@ async function productionWorker(dependencies: Record<string, unknown>) {
     if (!node) throw new Error(`Missing actual worker function ${name}`); return node.getText(source);
   }).join("\n");
   const js = ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
-  return new Function(...Object.keys(dependencies), `${js}; async function executeProvider(task) { return task.operation_type === 'video_generation' ? executeApiMartVideo(task,{apiKey:'fixture-only'}) : executeApiMartImage(task,{apiKey:'fixture-only'},task.prompt); } return {runTask};`)(...Object.values(dependencies)) as { runTask(id: string): Promise<void> };
+  return new Function("classifyResultFailure", "pauseOwnedTask", ...Object.keys(dependencies), `${js}; async function executeProvider(task) { return task.operation_type === 'video_generation' ? executeApiMartVideo(task,{apiKey:'fixture-only'}) : executeApiMartImage(task,{apiKey:'fixture-only'},task.prompt); } return {runTask};`)(classifyResultFailure, pauseOwnedTask, ...Object.values(dependencies)) as { runTask(id: string): Promise<void> };
 }
 
 for (const kind of ["image", "video"] as const) isolated(`96 ${kind} tasks / 192 overlapping worker invocations: quota, interruption, pause/resume and one terminal record`, async () => {

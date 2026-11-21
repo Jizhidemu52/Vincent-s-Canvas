@@ -1,3 +1,4 @@
+import { classifyResultFailure, pauseOwnedTask } from "../src/task-repair";
 import { expect, test } from "bun:test";
 import ts from "typescript";
 import { disposeProviderResults } from "../src/media-result-file";
@@ -10,7 +11,7 @@ import { videoFileExtension } from "../../shared/video-output";
 const source = ts.createSourceFile("worker.ts", await Bun.file(new URL("../src/worker.ts", import.meta.url)).text(), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 function functions(names: string[], dependencies: Record<string, unknown>) {
   const code = names.map(name => source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name)!.getText(source)).join("\n");
-  return new Function(...Object.keys(dependencies), `${ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText}; return {${names.join(',')}}`)(...Object.values(dependencies));
+  return new Function("classifyResultFailure", "pauseOwnedTask", ...Object.keys(dependencies), `${ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText}; return {${names.join(',')}}`)(classifyResultFailure, pauseOwnedTask, ...Object.values(dependencies));
 }
 const id = "30000000-0000-4000-8000-000000000001";
 
@@ -74,7 +75,8 @@ test.each(["stored", "store-failed", "lease-lost"])("worker disposes generated v
   await api.runTask(task.id);
   expect(paid).toBe(1); expect(disposed).toBe(1); expect(captures).toBe(outcome === "stored" ? 1 : 0); expect(stored).toBe(outcome === "lease-lost" ? 0 : 1);
   expect(statements.some(sql => sql.includes("status='failed'"))).toBe(false);
-  expect(statements.some(sql => sql.includes("status='paused'"))).toBe(outcome === "store-failed");
+  expect(statements.some(sql => sql.includes("status='paused'"))).toBe(outcome !== "stored");
+  if (outcome === "lease-lost") expect(statements.find(sql => sql.includes("status='paused'"))).toContain("execution_token=$2");
 });
 
 test("worker stores video via file upload with the streamed byte count", async () => {

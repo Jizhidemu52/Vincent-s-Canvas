@@ -302,3 +302,5 @@ curl https://正式域名/api/health
 创意场景的优化模型调用默认限时 45 秒（`PROMPT_OPTIMIZATION_TIMEOUT_MS=45000`）。原文降级默认为关闭；首批仅对创意设计启用时，在部署环境同时设置 `PROMPT_OPTIMIZATION_FALLBACK=original` 和 `PROMPT_FALLBACK_TOOL_KEYS=creative-*`，重新创建 API 容器使配置生效。白名单也可用逗号分隔的完整创意工具键。
 
 超时后不重发优化调用。原文和参考图通过原校验、且优化记录明确允许降级时，图片任务才可受理；没有原文、素材无权访问、配置或业务参数错误、需要用户澄清的请求不降级。回滚只需把模式改回 `off` 并加载配置，不影响已受理任务。
+
+自动恢复原结果需要先备份 PostgreSQL，再应用迁移 056。Worker 默认每 `RESULT_REPAIR_INTERVAL_SECONDS=60` 秒领取到期任务；`RESULT_REPAIR_MAX_ATTEMPTS=3`，默认按 1、5、15 分钟间隔。原任务、上游 ID 和已发生的提交均不变；无上游 ID 的不自动恢复。设置 `RESULT_REPAIR_ENABLED=false` 并重新创建 worker 可停止自动领取；人工核查仍可用。遇到 `worker.result_storage_full` 事件先查实际存储盘空间，不要重发出图。
