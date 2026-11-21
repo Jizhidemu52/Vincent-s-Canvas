@@ -5,6 +5,8 @@ import type {
   ConversationEvent, ErrorDetails, ImageTurn, ImageVersion, TurnState,
 } from "../../shared/image-conversation-contracts";
 import { conversationEventSchema } from "../../shared/image-conversation-schemas";
+import { activeTurnStates } from "../../shared/image-conversation-turn-state";
+export { activeTurnStates };
 
 export class ImageConversationError extends Error {
   constructor(readonly status: number, readonly code: ApiErrorCode, message: string, readonly details: ErrorDetails | null = null) {
@@ -12,7 +14,6 @@ export class ImageConversationError extends Error {
   }
 }
 
-export const activeTurnStates: TurnState[] = ["accepted", "planning", "queued", "generating", "uncertain"];
 type Timestamp = Date | string;
 export type ConversationRow = {
   id: string; owner_user_id: string; title: string | null; entrypoint: "standalone" | "canvas";

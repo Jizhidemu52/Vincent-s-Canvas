@@ -1,4 +1,5 @@
 import type { ApiErrorCode, CreateConversationRequest, ErrorDetails, SubmitTurnRequest } from "../../../../shared/image-conversation-contracts";
+import { reusableTurnInputSchema } from "../../../../shared/image-conversation-schemas";
 import { designExecutionHistoryPageSchema } from "../../../../shared/design-conversation-history";
 import type { PublicConversationEvent as ConversationEvent } from "../../../../shared/image-conversation-public";
 import { createConversationRequestSchema, submitTurnRequestSchema } from "../../../../shared/image-conversation-schemas";
@@ -62,6 +63,11 @@ export function createImageConversationApi(ownerId: string, fetcher: Fetch = glo
             const result = await request(`${base}/${pathId(id)}/turns/by-request/${pathId(key)}`, turnDetailsSchema, { signal });
             if (result.turn.conversationId !== id || result.turn.clientRequestId !== key) throw new ImageConversationApiError(200, "INVALID_RESPONSE", "原请求回执与请求编号不一致，不能重新发送。");
             return result;
+        },
+        reusableInput: async (id: string, turnId: string, signal?: AbortSignal) => {
+            const input = await request(`${base}/${pathId(id)}/turns/${pathId(turnId)}/input`, reusableTurnInputSchema, { signal });
+            if (input.conversationId !== id || input.turnId !== turnId) throw new Error("原轮次不匹配，未重发。");
+            return input;
         },
         turn: async (id: string, turnId: string, signal?: AbortSignal) => {
             const result = await request(`${base}/${pathId(id)}/turns/${pathId(turnId)}`, turnDetailsSchema, { signal });

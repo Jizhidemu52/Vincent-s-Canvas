@@ -19,7 +19,9 @@ export type ConversationView = {
     turns: ImageTurn[];
 };
 export type ConversationAttachment = { assetId: string; name: string; purpose?: AttachmentPurpose };
-export type ConversationDraft = { text: string; attachments: ConversationAttachment[] };
+export type ConversationDraft = { text: string; attachments: ConversationAttachment[];
+    source?: { turnId: string; inputActiveVersionId: string | null; outputPreferences: NonNullable<SubmitTurnRequest["outputPreferences"]> };
+};
 export type ConversationLocalState = {
     conversationId: string | null;
     drafts: Record<string, ConversationDraft>;

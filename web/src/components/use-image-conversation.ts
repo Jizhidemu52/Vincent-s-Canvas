@@ -104,6 +104,7 @@ export function useImageConversation(ownerId: string, options: ImageConversation
         [notice, setNotice] = useState(""),
         [connection, setConnection] = useState("正在连接服务端");
     const [reload, setReload] = useState(0);
+    const [acceptedCount, setAcceptedCount] = useState(0);
     const lifetime = useRef<AbortController | null>(null),
         stream = useRef<AbortController | null>(null);
     const callbacks = useRef(options);
@@ -115,8 +116,11 @@ export function useImageConversation(ownerId: string, options: ImageConversation
     const draftKey = id || "new",
         draft = local.drafts[draftKey] || emptyConversationDraft();
     const receipt = id ? local.receipts[id] : undefined;
-    const hasBase = (key: string) => key === "new" ? Boolean(callbacks.current.initialAssetId) : Boolean(viewRef.current?.snapshot.id === key && viewRef.current.snapshot.activeVersionId);
-    const imageCount = draft.attachments.length + Number(id ? Boolean(view?.snapshot.activeVersionId) : Boolean(options.initialAssetId));
+    const hasBase = (key: string) => {
+        const source = localRef.current.drafts[key]?.source;
+        return source ? Boolean(source.inputActiveVersionId) : key === "new" ? Boolean(callbacks.current.initialAssetId) : Boolean(viewRef.current?.snapshot.id === key && viewRef.current.snapshot.activeVersionId);
+    };
+    const imageCount = draft.attachments.length + Number(hasBase(draftKey));
     const remainingImages = Math.max(0, IMAGE_AGENT_MAX_IMAGES - imageCount);
     const save = useCallback(
         (update: (value: ConversationLocalState) => ConversationLocalState) => {
@@ -156,14 +160,15 @@ export function useImageConversation(ownerId: string, options: ImageConversation
             projected.current.add(`${version.conversationId}:${version.id}`);
         }
     };
-    const clearReceipt = async (conversationId: string, request: SubmitTurnRequest) =>
-        save((current) => {
+    const clearReceipt = async (conversationId: string, request: SubmitTurnRequest) => {
+        await save((current) => {
             const receipts = { ...current.receipts };
             delete receipts[conversationId];
             const drafts = { ...current.drafts },
                 existing = drafts[conversationId];
             if (
-                existing?.text.trim() === request.text &&
+                existing?.text.trim() === request.text && existing.source?.turnId === request.replyToTurnId &&
+                (!request.reuseInputFromTurnId || Boolean(request.replyToTurnId)) &&
                 JSON.stringify(conversationRequestAttachments(existing.attachments)) ===
                     JSON.stringify(
                         (request.attachments || []).map((item) => ({ ...item, purpose: item.purpose || "auto" })),
@@ -172,6 +177,8 @@ export function useImageConversation(ownerId: string, options: ImageConversation
                 drafts[conversationId] = emptyConversationDraft();
             return { ...current, receipts, drafts };
         });
+        setAcceptedCount(value => value + 1);
+    };
     const select = async (nextId: string | null) => {
         stream.current?.abort();
         install(null);
@@ -398,59 +405,76 @@ export function useImageConversation(ownerId: string, options: ImageConversation
             throw failure;
         }
     };
-    const submit = (text = draft.text) =>
-        action(async (signal) => {
-            const requestedText = text.trim();
-            if (
-                !requestedText ||
-                requestedText.length > 10000 ||
-                receipt ||
-                localRef.current.create ||
-                viewRef.current?.snapshot.pendingTurn
-            )
-                return;
-            const snapshot = id ? viewRef.current?.snapshot : await create(options.initialAssetId, signal);
-            if (!snapshot) throw new Error("会话尚未读取完成，请稍后发送。");
-            const currentDraft = localRef.current.drafts[snapshot.id] || emptyConversationDraft();
-            const limitError = conversationImageLimitError(currentDraft.attachments.length, Boolean(snapshot.activeVersionId));
-            if (limitError) throw new Error(limitError);
-            const input: SubmitTurnRequest = {
-                clientRequestId: createClientId(),
-                expectedStateRevision: snapshot.stateRevision,
-                text: requestedText,
-                attachments: conversationRequestAttachments(currentDraft.attachments),
-                outputPreferences: { mode: "auto" },
-            };
-            await save((current) => ({ ...current, receipts: { ...current.receipts, [snapshot.id]: input } }));
+    const sendDraft = async (currentDraft: ConversationDraft, signal: AbortSignal, regenerate = false) => {
+        const requestedText = regenerate ? currentDraft.text : currentDraft.text.trim();
+        if (
+            !requestedText ||
+            requestedText.length > 10000 ||
+            receipt ||
+            localRef.current.create ||
+            viewRef.current?.snapshot.pendingTurn
+        )
+            return;
+        const snapshot = id ? viewRef.current?.snapshot : await create(options.initialAssetId, signal);
+        if (!snapshot) throw new Error("会话尚未读取完成，请稍后发送。");
+        const source = currentDraft.source;
+        const limitError = conversationImageLimitError(currentDraft.attachments.length, Boolean(source ? source.inputActiveVersionId : snapshot.activeVersionId));
+        if (limitError) throw new Error(limitError);
+        const input: SubmitTurnRequest = {
+            clientRequestId: createClientId(),
+            expectedStateRevision: snapshot.stateRevision,
+            text: requestedText,
+            attachments: conversationRequestAttachments(currentDraft.attachments),
+            outputPreferences: source?.outputPreferences || { mode: "auto" },
+            ...(source ? { reuseInputFromTurnId: source.turnId, ...(!regenerate ? { replyToTurnId: source.turnId } : {}) } : {}),
+        };
+        await save((current) => ({ ...current, receipts: { ...current.receipts, [snapshot.id]: input } }));
+        try {
+            const accepted = await api.submit(snapshot.id, input, signal);
+            setNotice(
+                accepted.state === "completed"
+                    ? "本轮已完成，正在读取服务端结果。"
+                    : "已持久受理，正在等待服务端处理；尚不代表图片已生成。",
+            );
+            await clearReceipt(snapshot.id, input);
+            setReload((value) => value + 1);
+        } catch (failure) {
+            if (confirmedRejection(failure)) {
+                await save((current) => {
+                    const receipts = { ...current.receipts };
+                    delete receipts[snapshot.id];
+                    return { ...current, receipts };
+                });
+                setReload((value) => value + 1);
+                throw failure;
+            }
+            setError("发送回执尚未确认，已保留原请求编号；正在查询，不会重新发送。");
             try {
-                const accepted = await api.submit(snapshot.id, input, signal);
-                setNotice(
-                    accepted.state === "completed"
-                        ? "本轮已完成，正在读取服务端结果。"
-                        : "已持久受理，正在等待服务端处理；尚不代表图片已生成。",
-                );
+                await api.byRequest(snapshot.id, input.clientRequestId, signal);
                 await clearReceipt(snapshot.id, input);
                 setReload((value) => value + 1);
-            } catch (failure) {
-                if (confirmedRejection(failure)) {
-                    await save((current) => {
-                        const receipts = { ...current.receipts };
-                        delete receipts[snapshot.id];
-                        return { ...current, receipts };
-                    });
-                    setReload((value) => value + 1);
-                    throw failure;
-                }
-                setError("发送回执尚未确认，已保留原请求编号；正在查询，不会重新发送。");
-                try {
-                    await api.byRequest(snapshot.id, input.clientRequestId, signal);
-                    await clearReceipt(snapshot.id, input);
-                    setReload((value) => value + 1);
-                } catch {
-                    throw new Error("原请求结果尚未确认。请查询原请求，不要重新发送；刷新不会重发。");
-                }
+            } catch {
+                throw new Error("原请求结果尚未确认。请查询原请求，不要重新发送；刷新不会重发。");
             }
-        });
+        }
+    };
+    const submit = (text?: string) => action(signal => sendDraft(text === undefined ? localRef.current.drafts[draftKey] || emptyConversationDraft() : { text, attachments: [] }, signal));
+    const reuseTurn = (turnId: string, regenerate: boolean) => action(async signal => {
+        if (!id || receipt || localRef.current.create || viewRef.current?.snapshot.pendingTurn) return;
+        const input = await api.reusableInput(id, turnId, signal);
+        signal.throwIfAborted();
+        if (id !== idRef.current || id !== viewRef.current?.snapshot.id || localRef.current.receipts[id] || viewRef.current.snapshot.pendingTurn) return;
+        const restored: ConversationDraft = { text: input.text,
+            attachments: input.attachments.map((item, index) => {
+                const version = viewRef.current?.versions.find(version => version.assetId === item.assetId);
+                return { ...item, name: version ? `图${version.imageNo} · ${version.label}` : `原附件 ${index + 1}` };
+            }),
+            source: { turnId, inputActiveVersionId: input.inputActiveVersionId, outputPreferences: input.outputPreferences },
+        };
+        if (regenerate) return sendDraft(restored, signal, true);
+        await save(current => ({ ...current, drafts: { ...current.drafts, [id]: restored } }));
+        setNotice("已载入原消息和附件，可修改后发送；尚未创建新轮次。");
+    });
     const queryOriginal = () =>
         action(async (signal) => {
             if (!id) return;
@@ -618,6 +642,8 @@ export function useImageConversation(ownerId: string, options: ImageConversation
         notice,
         connection,
         submit,
+        reuseTurn,
+        acceptedCount,
         upload,
         attachAssets,
         attachImages,

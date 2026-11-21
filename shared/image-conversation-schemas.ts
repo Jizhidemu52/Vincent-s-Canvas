@@ -137,6 +137,7 @@ export const submitTurnRequestSchema = z.strictObject({
     ...turnInputFields,
     attachments: z.array(turnAttachmentSchema).max(16).superRefine(refineTurnAttachments).optional(),
     replyToTurnId: uuidSchema.optional(),
+    reuseInputFromTurnId: uuidSchema.optional(),
     outputPreferences: outputPreferencesSchema.optional(),
 }) satisfies z.ZodType<Contract.SubmitTurnRequest>;
 export const acceptedTurnInputSchema = z.strictObject({
@@ -147,8 +148,12 @@ export const acceptedTurnInputSchema = z.strictObject({
         .max(16)
         .superRefine(refineTurnAttachments),
     replyToTurnId: uuidSchema.nullable(),
+    reuseInputFromTurnId: uuidSchema.optional(),
     outputPreferences: outputPreferencesSchema,
 }) satisfies z.ZodType<Contract.AcceptedTurnInput>;
+export const reusableTurnInputSchema = acceptedTurnInputSchema.pick({ text: true, attachments: true, outputPreferences: true }).extend({
+    conversationId: uuidSchema, turnId: uuidSchema, inputActiveVersionId: uuidSchema.nullable(),
+});
 export const cancelTurnRequestSchema = z.strictObject({
     expectedStateRevision: safeIntegerSchema,
 }) satisfies z.ZodType<Contract.CancelTurnRequest>;

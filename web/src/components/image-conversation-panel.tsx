@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { IMAGE_AGENT_MAX_IMAGES } from "../../../shared/image-agent/focus";
+import { turnResultUnconfirmed } from "../../../shared/image-conversation-turn-state";
 import {
     ArrowDownToLine,
     Check,
@@ -264,6 +265,7 @@ function OwnedImageConversationPanel({
     }, []);
     useEffect(() => setMediaError(""), [state.id]);
     const files = useRef<HTMLInputElement>(null);
+    const composer = useRef<HTMLTextAreaElement>(null);
     const pending = state.view?.snapshot.pendingTurn;
     const blocked =
         !state.ready ||
@@ -274,6 +276,11 @@ function OwnedImageConversationPanel({
     const versions = state.view?.versions || [],
         messages = state.view?.messages || [];
     const follow = useChatBottomFollow(state.view?.messages, state.id || undefined);
+    const latestTurn = state.view?.turns.reduce<ImageTurn | undefined>((latest, turn) =>
+        !latest || turn.acceptedRevision > latest.acceptedRevision ? turn : latest, undefined);
+    const unresolvedPrevious = latestTurn && turnResultUnconfirmed(latestTurn.state, latestTurn.outputVersionId);
+    useEffect(() => { if (state.acceptedCount) follow.scrollToBottom(); }, [state.acceptedCount, follow.scrollToBottom]);
+    useEffect(() => { if (state.draft.source) composer.current?.focus(); }, [state.draft.source?.turnId]);
     const attachmentVersions = new Set(messages.flatMap((message) => message.attachments));
     const uploadVersions = versions.filter(
         (version) => version.source === "upload" && !attachmentVersions.has(version.id),
@@ -391,12 +398,14 @@ function OwnedImageConversationPanel({
                         </button>
                         <button
                             type="button"
-                            aria-label="刷新服务端记录"
+                            aria-label="查询原任务（不重新生成）"
+                            title="查询原任务（不重新生成）"
                             disabled={state.busy}
-                            onClick={state.refresh}
-                            className="grid size-9 place-items-center rounded-lg hover:bg-muted"
+                            onClick={state.receipt || pending ? state.queryOriginal : state.refresh}
+                            className="inline-flex min-h-9 min-w-9 items-center justify-center gap-2 rounded-lg px-2 text-xs hover:bg-muted"
                         >
                             <RefreshCw className="size-4" />
+                            <span className="hidden sm:inline">查询原任务（不重新生成）</span>
                         </button>
                     </div>
                 </header>
@@ -498,13 +507,31 @@ function OwnedImageConversationPanel({
                                             />
                                         ) : (
                                             <p key={versionId} className="text-xs text-muted-foreground">
-                                                图片版本正在同步，请刷新服务端记录。
+                                                图片版本正在同步，可查询原任务（不重新生成）。
                                             </p>
                                         );
                                     })}
                                     {turn && messages.findLast((item) => item.turnId === turn.id)?.id === message.id ? (
                                         <TurnStatus turn={turn} />
                                     ) : null}
+                                    {message.role === "user" && turn && (
+                                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                                            <button type="button" className={control}
+                                                disabled={blocked || unresolvedPrevious || turnResultUnconfirmed(turn.state, turn.outputVersionId)}
+                                                onClick={() => {
+                                                    if ((state.draft.text || state.draft.attachments.length) && !window.confirm("用这条历史消息替换当前未发送的草稿？")) return;
+                                                    void state.reuseTurn(turn.id, false);
+                                                }}>编辑后重发</button>
+                                            {(turn.taskId || turn.outputVersionId || turn.intent === "edit" || turn.intent === "generate_new") && (
+                                                <button type="button" className={control}
+                                                    disabled={blocked || unresolvedPrevious || turnResultUnconfirmed(turn.state, turn.outputVersionId)}
+                                                    onClick={() => {
+                                                        if (window.confirm("将创建一次新的图片生成，可能再次计费。继续吗？"))
+                                                            void state.reuseTurn(turn.id, true);
+                                                    }}>重新生成</button>
+                                            )}
+                                        </div>
+                                    )}
                                 </article>
                             );
                         })}
@@ -543,7 +570,7 @@ function OwnedImageConversationPanel({
                             </p>
                         ) : null}
                         {state.receipt ? (
-                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                            <div role="group" aria-label="待确认的发送回执" className="flex flex-wrap items-center gap-2 text-xs">
                                 <span>原请求 {state.receipt.clientRequestId}</span>
                                 <button
                                     type="button"
@@ -551,7 +578,7 @@ function OwnedImageConversationPanel({
                                     disabled={state.busy}
                                     onClick={state.queryOriginal}
                                 >
-                                    查询原请求
+                                    查询原任务（不重新生成）
                                 </button>
                             </div>
                         ) : null}
@@ -702,7 +729,11 @@ function OwnedImageConversationPanel({
                                     ))}
                                 </div>
                             ) : null}
-                            <textarea
+                            {state.draft.source && <div className="mb-1 flex items-center gap-2 text-xs">
+                                正在编辑历史消息，发送后会创建新轮次。
+                                <button type="button" className={control} disabled={blocked} onClick={() => state.changeDraft(() => ({ text: "", attachments: [] }))}>放弃编辑</button>
+                            </div>}
+                            <textarea ref={composer}
                                 aria-label="对话内容"
                                 value={state.draft.text}
                                 maxLength={10000}
@@ -756,7 +787,7 @@ function OwnedImageConversationPanel({
                                     {pending || state.receipt ? (
                                         <button
                                             type="button"
-                                            aria-label="查询原任务状态"
+                                            aria-label="查询原任务（不重新生成）"
                                             className={cn(control, "border-transparent px-2")}
                                             disabled={state.busy}
                                             onClick={state.queryOriginal}

@@ -426,7 +426,7 @@ test("unavailable thumbnails expose manual original preview without automatic fu
     await expect.poll(() => reads).toBeGreaterThan(0);
     const initialReads = reads;
     expect(initialReads).toBeLessThanOrEqual(2);
-    await panel.getByRole("button", { name: "刷新服务端记录", exact: true }).click();
+    await panel.getByTitle("查询原任务（不重新生成）").click();
     await expect(panel.getByText("已连接服务端", { exact: true })).toBeVisible();
     expect(reads).toBe(initialReads);
     expect(originals).toEqual([]);

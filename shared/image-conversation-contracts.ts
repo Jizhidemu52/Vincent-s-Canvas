@@ -68,6 +68,7 @@ export interface SubmitTurnRequest {
   text: string; // 1..10,000 characters; must contain non-whitespace content
   attachments?: TurnAttachment[]; // at most 16; model input budgets are separate
   replyToTurnId?: UUID;
+  reuseInputFromTurnId?: UUID;
   /** Omission is normalized to { mode: "auto" } before hashing/resolution. */
   outputPreferences?: OutputPreferences;
 }

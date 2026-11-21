@@ -124,6 +124,65 @@ class ConversationFixture {
     }
 }
 
+for (const action of ["重新生成", "编辑后重发"] as const) test(`reuse original turn: ${action}`, async ({ page, api }, info) => {
+    const fixture = new ConversationFixture();
+    const sourceId = "81000000-0000-4000-8000-000000000012";
+    const message = { ...conversationMessage(), id: "81000000-0000-4000-8000-000000000013", turnId: sourceId };
+    fixture.exists = true;
+    fixture.historyTurns = [{ ...conversationTurn("completed"), id: sourceId, acceptedRevision: 1 }];
+    fixture.messages = [message];
+    await fixture.attach(page);
+    const original = { turnId: sourceId, conversationId: ids.conversation, inputActiveVersionId: ids.root, text: message.text,
+        attachments: [{ assetId: ids.resultAsset, purpose: "reference" }], outputPreferences: { mode: "manual", quality: "low" } };
+    let inputReads = 0;
+    await page.route(`**/api/image-conversations/${ids.conversation}/turns/${sourceId}/input`, route => {
+        expect(route.request().method()).toBe("GET");
+        inputReads++;
+        return route.fulfill({ json: envelope(original) });
+    });
+    await page.goto("/chat");
+    await page.getByRole("navigation", { name: "会话列表" }).getByRole("button", { name: /针织衫改款/ }).click();
+    const history = page.locator(`[data-message-id="${message.id}"]`);
+    const button = history.getByRole("button", { name: action, exact: true });
+    const editor = page.getByRole("textbox", { name: "对话内容", exact: true });
+    await expect(button).toBeEnabled();
+    const initialReads = fixture.snapshots;
+    await page.getByTitle("查询原任务（不重新生成）").click();
+    await expect.poll(() => fixture.snapshots).toBeGreaterThan(initialReads);
+    expect(fixture.submissions).toEqual([]);
+    const editedText = "只改领口为深蓝";
+    if (action === "重新生成") {
+        await editor.fill("未发送的另一条草稿");
+        page.once("dialog", async dialog => { expect(dialog.message()).toContain("可能再次计费"); await dialog.dismiss(); });
+        await button.click();
+        expect(inputReads).toBe(0);
+        expect(fixture.submissions).toEqual([]);
+        page.once("dialog", dialog => dialog.accept());
+        await button.click();
+    } else {
+        await button.click();
+        await expect(editor).toHaveValue(original.text);
+        await expect(page.getByRole("combobox", { name: /用途/ })).toHaveValue("reference");
+        expect(fixture.submissions).toEqual([]);
+        await editor.fill(editedText);
+        await page.screenshot({ path: info.outputPath("edit-before-resend.png") });
+        await page.getByRole("button", { name: "发送", exact: true }).click();
+    }
+    await expect.poll(() => fixture.submissions.length).toBe(1);
+    await expect(button).toBeDisabled();
+    expect(inputReads).toBe(1);
+    const sent = fixture.submissions[0]!;
+    expect(sent).toMatchObject({ text: action === "重新生成" ? original.text : editedText, reuseInputFromTurnId: sourceId,
+        attachments: original.attachments, outputPreferences: original.outputPreferences });
+    expect(sent.replyToTurnId).toBe(action === "重新生成" ? undefined : sourceId);
+    expect(sent.clientRequestId).not.toBe(fixture.historyTurns[0]!.clientRequestId);
+    await expect(editor).toHaveValue(action === "重新生成" ? "未发送的另一条草稿" : "");
+    await expect(history).toContainText(original.text);
+    expect(api.submissions).toEqual([]);
+    expect(fixture.legacyPosts).toEqual([]);
+    await page.screenshot({ path: info.outputPath("original-and-new-turn.png") });
+});
+
 test("long conversation reads turn pages once and reuses terminal turns after another submission", async ({ page, api }, info) => {
     const fixture = new ConversationFixture();
     fixture.exists = true; fixture.historyDelay = 100;
@@ -163,7 +222,7 @@ test("a task-linked failure is read again so a late server result is not hidden 
     await page.getByRole("navigation", { name: "会话列表" }).getByRole("button", { name: /针织衫改款/ }).click();
     await expect(page.locator("[data-turn-state='failed']")).toHaveCount(1);
     fixture.complete();
-    await page.getByRole("button", { name: "刷新服务端记录", exact: true }).click();
+    await page.getByTitle("查询原任务（不重新生成）").click();
     await expect(page.locator("[data-turn-state='completed']")).toHaveCount(1);
     await expect(page.locator(`[data-version-id='${ids.generated}']`)).toHaveCount(1);
     expect(fixture.turnReads).toBe(1);
@@ -362,7 +421,8 @@ test("creation lookup 404 retains receipt until explicit same-key empty creation
 test("lost response persists original key across refresh and only queries until the original turn is found", async ({ page, api }) => {
     const fixture = new ConversationFixture(); fixture.loseSubmissionResponse = true; fixture.hideLookup = true; await fixture.attach(page);
     await uploadAndSend(page, fixture);
-    await expect(page.getByRole("button", { name: "查询原请求", exact: true })).toBeVisible();
+    const receipt = page.getByRole("group", { name: "待确认的发送回执" });
+    await expect(receipt).toBeVisible();
     await expect(page.getByRole("button", { name: "发送", exact: true })).toBeDisabled();
     const key = fixture.submissions[0]!.clientRequestId;
     await page.reload();
@@ -370,8 +430,8 @@ test("lost response persists original key across refresh and only queries until 
     await expect.poll(() => fixture.lookups).toBeGreaterThanOrEqual(2);
     expect(fixture.submissions).toHaveLength(1);
     fixture.hideLookup = false;
-    await page.getByRole("button", { name: "查询原请求", exact: true }).click();
-    await expect(page.getByRole("button", { name: "查询原请求", exact: true })).toHaveCount(0);
+    await receipt.getByRole("button", { name: "查询原任务（不重新生成）" }).click();
+    await expect(receipt).toHaveCount(0);
     await expect(page.getByRole("button", { name: "停止本轮", exact: true })).toBeVisible();
     expect(fixture.submissions[0]!.clientRequestId).toBe(key);
     expect(fixture.submissions).toHaveLength(1); expect(api.submissions).toHaveLength(0);
@@ -479,7 +539,7 @@ test("detached canvas result remains in server history without automatic canvas 
     fixture.complete(true);
     await expect(conversation.locator(`[data-version-id="${ids.generated}"]`)).toHaveCount(1);
     await expect(conversation.locator(`[data-version-id="${ids.generated}"]`)).not.toContainText("当前图");
-    await conversation.getByRole("button", { name: "刷新服务端记录", exact: true }).click();
+    await conversation.getByTitle("查询原任务（不重新生成）").click();
     await expect.poll(() => api.document(projectId)?.nodes.length).toBe(1);
     await page.reload();
     if (!(await conversation.isVisible())) await page.getByRole("tab", { name: "对话", exact: true }).first().click();

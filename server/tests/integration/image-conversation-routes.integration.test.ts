@@ -80,6 +80,49 @@ integration("image conversation HTTP contract with existing real sessions", () =
     expect((await fixture.db.query("SELECT count(*)::int AS n FROM image_conversation_turns WHERE conversation_id=$1", [data.id])).rows[0].n).toBe(1);
   });
 
+  test("original input is owner-scoped: regenerate and edit create independent immutable turns on the original base", async () => {
+    const user = await account(), stranger = await account(), baseAsset = randomUUID(), reference = randomUUID();
+    await fixture.db.query(`INSERT INTO assets(id,owner_user_id,object_key,filename,mime_type,kind,status)
+      SELECT id,$1,'fixture/'||id,'source.png','image/png','image','ready' FROM unnest($2::uuid[]) AS id`, [user.id, [baseAsset, reference]]);
+    const created = await request(user.cookie, "", { clientRequestId: randomUUID(), entrypoint: "standalone", initialAssetId: baseAsset });
+    const snapshot = (await created.json()).data;
+    const path = `/${snapshot.id}/turns`, submission = { text: "领口换成蓝色", attachments: [{ assetId: reference, purpose: "reference" }],
+      outputPreferences: { mode: "manual", quality: "low" }, clientRequestId: randomUUID(), expectedStateRevision: snapshot.stateRevision };
+    const first = await request(user.cookie, path, submission);
+    expect(first.status).toBe(202);
+    const receipt = (await first.json()).data, id = receipt.turnId, sourcePath = `${path}/${id}/input`;
+    const count = wakes;
+    expect((await request(stranger.cookie, sourcePath)).status).toBe(404);
+    const loaded = (await (await request(user.cookie, sourcePath)).json()).data;
+    expect(loaded).toEqual({ turnId: id, conversationId: snapshot.id, inputActiveVersionId: snapshot.activeVersionId,
+      text: submission.text, attachments: submission.attachments, outputPreferences: submission.outputPreferences });
+    expect(wakes).toBe(count);
+    const retry = { ...submission, clientRequestId: randomUUID(), reuseInputFromTurnId: id, expectedStateRevision: receipt.stateRevision };
+    for (const state of ["accepted", "uncertain", "detached"]) {
+      await fixture.db.query("UPDATE image_conversation_turns SET state=$2, auto_activate=($2 <> 'detached') WHERE id=$1", [id, state]);
+      const blocked = await request(user.cookie, path, retry);
+      expect(blocked.status).toBe(409);
+      expect(await blocked.json()).toMatchObject({ code: "TURN_IN_PROGRESS" });
+    }
+    expect(wakes).toBe(count);
+    await fixture.db.query("UPDATE image_conversation_turns SET state='completed' WHERE id=$1", [id]);
+    await fixture.db.query("UPDATE image_conversations SET active_version_id=(SELECT id FROM image_conversation_versions WHERE conversation_id=$1 AND asset_id=$2) WHERE id=$1", [snapshot.id, reference]);
+    const read = async (key: string) => (await fixture.db.query("SELECT * FROM image_conversation_turns WHERE id=$1", [key])).rows[0];
+    const original = await read(id);
+    expect((await request(user.cookie, path, { ...retry, text: "篡改原输入" })).status).toBe(400);
+    const generated = await request(user.cookie, path, retry);
+    expect(generated.status).toBe(202);
+    const second = (await generated.json()).data;
+    expect(second.turnId).not.toBe(id);
+    expect(await read(second.turnId)).toMatchObject({ reply_to_turn_id: null, input_active_version_id: snapshot.activeVersionId });
+    expect((await request(user.cookie, path, retry)).status).toBe(200);
+    await fixture.db.query("UPDATE image_conversation_turns SET state='completed' WHERE id=$1", [second.turnId]);
+    const edited = await request(user.cookie, path, { ...retry, clientRequestId: randomUUID(), expectedStateRevision: second.stateRevision, replyToTurnId: id, text: "改为深蓝" });
+    expect(edited.status).toBe(202);
+    expect(await read((await edited.json()).data.turnId)).toMatchObject({ reply_to_turn_id: id, input_active_version_id: snapshot.activeVersionId, input_payload: { text: "改为深蓝" } });
+    expect(await read(id)).toEqual(original);
+  });
+
   test("design history discovery uses the current session and one paged read without waking work", async () => {
     const user = await account(), other = await account(), project = randomUUID();
     await fixture.db.query("INSERT INTO canvas_documents(owner_user_id,external_id,revision,document) VALUES($1,$2,1,'{}')", [user.id, project]);

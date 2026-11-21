@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { conversationImageLimitError } from "../../shared/image-agent/focus";
+import { turnResultUnconfirmed } from "../../shared/image-conversation-turn-state";
 import type { PoolClient } from "pg";
 import type {
   AcceptedTurnInput, CancellationResult, ConversationPage, ConversationSnapshot, MessagePage, PaginationQuery, TurnDetails, TurnPage,
@@ -109,7 +110,19 @@ export async function submitImageConversationTurn(db: Database, ownerId: string,
       const reply = await client.query("SELECT id FROM image_conversation_turns WHERE conversation_id=$1 AND id=$2", [conversationId, input.replyToTurnId]);
       if (!reply.rows.length) throw new ImageConversationError(404, "NOT_FOUND", "回复的轮次不属于当前会话");
     }
-    const limitError = conversationImageLimitError(input.attachments.length, Boolean(conversation.active_version_id));
+    let inputActiveVersionId = conversation.active_version_id;
+    if (input.reuseInputFromTurnId) {
+      const source = (await client.query<TurnRow>("SELECT * FROM image_conversation_turns WHERE conversation_id=$1 AND id=$2", [conversationId, input.reuseInputFromTurnId])).rows[0];
+      if (!source) throw new ImageConversationError(404, "NOT_FOUND", "原轮次不属于当前会话");
+      const latest = (await client.query<TurnRow>("SELECT state,output_version_id FROM image_conversation_turns WHERE conversation_id=$1 ORDER BY accepted_revision DESC LIMIT 1", [conversationId])).rows[0];
+      if (turnResultUnconfirmed(source.state, source.output_version_id) || (latest && turnResultUnconfirmed(latest.state, latest.output_version_id)))
+        throw new ImageConversationError(409, "TURN_IN_PROGRESS", "原任务结果尚未确认，请查询原任务，不要重新生成");
+      if (input.replyToTurnId ? input.replyToTurnId !== source.id :
+          canonicalPayloadHash(reusableContent(input)) !== canonicalPayloadHash(reusableContent(source.input_payload)))
+        throw new ImageConversationError(400, "VALIDATION_ERROR", "编辑原消息请使用编辑后发送，不能变更重新生成的原始输入");
+      inputActiveVersionId = source.input_active_version_id;
+    }
+    const limitError = conversationImageLimitError(input.attachments.length, Boolean(inputActiveVersionId));
     if (limitError) throw new ImageConversationError(400, "TURN_ATTACHMENT_LIMIT", limitError);
     const previousImageNo = safeCounter(conversation.last_image_no);
     const versions: VersionRow[] = [];
@@ -119,7 +132,7 @@ export async function submitImageConversationTurn(db: Database, ownerId: string,
     const turnId = randomUUID();
     const inserted = await client.query<TurnRow>(`INSERT INTO image_conversation_turns(id,conversation_id,owner_user_id,client_request_id,payload_hash,input_payload,accepted_revision,input_active_version_id,reply_to_turn_id)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-    [turnId, conversationId, ownerId, clientRequestId, hash, JSON.stringify(input), conversation.state_revision, conversation.active_version_id, input.replyToTurnId]);
+    [turnId, conversationId, ownerId, clientRequestId, hash, JSON.stringify(input), conversation.state_revision, inputActiveVersionId, input.replyToTurnId]);
     for (const version of new Map(versions.filter(item => safeCounter(item.image_no) > previousImageNo).map(item => [item.id, item])).values()) {
       await appendConversationEvent(client, conversation, turnId, "version.created", { stateRevision: safeCounter(conversation.state_revision), version: versionSnapshot(version) });
     }
@@ -128,6 +141,17 @@ export async function submitImageConversationTurn(db: Database, ownerId: string,
     return { replayed: false, result: submission(inserted.rows[0], conversation) };
   });
 }
+function reusableContent({ text, attachments, outputPreferences }: AcceptedTurnInput) {
+  return { text, attachments, outputPreferences };
+}
+
+export async function getReusableTurnInput(db: Database, ownerId: string, conversationId: string, turnId: string) {
+  const source = (await db.query<Pick<TurnRow, "input_payload" | "input_active_version_id">>(
+    "SELECT input_payload,input_active_version_id FROM image_conversation_turns WHERE owner_user_id=$1 AND conversation_id=$2 AND id=$3", [ownerId, conversationId, turnId])).rows[0];
+  if (!source) throw new ImageConversationError(404, "NOT_FOUND", "原轮次不存在");
+  return { conversationId, turnId, inputActiveVersionId: source.input_active_version_id, ...reusableContent(source.input_payload) };
+}
+
 export async function getImageConversationTurn(db: Database, ownerId: string, conversationId: string, query: { turnId: string } | { clientRequestId: string }): Promise<TurnDetails> {
   return withTransaction(db, async client => {
     await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
