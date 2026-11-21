@@ -360,13 +360,13 @@ for (const source of ["cloud-url", "asset-only", "stale-blob"] as const) test(`s
     await page.screenshot({ path: info.outputPath("canvas-duplicate-original-draft.png"), animations: "disabled" });
 });
 
-test("a full sixteen-image draft can reselect its cached local canvas original without upload or submission", async ({
+test("a full five-image draft blocks all attachment entry points before upload or submission", async ({
     page,
     api,
 }, info) => {
     await page.setViewportSize({ width: 1800, height: 1800 });
     const { writes } = await openConversation(page);
-    const assets = Array.from({ length: 15 }, (_, index) => {
+    const assets = Array.from({ length: 4 }, (_, index) => {
         const id = `b4000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
         return { id, kind: "image", filename: `边界参考${index + 1}.png`, contentUrl: `/api/assets/${id}/content` };
     });
@@ -383,19 +383,28 @@ test("a full sixteen-image draft can reselect its cached local canvas original w
     await expect(panel.locator("[data-draft-asset-id]")).toHaveCount(1);
     await panel.getByRole("button", { name: "素材库选图", exact: true }).click();
     const picker = page.getByRole("dialog", { name: "选择设计参考", exact: true });
-    for (const asset of assets)
+    await expect(panel.getByText("当前图 + 附件 共 2/5")).toBeVisible();
+    for (const asset of assets.slice(0, 3))
         await picker.getByRole("button", { name: `选择图片：${asset.filename}`, exact: true }).click();
-    await picker.getByRole("button", { name: "使用这 15 张图片", exact: true }).click();
-    await expect(panel.locator("[data-draft-asset-id]")).toHaveCount(16);
+    await expect(picker.getByRole("button", { name: "选择图片：边界参考4.png" })).toBeDisabled();
+    await picker.getByRole("button", { name: "使用这 3 张图片", exact: true }).click();
+    await expect(panel.locator("[data-draft-asset-id]")).toHaveCount(4);
     const before = api.assets.size;
-    await addSelected.click();
-    await expect(addSelected).toBeEnabled();
-    await expect(panel.getByRole("alert")).toHaveCount(0);
-    await expect(panel.locator("[data-draft-asset-id]")).toHaveCount(16);
+    await expect(addSelected).toBeDisabled();
+    await expect(panel.getByRole("button", { name: "上传图片原件" })).toBeDisabled();
+    await expect(panel.getByRole("button", { name: "素材库选图" })).toBeDisabled();
+    await expect(panel.getByText("当前图 + 附件 共 5/5 · 名额已满")).toBeVisible();
+    await panel.getByRole("textbox", { name: "对话内容" }).evaluate((element, bytes) => {
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(new File([new Uint8Array(bytes)], "第六张.png", { type: "image/png" }));
+        element.dispatchEvent(new DragEvent("drop", { dataTransfer, bubbles: true, cancelable: true }));
+    }, [...fixturePng(85)]);
+    await expect(panel.getByRole("alert")).toContainText("最多 5 张，本次为 6 张");
+    await expect(panel.locator("[data-draft-asset-id]")).toHaveCount(4);
     expect(api.assets.size).toBe(before);
     expect(writes).toEqual([]);
     expect(api.submissions).toEqual([]);
-    await page.screenshot({ path: info.outputPath("canvas-sixteen-cached-original.png"), animations: "disabled" });
+    await page.screenshot({ path: info.outputPath("canvas-five-slot-limit.png"), animations: "disabled" });
 });
 
 test("unavailable thumbnails expose manual original preview without automatic full-image fallback or retry loops", async ({

@@ -17,6 +17,10 @@ export type ImageAgentImage = {
 
 export type ImageAgentFocus = { focusId?: string; explicitImageIds?: readonly string[]; newCreation?: boolean };
 export const IMAGE_AGENT_MAX_IMAGES = 5;
+export function conversationImageLimitError(attachments: number, hasCurrentImage: boolean) {
+    const used = attachments + Number(hasCurrentImage);
+    return used > IMAGE_AGENT_MAX_IMAGES ? `当前图和附件合计最多 ${IMAGE_AGENT_MAX_IMAGES} 张，本次为 ${used} 张，请先移除图片。` : null;
+}
 
 function findImage<T extends ImageAgentImage>(images: readonly T[], value: string): T {
     const image = images.find(item => item.id === value) || images.find(item => item.label === value);

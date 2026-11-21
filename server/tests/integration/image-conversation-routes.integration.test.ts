@@ -58,6 +58,28 @@ integration("image conversation HTTP contract with existing real sessions", () =
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 
+  test.each([true, false])("attachment overflow is rejected before accepting work; current image=%p", async hasBase => {
+    const user = await account();
+    const ids = Array.from({ length: 6 }, () => randomUUID());
+    await fixture.db.query(`INSERT INTO assets(id,owner_user_id,object_key,filename,mime_type,kind,status)
+      SELECT id,$1,'fixture/'||id,'source.png','image/png','image','ready' FROM unnest($2::uuid[]) AS id`, [user.id, ids]);
+    const response = await request(user.cookie, "", { clientRequestId: randomUUID(), entrypoint: "standalone", ...(hasBase ? { initialAssetId: ids[0] } : {}) });
+    expect(response.status).toBe(201);
+    const { data } = await response.json() as { data: { id: string; stateRevision: number; latestEventSeq: number } };
+    const path = `/${data.id}/turns`, before = wakes;
+    const input = { clientRequestId: randomUUID(), expectedStateRevision: data.stateRevision, text: "保留所有参考图", attachments: ids.slice(Number(hasBase)).map(assetId => ({ assetId })) };
+    const invalid = await request(user.cookie, path, input);
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({ code: "TURN_ATTACHMENT_LIMIT", msg: expect.stringContaining("最多 5 张，本次为 6 张") });
+    expect(wakes).toBe(before);
+    const unchanged = await request(user.cookie, `/${data.id}`);
+    expect(await unchanged.json()).toMatchObject({ data: { stateRevision: data.stateRevision, latestEventSeq: data.latestEventSeq, pendingTurn: null } });
+    const valid = { ...input, attachments: input.attachments.slice(0, -1) };
+    expect((await request(user.cookie, path, valid)).status).toBe(202);
+    expect((await request(user.cookie, path, valid)).status).toBe(200);
+    expect((await fixture.db.query("SELECT count(*)::int AS n FROM image_conversation_turns WHERE conversation_id=$1", [data.id])).rows[0].n).toBe(1);
+  });
+
   test("design history discovery uses the current session and one paged read without waking work", async () => {
     const user = await account(), other = await account(), project = randomUUID();
     await fixture.db.query("INSERT INTO canvas_documents(owner_user_id,external_id,revision,document) VALUES($1,$2,1,'{}')", [user.id, project]);

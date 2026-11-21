@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { IMAGE_AGENT_MAX_IMAGES } from "../../../shared/image-agent/focus";
 import {
     ArrowDownToLine,
     Check,
@@ -269,7 +270,7 @@ function OwnedImageConversationPanel({
         state.busy ||
         Boolean(state.receipt || state.createReceipt || pending) ||
         Boolean(state.id && !state.view);
-    const canSend = !blocked && state.draft.text.trim().length > 0 && state.draft.text.length <= 10000;
+    const canSend = !blocked && state.imageCount <= IMAGE_AGENT_MAX_IMAGES && state.draft.text.trim().length > 0 && state.draft.text.length <= 10000;
     const versions = state.view?.versions || [],
         messages = state.view?.messages || [];
     const follow = useChatBottomFollow(state.view?.messages, state.id || undefined);
@@ -723,7 +724,7 @@ function OwnedImageConversationPanel({
                                         type="button"
                                         aria-label="上传图片原件"
                                         className={cn(control, "border-transparent px-2")}
-                                        disabled={blocked}
+                                        disabled={blocked || !state.remainingImages}
                                         onClick={() => files.current?.click()}
                                     >
                                         <ImagePlus className="size-4" />
@@ -732,17 +733,20 @@ function OwnedImageConversationPanel({
                                     <button
                                         type="button"
                                         className={cn(control, "border-transparent px-2")}
-                                        disabled={blocked || state.draft.attachments.length >= 16}
+                                        disabled={blocked || !state.remainingImages}
                                         onClick={() => setPickerOpen(true)}
                                     >
                                         <Images className="size-4" />
                                         素材库选图
                                     </button>
+                                    <span aria-live="polite" className="text-xs text-muted-foreground">
+                                        当前图 + 附件 共 {state.imageCount}/{IMAGE_AGENT_MAX_IMAGES}{state.remainingImages === 0 ? " · 名额已满" : ""}
+                                    </span>
                                     {selectedCanvasImages.length ? (
                                         <button
                                             type="button"
                                             className={cn(control, "border-transparent px-2")}
-                                            disabled={blocked}
+                                            disabled={blocked || !state.remainingImages}
                                             onClick={() => void addImages(selectedCanvasImages)}
                                         >
                                             <ImagePlus className="size-4" />
@@ -823,10 +827,10 @@ function OwnedImageConversationPanel({
                 }
             >
                 <ReferencePicker
-                    open={pickerOpen}
+                    open={pickerOpen && state.remainingImages > 0}
                     initialTab="assets"
                     items={options.canvasImages || []}
-                    max={Math.max(1, 16 - state.draft.attachments.length)}
+                    max={state.remainingImages}
                     onChoose={addImages}
                     onClose={() => setPickerOpen(false)}
                 />

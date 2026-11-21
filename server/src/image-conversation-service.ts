@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { conversationImageLimitError } from "../../shared/image-agent/focus";
 import type { PoolClient } from "pg";
 import type {
   AcceptedTurnInput, CancellationResult, ConversationPage, ConversationSnapshot, MessagePage, PaginationQuery, TurnDetails, TurnPage,
@@ -108,6 +109,8 @@ export async function submitImageConversationTurn(db: Database, ownerId: string,
       const reply = await client.query("SELECT id FROM image_conversation_turns WHERE conversation_id=$1 AND id=$2", [conversationId, input.replyToTurnId]);
       if (!reply.rows.length) throw new ImageConversationError(404, "NOT_FOUND", "回复的轮次不属于当前会话");
     }
+    const limitError = conversationImageLimitError(input.attachments.length, Boolean(conversation.active_version_id));
+    if (limitError) throw new ImageConversationError(400, "TURN_ATTACHMENT_LIMIT", limitError);
     const previousImageNo = safeCounter(conversation.last_image_no);
     const versions: VersionRow[] = [];
     for (const attachment of input.attachments) versions.push(await registerUploadedVersion(client, conversation, attachment.assetId));

@@ -1,3 +1,4 @@
+import { conversationImageLimitError } from "../../../shared/image-agent/focus";
 import type {
     AttachmentPurpose,
     ConversationMessage,
@@ -38,7 +39,7 @@ const merge = <T extends { id: string }>(items: T[], item: T) => [
     item,
 ];
 
-export function mergeConversationAttachments(current: ConversationAttachment[], incoming: ConversationAttachment[]) {
+export function mergeConversationAttachments(current: ConversationAttachment[], incoming: ConversationAttachment[], hasCurrentImage = false) {
     if (new Set(incoming.map((item) => item.assetId)).size !== incoming.length)
         throw new Error("添加的图片重复，请检查图片用途。");
     const bases = incoming.filter((item) => item.purpose === "new_base");
@@ -52,7 +53,8 @@ export function mergeConversationAttachments(current: ConversationAttachment[], 
         ]),
     );
     for (const item of incoming) result.set(item.assetId, { ...result.get(item.assetId), ...item });
-    if (result.size > 16) throw new Error("每轮最多添加 16 张图片。");
+    const limitError = conversationImageLimitError(result.size, hasCurrentImage);
+    if (limitError) throw new Error(limitError);
     return [...result.values()];
 }
 

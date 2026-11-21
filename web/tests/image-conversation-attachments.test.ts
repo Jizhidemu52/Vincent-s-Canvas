@@ -46,10 +46,15 @@ test("invalid multi-base, conflicting duplicate and overflow batches fail withou
             ],
         ),
     ).toThrow("重复");
-    const full = Array.from({ length: 16 }, (_, index) => ({ assetId: asset(index), name: String(index) }));
-    expect(() => mergeConversationAttachments(full, [{ assetId: asset(17), name: "多余" }])).toThrow("16");
-    expect(full).toHaveLength(16);
-    expect(mergeConversationAttachments(full, [{ assetId: asset(0), name: "原件" }])).toHaveLength(16);
+});
+
+test.each([false, true])("current image and draft share five slots: base=%p", (base) => {
+    const limit = base ? 4 : 5;
+    const full = Array.from({ length: limit }, (_, index) => ({ assetId: asset(index), name: String(index) }));
+    expect(mergeConversationAttachments([], full, base)).toEqual(full);
+    expect(() => mergeConversationAttachments(full, [{ assetId: asset(7), name: "多余" }], base)).toThrow("最多 5 张，本次为 6 张");
+    expect(full).toHaveLength(limit);
+    expect(mergeConversationAttachments(full, [{ assetId: asset(0), name: "原件" }], base)).toHaveLength(limit);
 });
 
 test("request serialization retains explicit roles and defaults legacy drafts to auto", () => {

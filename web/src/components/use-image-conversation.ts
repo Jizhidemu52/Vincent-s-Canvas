@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { conversationImageLimitError, IMAGE_AGENT_MAX_IMAGES } from "../../../shared/image-agent/focus";
 import type {
     AttachmentPurpose,
     ConversationEntrypoint,
@@ -114,6 +115,9 @@ export function useImageConversation(ownerId: string, options: ImageConversation
     const draftKey = id || "new",
         draft = local.drafts[draftKey] || emptyConversationDraft();
     const receipt = id ? local.receipts[id] : undefined;
+    const hasBase = (key: string) => key === "new" ? Boolean(callbacks.current.initialAssetId) : Boolean(viewRef.current?.snapshot.id === key && viewRef.current.snapshot.activeVersionId);
+    const imageCount = draft.attachments.length + Number(id ? Boolean(view?.snapshot.activeVersionId) : Boolean(options.initialAssetId));
+    const remainingImages = Math.max(0, IMAGE_AGENT_MAX_IMAGES - imageCount);
     const save = useCallback(
         (update: (value: ConversationLocalState) => ConversationLocalState) => {
             const next = update(localRef.current);
@@ -408,6 +412,8 @@ export function useImageConversation(ownerId: string, options: ImageConversation
             const snapshot = id ? viewRef.current?.snapshot : await create(options.initialAssetId, signal);
             if (!snapshot) throw new Error("会话尚未读取完成，请稍后发送。");
             const currentDraft = localRef.current.drafts[snapshot.id] || emptyConversationDraft();
+            const limitError = conversationImageLimitError(currentDraft.attachments.length, Boolean(snapshot.activeVersionId));
+            if (limitError) throw new Error(limitError);
             const input: SubmitTurnRequest = {
                 clientRequestId: createClientId(),
                 expectedStateRevision: snapshot.stateRevision,
@@ -473,7 +479,8 @@ export function useImageConversation(ownerId: string, options: ImageConversation
     const upload = (files: File[]) =>
         action(async (signal) => {
             if (receipt || localRef.current.create || viewRef.current?.snapshot.pendingTurn) return;
-            if (files.length + draft.attachments.length > 16) throw new Error("每轮最多添加 16 张图片。");
+            const limitError = conversationImageLimitError(files.length + (localRef.current.drafts[draftKey]?.attachments.length || 0), hasBase(draftKey));
+            if (limitError) throw new Error(limitError);
             if (files.some((file) => !file.type.startsWith("image/")))
                 throw new Error("此会话入口目前只接收图片原件。");
             if (!files.length) return;
@@ -493,6 +500,7 @@ export function useImageConversation(ownerId: string, options: ImageConversation
             };
             let conversationId = id;
             let filesToUpload = files;
+            if (!conversationId && options.initialAssetId) conversationId = (await create(options.initialAssetId, signal)).id;
             if (!conversationId) {
                 const first = await uploadFile(files[0]!);
                 const snapshot = await create(first.assetId, signal);
@@ -512,7 +520,7 @@ export function useImageConversation(ownerId: string, options: ImageConversation
                     ...current.drafts,
                     [key]: {
                         ...currentDraft,
-                        attachments: mergeConversationAttachments(currentDraft.attachments, items),
+                        attachments: mergeConversationAttachments(currentDraft.attachments, items, hasBase(key)),
                     },
                 },
             };
@@ -559,10 +567,9 @@ export function useImageConversation(ownerId: string, options: ImageConversation
             ];
             const currentDraft = localRef.current.drafts[key] || emptyConversationDraft();
             const currentIds = new Set(currentDraft.attachments.map((item) => item.assetId));
-            if (prepared.every((image) => Boolean(image.assetId))) {
-                const newIncomingCount = prepared.filter((image) => !currentIds.has(image.assetId!)).length;
-                if (currentIds.size + newIncomingCount > 16) throw new Error("每轮最多添加 16 张图片。");
-            }
+            const newIncomingCount = prepared.filter((image) => !image.assetId || !currentIds.has(image.assetId)).length;
+            const limitError = conversationImageLimitError(currentIds.size + newIncomingCount, hasBase(key));
+            if (limitError) throw new Error(limitError);
             const attachments = await mapConcurrent(prepared, 4, async (image) => {
                 assertCurrent();
                 let assetId = image.assetId;
@@ -593,6 +600,8 @@ export function useImageConversation(ownerId: string, options: ImageConversation
     };
     return {
         ready,
+        imageCount,
+        remainingImages,
         view,
         conversations: conversations.filter(
             (item) =>
