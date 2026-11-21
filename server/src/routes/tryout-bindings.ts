@@ -8,10 +8,12 @@ import {writeAudit} from "../audit";
 import {assertCanvasOwner,CanvasDocumentError} from "../canvas-document";
 import {assertTryoutImageModel,bindingColumns,listTryoutModels} from "../tryout-model-bindings";
 import {tryoutSpeedReport} from "../tryout-speed";
+import {qualityReport} from "../../../shared/try-on-quality";
 
 export function createTryoutBindingsAdmin(db:Database){
     const router=Router();
     router.use(requireRole("super_admin"));
+    router.get("/wear-quality",(_req,res)=>res.set("Cache-Control","private, no-store").json({groups:qualityReport()}));
     router.get("/speed",async(_req,res,next)=>{try{
         res.set("Cache-Control","private, no-store").json(await tryoutSpeedReport(db));
     }catch(e){next(e);}});

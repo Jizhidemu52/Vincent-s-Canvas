@@ -1,4 +1,5 @@
 import {expect,test} from "./fixtures";
+import {qualityReport} from "../../shared/try-on-quality";
 
 test("super admin binds HD and a stale quick editor cannot overwrite another admin",async({api,page},info)=>{
     api.role="super_admin";
@@ -38,4 +39,21 @@ test("super admin binds HD and a stale quick editor cannot overwrite another adm
     await expect(speed.getByRole("row",{name:/松手 → 首次显示/})).toContainText("2.40 s");await expect(speed.getByRole("row",{name:/收到结果 → 显示回执/})).toContainText("—");
     await speed.getByText("暂停与失败原因分布").click();await expect(speed.getByText(/有上游 ID：1 单/)).toBeVisible();
     await page.screenshot({path:info.outputPath("tryout-speed-fixture.png")});
+    let qualityReads=0,available=false;
+    await page.route("**/api/admin/tryout-bindings/wear-quality",r=>{
+        qualityReads++;expect(r.request().method()).toBe("GET");
+        return r.fulfill(!available?{status:503,json:{message:"隔离暂不可用"}}:{json:{groups:qualityReport([{
+            group:"帽子",origin:"synthetic",variant:"fixture",testedAt:"2026-11-21T00:00:00.000Z",sampleCount:30,reviewed:6,passed:27,score:4.2,stable:true,evidenceSha256:"c".repeat(64)
+        }])}});
+    });
+    await page.getByRole("tab",{name:"上身效果",exact:true}).click();
+    const quality=page.getByRole("region",{name:"上身效果"}),hat=quality.getByRole("row",{name:/帽子/});
+    await expect(quality.getByRole("alert")).toBeVisible();available=true;await quality.getByRole("button",{name:"重试"}).click();await expect(hat).toContainText("未测");
+    await expect(quality.getByRole("row")).toHaveCount(10);
+    await quality.getByLabel("样本来源").selectOption("synthetic");await expect(hat).toContainText("90%");await expect(hat).toContainText("4.20");
+    const readsBeforeFilter=qualityReads;await page.screenshot({path:info.outputPath("wear-quality-isolated.png")});
+    await page.setViewportSize({width:390,height:844});await quality.scrollIntoViewIfNeeded();
+    await quality.getByLabel("样本来源").selectOption("physical");await expect(hat).toContainText("未测");expect(qualityReads).toBe(readsBeforeFilter);
+    const scroll=quality.locator(".overflow-x-auto");expect(await scroll.evaluate(el=>el.scrollWidth>el.clientWidth)).toBe(true);
+    await page.screenshot({path:info.outputPath("wear-quality-mobile.png")});
 });
