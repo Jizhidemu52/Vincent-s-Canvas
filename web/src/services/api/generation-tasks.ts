@@ -535,7 +535,7 @@ export async function recoverQueuedTask(id: string, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const result = await request<{ task: QueuedTask; recovered?: boolean; message?: string }>(`/api/tasks/${id}/recover`, { method: "POST", signal });
     signal?.throwIfAborted();
-    if (result.task.status !== "success" && isImageResultProcessingFailure(result.task)) throw new QueuedTaskFailedError(result.task);
+    if (result.task.status !== "success" && (isImageResultProcessingFailure(result.task) || classifyTaskRecovery(result.task) === "terminal")) throw new QueuedTaskFailedError(result.task);
     if (result.task.status === "paused") throw new QueuedTaskPausedError(result.task, result.message);
     return result.task;
 }
@@ -620,7 +620,7 @@ export async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?:
         },
         done: tasks => {
         const paused = haltOnPaused ? tasks.find((task) => task.status === "paused") : undefined;
-        if (paused && isImageResultProcessingFailure(paused)) throw new QueuedTaskFailedError(paused);
+        if (paused && classifyTaskRecovery(paused) === "terminal") throw new QueuedTaskFailedError(paused);
         if (paused) throw new QueuedTaskPausedError(paused);
         return tasks.length === ids.length && tasks.every((task) => classifyTaskRecovery(task) === "terminal");
     } }); } finally { events.close(); }

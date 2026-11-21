@@ -25,6 +25,35 @@ import type { TaskPausedKind } from "../../shared/task-repair";
     base = `http://127.0.0.1:${address.port}/tasks`;
   });
   afterAll(async () => { await new Promise<void>(resolve => server.close(() => resolve())); await pg.close(); });
+  test("only the owner's persisted provider originals are offered, even before role metadata is written", async () => {
+    const task = randomUUID(), other = randomUUID(), asset = randomUUID();
+    await pg.db.query("INSERT INTO users(id,username,display_name) VALUES($1,'other-reviewer','other-reviewer')", [other]);
+    await pg.db.query(`INSERT INTO tasks(id,request_id,user_id,project_id,operation_type,status,paused_kind)
+      VALUES($1::uuid,($1::uuid)::text,$2,'test','inpaint','paused','needs_review')`, [task,owner]);
+    const get = (user: string) => fetch(`${base}/${task}/review-originals`, {headers: {"x-test-actor": user}});
+    const before = deliveries.length;
+    expect(await (await get(owner)).json()).toEqual({taskId:task, originals:[]});
+    const prefix = `users/${owner}/generated/${task}/task-${task}-`;
+    for (const [id, user, suffix, source, deleted] of [
+      [asset,owner,"2-provider-original.png","edit",false],
+      [randomUUID(),owner,"1.png","edit",false],
+      [randomUUID(),owner,"1-export.png","edit",false],
+      [randomUUID(),other,"3-provider-original.png","edit",false],
+      [randomUUID(),owner,"4-provider-original.png","upload",false],
+      [randomUUID(),owner,"5-provider-original.png","edit",true],
+      [randomUUID(),owner,"6-provider-original.jpg","edit",false],
+    ] as const) {
+      await pg.db.query(`INSERT INTO assets(id,owner_user_id,task_id,object_key,filename,mime_type,byte_size,source,status,deleted_at)
+        VALUES($1,$2,$3,$4,'renamed-by-user','image/png',21,$5,'ready',CASE WHEN $6::boolean THEN now() END)`, [id,user,task,prefix+suffix,source,deleted]);
+    }
+    const response = await get(owner);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(await response.json()).toEqual({taskId:task, originals:[{assetId:asset,resultIndex:1,mimeType:"image/png",bytes:21,filename:`task-${task}-2-provider-original.png`}]});
+    expect((await get(other)).status).toBe(404);
+    await pg.db.query("UPDATE tasks SET paused_kind='submission_unknown' WHERE id=$1",[task]);
+    expect((await get(owner)).status).toBe(404);
+    expect(deliveries.length).toBe(before);
+  });
   test.each([
     ["result_repair",true,"重新保存"],["awaiting_query",true,"原任务查询"],["submission_unknown",false,"不会自动重发"],["needs_review",false,"管理员"],
   ] satisfies Array<[TaskPausedKind, boolean, string]>)("%s: recovery never creates another task or misreports a new charge", async (kind, allowed, message) => {

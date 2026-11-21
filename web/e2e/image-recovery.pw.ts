@@ -41,6 +41,25 @@ async function unknownCard(page: Page) {
     await expect(page.getByRole("button", { name: "取消任务", exact: true })).toHaveCount(0);
 }
 
+test("validation review with no archived output never offers a download or ordinary paid retry", async ({ page, context, api }, info) => {
+    const recoveries = await captureRecoveryWrites(context, api);
+    api.taskStatus = "paused";
+    await openImageEditor(page);
+    const task = await submitImage(page, api, "保留针织纹理");
+    await unknownCard(page);
+    await page.route(`**/api/tasks/${task.id}/review-originals`, route => route.fulfill({json:{taskId: task.id, originals:[]}}));
+    Object.assign(task, {pausedKind:"needs_review",repairErrorCode:"RESULT_MASK_INVALID"});
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByText("这笔任务没有可下载的已保存原件。")).toBeVisible();
+    await expect(page.getByText("需要管理员协助",{exact:true})).toBeVisible();
+    await expect(page.getByRole("alert").filter({hasText:"前景蒙版无效"})).toBeVisible();
+    await expect(page.getByRole("button",{name:"下载已保存原件"})).toHaveCount(0);
+    await expect(page.getByRole("button",{name:"按原参数重试"})).toHaveCount(0);
+    expect(recoveries).toEqual([]);
+    expect(api.submissions).toHaveLength(1);
+    await page.screenshot({path:info.outputPath("image-no-original.png"),fullPage:true});
+});
+
 async function expectRecordedTask(page: Page, task: { id: string; prompt: string }) {
     type Log = { prompt: string; images: Array<{ sourceTaskId?: string }> };
     await expect.poll(async () => (await readWorkspaceRecords<Log>(page, "image_generation_logs"))

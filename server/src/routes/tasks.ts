@@ -5,6 +5,7 @@ import { z } from "zod";
 import { taskSubmissionSchema as singleSchema, batchSubmissionSchema as batchSchema } from "../../../shared/task-contracts";
 
 import { writeAudit } from "../audit";
+import { readTaskReviewOriginals } from "../task-review-originals";
 import { requeueRepairs, type PausedKind } from "../task-repair";
 import type { Cache, Database } from "../db";
 import { makeCursorPage, parseCursorPage } from "../cursor-pagination";
@@ -506,6 +507,16 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
         return;
       }
       response.json({ task: result.rows[0] });
+    } catch (error) { next(error); }
+  });
+
+  router.get("/:id/review-originals", async (request, response, next) => {
+    response.set("Cache-Control", "private, no-store");
+    try {
+      const id = z.string().uuid().parse(request.params.id);
+      const result = await readTaskReviewOriginals(db, (request as unknown as AuthenticatedRequest).auth.id, id);
+      if (!result) { response.status(404).json({ error: "NOT_FOUND", message: "没有可访问的待核查任务" }); return; }
+      response.json(result);
     } catch (error) { next(error); }
   });
 
