@@ -42,8 +42,11 @@ sqlTest("independent design discussion initializes real Sol UUID, preserves exis
     expect(sol).not.toBe("gpt-6.2-sol");
     await db.query("DELETE FROM tool_api_configurations WHERE tool_key='canvas-design-chat'");
     const migration = await readFile(new URL("../../src/migrations/053_canvas_design_chat.sql", import.meta.url), "utf8");
+    const seedsAt = migration.indexOf("INSERT INTO module_flags");
+    expect(seedsAt).toBeGreaterThan(0);
     const client = await db.connect();
-    try { await client.query(`DO $design_chat_replay$ BEGIN\n${migration}\nEND; $design_chat_replay$`); } finally { client.release(); }
+    try { await client.query(`DO $design_chat_seed_replay$ BEGIN\n${migration.slice(seedsAt)}\nEND; $design_chat_seed_replay$`); } finally { client.release(); }
+    expect((await db.query("SELECT enabled FROM module_flags WHERE module_key='canvas-tryout'")).rows).toEqual([{ enabled: false }]);
     expect(await row()).toMatchObject({ model_config_id: null, configuration_version: 1 });
     await initializeCanvasDesignChatModel(db);
     expect(await row()).toMatchObject({ model_config_id: sol, configuration_version: 2 });
