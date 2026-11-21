@@ -41,7 +41,7 @@ export type ResponseFunctionTool = {
 export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: Array<Record<string, unknown>> };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-type RequestOptions = ImageAgentGenerationOptions & { quickImageAction?: QuickImageAction; exactPrompt?: boolean; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; chatProfile?: "creative-chat" | "canvas-assistant"; profileContext?: Record<string, unknown>; requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatWaiting?: (message: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
+type RequestOptions = ImageAgentGenerationOptions & { quickImageAction?: QuickImageAction; exactPrompt?: boolean; promptInput?: PromptInputData; onOriginalPrompt?: () => void; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; chatProfile?: "creative-chat" | "canvas-assistant"; profileContext?: Record<string, unknown>; requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatWaiting?: (message: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "responses_assistant"; output: Array<Record<string, unknown>> } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
@@ -74,6 +74,7 @@ function requestResolvedGeneration(resolved: Awaited<ReturnType<typeof resolveTo
         promptInput: options?.promptInput,
         onOptimizing: options?.onOptimizing,
         onCompiled: options?.onCompiled,
+        onOriginalPrompt: options?.onOriginalPrompt,
         count,
         operationType: options?.operationType || "image_generation",
         tool: options?.tool,
@@ -96,7 +97,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         const tool = options?.tool === "canvas-edit" ? "canvas-edit" : action === "hd-upscale" ? "detail-enhance" : "image-edit";
         return requestQueuedImages({ modelId: "", prompt: "", count: 1, operationType: tool === "detail-enhance" ? "upscale" : "inpaint", tool, quickImageAction: action,
             references, requestId: options?.requestId, signal: options?.signal, cancelOnAbort: options?.cancelOnAbort,
-            onSubmissionStarted: options?.onSubmissionStarted, onSubmitted: options?.onSubmitted, onCompiled: options?.onCompiled });
+            onSubmissionStarted: options?.onSubmissionStarted, onSubmitted: options?.onSubmitted, onOriginalPrompt: options?.onOriginalPrompt, onCompiled: options?.onCompiled });
     }
     if (!mask && imageModelProfile(config.model || config.imageModel).kind === "midjourney-blend") {
         return requestGeneration(config, "", { ...options, operationType: "image_generation", tool: options?.tool === "canvas-edit" ? "canvas-image" : options?.tool }, references);
@@ -136,6 +137,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         promptInput: options?.promptInput ? { ...options.promptInput, hasMask: Boolean(mask), ...(mask ? { maskReferenceIndex: references.length } : {}) } : undefined,
         onOptimizing: options?.onOptimizing,
         onCompiled: options?.onCompiled,
+        onOriginalPrompt: options?.onOriginalPrompt,
         count,
         operationType: options?.operationType || "inpaint",
         tool: options?.tool,

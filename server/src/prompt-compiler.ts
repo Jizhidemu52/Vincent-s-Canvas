@@ -13,6 +13,7 @@ import { chatUpstreamFailureReasons } from "./chat-upstream-failure";
 import { promptImageReferenceLimit } from "./image-task-policy";
 import { newCreativeFields, validateNewCreativeReferences } from "./new-creative-scenes";
 import { imagePromptOutputContract } from "./prompt-output-contract";
+import { withOptimizerDeadline, type PromptFallbackPolicy } from "./prompt-original-fallback";
 import { compileSceneTemplate } from "./prompt-scene-templates";
 import { assertMinimalPromptFidelity, minimalPromptPolicy, promptChainRevision, promptOutputMetrics } from "./prompt-minimal-policy";
 
@@ -20,7 +21,7 @@ export type PromptActor = { id: string; role: string; departmentId?: string | nu
 export type PromptSource = { bytes: Uint8Array; mimeType: string; previewDataUrl: string };
 export type PromptTargetModel = { id: string; modelId: string; protocol: string; fingerprint: string; workflowConfigId?: string | null };
 export type PromptOptimizer = { id: string; modelId: string; fingerprint: string; estimatedRmbCost: number | null;
-  invoke: (system: string, content: Array<{ type: "input_text"; text: string } | { type: "input_image"; image_url: string }>, context: { userId: string; compilationId: string }) => Promise<{ content: string; usage?: { inputTokens?: number; outputTokens?: number; actualCost?: number; currency?: string } }>;
+  invoke: (system: string, content: Array<{ type: "input_text"; text: string } | { type: "input_image"; image_url: string }>, context: { userId: string; compilationId: string; signal?: AbortSignal }) => Promise<{ content: string; usage?: { inputTokens?: number; outputTokens?: number; actualCost?: number; currency?: string } }>;
 };
 export type PromptCompilerRuntime = {
   resolveTarget(actor: PromptActor, request: PromptCompilationRequest, options?: { adminTest: boolean }): Promise<PromptTargetModel>;
@@ -58,7 +59,7 @@ function sourceHash(source: PromptSource) { return createHash("sha256").update(s
 const normalInput = (input: PromptInput) => { const { compilationId: _id, ...rest } = input; return rest; };
 
 export class PromptCompiler {
-  constructor(readonly store: PromptRecipeStore, readonly runtime: PromptCompilerRuntime) {}
+  constructor(readonly store: PromptRecipeStore, readonly runtime: PromptCompilerRuntime, readonly fallbackPolicy?: PromptFallbackPolicy) {}
 
   compileForResponse(actor: PromptActor, data: PromptCompilationRequest, prefer?: string | null) {
     if (!prefer?.split(",").some(value => value.trim().toLowerCase() === "respond-async")) return this.compile(actor, data);
@@ -162,7 +163,9 @@ export class PromptCompiler {
           inputTokens: 0, outputTokens: 0, actualCost: 0, estimatedCost: null, currency: "CNY", message: "服务端固定模板，未调用改写模型。" });
         return checkedResult((await this.store.getCompilation(claim.id, actor.id))!);
       }
-      const result = await optimizer!.invoke(system, content, { userId: actor.id, compilationId: claim.id });
+      const invoke = (signal?: AbortSignal) => optimizer!.invoke(system, content, { userId: actor.id, compilationId: claim.id, ...(signal ? { signal } : {}) });
+      const result = this.fallbackPolicy && request.toolKey?.startsWith("creative-")
+        ? await withOptimizerDeadline(this.fallbackPolicy.PROMPT_OPTIMIZATION_TIMEOUT_MS, invoke) : await invoke();
       rawResponse = result.content;
       usage = result.usage;
       const { avoidForMetrics, ...output } = parseOptimizedPrompt(result.content, [system], outputOptions);
@@ -184,7 +187,7 @@ export class PromptCompiler {
         ...(error.upstreamReason && chatUpstreamFailureReasons.includes(error.upstreamReason) ? { upstreamReason: error.upstreamReason } : {}),
       } : {};
       const metrics = { rawResponse, latencyMs: Math.round(performance.now() - started), ...usageFields(usage, rawResponse === null ? null : optimizer?.estimatedRmbCost ?? null), ...upstreamDiagnostics,
-        ...(uncertain ? { upstreamOutcome: "unknown" as const } : {}) };
+        ...(uncertain || failure.code === "PROMPT_OPTIMIZATION_TIMEOUT" ? { upstreamOutcome: "unknown" as const } : {}) };
       if (!uncertain && active.recipe.failurePolicy === "fallback" && active.version.fallbackPrompt.trim() && failure.code !== "PROMPT_OUTPUT_REJECTED") {
         const prompt = active.version.fallbackPrompt.replaceAll("{{user_text}}", userText).replaceAll("{{fields}}", JSON.stringify(fields));
         try {

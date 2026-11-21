@@ -37,7 +37,7 @@ type ToolCall = { id: string; type: "function"; function: { name: string; argume
 export type ChatCompletionUsage = { inputTokens?: number; outputTokens?: number; actualCost?: number; currency?: string };
 export type ChatCompletionResult = { content: string; toolCalls: ToolCall[]; stopReason?: string; claudeAssistantContent?: Array<Record<string, unknown>>; responsesOutputItems?: Array<Record<string, unknown>>; usage?: ChatCompletionUsage };
 export type ChatCompletionInput = { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number }; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number }; privateProfile?: boolean;
-    waitForResult?: boolean; providerImages?: { access: ProviderChatImageAccess; userId: string } };
+    waitForResult?: boolean; signal?: AbortSignal; providerImages?: { access: ProviderChatImageAccess; userId: string } };
 type ChatModel = { model_id: string; base_url: string; protocol: string; encrypted_credentials: string | null };
 /** Shared by explicit administrator analysis selection and the execution adapter. */
 export const CHAT_COMPLETION_PROTOCOLS = ["openai", "custom", "apimart", "gemini", "anthropic", "openai-chat"] as const;
@@ -375,7 +375,7 @@ async function requestClaudeCompletion(
         method: "POST",
         headers: claudeHeaders(credentials, model.protocol),
         body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { modelId: model.model_id, maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking }) }),
-        signal: AbortSignal.timeout(180000),
+        signal: input.signal ?? AbortSignal.timeout(180000),
     });
     if (!upstream.ok) throw await upstreamError("Claude Provider", upstream, model.protocol === "apimart" || input.privateProfile);
     return readClaudeResponse(await readNativeChatPayload(upstream) as ClaudeResponse);
@@ -590,7 +590,7 @@ async function requestOpenAiCompletion(
             parallel_tool_calls: false,
             ...(model.protocol === "apimart" ? { stream: false, ...(input.tools.length ? { include: ["reasoning.encrypted_content"] } : {}) } : {}),
         }),
-        signal: AbortSignal.timeout(chatResultTimeoutMs(model, input)),
+        signal: input.signal ?? AbortSignal.timeout(chatResultTimeoutMs(model, input)),
     });
     if (!upstream.ok) throw await upstreamError("对话 Provider", upstream, model.protocol === "apimart" || input.privateProfile);
     if (model.protocol === "apimart") return readApiMartResponses(await readApiMartChatPayload(upstream));
@@ -739,7 +739,7 @@ async function requestOpenAiChatCompletion(
                 parallel_tool_calls: false,
             } : {}),
         }),
-        signal: AbortSignal.timeout(chatResultTimeoutMs(model, input)),
+        signal: input.signal ?? AbortSignal.timeout(chatResultTimeoutMs(model, input)),
     });
     if (!upstream.ok) throw await upstreamError("Chat Completions Provider", upstream, model.protocol === "apimart" || input.privateProfile);
     if (model.protocol === "apimart") return readApiMartChatChoices(await readApiMartChatPayload(upstream));
@@ -757,7 +757,7 @@ async function requestGeminiCompletion(
         method: "POST",
         headers: requestHeaders(credentials),
         body: JSON.stringify(buildGeminiRequestBody(input)),
-        signal: AbortSignal.timeout(chatResultTimeoutMs(model, input)),
+        signal: input.signal ?? AbortSignal.timeout(chatResultTimeoutMs(model, input)),
     });
     if (!upstream.ok) throw await upstreamError("Gemini Provider", upstream, input.privateProfile);
 

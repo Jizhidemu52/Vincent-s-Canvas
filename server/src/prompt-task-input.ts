@@ -7,6 +7,7 @@ import { normalizeVideoMotionSettings } from "../../shared/video-motion-options"
 import { assertImageEditMarkupSupport } from "./image-edit-input";
 import { prepareFixedToolPrompt, type FixedToolPromptTarget } from "./fixed-tool-prompt";
 import { resolveVideoMode } from "./video-models";
+import { allowsOriginalPrompt, originalFallbackPrompt } from "./prompt-original-fallback";
 
 export type PromptTaskInput = {
   requestId: string; operationType: string; toolKey?: string; modelConfigId?: string | null;
@@ -26,6 +27,7 @@ export async function preparePromptTaskInput<T extends PromptTaskInput>(compiler
   if (!["image_generation", "inpaint", "batch_image", "video_generation"].includes(input.operationType)) throw new PromptOptimizationError("PROMPT_OPERATION_INVALID", "此任务类型不支持提示词优化");
   if (!input.modelConfigId) throw new PromptOptimizationError("MODEL_REQUIRED", "请先选择生成模型");
   const promptInput = promptInputSchema.parse(input.promptInput);
+  if (!promptInput.userText.trim() && allowsOriginalPrompt(compiler.fallbackPolicy, input.toolKey, promptInput)) promptInput.userText = input.prompt.trim();
   const isVideo = input.operationType === "video_generation";
   const expectedMode = isVideo ? "video" : input.operationType === "image_generation" ? "generate" : "edit";
   if (promptInput.mode !== expectedMode || (promptInput.scene === "video-motion") !== isVideo) throw new PromptOptimizationError("PROMPT_OPERATION_INVALID", "优化模式与实际生成操作不一致，未提交生成");
@@ -75,20 +77,25 @@ export async function preparePromptTaskInput<T extends PromptTaskInput>(compiler
   } else if (promptInput.hasMask) throw new PromptOptimizationError("PROMPT_MASK_INVALID", "生成输入缺少优化时使用的选区蒙版");
   const compilation = await compiler.compile(actor, { requestId: input.requestId, modelConfigId: input.modelConfigId,
     toolKey: input.toolKey, promptInput, sourceUrls });
-  if (compilation.status !== "success" || !compilation.prompt) throw new PromptOptimizationError(compilation.errorCode || "PROMPT_OPTIMIZING",
+  const original = originalFallbackPrompt(compiler.fallbackPolicy, input.toolKey, promptInput, compilation);
+  const finalPrompt = original ?? compilation.prompt;
+  if ((!original && compilation.status !== "success") || !finalPrompt) throw new PromptOptimizationError(compilation.errorCode || "PROMPT_OPTIMIZING",
     compilation.message || "提示词仍在优化，未提交生成，请查询原请求", compilation.status === "failed" ? 422 : 409);
   if (compilation.questions?.length) throw new PromptOptimizationError("PROMPT_CLARIFICATION_REQUIRED", `请先补充要求再生成：${compilation.questions.join("；")}`, 422);
-  if (isVideo) assertVideoMotionTimeline(compilation.prompt, videoTimelineDuration);
+  if (isVideo) assertVideoMotionTimeline(finalPrompt, videoTimelineDuration);
   if (["pattern-extract", "pattern-colorway"].includes(promptInput.scene)) {
     const target = await compiler.runtime.resolveTarget(actor, { requestId: input.requestId, modelConfigId: input.modelConfigId,
       toolKey: input.toolKey, promptInput, sourceUrls: input.sourceUrls }, { adminTest: compilation.adminTest === true });
     parameters = await promptImageBackground(promptInput, target, () => compiler.runtime.readSource(actor, input.sourceUrls[0]!), parameters);
   }
-  const userInput = { ...promptInput, compilationId: compilation.id };
-  parameters.promptOptimization = { optimized: compilation.optimized, compilationId: compilation.id, ...(compilation.summaryZh ? { summaryZh: compilation.summaryZh } : {}) };
+  const previewInput = { ...promptInput, compilationId: compilation.id };
+  const userInput = original ? { ...promptInput, compilationId: undefined } : previewInput;
+  const summaryZh = original ? "已按你的原始描述生成（提示词优化未完成，不影响本次出图）" : compilation.summaryZh;
+  const optimized = !original && compilation.optimized;
+  parameters.promptOptimization = { optimized, ...(original ? { fallback: true, code: compilation.errorCode } : { compilationId: compilation.id }), ...(summaryZh ? { summaryZh } : {}) };
   if (archive) {
     const config = archive.config && typeof archive.config === "object" ? archive.config as Record<string, unknown> : {};
-    parameters.inputArchive = { ...archive, prompt: promptInput.userText, effectivePrompt: compilation.prompt, config: { ...config, systemPrompt: "" }, userInput };
+    parameters.inputArchive = { ...archive, prompt: promptInput.userText, effectivePrompt: finalPrompt, config: { ...config, systemPrompt: "" }, userInput };
   }
-  return { ...input, prompt: compilation.prompt, promptInput: userInput, userInput, promptCompilationId: compilation.id, ...(compilation.summaryZh ? { summaryZh: compilation.summaryZh } : {}), optimized: compilation.optimized, parameters };
+  return { ...input, prompt: finalPrompt, promptInput: previewInput, userInput, ...(original ? {} : { promptCompilationId: compilation.id }), ...(summaryZh ? { summaryZh } : {}), optimized, parameters };
 }

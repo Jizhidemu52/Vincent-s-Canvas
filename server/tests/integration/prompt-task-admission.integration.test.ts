@@ -42,6 +42,7 @@ integration(
     let fixture: Awaited<ReturnType<typeof createIsolatedPostgres>>;
     let server: ReturnType<ReturnType<typeof express>["listen"]>;
     let base: string, store: PromptRecipeStore, compiler: PromptCompiler;
+    const optimizationPolicy: import("../../src/prompt-original-fallback").PromptFallbackPolicy = { PROMPT_OPTIMIZATION_FALLBACK: "off", PROMPT_OPTIMIZATION_TIMEOUT_MS: 45000, PROMPT_FALLBACK_TOOL_KEYS: "creative-*" };
     const adminId = randomUUID(),
       departmentId = randomUUID(),
       imageId = randomUUID(),
@@ -312,7 +313,7 @@ integration(
             previewDataUrl: "data:image/png;base64,aXNvbGF0ZWQ=",
           };
         },
-      });
+      }, optimizationPolicy);
       const app = express();
       app.use(express.json());
       // Authentication is fixture-owned; RBAC and all business routes below are real.
@@ -611,6 +612,28 @@ integration(
           expect(await count("credit_reservations", actor)).toBe(0);
         }
       }
+    });
+
+    test("original fallback survives preview and SQL admission once, without trusting a forged effective prompt", async () => {
+      const actor = await user(), before = calls.length;
+      const value = input("blue shirt", { promptInput: promptInput("blue shirt", "text-to-style", { fixtureOutcome: "throw", keepDetails: "five buttons" }) });
+      optimizationPolicy.PROMPT_OPTIMIZATION_FALLBACK = "original";
+      try {
+        const preview = await request(actor, "/api/tasks/preview", "POST", value);
+        expect(preview.status).toBe(200);
+        const { preview: shown } = await preview.json();
+        expect(shown.prompt).toContain("five buttons");
+        expect(shown.prompt).not.toContain("forged browser");
+        expect(await count("tasks", actor)).toBe(0);
+        const submit = await request(actor, "/api/tasks", "POST", { ...value, promptInput: shown.promptInput });
+        expect(submit.status).toBe(201);
+        const { task } = await submit.json();
+        expect(task.prompt).toBe(shown.prompt);
+        expect(task.parameters.promptOptimization.fallback).toBe(true);
+        expect((await query("SELECT prompt_optimized,prompt_compilation_id FROM tasks WHERE id=$1", [task.id])).rows).toEqual([{ prompt_optimized: false, prompt_compilation_id: null }]);
+        expect(await count("credit_reservations", actor)).toBe(1);
+        expect(calls.length - before).toBe(1);
+      } finally { optimizationPolicy.PROMPT_OPTIMIZATION_FALLBACK = "off"; }
     });
 
     test("mandatory creative structured input is rejected before optimization or reservation", async () => {

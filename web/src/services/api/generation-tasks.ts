@@ -55,6 +55,10 @@ export function imageTaskPrompts(task: Pick<QueuedTask, "prompt" | "parameters">
     }
     return { prompt: task.prompt ?? fallback, submittedPrompt: undefined };
 }
+export function usedOriginalPrompt(task: Pick<QueuedTask, "optimized" | "parameters">) {
+    const preparation = task.parameters?.promptOptimization;
+    return task.optimized === false && !!preparation && typeof preparation === "object" && "fallback" in preparation && preparation.fallback === true;
+}
 export class QueuedTaskPausedError extends Error {
     readonly taskId: string;
     readonly requestId: string;
@@ -155,7 +159,7 @@ export function createImageTaskRequests(input: {
     } satisfies Omit<TaskSubmission, "promptInput" | "prompt"> & { prompt?: string; promptInput?: PromptInputData }));
 }
 
-export async function requestQueuedImages(input: { quickImageAction?: QuickImageAction; modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
+export async function requestQueuedImages(input: { quickImageAction?: QuickImageAction; modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; onOriginalPrompt?: () => void; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
     input.signal?.throwIfAborted();
     const ownerId = useUserStore.getState().user?.id;
     if (!ownerId) throw new Error("当前账号不可用");
@@ -239,6 +243,7 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
                 signal: input.signal,
                 });
                 if (typeof result?.task?.id !== "string" || !result.task.id.trim()) throw new Error("服务器未返回任务编号");
+                if (usedOriginalPrompt(result.task)) input.onOriginalPrompt?.();
                 if (result.task.prompt !== undefined) { const prompts = imageTaskPrompts(result.task); input.onCompiled?.(prompts.prompt, result.task.optimized === true, prompts.submittedPrompt); }
                 return result;
             } catch (error) {
@@ -249,7 +254,7 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
                 const [taskLookup] = await Promise.allSettled([getQueuedTaskByRequestId(task.requestId, lookupSignal)]);
                 assertOwner();
                 const original = taskLookup.status === "fulfilled" ? taskLookup.value : null;
-                if (original?.id) { const prompts = imageTaskPrompts(original, input.prompt); input.onCompiled?.(prompts.prompt, original.optimized === true, prompts.submittedPrompt); return { task: original }; }
+                if (original?.id) { if (usedOriginalPrompt(original)) input.onOriginalPrompt?.(); const prompts = imageTaskPrompts(original, input.prompt); input.onCompiled?.(prompts.prompt, original.optimized === true, prompts.submittedPrompt); return { task: original }; }
                 const compilation = input.promptInput && taskLookup.status === "fulfilled" && taskLookup.value === null ? await getPromptCompilation(task.requestId, lookupSignal).catch(() => null) : null;
                 assertOwner();
                 // Only an authoritative missing task and this request's failed

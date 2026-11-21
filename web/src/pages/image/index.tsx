@@ -1134,6 +1134,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 operationType: requestOperationType, tool: record.tool,
                 promptInput: snapshot.promptInput,
                 onOptimizing: () => { if (mountedRef.current) setOptimizingPrompt(true); },
+                onOriginalPrompt: () => { if (mountedRef.current) message.info(uiText("已按你的原始描述生成（提示词优化未完成，不影响本次出图）")); },
                 onCompiled: () => { if (mountedRef.current) setOptimizingPrompt(false); },
                 requestId: record.requestId, signal: controller.signal, cancelOnAbort: () => false,
                 onSubmissionStarted: async () => { if (mountedRef.current) setResults(value => updateResultAt(value, index, { id: record.id })); await persistPending(record); submissionStarted = true; },

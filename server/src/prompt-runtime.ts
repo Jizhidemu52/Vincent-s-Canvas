@@ -44,7 +44,7 @@ export function createPostgresPromptCompiler(db: Database, config: AppConfig, st
       if (!row.encrypted_credentials || !config.PROVIDER_ENCRYPTION_KEY) throw new PromptOptimizationError("PROMPT_MODEL_NOT_CONFIGURED", "扩写模型的服务端凭据未配置，未提交生成", 503);
       const credentials = JSON.parse(decryptSecret(row.encrypted_credentials, config.PROVIDER_ENCRYPTION_KEY)) as Record<string, string>;
       return { id: row.id, modelId: row.model_id, fingerprint: promptHash({ id: row.id, modelId: row.model_id, protocol: row.protocol, baseUrl: row.base_url, updatedAt: row.updatedAt, providerUpdatedAt: row.providerUpdatedAt }), estimatedRmbCost: row.rmbCost > 0 ? row.rmbCost : null,
-        invoke: async (system, content, context) => validatePromptOptimizerResponse(await requestChatCompletion(row, credentials, { privateProfile: true, input: [{ role: "system", content: system }, { role: "user", content }], tools: [], claude: { thinking: false, stream: false, maxTokens: 4096 }, gemini: { maxOutputTokens: 4096 },
+        invoke: async (system, content, context) => validatePromptOptimizerResponse(await requestChatCompletion(row, credentials, { signal: context.signal, privateProfile: true, input: [{ role: "system", content: system }, { role: "user", content }], tools: [], claude: { thinking: false, stream: false, maxTokens: 4096 }, gemini: { maxOutputTokens: 4096 },
           ...(providerImages ? { providerImages: { access: providerImages, userId: context.userId } } : {}) }), row.model_id),
       };
     },
@@ -68,7 +68,7 @@ export function createPostgresPromptCompiler(db: Database, config: AppConfig, st
       return promptSourceFromBytes(Buffer.concat(chunks), row.mimeType);
     },
   };
-  return new PromptCompiler(store, runtime);
+  return new PromptCompiler(store, runtime, config);
 }
 
 /** Stable non-secret model identity for the SQLite runtime's configured models. */

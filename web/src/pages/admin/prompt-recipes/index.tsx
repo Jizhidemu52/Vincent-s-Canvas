@@ -113,6 +113,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                     <div>
                         <div className="wb-eyebrow">{staticUiText("管理工作台 / 提示词中台")}</div>
                         <h1 className="wb-title">{staticUiText("提示词配方")}</h1>
+                        <p>{staticUiText("可在使用分析中查看优化耗时；若 P90 超过 90 秒，建议评估更快的优化模型。")}</p>
                         <p className="wb-description">{staticUiText("独立绑定优化模型，先存草稿、再测试、再激活。创作端只使用已激活版本。")}</p>
                     </div>
                     <Link to="/admin">
