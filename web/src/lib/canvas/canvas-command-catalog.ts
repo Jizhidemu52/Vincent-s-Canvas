@@ -8,7 +8,7 @@ const searchAliases: Partial<Record<CanvasActionId, string>> = {
     assets: "素材库 asset", designTemplate: "template", resetView: "定位 居中 zoom",
     minimap: "导航 map", export: "保存 备份", exportImages: "export images",
     downloadSelectedImages: "框选 批量 原图 打包 zip download images",
-    tryout: "试色 试材质 上身 提案板",
+    tryout:"工作台",tryoutColor:"颜色 色板 试材质",tryoutWear:"模特 穿戴",tryoutBoard:"提案 排版",
     tools: "workspace", guide: "教程 help", theme: "深色 浅色 dark light",
     rename: "名称", clear: "清除", select: "选择工具", pan: "手形 平移 hand",
     imageInfo: "隐藏 图片名称 info", projects: "项目", newProject: "新项目 new project",

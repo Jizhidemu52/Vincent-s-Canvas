@@ -113,6 +113,7 @@ import {createTryoutPrewarm} from "../../src/tryout-prewarm";
         expect((await sql.db.query("SELECT owner_user_id FROM provider_upload_cache WHERE reference_spec LIKE '%:published'")).rows).toEqual([{owner_user_id:other}]);
         expect((await submit({...selected,productAssetIds:[foreign]})).error).toBe("TRYOUT_ASSET_UNAVAILABLE");
         const live=await submit(selected);expect(live.status).toBe(201);expect((await submit(selected)).taskId).toBe(live.taskId);
+        expect(live.model).toEqual({name:"女模特",presetId:entry});expect((await submit(selected)).model).toEqual(live.model);
         expect((await sql.db.query("SELECT parameters,source_urls FROM tasks WHERE id=$1",[live.taskId])).rows[0]).toMatchObject({parameters:{tryoutPresetId:entry},source_urls:[publicId,product].map(id=>"/api/assets/"+id+"/content")});
         await sql.db.query("UPDATE model_presets SET status='hidden' WHERE id=$1",[entry]);
         expect((await submit(selected)).taskId).toBe(live.taskId);

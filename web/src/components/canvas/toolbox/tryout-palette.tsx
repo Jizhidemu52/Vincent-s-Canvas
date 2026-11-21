@@ -12,7 +12,7 @@ const initialColors=[
 ].map(([name,hex])=>({id:hex,name,hex}));
 export const initialKit:TryoutKit={version:1,colors:initialColors,materials:[]};
 
-export function TryoutPalette({writable,beforeEdit,onColor}:{onColor:DropColor;writable:{current:boolean};beforeEdit:()=>void}){
+export function TryoutPalette({writable,beforeEdit,onColor,selectedId}:{selectedId?:string;onColor:DropColor;writable:{current:boolean};beforeEdit:()=>void}){
     const t=useUiText(),[stored,setKit]=useCanvasGraphField("tryoutKit"),kit=stored??initialKit;
     const [open,setOpen]=useState(false),[notice,setNotice]=useState("");
     useEffect(prewarmVisibleRegions,[]);
@@ -29,7 +29,7 @@ export function TryoutPalette({writable,beforeEdit,onColor}:{onColor:DropColor;w
         <div className="mb-2 flex items-baseline justify-between"><strong>{t("企划色板")}</strong><span aria-label={t("已选颜色数")}>{kit.colors.length} / {KIT_MAX}</span></div>
         <div className="grid grid-cols-3 gap-x-2 gap-y-2">
             {kit.colors.map(c=><div key={c.id} className="group relative min-w-0">
-                <TryoutSwatch color={c} onDrop={onColor} writable={writable} notice={setNotice}/>
+                <TryoutSwatch selectedId={selectedId} color={c} onDrop={onColor} writable={writable} notice={setNotice}/>
                 <span className="block truncate pt-0.5" title={[c.name,c.code,c.hex].filter(Boolean).join(" · ")}>{c.name}</span>
                 <button type="button" aria-label={t("移除")+" "+c.name} className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-[var(--cw-panel,#fff)] text-[var(--cw-text,#222)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100" onClick={()=>edit(null,c.id)}><X size={13}/></button>
             </div>)}

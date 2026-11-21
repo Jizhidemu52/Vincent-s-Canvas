@@ -48,7 +48,8 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
             const original=nodesRef.current.find(n=>n.id===sourceId)?.metadata;
             if(!original||canvasImageSource(original)!==url||original.storageKey!==metadata.storageKey)throw new Error("原图已变更，未提交试款");
             const common={tier:"quick",canvasId:projectId,nodeId:id,requestId} as const;
-            const input:TryoutSubmissionInput=wear?{...common,kind:"wear",model:wear.model,productAssetIds:[sourceAssetId]}:color?{...common,sourceAssetId,kind:"color",color,fallbackHex:regionHex}:{...common,sourceAssetId,kind:"material",fallbackHex:regionHex,material:material!.presetId?{presetId:material!.presetId}:{assetId:material!.assetId!}};
+            const region=regionHex?{fallbackHex:regionHex}:{};
+            const input:TryoutSubmissionInput=wear?{...common,kind:"wear",model:wear.model,productAssetIds:[sourceAssetId]}:color?{...common,sourceAssetId,kind:"color",color,...region}:{...common,sourceAssetId,kind:"material",...region,material:material!.presetId?{presetId:material!.presetId}:{assetId:material!.assetId!}};
             uncertain=true;
             const res=await fetch("/api/tryout/quick",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","X-Canvas-Owner-Id":owner},body:JSON.stringify(input)});
             if(!res.ok){
@@ -59,7 +60,7 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
             const result=await res.json();
             if(typeof result.taskId!=="string"||!result.taskId)throw new Error("缺少任务编号");
             if(!await runtime.waitForWriteAccess()||!valid())return;
-            patch({imageTask:{...binding,taskId:result.taskId},sourceTaskId:result.taskId,prompt:result.prompt||prompt,tryout:{...trace,prompt:result.prompt||prompt,timing:{droppedAt,submittedAt:Date.now()}}});
+            patch({imageTask:{...binding,taskId:result.taskId},sourceTaskId:result.taskId,prompt:result.prompt||prompt,tryout:{...trace,...(wear&&typeof result.model?.name==="string"?{model:{name:result.model.name,...(typeof result.model.presetId==="string"?{presetId:result.model.presetId}:typeof result.model.assetId==="string"?{assetId:result.model.assetId}:{})}}:{}),prompt:result.prompt||prompt,timing:{droppedAt,submittedAt:Date.now()}}});
             await persist();
             if(valid())void runtime.recoverPending(id);
         }catch(error){

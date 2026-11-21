@@ -70,3 +70,4 @@ export async function createCanvasUploadedNode(file: File, kind: "image" | "vide
     return { node, largeImage: upload.largeImage };
 }
 export { placeCanvasImportedNodes } from "./canvas-import-placement";
+export {importCanvasFiles} from "./canvas-file-import";

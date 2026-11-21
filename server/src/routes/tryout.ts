@@ -21,7 +21,7 @@ async function assertTryoutImageModel(db:Pick<Database,"query">,id:string,lock=f
     const model=(await db.query(`SELECT m.model_id,p.protocol,m.workflow_config_id FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1 AND m.enabled AND p.enabled`+(lock?" FOR SHARE OF m,p":""),[id])).rows[0];
     if(model?.protocol!=="apimart"||model.workflow_config_id||!MARK_GPT26_IMAGE_MODELS.some(m=>m.modelId===model.model_id))throw new BillingError("TRYOUT_MODEL_UNAVAILABLE","当前画布改图模型未验证支持试款参数，未提交任务");
 }
-async function recipe(input:TryoutSubmission,db:Pick<Database,"query">,ownerId:string,items:Map<string,ProductCardItem|null>,locked=false):Promise<{prompt:string;ids:string[];presetId?:string;child?:"boys"|"girls"}> {
+async function recipe(input:TryoutSubmission,db:Pick<Database,"query">,ownerId:string,items:Map<string,ProductCardItem|null>,locked=false):Promise<{prompt:string;ids:string[];model?:{name:string;presetId?:string;assetId?:string};presetId?:string;child?:"boys"|"girls"}> {
     const item=input.kind==="wear"?null:items.get(input.sourceAssetId)??null;
     const part=input.kind==="wear"?null:input.part??closestProductPart(item,input.fallbackHex);
     if(input.kind==="color")return {prompt:colorPrompt(item,part,input.color,input.fallbackHex),ids:[input.sourceAssetId]};
@@ -38,7 +38,7 @@ async function recipe(input:TryoutSubmission,db:Pick<Database,"query">,ownerId:s
     const products=input.productAssetIds.map(id=>items.get(id)??null);
     if(products.some(p=>p?.wearPosition==="none"))throw new BillingError("TRYOUT_NOT_WEARABLE","这件产品不适合上身，可使用场景展示或修正产品卡");
     const portrait=await resolvePortrait(db,ownerId,input.model,products[0]??null);
-    return {prompt:wearPrompt(products),ids:[portrait.assetId,...input.productAssetIds],...(portrait.presetId?{presetId:portrait.presetId}:{}),...(products[0]?.audience==="kids"&&(portrait.audience==="boys"||portrait.audience==="girls")?{child:portrait.audience}:{})};
+    return {prompt:wearPrompt(products),ids:[portrait.assetId,...input.productAssetIds],model:{name:portrait.name,...(portrait.presetId?{presetId:portrait.presetId}:{assetId:portrait.assetId})},...(portrait.presetId?{presetId:portrait.presetId}:{}),...(products[0]?.audience==="kids"&&(portrait.audience==="boys"||portrait.audience==="girls")?{child:portrait.audience}:{})};
 }
 export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm?:ReturnType<typeof createTryoutPrewarm>) {
     const router=Router();
@@ -63,21 +63,21 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
             const requestId="tryout:"+actor.id+":"+(input.kind==="refine"?"hd:"+input.sourceTaskId:input.requestId);
             const signature=createHash("sha256").update(JSON.stringify(input)).digest("hex");
             const read=async(query:Pick<Database,"query">)=>{
-                const row=(await query.query<{id:string;prompt:string;signature:string}>(`SELECT id,prompt,parameters->>'tryoutSignature' AS signature FROM tasks WHERE user_id=$1 AND request_id=$2`,[actor.id,requestId])).rows[0];
+                const row=(await query.query<{id:string;prompt:string;signature:string;model:{name:string;presetId?:string;assetId?:string}|null}>(`SELECT id,prompt,parameters->'tryoutModel' AS model,parameters->>'tryoutSignature' AS signature FROM tasks WHERE user_id=$1 AND request_id=$2`,[actor.id,requestId])).rows[0];
                 if(row && row.signature!==signature)throw new BillingError("TRYOUT_REQUEST_CHANGED","该操作编号已用于不同的试款，不会重复提交");
                 return row;
             };
             const prior=await read(db);
-            if(prior){res.json({taskId:prior.id,prompt:prior.prompt});return;}
+            if(prior){res.json({taskId:prior.id,prompt:prior.prompt,...(prior.model?{model:prior.model}:{})});return;}
             const items=await tryoutProductItems(db,actor.id,input.kind==="refine"?[]:input.kind==="wear"?input.productAssetIds:[input.sourceAssetId],policy.productCards!==false);
             const original=async(query:Pick<Database,"query">,locked=false)=>{
                 if(input.kind!=="refine")return {...await recipe(input,query,actor.id,items,locked),kind:input.kind,tier:input.tier};
-                const row=(await query.query(`SELECT prompt,source_urls,parameters->>'tryoutKind' AS kind,parameters->>'tryoutPresetId' AS preset FROM tasks
+                const row=(await query.query(`SELECT prompt,source_urls,parameters->>'tryoutKind' AS kind,parameters->'tryoutModel' AS model,parameters->>'tryoutPresetId' AS preset FROM tasks
                     WHERE id=$1 AND user_id=$2 AND project_id=$3 AND parameters->>'tryoutNodeId'=$4 AND status='success'
                     AND parameters->>'tryoutTier'='quick' AND request_id LIKE $5`+(locked?" FOR SHARE":""),[input.sourceTaskId,actor.id,input.canvasId,input.nodeId,"tryout:"+actor.id+":%"])).rows[0];
                 if(!row||!["color","material","wear"].includes(row.kind)||!Array.isArray(row.source_urls)||!row.source_urls.length)throw new BillingError("TRYOUT_ORIGIN_UNAVAILABLE","只能为这张画布上已成功的快速档结果出高清");
                 const ids:string[]=row.source_urls.map((url:string)=>{const id=/^\/api\/assets\/([0-9a-f-]{36})\/content$/i.exec(url)?.[1];if(!id)throw new BillingError("TRYOUT_REFERENCES","快速档原始参考图不可用");return id;});
-                return {prompt:row.prompt as string,ids,kind:row.kind as TryoutSubmission["kind"],tier:"hd" as const,presetId:typeof row.preset==="string"?row.preset:undefined,child:undefined};
+                return {prompt:row.prompt as string,ids,kind:row.kind as TryoutSubmission["kind"],tier:"hd" as const,model:row.model??undefined,presetId:typeof row.preset==="string"?row.preset:undefined,child:undefined};
             };
             const spec=await original(db),{prompt,ids}=spec,unique=[...new Set(ids)].sort();
             if(unique.length!==ids.length)throw new BillingError("TRYOUT_REFERENCES","请使用不同的产品、模特或材质图");
@@ -85,7 +85,7 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
             await assertTryoutImageModel(db,execution.modelConfigId);
             const prepared=await prepareTaskEnqueue(db,{requestId,userId:actor.id,departmentId:actor.departmentId,projectId:input.canvasId,
                 operationType:"inpaint",toolKey:"canvas-edit",modelConfigId:execution.modelConfigId,prompt,optimized:false,priority:"priority",
-                sourceUrls:ids.map(id=>"/api/assets/"+id+"/content"),parameters:{tool:"canvas-edit",...tryoutImageOptions(spec.kind,spec.tier),tryoutKind:spec.kind,tryoutTier:spec.tier,tryoutNodeId:input.nodeId,tryoutSignature:signature,...(spec.presetId?{tryoutPresetId:spec.presetId}:{}),...(input.kind==="refine"?{tryoutQuickTaskId:input.sourceTaskId}:{})},
+                sourceUrls:ids.map(id=>"/api/assets/"+id+"/content"),parameters:{tool:"canvas-edit",...tryoutImageOptions(spec.kind,spec.tier),tryoutKind:spec.kind,tryoutTier:spec.tier,tryoutNodeId:input.nodeId,tryoutSignature:signature,...(spec.model?{tryoutModel:spec.model}:{}),...(spec.presetId?{tryoutPresetId:spec.presetId}:{}),...(input.kind==="refine"?{tryoutQuickTaskId:input.sourceTaskId}:{})},
                 creditsEnabled:await policy.credits(),maxInflightTasks:policy.maxInflightTasks,maxPausedTasks:policy.maxPausedTasks});
             const result=await withTransaction(db,async client=>{
                 await client.query("SELECT module_key FROM module_flags WHERE module_key=ANY($1::text[]) ORDER BY module_key FOR SHARE",[["canvas","canvas-tryout","canvas-edit"]]);
@@ -107,7 +107,7 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
                 return task;
             });
             await publishEnqueuedTask(cache,result);
-            res.status(201).json({taskId:result.task.id,prompt});
+            res.status(201).json({taskId:result.task.id,prompt,...(spec.model?{model:spec.model}:{})});
         }catch(error){next(error);}
     });
     return router;

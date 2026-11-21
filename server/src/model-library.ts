@@ -30,7 +30,9 @@ export async function resolvePortrait(db:Query,owner:string,input:ModelSelection
         if(!p)throw new CanvasDocumentError("TRYOUT_PRESET_UNAVAILABLE","该模特图已变更或下架，未提交任务",409);
         return {assetId:p.assetId,presetId:p.id,name:p.name,audience:p.audience};
     }
-    return {assetId:choice.assetId,presetId:null,name:"我的模特",audience:null};
+    const mine=(await db.query<{name:string;audience:string|null}>("SELECT COALESCE(NULLIF(metadata->>'name',''),filename) AS name,metadata->>'audience' AS audience FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND kind='image' AND deleted_at IS NULL AND COALESCE(metadata->>'tryoutArchived','false')<>'true' AND COALESCE(metadata->>'source','') NOT IN ('model-preset-library','material-library')",[choice.assetId,owner])).rows[0];
+    if(!mine)throw new CanvasDocumentError("TRYOUT_ASSET_UNAVAILABLE","模特图不可用或不属于当前员工",404);
+    return {assetId:choice.assetId,presetId:null,name:mine.name.slice(0,80),audience:mine.audience};
 }
 export async function lockPreset(db:Query,preset:string,asset:string){
     const row=await db.query(`SELECT p.id FROM model_presets p JOIN assets a ON ${publishedPortrait} WHERE p.id=$1 AND a.id=$2 FOR SHARE OF p,a`,[preset,asset]);

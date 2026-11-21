@@ -60,14 +60,21 @@ function target(x:number,y:number){
     return {id:node.dataset.nodeId,img,u,v,left,top,w,h};
 }
 type Drag={pointer:number;x:number;y:number;active:boolean;frame:number;seq:number;overlay:HTMLCanvasElement;paintKey?:string};
-export function TryoutSwatch({color,onDrop,notice,writable}:{color:TryoutChip;onDrop:DropColor;notice:(s:string)=>void;writable:{current:boolean}}){
+export function TryoutSwatch({color,onDrop,notice,writable,selectedId}:{color:TryoutChip;onDrop:DropColor;notice:(s:string)=>void;writable:{current:boolean};selectedId?:string}){
     const material=!("hex" in color),hex="hex" in color?color.hex:"#908374";
-    const drag=useRef<Drag|null>(null),mounted=useRef(false);
+    const drag=useRef<Drag|null>(null),mounted=useRef(false),suppressClick=useRef(false),submitting=useRef(false);
     const clear=()=>{const d=drag.current;if(d){cancelAnimationFrame(d.frame);d.overlay.remove();drag.current=null;}};
     useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false;clear();};},[]);
-    return <button type="button" aria-label={(material?"拖动换材质：":"拖动换色：")+color.name} title="拖到产品上生成 1 款" className="block h-6 w-full cursor-grab touch-none select-none rounded-sm border border-current/10 active:cursor-grabbing" style={{background:material?"transparent":hex}}
+    return <button type="button" aria-label={(material?"拖动换材质：":"拖动换色：")+color.name} title={selectedId?"点击对所选产品生成 1 款；拖动可指定部位":"拖到产品上生成 1 款"} className="block h-6 w-full cursor-grab touch-none select-none rounded-sm border border-current/10 active:cursor-grabbing" style={{background:material?"transparent":hex}}
+        onClick={async e=>{
+            if(e.detail&&suppressClick.current){suppressClick.current=false;return;}
+            if(!writable.current||submitting.current)return;
+            if(!selectedId){notice("拖到产品上松手，生成 1 款");return;}
+            submitting.current=true;try{notice("");await onDrop(selectedId,color,"",Date.now());}finally{submitting.current=false;}
+        }}
         onPointerDown={e=>{
             if(!e.isPrimary||e.button!==0||!writable.current||drag.current)return;
+            suppressClick.current=false;
             e.stopPropagation();e.currentTarget.setPointerCapture(e.pointerId);
             const overlay=document.createElement("canvas");
             Object.assign(overlay.style,{position:"fixed",pointerEvents:"none",zIndex:"9999",display:"none"});
@@ -101,12 +108,12 @@ export function TryoutSwatch({color,onDrop,notice,writable}:{color:TryoutChip;on
         onPointerUp={async e=>{
             const d=drag.current;if(!d||d.pointer!==e.pointerId)return;
             const hit=d.active?target(e.clientX,e.clientY):null,at=Date.now(),url=hit?.img.currentSrc;
-            clear();if(!hit){if(!d.active)notice("拖到产品上松手，生成 1 款");return;}
+            suppressClick.current=d.active;clear();if(!hit)return;
             try{const map=await regionMap(hit.img);
                 if(!mounted.current||!writable.current||!hit.img.isConnected||hit.img.currentSrc!==url)return;
                 const id=regionAtPoint(map,hit.u*map.width,hit.v*map.height),region=map.regions.find(r=>r.id===id);
                 if(!region){notice("这里是背景，未提交试款");return;}
                 notice("");await onDrop(hit.id,color,region.color,at);
             }catch{if(mounted.current)notice("未能读取本次操作的结果，请查看画布任务");}
-        }} onLostPointerCapture={clear} onPointerCancel={clear}>{material?color.name:null}</button>;
+        }} onLostPointerCapture={clear} onPointerCancel={()=>{suppressClick.current=true;clear();}}>{material?color.name:null}</button>;
 }

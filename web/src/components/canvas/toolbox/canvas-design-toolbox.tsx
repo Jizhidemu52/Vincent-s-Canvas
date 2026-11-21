@@ -1,3 +1,4 @@
+import {isTryoutProduct} from "@/lib/tryout/product-node";
 import type {DropColor} from "./tryout-swatch";
 import { TryoutPalette } from "./tryout-palette";
 import {TryoutMaterials} from "./tryout-materials";
@@ -28,6 +29,7 @@ export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onCl
     const t=useUiText();
     const discussion=tab==="discussion";
     const body=!discussion;
+    const selectedProduct=count===1&&isTryoutProduct(node)?node?.id:undefined;
     const saved=node?.metadata?.proposalBoard;
     const board=saved?.version===2 && pending && pending.id===node?.id ? {...saved,...pending.patch} : saved;
     const run=async(options?:Partial<TryoutBoardOptions>)=>{
@@ -46,9 +48,10 @@ export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onCl
             <button type="button" aria-label={t("收起试款台")} onClick={onClose} className="ml-auto grid size-8 place-items-center"><ChevronUp size={15}/></button>
         </div>
         {body?<div className="max-h-[min(55vh,460px)] overflow-auto border-t p-3" style={{borderColor:theme.toolbar.border}}>
-            <TryoutPalette onColor={onColor} writable={writable} beforeEdit={beforeEdit}/>
-            <TryoutMaterials onColor={onColor} writable={writable} beforeEdit={beforeEdit}/>
-            <TryoutModels nodeId={count===1&&!node?.metadata?.proposalBoard&&node?.metadata?.tryout?.kind!=="wear"?node?.id:undefined} writable={writable} onDrop={onColor}/>
+            {selectedProduct?<p className="mb-2">{t("点击色块或材质，给所选产品生成 1 款；拖动可指定部位。")}</p>:null}
+            <TryoutPalette selectedId={selectedProduct} onColor={onColor} writable={writable} beforeEdit={beforeEdit}/>
+            <TryoutMaterials selectedId={selectedProduct} onColor={onColor} writable={writable} beforeEdit={beforeEdit}/>
+            <TryoutModels nodeId={selectedProduct} writable={writable} onDrop={onColor}/>
             {!count?<p className="mb-2" style={{color:theme.node.muted}}>{t(selectedCount?"这个工具只对图片可用":"选中图片后可用")}</p>:null}
             {board?.version===2 ? <fieldset className="grid gap-2" disabled={busy||node?.metadata?.locked}>
                 <legend className="mb-2 font-semibold">{t("提案板排版")}</legend>

@@ -21,6 +21,8 @@ import { CanvasImageDownloadButton } from "./canvas-image-download-button";
 
 type CanvasNodeHoverToolbarProps = {
     onTryout?: () => void;
+    onWear?:()=>void;
+    onTryoutBoard?:()=>void;
     onPickTryout?: (node: CanvasNodeData) => void;
     onTryoutTier?: (node: CanvasNodeData) => void;
     onCompare?: (node: CanvasNodeData) => void;
@@ -76,7 +78,7 @@ type ToolbarTool = {
 };
 
 export function CanvasNodeHoverToolbar({
-    onTryout, onPickTryout, onTryoutTier,
+    onTryout,onWear,onTryoutBoard, onPickTryout, onTryoutTier,
     onCompare,
     onDesignTemplate,
     onImageSequence,
@@ -314,7 +316,9 @@ export function CanvasNodeHoverToolbar({
             >
                 <div className="hide-scrollbar flex min-w-0 items-center overflow-x-auto">
                     {isText && onFontSize ? <Select aria-label={t("文字字号")} size="small" className="mx-1 min-w-20" value={node.metadata?.fontSize || 14} onChange={value => onFontSize(node, value)} options={Array.from(new Set([12, 14, 16, 18, 20, 24, 28, 32, 40, 48, node.metadata?.fontSize || 14])).sort((a,b) => a-b).map(value => ({ value, label: `${value}px` }))} /> : null}
-                    {hasImage && onTryout ? <button type="button" className="min-h-8 shrink-0 rounded-md px-2" onClick={onTryout}>{t("打开试款台")}</button> : null}
+                    {hasImage && onTryout ? <button type="button" className="min-h-8 shrink-0 rounded-md px-2" onClick={onTryout}>{t("试色")}</button> : null}
+                    {hasImage && onWear ? <button type="button" className="min-h-8 shrink-0 rounded-md px-2" onClick={onWear} title={t("按产品自动配模特，生成 1 张")}>{t("上身 1 张")}</button> : null}
+                    {hasImage && onTryoutBoard ? <button type="button" className="min-h-8 shrink-0 rounded-md px-2" onClick={onTryoutBoard}>{t("出提案")}</button> : null}
                     {hasImage && onPickTryout && !node.metadata?.proposalBoard && node.metadata?.tryout?.kind !== "wear" && node.metadata?.status !== "loading" && node.metadata?.status !== "error" ? <button type="button" className="min-h-8 shrink-0 rounded-md px-2" aria-pressed={Boolean(node.metadata?.tryout?.picked)} onClick={()=>onPickTryout(node)}>{t(node.metadata?.tryout?.picked ? "取消入选":"入选")}</button> : null}
                     {hasImage && onTryoutTier && node.metadata?.tryout?.tier && node.metadata.sourceTaskId && node.metadata.status==="success" ? <button type="button" title={node.metadata.errorDetails} className="min-h-8 shrink-0 rounded-md px-2" onClick={()=>onTryoutTier(node)}>{t(node.metadata.imageTask?.tryoutSwap?"查询切换进度":node.metadata.tryout.tier==="hd"?"恢复快速档":"出高清")}</button>:null}
                     {toolbarTools.map((tool) => (hasImage && tool.id === "download" ? <CanvasImageDownloadButton key={tool.id} onDownload={format => onDownload(node, format)} onOptions={onDownloadOptions ? () => onDownloadOptions(node) : undefined} showLabel={showImageToolLabels} /> :

@@ -34,6 +34,7 @@ import { CanvasSelectionOverlay, type CanvasSelectionOverlayHandle } from "@/com
 import { CanvasTopBar } from "@/components/canvas/canvas-top-bar";
 import type { PreparedCanvasMask } from "@/components/canvas/canvas-mask-composer";
 import { hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
+import {isTryoutProduct} from "@/lib/tryout/product-node";
 import { WirelessCanvas, type WirelessCanvasHandle } from "@/components/canvas/wireless-canvas";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
@@ -64,7 +65,7 @@ import type { PublicImageVersion } from "../../../../shared/image-conversation-p
 import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
 import { canvasImageReferenceMentions, resolveCanvasNodeImageReferences } from "@/lib/canvas/canvas-image-references";
 import { canvasImagePreviewEdge } from "@/lib/canvas/canvas-image-thumbnail";
-import { assertCanvasImageUploadSize, CANVAS_LARGE_IMAGE_NOTICE, isLargeCanvasImage } from "@/lib/canvas/canvas-image-upload-limit";
+import { assertCanvasImageUploadSize, CANVAS_LARGE_IMAGE_NOTICE } from "@/lib/canvas/canvas-image-upload-limit";
 import { createCanvasMinimapGeometryCache } from "@/lib/canvas/canvas-minimap-geometry-cache";
 import { cloneCanvasNodeGraph, copyCanvasNodeGraph, type CanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
 import { assignCanvasNodeGroup, canvasGroupMemberIds, canvasGroupVisualBounds, collapsedCanvasConnectionNodes, createCanvasGroupIndex, removeCanvasGroupMembers } from "@/lib/canvas/canvas-node-groups";
@@ -89,7 +90,6 @@ import { canvasContinueFromImagePatch, canvasGenerationDerivatives } from "@/lib
 import { canvasGenerationStackCover, reconcileCanvasGenerationStackNodes } from "@/lib/canvas/canvas-generation-stack";
 import { syncCanvasSelectionReferences } from "@/lib/canvas/canvas-selection-references";
 import { snapCanvasDrag, transferCanvasGroupMembers } from "@/lib/canvas/canvas-selection-geometry";
-import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
 import { canvasConversationImages } from "@/lib/canvas/canvas-assistant-image-catalog";
 import type { ConversationImageItem } from "@/components/conversation-image-controls";
 import { boundsForViewport, createCanvasSpatialIndex, refreshCanvasSpatialIndex } from "@/lib/canvas/canvas-spatial-index";
@@ -101,7 +101,7 @@ import { canvasViewportOverscan } from "@/lib/canvas/canvas-viewport-overscan";
 import { createCanvasVisibleNodeCache } from "@/lib/canvas/canvas-visible-node-cache";
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { useCopyText } from "@/hooks/use-copy-text";
-import { canvasImportGridPosition, canvasUsableArea, fitCanvasNodes } from "@/lib/canvas/canvas-interaction-ux";
+import { canvasUsableArea, fitCanvasNodes } from "@/lib/canvas/canvas-interaction-ux";
 import { canvasLibrarySummaries } from "@/lib/canvas/canvas-project-summary";
 import { nextProjectTitle } from "@/lib/project-title";
 import { deploymentFeatures } from "@/lib/deployment-features";
@@ -1090,6 +1090,8 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
 
     const editorOwner = useUserStore(state => state.user ? `user:${state.user.id}:${state.user.role}` : state.status);
     const tryoutPanel=useTryoutPanel(tryoutEnabled,editorOwner);
+    const setTryoutTab=useCanvasGraphSetter("toolboxTab");
+    const showColors=(target?:CanvasNodeData)=>{if(target)commitSelectedNodeIds(new Set([target.id]));setTryoutTab("toolbox");tryoutPanel.change(true);};
     const editorSelectionKey = `${projectId}:${editorOwner}:${Array.from(selectedNodeIds).sort().join(",")}`;
     useEffect(() => {
         if (!projectLoaded) return;
@@ -2013,6 +2015,13 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         const sources=canvasImageExportSelection(nodesRef.current,[...selectedNodeIdsRef.current]);
         return makeBoard(sources,groupsRef.current,projectTitle ?? "",reflow);
     };
+    const wearing=useRef(new Set<string>());
+    const quickWear=async(node?:CanvasNodeData)=>{
+        if(!node||!tryoutEnabled||!writable.current||!isTryoutProduct(node)||wearing.current.has(node.id))return;
+        wearing.current.add(node.id);
+        try{await tryoutColorNode(node.id,{name:"自动配模特",model:{auto:true}},"",Date.now());}
+        finally{wearing.current.delete(node.id);}
+    };
 
     const createImageFileNode = useCallback(async (file: File, position: Position, signal?: AbortSignal, preserveQuickGeneratePrompt = false, openPanel = true) => {
         signal?.throwIfAborted();
@@ -2045,41 +2054,20 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         // Independent paste/drop gestures retain their own batch and undo entry.
         // Queue before preparation so a second gesture cannot be silently discarded.
         const queued = importQueueRef.current.catch(() => undefined).then(async () => {
-            const key = `canvas-import-${nanoid()}`;
-            let failed = 0, completed = 0;
-            const current = () => designProjectIdRef.current === projectId && useUserStore.getState().user?.id === ownerId && !signal?.aborted;
-            if (!current()) return;
-            try {
-                const { prepareCanvasMediaNode, placeCanvasImportedNodes } = await loadCanvasNodeUploadRuntime();
-                const prepared = await mapCanvasAsyncPool(files, 3, async (file, index) => {
-                    if (!current()) return null;
-                    const position = canvasImportGridPosition(origin, index, files.length);
-                    setImportPlaceholder({ position, name: file.name, completed, total: files.length });
-                    message.open({ key, type: "loading", duration: 0, content: displayNotice(uiText("正在导入 {value1}/{value2} 个文件…", { value1: completed, value2: files.length })) });
-                    try {
-                        return await prepareCanvasMediaNode(file, position);
-                    } catch (error) { failed++; if (current()) message.error(displayNotice(`${file.name}：${error instanceof Error ? error.message : uiText("素材导入失败")}`)); return null; }
-                    finally { completed++; }
-                });
-                const imported = placeCanvasImportedNodes(nodesRef.current, prepared.filter((node): node is CanvasNodeData => Boolean(node)), append);
-                if (current()) {
-                    if (imported.length) {
-                        flushEditorDrafts(); flushPendingHistory();
-                        setNodes(nodesRef.current = [...nodesRef.current, ...imported]);
-                        const ids = new Set(imported.map(node => node.id));
-                        commitSelectedNodeIds(ids); setSelectedConnectionId(null);
-                        loadQuickGenerationNode(null);
-                        lastEditorSelectionRef.current = `${projectId}:${editorOwner}:${[...ids].sort().join(",")}`;
-                        setQuickGenerateReferences(references => syncCanvasSelectionReferences(references, ids, new Map(nodesRef.current.map(node => [node.id, node]))));
-                        if (imported.length === 1) setDialogNodeId(imported[0].id);
-                        flushPendingHistory();
-                    }
-                    const hasLargeImages = imported.some(node => node.type === CanvasNodeType.Image && isLargeCanvasImage({ bytes: node.metadata?.bytes, width: node.metadata?.naturalWidth, height: node.metadata?.naturalHeight }));
-                    const summary = uiText("导入完成：成功 {value1} 个{value2}", { value1: imported.length, value2: failed ? uiText("，失败 {count} 个", { count: failed }) : "" });
-                    message.open({ key, type: failed ? "warning" : "success", duration: hasLargeImages ? 7 : 4, content: displayNotice(hasLargeImages ? `${summary}。${uiText(CANVAS_LARGE_IMAGE_NOTICE)}` : summary) });
-                }
-                else message.destroy(key);
-            } finally { setImportPlaceholder(null); }
+            const current=()=>designProjectIdRef.current===projectId&&useUserStore.getState().user?.id===ownerId&&!signal?.aborted;
+            if(!current())return;
+            const {importCanvasFiles}=await loadCanvasNodeUploadRuntime();
+            await importCanvasFiles({files,origin,append,current,nodes:()=>nodesRef.current,message,placeholder:setImportPlaceholder,commit:imported=>{
+                    flushEditorDrafts(); flushPendingHistory();
+                    setNodes(nodesRef.current = [...nodesRef.current, ...imported]);
+                    const ids = new Set(imported.map(node => node.id));
+                    commitSelectedNodeIds(ids); setSelectedConnectionId(null);
+                    loadQuickGenerationNode(null);
+                    lastEditorSelectionRef.current = `${projectId}:${editorOwner}:${[...ids].sort().join(",")}`;
+                    setQuickGenerateReferences(references => syncCanvasSelectionReferences(references, ids, new Map(nodesRef.current.map(node => [node.id, node]))));
+                    if (imported.length === 1) setDialogNodeId(imported[0].id);
+                    flushPendingHistory();
+            }});
         });
         importQueueRef.current = queued.catch(() => undefined);
         return queued;
@@ -2959,6 +2947,9 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     }, [size]);
     const commandBindings: CanvasCommandBindings = {
         tryout:{run:()=>tryoutPanel.change(true),enabled:tryoutEnabled},
+        tryoutColor:{run:()=>showColors(),enabled:tryoutEnabled},
+        tryoutWear:{run:()=>void quickWear(singleSelectedNode??undefined),enabled:tryoutEnabled&&isTryoutProduct(singleSelectedNode??undefined)},
+        tryoutBoard:{run:()=>void makeSelectionBoard(),enabled:tryoutEnabled&&selectedExportImageCount>0},
         upload: { run: uploadFromToolbar }, text: { run: addTextNodeFromToolbar }, image: { run: addImageNodeFromToolbar },
         video: { run: addVideoNodeFromToolbar }, audio: { run: addAudioNodeFromToolbar }, config: { run: addConfigNodeFromToolbar },
         generate: { run: openQuickGenerateFromToolbar }, batch: { run: openBatchEditFromToolbar },
@@ -3041,7 +3032,10 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
 
     const renderNodeTools = (toolbarNode: CanvasNodeData, context?: { x: number; y: number }) => <Suspense fallback={null}>
         <CanvasNodeHoverToolbar node={toolbarNode} viewport={viewport}
-            onTryout={tryoutEnabled ? ()=>tryoutPanel.change(true) : undefined} onPickTryout={tryoutPanel.open && !toolbarNode.metadata?.locked ? toggleTryoutPick : undefined}
+            onTryout={tryoutEnabled&&isTryoutProduct(toolbarNode)?()=>showColors(toolbarNode):undefined}
+            onWear={tryoutEnabled&&isTryoutProduct(toolbarNode)?()=>void quickWear(toolbarNode):undefined}
+            onTryoutBoard={tryoutEnabled&&isTryoutProduct(toolbarNode)?()=>void makeBoard([toolbarNode],groupsRef.current,projectTitle??""):undefined}
+            onPickTryout={tryoutPanel.open && !toolbarNode.metadata?.locked ? toggleTryoutPick : undefined}
             onTryoutTier={tryoutEnabled && !toolbarNode.metadata?.locked ? changeTryoutTier : undefined}
             contextMenu={context ? { ...context, onClose: () => setContextMenu(null) } : undefined}
             onKeep={keepNodeToolbar} onLeave={hideNodeToolbar}
