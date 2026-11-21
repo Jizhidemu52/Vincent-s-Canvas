@@ -24,10 +24,10 @@ describe("generation interaction safety", () => {
         expect(original.references[0]?.storageKey).toBe("original-bytes");
     });
     test("unknown paid submissions always request original task lookup", () => {
-        const result = generationErrorMessage("原任务状态待核查，勿重复生成；Failed to fetch", 500);
-        expect(result).toContain("请稍后再试");
-        expect(result).toContain("刷新进度不会重新生成");
-        expect(result).not.toMatch(/待核查|尚未确认|生成失败/);
+        const result = generationErrorMessage("Failed to fetch", 500, "UPSTREAM_OUTCOME_UNKNOWN");
+        expect(result).toContain("提交结果待核查");
+        expect(result).toContain("不会自动重新生成");
+        expect(result).not.toMatch(/生成失败/);
     });
     test("task upload-limit guidance survives the API and result-display formatting", () => {
         for (const purpose of ["图片", "视频"]) {
@@ -40,10 +40,11 @@ describe("generation interaction safety", () => {
         }
     });
     test("an unrecoverable submission keeps the investigation guidance instead of promising recovery", () => {
-        const result = generationErrorMessage("upstream HTTP 500，提交结果待核查，暂无法恢复上游查询。请勿重复提交。");
-        expect(result).toContain("管理员协助");
-        expect(result).toContain("刷新进度");
-        expect(result).not.toContain("继续查询原任务");
+        const warning = "已停止本页等待，但上游任务未确认取消，仍可能完成并产生费用；请查询原任务，不要重复生成。";
+        expect(generationErrorMessage(warning)).toBe(warning);
+        expect(generationErrorMessage("提交结果待核查；Authorization: Bearer example-private-value")).not.toContain("example-private-value");
+        expect(generationErrorMessage("private transport", 503, "SUBMISSION_UNKNOWN")).toContain("请联系管理员");
+        expect(generationErrorMessage(new Error("private detail"), 500, "STORAGE_ENOSPC")).toContain("保存空间不足");
     });
     test("local postprocessing failure is not rewritten as an uncertain upstream query", () => {
         for (const error of ["渠道原件已保存到素材库，但图片后处理未完成：decoder failed", imageResultProcessingFailureMessage,

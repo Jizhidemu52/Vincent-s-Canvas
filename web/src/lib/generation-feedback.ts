@@ -1,4 +1,6 @@
 import { IMAGE_RESULT_POSTPROCESS_FAILURE_CODE, IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX, publicGenerationFailure } from "../../../shared/generation-error";
+import { repairDiagnosticMessage, taskRepairMessage, type TaskRepairState } from "../../../shared/task-repair";
+import { unavailablePlannerMessage } from "../../../shared/image-conversation-planner-policy";
 
 const preparationFailureMessages = {
     PROMPT_PREPARATION_FAILED: "提示词准备失败，本次未提交生成。",
@@ -33,13 +35,18 @@ export function generationSubmissionRejected(status: number, code?: string): boo
 
 /** Keep human guidance separate from the original diagnostic. Never infer that an unknown paid submission failed. */
 export function generationErrorMessage(error: unknown, status?: number, code?: string): string {
+    const detail = error && typeof error === "object" ? error as { code?: unknown; task?: TaskRepairState } : undefined;
+    code ??= typeof detail?.code === "string" ? detail.code : undefined;
+    if (code === "PLANNER_BINDING_UNAVAILABLE") return unavailablePlannerMessage;
+    const repair = (detail?.task && taskRepairMessage(detail.task)) ?? repairDiagnosticMessage(code);
+    if (repair) return repair;
     const notSubmitted = generationPreSubmissionMessage(code);
     if (notSubmitted) return notSubmitted;
     if (isImageResultProcessingFailure(error) || code === IMAGE_RESULT_POSTPROCESS_FAILURE_CODE) return imageResultProcessingFailureMessage;
     const raw = error instanceof Error ? error.message : String(error || "");
     if (Object.values(preparationFailureMessages).includes(raw)) return raw;
-    if (/暂无法恢复上游查询|提交结果待核查/.test(raw)) return "暂时无法获取结果，需要管理员协助。可先刷新进度，不会重新生成。";
-    if (/待核查|勿重复|不要重复|查询暂停|停止本页查询|原请求待查询/.test(raw)) return "暂时无法获取进度，请稍后再试；刷新进度不会重新生成。";
+    if (/https?:\/\/|\bBearer\s+|\b(?:api[_-]?key|authorization|token|password|secret)\s*[:=]/i.test(raw)) return publicGenerationFailure(raw);
+    if (!code && !status && /^[\p{Script=Han}\p{P}\d\s]+$/u.test(raw) && /[\u3400-\u9fff]/.test(raw)) return raw;
     if (status === 401 || /unauthorized|session.*expired|登录.*过期/i.test(raw)) return "登录已过期，请重新登录后继续；不要重复提交尚未确认的任务。";
     if (status === 402 || /insufficient|balance|额度不足|余额不足/i.test(raw)) return "当前任务暂时无法提交，请联系管理员检查服务配置。";
     if (status === 429 || /rate.limit|too many|限流/i.test(raw)) return "服务请求较多，请稍后重试；已提交的任务请继续查询。";

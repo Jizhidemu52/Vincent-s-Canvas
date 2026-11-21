@@ -66,7 +66,7 @@ test("停止观察会跨刷新保留，认证恢复和前台事件不自动重�
     await expect.poll(() => api.taskReads.length).toBeGreaterThan(0);
     await page.getByRole("button", { name: "停止本页查询（不取消服务端任务）", exact: true }).click();
     await expect(page.getByText("暂未完成", { exact: true })).toBeVisible();
-    await expect(activeWorkbench(page).getByRole("alert")).toHaveText("暂时无法获取进度，请稍后再试；刷新进度不会重新生成。");
+    await expect(activeWorkbench(page).getByRole("alert")).toContainText("已停止本页查询");
     const reads = api.taskReads.length;
     api.holdSession = true;
     await page.reload();
@@ -77,7 +77,7 @@ test("停止观察会跨刷新保留，认证恢复和前台事件不自动重�
     original.status = "success"; original.resultUrls = [`/api/assets/${original.id}/content`];
     await api.releaseSessions();
     await expect(page.getByRole("button", { name: "刷新进度", exact: true })).toBeEnabled();
-    await page.evaluate(() => { window.dispatchEvent(new Event("focus")); window.dispatchEvent(new Event("online")); });
+    await page.evaluate(() => { document.dispatchEvent(new Event("visibilitychange")); window.dispatchEvent(new Event("focus")); window.dispatchEvent(new Event("online")); });
     await page.waitForTimeout(700);
     expect(api.taskReads).toHaveLength(reads);
     await expect(page.getByRole("button", { name: "下载", exact: true })).toHaveCount(0);
@@ -93,7 +93,7 @@ test("停止观察会跨刷新保留，认证恢复和前台事件不自动重�
     expect(recoveries).toEqual([]);
 });
 
-for (const wake of ["focus", "online"]) {
+for (const wake of ["focus", "online", "visibilitychange"]) {
     test(`无上游ID仅只读刷新，晚到成功经${wake}自动回填且草稿不变`, async ({ page, context, api }, testInfo) => {
         const recoveries = await captureRecoveryWrites(context, api);
         api.taskStatus = "paused";
@@ -122,7 +122,7 @@ for (const wake of ["focus", "online"]) {
         await page.getByRole("textbox", { name: "图像提示词", exact: true }).fill(draft);
         original.status = "success";
         original.resultUrls = [`/api/assets/${original.id}/content`];
-        await page.evaluate(event => window.dispatchEvent(new Event(event)), wake);
+        await page.evaluate(event => (event === "visibilitychange" ? document : window).dispatchEvent(new Event(event)), wake);
         await expect(page.getByRole("button", { name: "下载", exact: true })).toBeVisible({ timeout: 8_000 });
         await expect(page.getByText("暂未完成", { exact: true })).toHaveCount(0);
         await expect(page.getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue(draft);
@@ -183,7 +183,7 @@ test("新建空白结果视图后，原任务成功只进历史不占据新草�
     await expect(page.getByRole("img", { name: /^生成结果/ })).toHaveCount(0);
     original.status = "success";
     original.resultUrls = [`/api/assets/${original.id}/content`];
-    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
     await page.getByRole("tab", { name: /^历史记录/ }).click();
     await expectRecordedTask(page, original);
     await expect(activeWorkbench(page).locator(".image-history-card")).toHaveCount(1, { timeout: 8_000 });

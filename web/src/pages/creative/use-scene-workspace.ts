@@ -38,6 +38,8 @@ import { classifyTaskRecovery, watchTaskReconciliation } from "@/services/api/ta
 import { canRetrySceneResult, prepareSceneRetry, sceneFailure } from "./scene-retry";
 import { createSceneResultActions } from "./scene-result-actions";
 import { canQuerySceneResult, readSceneRequest, sceneInputMatchesLog, sceneRootRequestId } from "./scene-recovery";
+import { restoreSceneObservation, sceneObservation } from "./scene-result-state";
+import { taskRepairMessage, type TaskPausedKind } from "../../../../shared/task-repair";
 import { freezeSceneSource, saveSceneFinalImage, selectionFinalSave, type SceneFinalSave } from "./scene-final-archive";
 import { serverMediaId } from "@/services/canvas-media-links";
 
@@ -52,7 +54,7 @@ export type SceneSelection = { sourceId: string; mask: SceneImage };
 export type SceneResult = { id: string; status: "pending" | "success" | "failed" | "cancelled"; image?: SceneImage; uncompositedImage?: SceneImage; error?: string;
     pendingFinalImage?: SceneImage; finalSave?: SceneFinalSave; finalAssetId?: string;
     taskId?: string; requestId?: string; compilationId?: string; failureKind?: "terminal" | "uncertain" | "local"; retryLogId?: string;
-    recovery?: "resume" | "investigate" };
+    recovery?: "resume" | "investigate"; pausedKind?: TaskPausedKind; progress?: "preparing" | "submitting" | "generating" | "saving" | "querying" };
 export type SceneLog = {
     inputArchiveVersion?: 1;
     userInput?: import("../../../../shared/prompt-contracts").PromptInputData;
@@ -114,7 +116,7 @@ async function hydrateImages(images: SceneImages): Promise<SceneImages> {
 }
 
 async function hydrateLog(log: SceneLog): Promise<SceneLog> {
-    const results = await Promise.all(log.results.map(async result => ({ ...result, image: result.image ? await hydrateImage(result.image) : undefined,
+    const results = await Promise.all(log.results.map(async result => ({ ...restoreSceneObservation(result), image: result.image ? await hydrateImage(result.image) : undefined,
         pendingFinalImage: result.pendingFinalImage ? await hydrateImage(result.pendingFinalImage) : undefined,
         uncompositedImage: result.uncompositedImage ? await hydrateImage(result.uncompositedImage) : undefined })));
     return { ...log, results, images: results.flatMap(result => result.image ? [result.image] : []) };
@@ -645,12 +647,17 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             };
             const completed = await Promise.all(pending.map(async (item, index) => {
                 const itemStart = performance.now();
-                const tracked = item;
+                let tracked = item;
+                const observe = (progress: NonNullable<SceneResult["progress"]>, error: string, taskId = tracked.taskId) => {
+                    tracked = sceneObservation(tracked, { status: "pending", progress, error, taskId });
+                    runLog.results = runLog.results.map(row => row.id === tracked.id ? tracked : row);
+                    updateResult(index, tracked);
+                };
                 let submitted = false;
                 try {
-                    const options = { operationType, tool: `creative-${sceneId}`, promptInput, signal: controller.signal, cancelOnAbort: () => false, onOriginalPrompt: () => { if (revision === epoch.current) setNotice(uiText("已按你的原始描述生成（提示词优化未完成，不影响本次出图）")); }, onOptimizing: () => { if (revision === epoch.current) setOptimizing(true); }, onCompiled: (finalPrompt: string, wasOptimized: boolean) => { prompt = finalPrompt; optimized = wasOptimized; runLog.prompt = finalPrompt; runLog.optimized = wasOptimized; if (revision === epoch.current) setOptimizing(false); }, requestId: sceneRootRequestId(tracked), onSubmissionStarted: async () => { await persistRun(); submitted = true; }, onSubmitted: async (ids: string[]) => { tracked.taskId = ids[0]; await persistRun(); } };
+                    const options = { operationType, tool: `creative-${sceneId}`, promptInput, signal: controller.signal, cancelOnAbort: () => false, onOriginalPrompt: () => { if (revision === epoch.current) setNotice(uiText("已按你的原始描述生成（提示词优化未完成，不影响本次出图）")); }, onOptimizing: () => { observe("preparing", "正在准备提示词，请稍候。"); if (revision === epoch.current) setOptimizing(true); }, onCompiled: (finalPrompt: string, wasOptimized: boolean) => { prompt = finalPrompt; optimized = wasOptimized; runLog.prompt = finalPrompt; runLog.optimized = wasOptimized; if (revision === epoch.current) setOptimizing(false); }, requestId: sceneRootRequestId(tracked), onSubmissionStarted: async () => { observe("submitting", "正在提交图片请求。"); await persistRun(); submitted = true; }, onSubmitted: async (ids: string[]) => { observe("generating", "图片正在生成，完成后会自动显示。", ids[0]); await persistRun(); } };
                     const generated = requestReferences.length ? await requestEdit(requestConfig, prompt, requestReferences, undefined, options) : await requestGeneration(requestConfig, prompt, options);
-                    const result = await storeSceneResult(tracked, generated[0], index, sceneId, snapshot, message => storageWarnings.push(message), { ownerId: user.id, prompt });
+                    const result = await storeSceneResult(sceneObservation(tracked, { status: "pending" }), generated[0], index, sceneId, snapshot, message => storageWarnings.push(message), { ownerId: user.id, prompt });
                     if (result.image) result.image.durationMs = performance.now() - itemStart;
                     updateResult(index, result);
                     return result;
@@ -787,7 +794,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             let currentResult = log.results.find(item => item.id === result.id);
             if (!currentResult) throw new Error("原结果记录已变化，请重新打开历史");
             assertCurrent();
-            const commit = async (next: SceneResult, patch: Partial<SceneLog> = {}, retainResult = false) => {
+            const commit = async (next: ReturnType<typeof sceneObservation>, patch: Partial<SceneLog> = {}, retainResult = false) => {
                 assertCurrent();
                 const results = log.results.map(item => item.id === next.id ? next : item);
                 log = { ...log, ...patch, results, images: results.flatMap(item => item.image ? [item.image] : []), successCount: results.filter(item => item.status === "success").length, failCount: results.filter(item => item.status === "failed" && item.failureKind !== "uncertain").length };
@@ -812,10 +819,18 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             };
             if (!canQuerySceneResult(currentResult)) {
                 log = await hydrateLog(log); assertCurrent();
-                await commit(log.results.find(item => item.id === result.id)!, {}, true);
+                const saved = log.results.find(item => item.id === result.id)!;
+                await commit(sceneObservation(saved, saved), {}, true);
                 return;
             }
-            const original = await readSceneRequest(log, currentResult, user.id, undefined, AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
+            let original: Awaited<ReturnType<typeof readSceneRequest>>;
+            try {
+                original = await readSceneRequest(log, currentResult, user.id, undefined, AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
+            } catch (caught) {
+                assertCurrent();
+                await commit(sceneObservation(currentResult, { status: "failed", failureKind: "uncertain", error: "暂时无法读取原任务，请刷新进度；不会重新生成。" }));
+                throw caught;
+            }
             assertCurrent();
             const restoreSnapshot = async () => {
                 if (!log.selection) return { images: log.referenceImages, selection: null };
@@ -835,34 +850,34 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                 if (task.status === "success") {
                     if (!task.resultUrls[0]) throw new Error("原任务成功但未返回结果图片，请勿重新生成");
                     const snapshot = await restoreSnapshot(); assertCurrent();
-                    const completed = await storeSceneResult({ ...currentResult, taskId: task.id, failureKind: undefined, recovery: undefined, error: undefined, compilationId: undefined }, { id: `${task.id}:0`, dataUrl: task.resultUrls[0], sourceTaskId: task.id, durationMs: completedTaskDurationMs(task), prompt: patch.prompt, userInput: patch.userInput, optimized: patch.optimized }, 0, sceneId, { ...snapshot, form: log.form, config: log.config }, text => setNotice(uiText(text)), { ownerId: user.id, prompt: patch.prompt });
-                    await commit(completed, patch, true); setNotice(uiText(completed.status === "success" ? "已找回原任务结果，没有重新生成。" : completed.error || "原任务已成功，最终成果尚未保存。"));
+                    const completed = await storeSceneResult(sceneObservation(currentResult, { status: "pending", taskId: task.id, finalSave: currentResult.finalSave }), { id: `${task.id}:0`, dataUrl: task.resultUrls[0], sourceTaskId: task.id, durationMs: completedTaskDurationMs(task), prompt: patch.prompt, userInput: patch.userInput, optimized: patch.optimized }, 0, sceneId, { ...snapshot, form: log.form, config: log.config }, text => setNotice(uiText(text)), { ownerId: user.id, prompt: patch.prompt });
+                    await commit(sceneObservation(completed, completed), patch, true); setNotice(uiText(completed.status === "success" ? "已找回原任务结果，没有重新生成。" : completed.error || "原任务已成功，最终成果尚未保存。"));
                 } else if (classifyTaskRecovery(task) === "terminal") {
-                    await commit({ id: currentResult.id, ...sceneFailure(new QueuedTaskFailedError(task), true, task.id, task.requestId) }, patch);
+                    await commit(sceneObservation(currentResult, sceneFailure(new QueuedTaskFailedError(task), true, task.id, task.requestId)), patch);
                 } else if (task.status === "paused") {
-                    await commit({ id: currentResult.id, ...sceneFailure(new QueuedTaskPausedError(task), true, task.id, task.requestId) }, patch);
+                    await commit(sceneObservation(currentResult, sceneFailure(new QueuedTaskPausedError(task), true, task.id, task.requestId)), patch);
                 } else if (["waiting", "processing"].includes(task.status)) {
-                    await commit({ ...currentResult, taskId: task.id, requestId: task.requestId, status: "pending", failureKind: "uncertain", recovery: undefined, compilationId: undefined, error: "图片正在生成，完成后会自动显示。" }, patch);
+                    await commit(sceneObservation(currentResult, { taskId: task.id, requestId: task.requestId, status: "pending", progress: task.pausedKind === "result_repair" ? "saving" : task.pausedKind === "awaiting_query" ? "querying" : "generating", error: taskRepairMessage(task) ?? "图片正在生成，完成后会自动显示。" }), patch);
                     if (!automatic) setNotice(uiText("图片仍在生成，完成后会自动显示。"));
                 } else {
-                    await commit({ ...currentResult, status: "failed", failureKind: "uncertain", recovery: "investigate", error: "暂时无法获取结果，需要管理员协助。" }, patch);
+                    await commit(sceneObservation(currentResult, { taskId: task.id, requestId: task.requestId, status: "failed", failureKind: "uncertain", recovery: "investigate", error: "原任务状态待核查，请联系管理员。" }), patch);
                 }
                 return;
             }
             const compilation = original.compilation;
             if (compilation?.status === "failed") {
-                await commit({ ...currentResult, status: "failed", failureKind: "local", recovery: undefined, compilationId: undefined, error: generationErrorMessage(compilation.message || "原提示词优化已失败，未创建图片任务。", 422, compilation.errorCode) });
+                await commit(sceneObservation(currentResult, { status: "failed", failureKind: "local", error: generationErrorMessage(compilation.message || "原提示词优化已失败，未创建图片任务。", 422, compilation.errorCode) }));
                 return;
             }
             if (compilation?.status === "optimizing") {
-                await commit({ ...currentResult, status: "pending", failureKind: undefined, recovery: undefined, compilationId: undefined, error: "正在准备提示词，请稍候。" });
+                await commit(sceneObservation(currentResult, { status: "pending", progress: "preparing", error: "正在准备提示词，请稍候。" }));
                 return;
             }
             if (compilation?.status !== "success" || !compilation.prompt?.trim()) {
-                await commit({ ...currentResult, status: "failed", failureKind: "uncertain", compilationId: undefined, error: "暂时无法获取进度，稍后会自动更新。" });
+                await commit(sceneObservation(currentResult, { status: "failed", failureKind: "uncertain", error: "正在查询原任务，不会重新生成。" }));
                 return;
             }
-            await commit({ ...currentResult, status: "failed", failureKind: "uncertain", compilationId: compilation.id, error: "准备已完成，图片尚未开始生成。点击“继续生成”可沿用已保存的设置。" }, { prompt: compilation.prompt, optimized: compilation.optimized });
+            await commit(sceneObservation(currentResult, { status: "failed", failureKind: "uncertain", compilationId: compilation.id, error: "准备已完成，图片尚未开始生成。点击“继续生成”可沿用已保存的设置。" }), { prompt: compilation.prompt, optimized: compilation.optimized });
             if (!continueSubmission) return;
             if (!toolEnabled || !log.userInput || !log.submittedReferences || !sceneRootRequestId(currentResult)) throw new Error("缺少原始提交归档或场景已停用，无法安全继续原请求");
             const restoredReferences = await Promise.all(log.submittedReferences.map(restoreLocalInput));
@@ -872,15 +887,15 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             let submitted = false;
             try {
                 const options = { operationType, tool: `creative-${sceneId}`, requestId: sceneRootRequestId(currentResult), promptInput, signal: controller.signal, cancelOnAbort: () => false,
-                    onSubmissionStarted: async () => { await commit({ ...currentResult!, status: "pending", error: "正在继续原图片任务…" }); submitted = true; },
-                    onSubmitted: async (ids: string[]) => { await commit({ ...currentResult!, taskId: ids[0], status: "pending" }); } };
+                    onSubmissionStarted: async () => { await commit(sceneObservation(currentResult!, { status: "pending", progress: "submitting", error: "正在提交原图片请求。" })); submitted = true; },
+                    onSubmitted: async (ids: string[]) => { await commit(sceneObservation(currentResult!, { taskId: ids[0], status: "pending", progress: "generating", error: "图片正在生成，完成后会自动显示。" })); } };
                 const generated = restoredReferences.length ? await requestEdit(requestConfig, compilation.prompt, restoredReferences, undefined, options) : await requestGeneration(requestConfig, compilation.prompt, options);
                 assertCurrent();
-                const completed = await storeSceneResult({ ...currentResult!, failureKind: undefined, error: undefined, compilationId: undefined }, generated[0], 0, sceneId, { ...snapshot, form: log.form, config: log.config }, text => setNotice(uiText(text)), { ownerId: user.id, prompt: compilation.prompt });
-                await commit(completed, { prompt: generated[0]?.prompt || compilation.prompt, userInput: generated[0]?.userInput || promptInput, optimized: generated[0]?.optimized ?? compilation.optimized });
+                const completed = await storeSceneResult(sceneObservation(currentResult!, { status: "pending", finalSave: currentResult!.finalSave }), generated[0], 0, sceneId, { ...snapshot, form: log.form, config: log.config }, text => setNotice(uiText(text)), { ownerId: user.id, prompt: compilation.prompt });
+                await commit(sceneObservation(completed, completed), { prompt: generated[0]?.prompt || compilation.prompt, userInput: generated[0]?.userInput || promptInput, optimized: generated[0]?.optimized ?? compilation.optimized });
             } catch (caught) {
                 assertCurrent();
-                await commit({ id: currentResult!.id, ...sceneFailure(caught, submitted, currentResult!.taskId, currentResult!.requestId) });
+                await commit(sceneObservation(currentResult!, sceneFailure(caught, submitted, currentResult!.taskId, currentResult!.requestId)));
             }
         } catch (caught) { if (!signal.aborted && revision === epoch.current && viewRevision === viewEpoch.current && useUserStore.getState().user?.id === user.id) setError(uiText(automatic ? "暂时无法获取进度，稍后会自动更新。" : errorText(caught))); }
         finally { observationControllers.current.delete(controller); release(); queryingResult.current = false; if (!automatic && revision === epoch.current) { setRunning(false); setOptimizing(false); } }

@@ -2,6 +2,51 @@ import { test, expect, IMAGE } from "./fixtures";
 import { activeWorkbench, readWorkspaceRecords } from "./headless-workbench";
 import type { SceneLog } from "../src/pages/creative/use-scene-workspace";
 
+test("garment colorway restores one coherent observation on visibility and retrieves the original image on reload", async ({ page, api }, info) => {
+    const taskId = "cd14d28a-f862-40cd-9977-5ef320218941";
+    let phase: "uncertain" | "optimizing" | "processing" | "success" = "uncertain", posts = 0, requestId = "";
+    await page.route("**/api/tasks", route => {
+        if (route.request().method() !== "POST") return route.fallback();
+        posts++;
+        requestId = route.request().postDataJSON().requestId;
+        return route.fulfill({ status: 504, json: { message: "Gateway timeout" } });
+    });
+    const task = () => ({ task: { id: taskId, requestId, status: phase, resultUrls: phase === "success" ? [`/api/assets/${taskId}/content`] : [], failureReason: null } });
+    await page.route("**/api/tasks/by-request/*", route => phase === "processing" || phase === "success" ? route.fulfill({ json: task() }) : route.fulfill({ status: 404, json: {} }));
+    await page.route(`**/api/tasks/${taskId}`, route => route.fulfill({ json: task() }));
+    await page.route(`**/api/tasks/${taskId}/progress`, route => route.fulfill({ status: 404, json: {} }));
+    await page.route("**/api/prompt-compilations/by-request/*", route => route.fulfill({ json: { compilation: {
+        id: "12345678-1234-4123-8123-123456789abc", requestId, status: phase,
+    } } }));
+    await page.goto("/creative/garment-colorway");
+    const pane = activeWorkbench(page);
+    await pane.getByLabel("上传服装参考图", { exact: true }).setInputFiles({ name: "original-garment.png", mimeType: "image/png", buffer: IMAGE });
+    await pane.locator("button.cs-generate").click();
+    const stored = async () => (await readWorkspaceRecords<SceneLog>(page, "creative_scene_workspaces"))
+        .find(row => row.key.startsWith("history-record:"))?.value.results[0];
+    await expect.poll(async () => (await stored())?.failureKind).toBe("uncertain");
+    const wake = () => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    phase = "optimizing"; await wake();
+    await expect(pane.getByText("正在准备提示词 · 方案 1", { exact: true })).toBeVisible();
+    await expect(pane.getByText("正在准备提示词，请稍候。", { exact: true })).toBeVisible();
+    await expect(pane.getByText(/方案 1 暂时无法获取进度/)).toHaveCount(0);
+    expect((await stored())?.failureKind).toBeUndefined();
+    await page.screenshot({ path: info.outputPath("garment-preparing.png") });
+    phase = "processing"; await wake();
+    await expect(pane.getByText("图片生成中 · 方案 1", { exact: true })).toBeVisible();
+    await expect(pane.getByText("正在准备提示词，请稍候。", { exact: true })).toHaveCount(0);
+    expect(await stored()).toMatchObject({ status: "pending", progress: "generating", taskId, requestId });
+    phase = "success"; await page.reload();
+    const recovered = activeWorkbench(page).getByRole("img", { name: "服装配色结果 1", exact: true });
+    await expect(recovered).toBeVisible();
+    await expect.poll(() => recovered.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    expect(await stored()).toMatchObject({ status: "success", taskId, requestId });
+    expect((await stored())?.error).toBeUndefined();
+    expect(posts).toBe(1);
+    expect(api.submissions).toEqual([]);
+    await page.screenshot({ path: info.outputPath("garment-original-recovered.png") });
+});
+
 test("try-on refresh adopts an already successful original task without another submission", async ({ page, api }, info) => {
     api.taskStatus = "paused";
     await page.goto("/creative/virtual-try-on");
