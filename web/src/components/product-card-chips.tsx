@@ -7,7 +7,7 @@ import {useUiText} from "@/lib/i18n";
 const audiences={women:"女装",men:"男装",kids:"童装",unisex:"通用",unknown:"人群未知"};
 const positions={head:"头部",neck:"颈部",upper:"上身",lower:"下身",full:"全身",hand:"手部",foot:"脚部",shoulder:"肩背",none:"不穿戴"};
 type View={status:"pending"|"ready"|"unavailable";card?:ProductCard};
-export default function ProductCardChips({source,inline=false}:{source:string;inline?:boolean}){
+export default function ProductCardChips({source,inline=false,onPickPart}:{source:string;inline?:boolean;onPickPart?:(part:string)=>void}){
     const t=useUiText(),owner=useUserStore(s=>s.user?.id),marker=useRef<HTMLDivElement>(null);
     const [card,setCard]=useState<ProductCard|null>(null),[draft,setDraft]=useState<ProductCardItem|null>(null),[saving,setSaving]=useState(false),[note,setNote]=useState("");
     const endpoint=useRef(""),sequence=useRef(0);
@@ -62,6 +62,7 @@ export default function ProductCardChips({source,inline=false}:{source:string;in
     const applyDraft=()=>{if(card&&draft&&draft.category.trim()&&draft.parts.every(p=>p.trim()))void save({...card,items:card.items.map((v,i)=>i===selected?draft:v)});};
     return <><div ref={marker} aria-hidden className="pointer-events-none absolute inset-0"/>{card&&item?<div aria-label={t("产品卡")} className={(inline?"relative ":"absolute inset-x-1 top-1 max-h-[95%] overflow-auto ")+"z-[1] w-fit max-w-full rounded-md bg-white/95 px-2 py-1 text-xs text-neutral-900 shadow"} onPointerDown={e=>e.stopPropagation()} onMouseDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()} onDoubleClick={e=>e.stopPropagation()} onKeyDown={e=>{e.stopPropagation();if(draft&&e.key==="Enter"&&e.target instanceof HTMLInputElement&&!e.nativeEvent.isComposing){e.preventDefault();applyDraft();}}}>
         {card.items.length>1?<div className="flex flex-wrap gap-1">{card.items.map((v,i)=><button type="button" key={i} disabled={saving} aria-pressed={i===selected} onClick={()=>void save({...card,items:card.items.map((v,j)=>({...v,primary:j===i}))})}>{v.category}</button>)}</div>:null}
+        {onPickPart&&!draft?<div aria-label={t("改动部位")} className="flex flex-wrap gap-1">{item.parts.map((part,i)=><button key={i} type="button" className="rounded-md border px-2 py-1" onClick={()=>onPickPart(part)}>{part}</button>)}</div>:null}
         {draft?<div className="grid gap-1">
             <input aria-label={t("品类")} required maxLength={20} value={draft.category} onChange={e=>setDraft({...draft,category:e.target.value})}/>
             <select aria-label={t("人群")} value={draft.audience} onChange={e=>setDraft({...draft,audience:e.target.value as ProductCardItem["audience"]})}>{Object.entries(audiences).map(([k,v])=><option key={k} value={k}>{t(v)}</option>)}</select>

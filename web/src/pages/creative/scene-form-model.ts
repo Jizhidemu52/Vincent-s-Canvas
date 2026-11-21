@@ -36,14 +36,14 @@ export type SceneForm = {
     accessoryApply: string;
 };
 
-export function createSceneForm(_sceneId: string): SceneForm {
+export function createSceneForm(sceneId: string): SceneForm {
     return {
         description: "",
         targetProduct: "",
         keepDetails: "",
         carryoverRequirements: [],
-        category: "按描述判断",
-        silhouette: "按描述判断",
+        category: "",
+        silhouette: "",
         fabric: "",
         colorDescription: "",
         presentation: "白底平铺",
@@ -53,7 +53,7 @@ export function createSceneForm(_sceneId: string): SceneForm {
         change: "",
         preserve: "",
         colorMode: "smart",
-        colors: ["#789282", "#E8DCC8", "#424A55"],
+        colors: sceneId==="garment-colorway"?[]:["#789282", "#E8DCC8", "#424A55"],
         colorRegion: "",
         colorMood: "自然柔和",
         colorVariant: "0",
@@ -258,7 +258,7 @@ export function validateSceneForm(sceneId: string, form: SceneForm, images: Part
 export function scenePromptInput(sceneId: string, form: SceneForm, images: Partial<Record<SceneSlotId, ReferenceImage>> = {}): import("../../../../shared/prompt-contracts").PromptInputData {
     if (!Object.hasOwn(sceneSummaries, sceneId)) throw new Error("暂不支持这个设计场景。");
     const keys: Record<string, Array<keyof SceneForm>> = {
-        "text-to-style": ["category", "silhouette", "fabric", "presentation"],
+        "text-to-style": [...(form.category&&form.category!=="按描述判断"?["category"] as const:[]),...(form.silhouette&&form.silhouette!=="按描述判断"?["silhouette"] as const:[]),"fabric", "presentation"],
         "style-to-sketch": ["sketchStyle", "sketchDetail"],
         "local-restyle": [...(form.restyleArea ? ["restyleArea"] as const : []), "change", "preserve"],
         "garment-colorway": ["colorMode", "colorRegion", ...(form.colorMode === "specific" ? ["colors", "colorSelections"] as const : form.colorMode === "smart" ? ["colorMood"] as const : [])],

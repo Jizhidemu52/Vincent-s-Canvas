@@ -46,7 +46,7 @@ describe("standard color selections for clothing photos", () => {
     });
 
     test("manual edits clear identity even when the HEX stays the same, and distinct IDs remain distinct", () => {
-        const original = setSceneColor(formFor("garment-colorway"), 0, standardColor.hex, standardColor);
+        const original = setSceneColor(addSceneColor(formFor("garment-colorway")), 0, standardColor.hex, standardColor);
         const alternate = { ...standardColor, id: "different-source", name: "Different standard", library: "Other library" };
         const chosen = setSceneColor(original, 0, alternate.hex, alternate);
         expect(getSceneColorSelection(chosen, 0)?.id).toBe(alternate.id);
@@ -100,7 +100,7 @@ describe("creative scene input roles", () => {
         expect(Object.keys(sceneSummaries)).toEqual(sceneIds);
         const original = createSceneForm("garment-colorway");
         original.colors.push("#FFFFFF");
-        expect(createSceneForm("garment-colorway").colors).toHaveLength(3);
+        expect(createSceneForm("garment-colorway").colors).toEqual([]);
         for (const summary of Object.values(sceneSummaries)) {
             expect(summary.input.length).toBeLessThanOrEqual(10);
             expect(summary.output.length).toBeLessThanOrEqual(10);
@@ -145,7 +145,7 @@ describe("creative scene input roles", () => {
         expect(scenePromptInput(sceneId, reference).referenceRoles).toHaveLength(2);
         expect(scenePromptInput(sceneId, reference).referenceRoles?.[1]).toBe("配色参考图");
         for (const colorMode of ["smart", "specific"] as const) {
-            const form = { ...reference, colorMode };
+            const form = { ...reference, colorMode,colors:["#778899"] };
             expect(getSceneSlots(sceneId, form).map((slot) => slot.id)).toEqual(["primary"]);
             expect(validateSceneForm(sceneId, form, { primary })).toBeNull();
             expect(scenePromptInput(sceneId, form).referenceRoles).toHaveLength(1);
@@ -247,9 +247,9 @@ describe("specialized form presentation", () => {
     });
     test("every scene exposes its own labeled controls and not a generic prompt editor", () => {
         const labels = [
-            ["text-to-style", "款式描述", "服装品类", "面料方向", "廓形", "展示方式"],
+            ["text-to-style", "款式描述", "面料方向", "展示方式"],
             ["style-to-sketch", "线条风格", "细节程度", "技术感线稿", "极简线稿"],
-            ["local-restyle", "改动部位", "要改成什么样", "特别要保留的细节", "口袋"],
+            ["local-restyle", "改动部位", "要改成什么样", "特别要保留的细节", "填写部位"],
             ["garment-colorway", "配色方式", "配色方向", "改色区域"],
             ["back-design", "背面结构方向", "正面图案如何处理"],
             ["pattern-extract", "提取范围", "背景处理"],

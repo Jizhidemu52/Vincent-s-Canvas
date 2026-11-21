@@ -1,4 +1,9 @@
 const english: Record<string, string> = {
+    "填写部位，或从产品卡中选择": "Enter a part or choose one from the product card",
+    "描述你想设计的产品、外形和配色。": "Describe the product, shape and colors you want.",
+    "改局部": "Edit a detail",
+    "展示": "Presentation",
+    "设计工具导航": "Design tools navigation",
     "本次先优化提示词": "Optimize the prompt for this run",
     "正在核对设计输入，尚未确认出图。": "Checking the design inputs. Image generation has not been confirmed.",
     "在画布里试款": "Try it on the canvas",

@@ -115,6 +115,7 @@ test("scene color labels and reference names switch languages without changing H
     await page.getByLabel("上传服装参考图", { exact: true }).setInputFiles({ name: "测试毛衫参考.png", mimeType: "image/png", buffer: IMAGE });
     await expect(page.locator(".cs-upload-file")).toContainText("测试毛衫参考.png");
     await page.getByRole("radio", { name: "指定颜色", exact: true }).check();
+    await page.getByRole("button",{name:"添加颜色",exact:true}).click();
     await page.getByRole("button", { name: "从标准色库选择颜色 1", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("button", { name: "测试暖红色 #AA2233", exact: true })).toBeVisible();

@@ -136,7 +136,10 @@ test("standard colors use real lazy local data, paginate and fill only the confi
     page.on("request", request => { const path = new URL(request.url()).pathname; if (path.startsWith("/color-library/")) colorReads.push(path); });
     await page.goto("/creative/garment-colorway");
     await pane(page).getByRole("radio", { name: "指定颜色", exact: true }).check();
+    await expect(pane(page).getByRole("textbox",{name:"颜色 1 HEX 色值",exact:true})).toHaveCount(0);
+    await pane(page).getByRole("button",{name:"添加颜色",exact:true}).click();
     expect(colorReads).toEqual([]);
+    await pane(page).getByRole("button",{name:"添加颜色",exact:true}).click();
     const original = await pane(page).getByRole("textbox", { name: "颜色 2 HEX 色值", exact: true }).inputValue();
     const modal = await openColorLibrary(page, 2);
     const cards = modal.locator("button.sc-card");
@@ -158,7 +161,7 @@ test("standard colors use real lazy local data, paginate and fill only the confi
     await evidence(page, reopened, info, "standard-colors");
     await reopened.getByRole("button", { name: "应用到颜色 2", exact: true }).click();
     await expect(pane(page).getByRole("textbox", { name: "颜色 2 HEX 色值", exact: true })).toHaveValue(selectedHex);
-    await expect(pane(page).getByRole("textbox", { name: "颜色 1 HEX 色值", exact: true })).toHaveValue("#789282");
+    await expect(pane(page).getByRole("textbox", { name: "颜色 1 HEX 色值", exact: true })).toHaveValue("#808080");
     await expect.poll(async () => (await readDraft(page, "garment-colorway"))?.form.colorSelections?.[1]?.hex).toBe(selectedHex);
     const saved = (await readDraft(page, "garment-colorway")).form.colorSelections[1];
     expect(saved).toMatchObject({ library: "PANTONE TCX", hex: selectedHex });
@@ -175,6 +178,8 @@ test("standard color load failure is explicit and retries only on click, with in
     await page.route("**/color-library/manifest.json", route => { manifests++; return manifests === 1 ? route.fulfill({ status: 503, body: "isolated unavailable" }) : route.continue(); });
     await page.goto("/creative/garment-colorway");
     await pane(page).getByRole("radio", { name: "指定颜色", exact: true }).check();
+    await expect(pane(page).getByRole("textbox",{name:"颜色 1 HEX 色值",exact:true})).toHaveCount(0);
+    await pane(page).getByRole("button",{name:"添加颜色",exact:true}).click();
     const modal = await openColorLibrary(page);
     await expect(modal.getByRole("alert")).toContainText("503");
     expect(manifests).toBe(1);
@@ -186,7 +191,7 @@ test("standard color load failure is explicit and retries only on click, with in
     await modal.getByRole("searchbox", { name: "色号 / 名称 / HEX", exact: true }).fill("NO_SUCH_COLOR_731");
     await expect(modal.getByText("没有找到匹配色号，请缩短关键词或切换到全部色库。", { exact: true })).toBeVisible();
     await modal.getByRole("button", { name: /^取\s*消$/ }).click();
-    await expect(pane(page).getByRole("textbox", { name: "颜色 1 HEX 色值", exact: true })).toHaveValue("#789282");
+    await expect(pane(page).getByRole("textbox", { name: "颜色 1 HEX 色值", exact: true })).toHaveValue("#808080");
     localOnly(api, posts);
 });
 
@@ -197,6 +202,8 @@ for (const layout of ["default", "viewport change"] as const) test(`photo sampli
     await upload(page, "服装参考图", "sample-color-original.png", bytes);
     const original = await sourceIdentity(page, "garment-colorway", bytes);
     await pane(page).getByRole("radio", { name: "指定颜色", exact: true }).check();
+    await expect(pane(page).getByRole("textbox",{name:"颜色 1 HEX 色值",exact:true})).toHaveCount(0);
+    await pane(page).getByRole("button",{name:"添加颜色",exact:true}).click();
     const modal = await openColorLibrary(page);
     await modal.getByText("从已上传的款式图取色", { exact: true }).click();
     const sampler = modal.getByRole("button", { name: "衣服照片取色", exact: true });

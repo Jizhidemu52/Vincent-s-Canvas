@@ -118,18 +118,14 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
     switch (sceneId) {
         case "text-to-style":
             fields = <>
-                {descriptionField("款式描述", "描述你想设计的服装：关键结构、配色和细节……", true)}
+                {descriptionField("款式描述", "描述你想设计的产品、外形和配色。", true)}
                 <div className="cs-field-row">
-                    <div className="cs-field">
-                        <label className="cs-label" htmlFor={id("category")}>{uiText("服装品类")}</label>
-                        <Select id={id("category")} value={form.category} onChange={value => update("category", value)} disabled={disabled} options={["按描述判断", "上衣", "针织衫", "外套", "连衣裙", "下装", "其他服装"].map(value => ({ value, label: uiText(value) }))} />
-                    </div>
+                    {(["category","silhouette"] as const).filter(key=>form[key]&&form[key]!=="按描述判断").map(key=><label key={key} className="cs-label">{uiText(key==="category"?"品类":"廓形")}<input value={form[key]} className="cs-input" disabled={disabled} maxLength={80} onChange={e=>update(key,e.target.value)}/></label>)}
                     <div className="cs-field">
                         <label className="cs-label" htmlFor={id("fabric")}>{uiText("面料方向 ")}<span className="cs-help">{uiText("可选")}</span></label>
                         <input id={id("fabric")} className="cs-input" value={form.fabric} onChange={(event) => update("fabric", event.target.value)} maxLength={200} placeholder={uiText("如：细针棉针织、轻薄梭织")} disabled={disabled} />
                     </div>
                 </div>
-                {choice("silhouette", "廓形", ["按描述判断", "合体", "微宽松", "宽松", "箱型", "A 字型"])}
                 {choice("presentation", "展示方式", ["白底平铺", "模特展示", "设计效果图"])}
             </>;
             break;
@@ -143,10 +139,11 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
             break;
         case "local-restyle":
             fields = <>
-                {choice("restyleArea", "改动部位", [{ value: "", label: "按描述判断" }, "领口", "袖子", "下摆", "口袋", "其他"])}
+                <label className="cs-label" htmlFor={id("restyleArea")}>{uiText("改动部位")}</label>
+                <input id={id("restyleArea")} className="cs-input" disabled={disabled} maxLength={80} value={form.restyleArea} onChange={e=>update("restyleArea",e.target.value)} placeholder={uiText("填写部位，或从产品卡中选择")}/>
                 <div className="cs-field">
                     <label className="cs-label" htmlFor={id("change")}>{uiText("要改成什么样")}<span className="cs-required" aria-hidden="true"> *</span></label>
-                    <textarea id={id("change")} className="cs-textarea" value={form.change} onChange={(event) => update("change", event.target.value)} required rows={3} maxLength={3000} disabled={disabled} placeholder={!form.restyleArea || form.restyleArea === "其他" ? uiText("请写清具体部位，以及要调整的结构或细节。") : uiText("如：{value1}。", { value1: uiText(form.restyleArea === "领口" ? "圆领改为小 V 领，保留细罗纹领边" : form.restyleArea === "袖子" ? "直筒袖改为轻微喇叭袖，袖长不变" : form.restyleArea === "下摆" ? "下摆改为平直收边，两侧增加小开衩" : "去掉前胸口袋，用原面料自然补齐") })} />
+                    <textarea id={id("change")} className="cs-textarea" value={form.change} onChange={(event) => update("change", event.target.value)} required rows={3} maxLength={3000} disabled={disabled} placeholder={uiText("请写清具体部位，以及要调整的结构或细节。")} />
                 </div>
                 <div className="cs-field">
                     <label className="cs-label" htmlFor={id("preserve")}>{uiText("特别要保留的细节 ")}<span className="cs-help">{uiText("可选")}</span></label>
@@ -248,7 +245,8 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
     </div>;
 }
 
-export function SceneUploads({ slots, images, onImage, onAsset, disabled = false, scopeKey = "creative" }: {
+export function SceneUploads({ slots, images, onImage, onAsset, disabled = false, scopeKey = "creative",onPickPart }: {
+    onPickPart?:(part:string)=>void;
     slots: SceneSlot[];
     images: Partial<Record<SceneSlotId, ReferenceImage>>;
     onImage: (slotId: SceneSlotId, file: File | null) => void | Promise<void>;
@@ -259,11 +257,12 @@ export function SceneUploads({ slots, images, onImage, onAsset, disabled = false
     useUiText();
     if (!slots.length) return null;
     return <div className={`cs-upload-grid${slots.length === 2 ? " cs-upload-grid-pair" : ""}`}>
-        {slots.map(slot => <SceneUploadSlot key={slot.id} slot={slot} reference={images[slot.id]} onImage={onImage} onAsset={onAsset} disabled={disabled} scopeKey={scopeKey} />)}
+        {slots.map(slot => <SceneUploadSlot key={slot.id} slot={slot} reference={images[slot.id]} onImage={onImage} onAsset={onAsset} disabled={disabled} scopeKey={scopeKey} onPickPart={onPickPart} />)}
     </div>;
 }
 
-function SceneUploadSlot({ slot, reference, onImage, onAsset, disabled, scopeKey }: {
+function SceneUploadSlot({ slot, reference, onImage, onAsset, disabled, scopeKey,onPickPart }: {
+    onPickPart?:(part:string)=>void;
     slot: SceneSlot;
     reference?: ReferenceImage;
     onImage: (slotId: SceneSlotId, file: File | null) => void | Promise<void>;
@@ -303,7 +302,7 @@ function SceneUploadSlot({ slot, reference, onImage, onAsset, disabled, scopeKey
                         <span className="cs-upload-replace"><Upload size={14} aria-hidden="true" />{uiText("重新上传")}</span>
                     </> : <span className="cs-upload-empty"><ImagePlus size={28} strokeWidth={1.5} aria-hidden="true" /><strong>{uiText("上传")}{uiText(slot.label || "")}</strong><span>{uiText("点击或拖入 PNG / JPG / WebP")}</span></span>}
                 </label>
-                {productSource?<div className="relative min-h-px"><Suspense fallback={null}><ProductCardChips key={productSource} source={productSource} inline/></Suspense></div>:null}
+                {productSource?<div className="relative min-h-px"><Suspense fallback={null}><ProductCardChips key={productSource} source={productSource} inline onPickPart={disabled?undefined:onPickPart}/></Suspense></div>:null}
                 {onAsset && <button type="button" className="cs-tool-entry" aria-label={uiText("从素材库选择{label}", { label: uiText(slot.label) })} disabled={disabled || !task.active} onClick={() => setAssetPickerOpen(true)}><FolderOpen size={14} aria-hidden="true" />{uiText("从素材库选择")}</button>}
                 {assetPickerOpen && onAsset && task.active && <AssetPickerModal open selectionMode="single-image" onClose={() => setAssetPickerOpen(false)} onInsert={async asset => {
                     if (asset.kind !== "image") throw new Error("请选择图片素材");

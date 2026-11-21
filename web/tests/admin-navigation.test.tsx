@@ -57,6 +57,7 @@ function navigation(surface: "desktop" | "mobile", role: Role, rolePortalsEnable
         "@/stores/use-module-store": { useModuleStore: (select: any) => select({ flags: {} }), useModuleEnabled: () => true, isModuleAvailable: () => true },
     };
     dependencies["./frequent-navigation"] = dependencies["@/components/layout/frequent-navigation"];
+    dependencies["./tryout-navigation"] = component("../src/components/layout/tryout-navigation.tsx", dependencies);
     dependencies["@/components/layout/navigation-menu"] = component("../src/components/layout/navigation-menu.tsx", dependencies);
     dependencies["@/components/layout/navigation-footer"] = component("../src/components/layout/navigation-footer.tsx", dependencies);
     const { MobileNavDrawer } = component("../src/components/layout/mobile-nav-drawer.tsx", dependencies);
