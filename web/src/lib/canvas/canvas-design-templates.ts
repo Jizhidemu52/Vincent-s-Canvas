@@ -23,6 +23,14 @@ const templateScenes = {
 export type CanvasDesignTemplateId = typeof canvasDesignTemplates[number]["id"];
 export type CanvasDesignTemplateSteps = readonly (readonly [title: string, prompt: string])[];
 
+export function prepareCanvasDesignTemplate(id:CanvasDesignTemplateId, nodes:CanvasNodeData[], sourceId:string|null|undefined, model:string, steps:CanvasDesignTemplateSteps, title?:string){
+    const source=sourceId?nodes.find(node=>node.id===sourceId):undefined;
+    if(sourceId&&!source)return;
+    const position={x:nodes.length?nodes.reduce((edge,n)=>Math.max(edge,n.position.x+n.width),-Infinity)+120:0,y:source?.position.y||0};
+    const result=createCanvasDesignTemplate(id,source,position,model,undefined,steps,title);
+    return {...result,config:result.nodes.find(node=>node.type===CanvasNodeType.Config)!};
+}
+
 /** Creates idle, executable config branches; never changes the reference or schedules generation. */
 export function createCanvasDesignTemplate(templateId: CanvasDesignTemplateId, source: CanvasNodeData | undefined, position: Position, model?: string, makeId = nanoid, editedSteps?: CanvasDesignTemplateSteps, editedTitle?: string) {
     const template = canvasDesignTemplates.find(item => item.id === templateId)!;

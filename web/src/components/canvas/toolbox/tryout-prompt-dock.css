@@ -1,0 +1,101 @@
+.tryout-prompt-dock {
+    --tpd-blue: #2440d8;
+    position: absolute;
+    z-index: var(--cw-z-panel);
+    bottom: 58px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(680px, calc(100% - 32px));
+    border: 1px solid var(--cw-border);
+    border-radius: 16px;
+    background: var(--cw-panel);
+    color: var(--cw-text);
+    padding: 8px 12px;
+    box-shadow: 0 4px 24px #17244418;
+}
+[data-theme="dark"] .tryout-prompt-dock {
+    --tpd-blue: #93a5ff;
+}
+.tpd-main,
+.tpd-settings,
+.tpd-settings label,
+.tpd-go {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.tpd-target {
+    max-width: 28%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border-radius: 6px;
+    background: var(--cw-soft);
+    padding: 4px 8px;
+    font-size: 12px;
+}
+.tpd-main input {
+    min-width: 0;
+    flex: 1;
+    font-size: 14px;
+    background: transparent;
+    border: 0;
+    padding: 8px 0;
+    color: inherit;
+}
+.tpd-go {
+    background: var(--tpd-blue);
+    color: white;
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+[data-theme="dark"] .tpd-go {
+    color: #10162f;
+}
+.tpd-go:disabled {
+    background: var(--cw-soft);
+    color: var(--cw-muted);
+}
+.tpd-settings {
+    margin-top: 4px;
+    flex-wrap: wrap;
+    color: var(--cw-muted);
+    font-size: 12px;
+}
+.tpd-settings label {
+    gap: 4px;
+}
+.tpd-settings select,
+.tpd-more {
+    background: transparent;
+    color: inherit;
+    padding: 4px;
+    border-radius: 6px;
+}
+.tpd-settings option {
+    color: var(--cw-text);
+    background: var(--cw-panel);
+}
+.tpd-note {
+    margin-left: auto;
+}
+.tryout-prompt-dock :is(input, button, select):focus-visible {
+    outline: 2px solid var(--tpd-blue);
+    outline-offset: 2px;
+}
+@media (max-width: 600px) {
+    .tryout-prompt-dock {
+        width: calc(100% - 16px);
+        bottom: 108px;
+        padding: 8px;
+    }
+    .tpd-note {
+        flex-basis: 100%;
+        margin: 0;
+    }
+    .tpd-settings {
+        gap: 4px;
+    }
+}

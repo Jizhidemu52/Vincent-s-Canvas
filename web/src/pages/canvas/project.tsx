@@ -188,6 +188,7 @@ const loadCanvasPanelControls = () => import("@/components/canvas/canvas-panel-s
 const CanvasPanelResizeHandle = lazy(() => loadCanvasPanelControls().then(module => ({ default: module.CanvasPanelResizeHandle })));
 const CanvasPanelSizeControl = lazy(() => loadCanvasPanelControls().then(module => ({ default: module.CanvasPanelSizeControl })));
 const CanvasNodeHoverToolbar = lazy(loadCanvasNodeHoverToolbar);
+const TryoutPromptDock = lazy(() => import("@/components/canvas/toolbox/tryout-prompt-dock"));
 const CanvasDesignToolbox = lazy(() => import("@/components/canvas/toolbox/canvas-design-toolbox").then(module => ({ default: module.CanvasDesignToolbox })));
 const CanvasImageQuickActions = lazy(() => import("@/components/canvas/canvas-image-quick-actions").then(module => ({ default: module.CanvasImageQuickActions })));
 
@@ -2424,16 +2425,14 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const applyDesignTemplate = async (id: import("@/lib/canvas/canvas-design-templates").CanvasDesignTemplateId, steps: import("@/lib/canvas/canvas-design-templates").CanvasDesignTemplateSteps, title?: string) => {
         if (!localToolsEnabled) return;
         const sourceId = templateSourceId;
-        const { createCanvasDesignTemplate } = await import("@/lib/canvas/canvas-design-templates");
+        const { prepareCanvasDesignTemplate } = await import("@/lib/canvas/canvas-design-templates");
         if (designProjectIdRef.current !== projectId) return;
-        const source = sourceId ? nodesRef.current.find(node => node.id === sourceId) : undefined;
-        if (sourceId && !source) { message.warning(t("参考图已移除，请重新选择")); return; }
-        const position = { x: nodesRef.current.length ? Math.max(...nodesRef.current.map(node => node.position.x + node.width)) + 120 : 0, y: source?.position.y || 0 };
-        const result = createCanvasDesignTemplate(id, source, position, effectiveConfig.imageModel || effectiveConfig.model, undefined, steps, title);
+        const result = prepareCanvasDesignTemplate(id,nodesRef.current,sourceId,effectiveConfig.imageModel || effectiveConfig.model,steps,title);
+        if (!result) { message.warning(t("参考图已移除，请重新选择")); return; }
         setNodes(current => [...current, ...result.nodes]);
         setConnections(current => [...current, ...result.connections]);
         setGroups(current => [...current, result.group]);
-        const config = result.nodes.find(node => node.type === CanvasNodeType.Config)!;
+        const {config} = result;
         setSelectedNodeIds(new Set([config.id]));
         setSelectedConnectionId(null);
         setDialogNodeId(config.id);
@@ -2444,18 +2443,18 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
 
     const arrangeNodes = async (mode: import("@/lib/canvas/canvas-node-arrange").CanvasArrangeMode, confirmed = false) => {
         if (!localToolsEnabled) return;
-        if (!selectedNodeIdsRef.current.size && !confirmed) {
-            modal.confirm({ title: t("整理整个画布？"), content: t("没有选中节点，将移动所有未锁定的节点和款式组；操作可撤销。"), okText: t("整理全部"), cancelText: t("取消"), onOk: () => arrangeNodes(mode, true) });
+        const { planCanvasArrangement } = await import("@/lib/canvas/canvas-node-arrange");
+        if (designProjectIdRef.current !== projectId) return;
+        const plan = planCanvasArrangement(nodesRef.current, groupsRef.current, selectedNodeIdsRef.current, mode, confirmed);
+        if (plan.kind === "confirm") {
+            modal.confirm({ title: t(plan.title), content: t(plan.content), okText: t(plan.okText), cancelText: t("取消"), onOk: () => arrangeNodes(mode, true) });
             return;
         }
-        const { arrangeCanvasNodes } = await import("@/lib/canvas/canvas-node-arrange");
-        if (designProjectIdRef.current !== projectId) return;
-        const next = arrangeCanvasNodes(nodesRef.current, groupsRef.current, selectedNodeIdsRef.current, mode);
-        if (next === nodesRef.current) { message.info(t("至少需要两个可移动单元；同一款式组视为一个整体")); return; }
+        if (plan.kind === "unchanged") { message.info(t(plan.notice)); return; }
         flushPendingHistory();
-        setNodes(nodesRef.current = next);
+        setNodes(nodesRef.current = plan.nodes);
         flushPendingHistory();
-        message.success(t("排版已更新，款式组内相对位置保留，可撤销"));
+        message.success(t(plan.notice));
     };
 
     const handleFontSizeChange = useCallback((nodeId: string, fontSize: number) => {
@@ -3115,6 +3114,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                     onToggleAgent={toggleAgentFromTopBar}
                 />
                 {!isCanvasDesktopLayout ? quickGeneratePanel : null}
+                {projectLoaded && tryoutEnabled && <Suspense fallback={null}><TryoutPromptDock owner={editorOwner} onRun={runQuickCanvasGeneration} busy={quickGenerateRunning || !writable.current} hidden={!isCanvasDesktopLayout && (assistantOpen || quickGenerateOpen || tryoutPanel.open)} /></Suspense>}
                 {projectLoaded ? <Suspense fallback={null}><CanvasDesignDiscussion key={projectId} projectId={projectId} writable={writable} getCanvasCenter={getCanvasCenter} onBeforeChange={flushPendingHistory} onLocate={locateNodes} toolboxOpen={tryoutPanel.open} /></Suspense> : null}
 
                 <WirelessCanvas

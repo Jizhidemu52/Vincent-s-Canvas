@@ -1,13 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
-import { arrangeCanvasNodes, canvasArrangeOptions } from "../src/lib/canvas/canvas-node-arrange";
-import { canvasDesignTemplates, createCanvasDesignTemplate, isEmptyCanvasDesignTemplateReference } from "../src/lib/canvas/canvas-design-templates";
+import { arrangeCanvasNodes, canvasArrangeOptions, planCanvasArrangement } from "../src/lib/canvas/canvas-node-arrange";
+import { canvasDesignTemplates, createCanvasDesignTemplate, isEmptyCanvasDesignTemplateReference, prepareCanvasDesignTemplate } from "../src/lib/canvas/canvas-design-templates";
 import { replaceCanvasNodeImage } from "../src/pages/canvas/canvas-project-utils";
 import { canvasCompareImages, chooseCanvasComparePair, compareContainRect, drawCanvasCompare } from "../src/lib/canvas/canvas-image-compare";
 import { createCanvasRestoredGenerationNode } from "../src/lib/canvas/canvas-generation-draft";
 import { buildNodeGenerationContext, buildNodeGenerationInputs, createConfigGenerationInputIndex } from "../src/components/canvas/canvas-node-generation";
 import { resolveCanvasImageReferences } from "../src/lib/canvas/canvas-image-references";
 import { cloneCanvasNodeGraph } from "../src/lib/canvas/canvas-node-copy";
+
+test("opening optional canvas tools keeps a missing original and unconfirmed whole-canvas arrangement read-only",()=>{
+    const nodes=[node("a",0,0),node("b",33,22)];
+    expect(planCanvasArrangement(nodes,[],new Set(),"horizontal",false).kind).toBe("confirm");
+    expect(planCanvasArrangement(nodes,[],new Set(),"horizontal",true).kind).toBe("apply");
+    expect(prepareCanvasDesignTemplate("range",nodes,"absent","image-model",canvasDesignTemplates[2].steps)).toBeUndefined();
+    expect(prepareCanvasDesignTemplate("range",nodes,"a","image-model",canvasDesignTemplates[2].steps)?.config.type).toBe(CanvasNodeType.Config);
+});
 
 const node = (id: string, x = 0, y = 0, width = 100): CanvasNodeData => ({ id, type: CanvasNodeType.Image, title: id, position: { x, y }, width, height: 80, metadata: { content: `data:image/png;base64,${id}`, storageKey: `image:${id}`, imageName: "coat", imageVersion: 1 } });
 

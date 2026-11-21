@@ -2,6 +2,13 @@ import type { CanvasNodeData, CanvasNodeGroup } from "@/types/canvas";
 import type { CanvasArrangeMode } from "./canvas-node-arrange-options";
 export { canvasArrangeOptions, type CanvasArrangeMode } from "./canvas-node-arrange-options";
 
+export function planCanvasArrangement(nodes: CanvasNodeData[], groups: CanvasNodeGroup[], selected: ReadonlySet<string>, mode: CanvasArrangeMode, confirmed: boolean) {
+    if (!selected.size && !confirmed) return { kind: "confirm", title: "整理整个画布？", content: "没有选中节点，将移动所有未锁定的节点和款式组；操作可撤销。", okText: "整理全部" } as const;
+    const next = arrangeCanvasNodes(nodes, groups, selected, mode);
+    return next === nodes ? {kind: "unchanged", notice: "至少需要两个可移动单元；同一款式组视为一个整体"} as const
+        : {kind: "apply", nodes: next, notice: "排版已更新，款式组内相对位置保留，可撤销"} as const;
+}
+
 /** A group or batch is one movable unit, including when only one member is selected. */
 export function arrangeCanvasNodes(nodes: CanvasNodeData[], groups: CanvasNodeGroup[], selected: ReadonlySet<string>, mode: CanvasArrangeMode, gap = 80) {
     const parents = new Map(nodes.map(node => [node.id, node.id]));

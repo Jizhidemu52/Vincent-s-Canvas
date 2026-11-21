@@ -29,6 +29,7 @@ import { useSearchParams } from "react-router-dom";
 import { buildImageGenerationMetadata, getGenerationCount, isGenerationCanceled } from "./canvas-project-utils";
 import { useCanvasBatchEdit } from "./use-canvas-batch-edit";
 import { useCanvasGenerationRuntime } from "./use-canvas-generation-runtime";
+export type CanvasDockInput={prompt:string;source?:CanvasNodeData;references:CanvasSelectionReference[];size:string;quality:string;imageOptions:string;model:string};
 type CanvasQuickGenerationOptions = {
     projectId: string;
     projectLoaded: boolean;
@@ -269,7 +270,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         void addQuickReferenceFiles(files);
     }, [addQuickReferenceFiles]);
 
-    const runQuickCanvasGeneration = useCallback(async () => {
+    const runQuickCanvasGeneration = useCallback(async (dock?:CanvasDockInput) => {
         if (quickSubmissionRef.current || referenceRead.current) return;
         if (!isObservationCurrent()) return;
         const account = useUserStore.getState();
@@ -277,23 +278,25 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
             || draftScope !== `${projectId}:${account.status}:${account.user?.id || ""}`) return;
         flushQuickNodeDraft();
         const user = account.user;
-        const sourceNode = nodeDraftBindingRef.current?.scope === currentDraftScopeRef.current ? nodesRef.current.find(node => node.id === nodeDraftBindingRef.current?.nodeId) : undefined;
-        if (sourceNode && sourceNode.metadata?.draftImageReferences === undefined && hasIncompleteCanvasGenerationReferences(sourceNode)) {
+        const sourceNode = dock ? dock.source : nodeDraftBindingRef.current?.scope === currentDraftScopeRef.current ? nodesRef.current.find(node => node.id === nodeDraftBindingRef.current?.nodeId) : undefined;
+        if(dock&&sourceNode&&!nodesRef.current.includes(sourceNode)){message.warning(uiText("所选图片已变化，请重新选择。"));return;}
+        if (!dock && sourceNode && sourceNode.metadata?.draftImageReferences === undefined && hasIncompleteCanvasGenerationReferences(sourceNode)) {
             message.warning(uiText("旧版记录参考信息不完整，请先恢复历史输入或明确设置新的参考图"));
             return;
         }
-        const selectedModel = quickGenerateModel || effectiveConfig.imageModel || effectiveConfig.model;
-        const toolKey = canvasToolKey("image", quickGenerateReferences.length > 0, imageModelProfile(selectedModel).kind);
+        const references = structuredClone(dock?.references??quickGenerateReferences);
+        const selectedModel = dock?.model || quickGenerateModel || effectiveConfig.imageModel || effectiveConfig.model;
+        const toolKey = canvasToolKey("image", references.length > 0, imageModelProfile(selectedModel).kind);
         const model = currentToolConfig({ ...effectiveConfig, model: selectedModel }, toolKey).model;
         const modelId = modelOptionName(model);
         const profile = imageModelProfile(model);
-        const prompt = profile.requiresPrompt ? quickGeneratePromptRef.current.trim() : "";
-        const settings = normalizeImageModelSettings({ size: quickGenerateSize, quality: quickGenerateQuality, count: String(quickGenerateCount) }, profile);
-        const count = getGenerationCount(String(quickGenerateCount));
-        const references = structuredClone(quickGenerateReferences);
+        if(dock&&model!==dock.model){message.warning(uiText("模型配置已变化，请核对后再生成。"));return;}
+        const prompt = profile.requiresPrompt ? (dock?.prompt??quickGeneratePromptRef.current).trim() : "";
+        const count = dock?1:getGenerationCount(String(quickGenerateCount));
+        const settings = normalizeImageModelSettings({ size: dock?.size??quickGenerateSize, quality: dock?.quality??quickGenerateQuality, count: String(count) }, profile);
         // Select the compilation before any async preparation. Later edits or
         // optimization results belong to the next run, never this batch.
-        const optimized = quickOptimizedDraft.current;
+        const optimized = dock?undefined:quickOptimizedDraft.current;
         const sameReferences = optimized?.references.length === references.length && optimized.references.every((image, index) => {
             const reference = references[index];
             return reference && image.id === reference.id && image.dataUrl === reference.dataUrl && image.url === reference.url
@@ -309,7 +312,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
             model,
             imageModel: model,
             ...settings,
-            imageOptions: quickGenerateImageOptions,
+            imageOptions: dock?.imageOptions??quickGenerateImageOptions,
             count: "1",
             canvasImageCount: "1",
         };
@@ -347,7 +350,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         const { x: startX, y: startY } = placeCanvasImageOutputs(nodesRef.current, sourceNodes, {
             width: columns * nodeSize.width + (columns - 1) * gap,
             height: rows * nodeSize.height + (rows - 1) * gap,
-        }, origin, gap, quickGeneratePosition);
+        }, origin, gap, dock?null:quickGeneratePosition);
         const targetIds = Array.from({ length: count }, () => `quick-image-${nanoid()}`);
         const runId = nanoid();
         const generationType: CanvasImageGenerationType = operationType === "inpaint" ? "edit" : "generation";
@@ -407,7 +410,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
                             node.id === targetId
                                 ? {
                                       ...node,
-                                      position: quickGeneratePosition ? node.position : {
+                                      position: !dock && quickGeneratePosition ? node.position : {
                                           x: node.position.x + node.width / 2 - resultSize.width / 2,
                                           y: node.position.y + node.height / 2 - resultSize.height / 2,
                                       },
