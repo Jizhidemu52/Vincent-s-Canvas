@@ -1,4 +1,5 @@
 import type { BrowserContext, Page, Route } from "@playwright/test";
+import { approveEdit } from "./approve-canvas-edit";
 import { test, expect, newCanvas, uploadImage, IMAGE, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
 import { parseCanvasProject } from "../src/lib/canvas/canvas-project-codec";
@@ -181,6 +182,7 @@ for (const mode of ["正常返回", "processing 后刷新查询原任务"] as co
         await openConversation(page);
         await paintRegion(page);
         await send(page, "只把圈选范围改为纯红色，选区外全部保持原样");
+        await approveEdit(page, api, 0);
         await expect.poll(() => api.submissions.length).toBe(1);
         expect(acceptedPending).toBeDefined();
         const taskId = [...api.tasks.keys()][0]!, savedPending = acceptedPending;
@@ -308,6 +310,7 @@ for (const scenario of [
         const requestText = "只把当前图改为浅蓝色，保持原有结构与背景";
         await send(page, requestText);
         if (scenario.kind === "repair-once") {
+            await approveEdit(page, api, 0);
             await expect.poll(() => api.submissions.length).toBe(1);
             await expect.poll(() => api.document(id)?.nodes.length).toBe(2);
             await expect(panel(page).getByText("1 张图片已生成并放入画布。", { exact: true })).toBeVisible();
@@ -354,6 +357,7 @@ test("Canvas planner 本地无效 edit_spec 仅修复一次，保存本版规格
     const originalId = api.document(id)!.nodes[0].id;
     await openConversation(page);
     await send(page, "只把领口改为 V 领，针织纹理与背景保持");
+    await approveEdit(page, api, 0);
     await expect.poll(() => api.submissions.length).toBe(1);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(2);
     expect(requests).toHaveLength(2);
@@ -424,9 +428,11 @@ test("Canvas review 仅手动检查、逐项报告持久化，纠正保留草稿
     await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
     await openConversation(page);
     await send(page, "第一轮，沿用原图开发针织上衣方案");
+    await approveEdit(page, api, 0);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(2);
     await expect(panel(page).getByRole("button", { name: "发送", exact: true })).toBeVisible();
     await send(page, "在上一轮方案上收窄袖口，保留整体款式方向");
+    await approveEdit(page, api, 1);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(3);
     await expect(panel(page).getByRole("button", { name: "发送", exact: true })).toBeVisible();
     const before = await savedCanvas(page, id);
@@ -510,6 +516,7 @@ test("Canvas conversation-only current previous original and refresh keep exact 
     const results: Array<{ nodeId: string; imageId: string; baseId: string }> = [];
     for (const [index, text] of prompts.entries()) {
         await assertSimple(); await send(page, text);
+        await approveEdit(page, api, index);
         await expect.poll(() => api.submissions.length).toBe(index + 1);
         await expect.poll(() => api.document(id)?.nodes.length).toBe(index + 2);
         await expect(panel(page).getByRole("button", { name: "发送", exact: true })).toBeVisible();
@@ -527,6 +534,7 @@ test("Canvas conversation-only current previous original and refresh keep exact 
     }
     await page.reload(); await openConversation(page); await assertSimple();
     await send(page, "刷新后继续把海面颜色调淡");
+    await approveEdit(page, api, 4);
     await expect.poll(() => api.submissions.length).toBe(5);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(6);
     await expect(panel(page).getByRole("button", { name: "发送", exact: true })).toBeVisible();
@@ -554,6 +562,7 @@ for (const destination of ["session", "owner", "project"] as const) test(`Canvas
     await uploadImage(page, `review-${destination}-original.png`);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
     await openConversation(page); await send(page, "沿用原版开发新的针织方案");
+    await approveEdit(page, api, 0);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(2);
     await expect(panel(page).getByRole("button", { name: "发送", exact: true })).toBeVisible();
     const original = await savedCanvas(page, id);

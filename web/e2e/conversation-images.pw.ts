@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { approveEdit } from "./approve-canvas-edit";
 import { toolDefinitions } from "../../shared/feature-catalog";
 import { test, expect, IMAGE, type MockCanvasApi } from "./fixtures";
 import type { BrowserContext, Locator, Page, Route } from "@playwright/test";
@@ -178,6 +179,7 @@ for (const surface of ["chat", "canvas"] as const) test(`${surface} keeps origin
     const original = surface === "chat" ? api.assetBytes.get([...api.tasks.keys()][0])! : IMAGE;
     api.taskStatus = "processing";
     await send("再生成另一款毛衣");
+    if (surface === "canvas") await approveEdit(page, api, 0);
     const expectedTasks = surface === "chat" ? 2 : 1;
     await expect.poll(() => api.submissions.length).toBe(expectedTasks);
     const pendingId = [...api.tasks.keys()].at(-1)!;
@@ -369,6 +371,7 @@ test("canvas image preview preserves original bytes while older-version and orig
     const composer = page.locator(".cw-agent-panel textarea").last();
     await composer.fill("图2，正方形再亮一点。");
     await page.locator(".cw-agent-panel").getByRole("button", { name: "发送", exact: true }).click();
+    await approveEdit(page, api, 0);
     await expect.poll(() => api.submissions.length).toBe(1);
     expect(api.submissions[0].operationType).toBe("inpaint");
     expect(api.submissions[0].parameters.inputArchive.references.map((image: any) => image.id)).toEqual([oldId]);
@@ -377,6 +380,7 @@ test("canvas image preview preserves original bytes while older-version and orig
     await expect(canvasCard(page, "图4")).toBeVisible();
     await composer.fill("回到原图，重新修改正方形。");
     await page.locator(".cw-agent-panel").getByRole("button", { name: "发送", exact: true }).click();
+    await approveEdit(page, api, 1);
     await expect.poll(() => api.submissions.length).toBe(2);
     expect(api.submissions[1].parameters.inputArchive.references.map((image: any) => image.id)).toEqual([originalId]);
     expect(api.submissions[1].operationType).toBe("inpaint");
