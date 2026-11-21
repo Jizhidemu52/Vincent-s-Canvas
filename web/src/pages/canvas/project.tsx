@@ -2976,6 +2976,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         downloadSelectedImages: { run: openSelectedImageDownload, enabled: selectedExportImageCount > 0 },
         select: { run: () => setInteractionMode("select") }, pan: { run: () => { deselectCanvas(); setInteractionMode("hand"); } },
         backgroundDots: { run: () => setBackgroundMode("dots") }, backgroundLines: { run: () => setBackgroundMode("lines") }, backgroundBlank: { run: () => setBackgroundMode("blank") },
+        backgroundPaper: { run: () => setBackgroundMode("paper") },
         imageInfo: { run: () => setShowImageInfo(value => !value) },
         newProject: { run: createAndOpenProject },
         deleteProject: { run: deleteCurrentProject }, renameProject: { run: startTitleEditing }, share: { run: shareFromTopBar },

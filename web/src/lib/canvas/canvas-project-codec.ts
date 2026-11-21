@@ -137,7 +137,7 @@ function applySnapshotDelta(before: CanvasHistorySnapshot, value: unknown): Canv
     if (Object.keys(arrays).some(key => !arrayKeys.has(key))) return invalid();
     for (const [key, field] of Object.entries(set)) if (arrayKeys.has(key) && !Array.isArray(field)) return invalid();
     if (Object.hasOwn(set, "activeChatId") && set.activeChatId !== null && typeof set.activeChatId !== "string") return invalid();
-    if (Object.hasOwn(set, "backgroundMode") && !["dots", "lines", "blank"].includes(set.backgroundMode as string)) return invalid();
+    if (Object.hasOwn(set, "backgroundMode") && !["dots", "lines", "blank", "paper"].includes(set.backgroundMode as string)) return invalid();
     if (Object.hasOwn(set, "showImageInfo") && typeof set.showImageInfo !== "boolean") return invalid();
     if (Object.hasOwn(set,"tryoutKit") && !tryoutKitSchema.safeParse(set.tryoutKit).success) return invalid();
     if (!touched.length) return before;

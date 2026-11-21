@@ -11,6 +11,7 @@
     --canvas-cursor-grabbing: url("./cursors/grabbing-dark.svg") 12 13, grabbing;
 }
 [data-canvas-viewport][data-cursor-mode="grab"] { cursor: var(--canvas-cursor-grab); }
+[data-grid-mode="paper"] { background-image: url("./pattern-paper.svg"); }
 [data-canvas-viewport][data-cursor-panning="true"] { cursor: var(--canvas-cursor-grabbing); }
 /* No descendant override: inputs, links, resize handles and comparison sliders keep their own cursors. */
 @media (forced-colors: active) {

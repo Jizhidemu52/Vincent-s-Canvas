@@ -52,6 +52,7 @@ export const canvasActions = [
     { id: "backgroundDots", label: "画布背景：点阵", toolbarLabel: "点阵" },
     { id: "backgroundLines", label: "画布背景：网格", toolbarLabel: "网格" },
     { id: "backgroundBlank", label: "画布背景：纯色", toolbarLabel: "纯色" },
+    { id: "backgroundPaper", label: "画布背景：打版纸", toolbarLabel: "打版纸" },
     { id: "imageInfo", label: "显示图片信息" },
     { id: "home", label: "工作台" },
     { id: "projects", label: "我的画布" },

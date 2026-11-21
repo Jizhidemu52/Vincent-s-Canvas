@@ -933,6 +933,8 @@ const enCanvas: Record<string, string> = {
   "移动画布": "Pan canvas",
   "空格 + 拖动": "Space + drag",
   "画布背景：点阵": "Canvas background: dots",
+  "画布背景：打版纸": "Canvas background: pattern paper",
+  "打版纸": "Pattern paper",
   "点阵": "Dots",
   "画布背景：网格": "Canvas background: grid",
   "网格": "Grid",

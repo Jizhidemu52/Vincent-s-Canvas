@@ -54,7 +54,7 @@ const documentSchema = z.object({
     chatSessions: z.array(z.object({ id: idSchema, title: z.string(), messages: z.array(messageSchema), createdAt: dateSchema, updatedAt: dateSchema,
         serverConversationId: z.string().uuid().optional(),
     }).passthrough().refine(session => !session.serverConversationId || session.messages.length === 0)),
-    activeChatId: idSchema.nullable(), backgroundMode: z.enum(["dots", "lines", "blank"]), showImageInfo: z.boolean(),
+    activeChatId: idSchema.nullable(), backgroundMode: z.enum(["dots", "lines", "blank", "paper"]), showImageInfo: z.boolean(),
     viewport: z.object({ x: z.number(), y: z.number(), k: z.number().positive() }).passthrough(),
 }).passthrough();
 const writeSchema = z.object({ baseRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER - 1), document: documentSchema.nullable() });
