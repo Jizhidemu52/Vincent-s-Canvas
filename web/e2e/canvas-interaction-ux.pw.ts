@@ -63,7 +63,14 @@ test("desktop: collapsed remembered panel, grid import, pan/zoom shortcuts and r
     await page.locator(".ant-message").getByRole("button", { name: "撤销", exact: true }).click();
     await expect.poll(() => api.document(id)?.nodes.length).toBe(2);
     await expect(page.getByText("体验数据", { exact: true })).toBeHidden();
-    await canvas.click({ button: "right", position: { x: 1100, y: 120 } });
+    const background = await canvas.evaluate(view => {
+        const bounds = view.getBoundingClientRect();
+        for (let y = 65; y < bounds.height - 30; y += 75) for (let x = 70; x < bounds.width - 30; x += 100) {
+            if (document.elementFromPoint(bounds.left + x, bounds.top + y) === view) return { x, y };
+        }
+        throw new Error("No exposed canvas background for the context menu");
+    });
+    await canvas.click({ button: "right", position: background });
     for (const name of ["粘贴到此处", "添加文本", "全选节点", "适应全部内容"]) await expect(page.getByRole("menuitem", { name: new RegExp(name) })).toBeVisible();
     await page.keyboard.press("Escape");
     await page.screenshot({ path: info.outputPath("canvas-desktop.png") });
