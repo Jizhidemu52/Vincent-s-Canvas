@@ -53,3 +53,14 @@ export async function requeueRepairs(db: Database, cache: Pick<Cache, "eval">, o
   for (const row of rows) await scheduleQueuedTask(cache, row.id, queueScore(row.priority, new Date(row.queued_at).getTime()), new Date(row.available_at).getTime());
   return rows.length;
 }
+
+export function startTaskRepairScheduler(db: Database, cache: Pick<Cache, "eval">, maxAttempts: number, intervalSeconds: number) {
+  let pending: Promise<void> | undefined;
+  const timer = setInterval(() => {
+    if (pending) return;
+    pending = requeueRepairs(db, cache, { maxAttempts })
+      .then(() => undefined, () => { console.error(JSON.stringify({ event: "worker.result_repair_schedule_failed" })); })
+      .finally(() => { pending = undefined; });
+  }, intervalSeconds * 1000);
+  return { stop() { clearInterval(timer); return pending; } };
+}

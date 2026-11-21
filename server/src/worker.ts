@@ -2,7 +2,7 @@ import { loadConfig } from "./config";
 import { videoFileExtension } from "../../shared/video-output";
 import { randomUUID } from "node:crypto";
 import { createCache, createDatabase, type Cache, type Database } from "./db";
-import { classifyResultFailure, pauseOwnedTask, requeueRepairs, type PausedKind } from "./task-repair";
+import { classifyResultFailure, pauseOwnedTask, startTaskRepairScheduler, type PausedKind } from "./task-repair";
 import { decryptSecret } from "./security";
 import { settleReservation } from "./billing";
 import { withTransaction } from "./db-transaction";
@@ -106,7 +106,7 @@ const storage = new ObjectStorage(config);
 let stopping = false;
 let queueReconciliation: Promise<void> | null = null;
 let queueReconciliationTimer: ReturnType<typeof setInterval> | undefined;
-let repairTimer: ReturnType<typeof setInterval> | undefined;
+let repairScheduler: ReturnType<typeof startTaskRepairScheduler> | undefined;
 let repairWork: Promise<void> | undefined;
 let usageRollupTimer: ReturnType<typeof setInterval> | undefined;
 let usageRollupWork: Promise<void> | null = null;
@@ -1056,7 +1056,7 @@ function shutdown(signal: string) {
   if (stopping) return;
   stopping = true;
   clearInterval(queueReconciliationTimer);
-  clearInterval(repairTimer);
+  repairWork = repairScheduler?.stop();
   clearInterval(usageRollupTimer);
   void workerHealth?.stop();
   console.log(JSON.stringify({ event: "worker.draining", signal, activeTasks: activeTaskIds.size, graceSeconds: config.WORKER_SHUTDOWN_GRACE_SECONDS }));
@@ -1084,12 +1084,8 @@ if (!stopping) workerHealth = startWorkerHealth({
   isRunning: () => !stopping,
 });
 if (!stopping) queueReconciliationTimer = setInterval(() => void reconcileTaskQueue(), 60_000);
-if (!stopping && config.RESULT_REPAIR_ENABLED === "true") repairTimer = setInterval(() => {
-  if (stopping || repairWork) return;
-  repairWork = requeueRepairs(db, cache, { maxAttempts: config.RESULT_REPAIR_MAX_ATTEMPTS })
-    .then(() => undefined, () => { console.error(JSON.stringify({ event: "worker.result_repair_schedule_failed" })); })
-    .finally(() => { repairWork = undefined; });
-}, config.RESULT_REPAIR_INTERVAL_SECONDS * 1000);
+if (!stopping && config.RESULT_REPAIR_ENABLED === "true")
+  repairScheduler = startTaskRepairScheduler(db, cache, config.RESULT_REPAIR_MAX_ATTEMPTS, config.RESULT_REPAIR_INTERVAL_SECONDS);
 async function runUsageRollups() {
   if (stopping || usageRollupWork) return;
   usageRollupWork = (async () => {

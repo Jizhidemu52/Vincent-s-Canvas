@@ -82,7 +82,7 @@ test("graceful shutdown is idempotent, stops reconciliation and enforces a bound
   const cleared: unknown[] = [], exits: number[] = [];
   let healthStops = 0;
   const worker = productionFunctions(["shutdown"], {
-    stopping: false, repairTimer: "repair-timer", queueReconciliationTimer: "reconcile-timer", usageRollupTimer: "usage-rollup-timer", shutdownTimer: undefined,
+    stopping: false, repairWork: undefined, repairScheduler: { stop: () => cleared.push("repair-timer") }, queueReconciliationTimer: "reconcile-timer", usageRollupTimer: "usage-rollup-timer", shutdownTimer: undefined,
     workerHealth: { stop: async () => { healthStops++; } },
     activeTaskIds: new Set(["active"]), config: { WORKER_SHUTDOWN_GRACE_SECONDS: 1200 },
     console: { log() {}, error() {} }, process: { exit: (code: number) => exits.push(code) },

@@ -1,4 +1,7 @@
-import { classifyResultFailure, pauseOwnedTask } from "../../src/task-repair";
+import { classifyResultFailure, pauseOwnedTask, startTaskRepairScheduler } from "../../src/task-repair";
+import { storeImageResult, imageResultExtension, ImageResultPersistenceError } from "../../src/image-result-storage";
+import { recordAssetEvent } from "../../src/asset-events";
+import { classifyDesignDirection } from "../../src/design-direction";
 import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import ts from "typescript";
@@ -52,13 +55,14 @@ async function databaseFixture(kind: "image" | "video" = "video") {
   return { ...sql, redis, model, task, close: async () => { await redis.close(); await sql.close(); } };
 }
 
-async function productionWorker(dependencies: Record<string, unknown>) {
+async function productionWorker(dependencies: Record<string, unknown>, realResultWriter = false) {
   dependencies = { disposeProviderResults, WorkflowTaskPending, ApiMartImageQueryRetryable, PromptOptimizationError, readApiMartVideoReceipt, saveApiMartVideoReceipt, ...dependencies };
   // Exercise the real orchestration/provider functions without importing the
   // worker entrypoint (which intentionally starts configured production services).
   const file = await Bun.file(new URL("../../src/worker.ts", import.meta.url)).text();
   const source = ts.createSourceFile("worker.ts", file, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const names = ["runTask", "deferTask", "assertTaskExecution", "executeApiMartVideo", "executeApiMartImage"];
+  if (realResultWriter) names.push("storeResults", "saveResultAsset");
   const code = names.map(name => {
     const node = source.statements.find(statement => ts.isFunctionDeclaration(statement) && statement.name?.text === name);
     if (!node) throw new Error(`Missing production function ${name}`);
@@ -70,6 +74,73 @@ async function productionWorker(dependencies: Record<string, unknown>) {
       ? executeApiMartVideo(task,{apiKey:'fixture-only'}) : executeApiMartImage(task,{apiKey:'fixture-only'},task.prompt); }
     return {runTask};`)(classifyResultFailure, pauseOwnedTask, ...Object.values(dependencies)) as { runTask(id: string): Promise<void> };
 }
+
+integration("ordinary image recovers from ENOSPC using the production timer, same upstream ID and original PNG", async () => {
+  const fixture = await databaseFixture("image"), { db, redis } = fixture;
+  let scheduler: ReturnType<typeof startTaskRepairScheduler> | undefined;
+  const objects = new Map<string, Buffer>();
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAFUlEQVR4nGP8////fwYGBgYWEAHCAD4KBAICIHhuAAAAAElFTkSuQmCC", "base64");
+  const methods: string[] = [];
+  let writes = 0;
+  const worker = await productionWorker({
+    db, cache: redis.cache, randomUUID, TASK_LEASE_SECONDS, config: { TASK_MOCK_MODE: "false", RESULT_REPAIR_MAX_ATTEMPTS: 3 },
+    acquireModelLease, releaseModelLease, startTaskLeaseHeartbeat, TaskExecutionLost, withTransaction, settleReservation,
+    scheduleQueuedTask, queueScore, canAutomaticallyRetryTask, recalculateBatch, VideoTaskPending, ApiMartImageTaskPending,
+    VideoSubmissionClaimLost, VideoProviderFailure, ApiMartImageProviderFailure, ProviderSubmissionRejected, submissionWasNotSent,
+    readProviderSubmissionDiagnostics: () => undefined, ImageResultPersistenceError, storeImageResult, imageResultExtension,
+    recordAssetEvent, classifyDesignDirection, scheduleAssetThumbnails: () => {},
+    createGenerationTiming: () => ({ measure: (_stage: string, action: () => unknown) => action(), finish() {} }),
+    loadSourceAssets: async () => [],
+    stepApiMartImageTask: (input: ApiMartImageTaskInput) => stepApiMartImageTask(input, { fetch: async (url, init) => {
+      const method = init?.method ?? "GET";
+      methods.push(method);
+      if (method === "POST") return Response.json({ data: [{ task_id: "original-remote" }] });
+      expect(String(url)).toContain("/tasks/original-remote");
+      return Response.json({ data: { status: "completed", result: { images: [{ url: "https://provider.invalid/returned.png" }] } } });
+    } }),
+    fetchProviderResult: async (url: string) => {
+      expect(url).toBe("https://provider.invalid/returned.png");
+      return { bytes: png, mimeType: "image/png" };
+    },
+    storage: { configured: true, put: async (key: string, bytes: Uint8Array) => {
+      if (++writes === 1) throw Object.assign(new Error("fixture disk full"), { code: "ENOSPC" });
+      objects.set(key, Buffer.from(bytes));
+    } },
+  }, true);
+  try {
+    const id = await fixture.task();
+    const state = async () => (await db.query("SELECT status,paused_kind,repair_error_code,repair_attempts,attempts,upstream_submission_started_at,upstream_task_id,result_urls FROM tasks WHERE id=$1", [id])).rows[0];
+    const next = async (deadline: number) => {
+      while (Date.now() < deadline) {
+        const ready = await popReadyTask(redis.cache);
+        if (ready) { expect(ready).toBe(id); return worker.runTask(ready); }
+        await Bun.sleep(250);
+      }
+      throw new Error("Timed out waiting for scheduled original task");
+    };
+    await worker.runTask(id);
+    await next(Date.now() + 10_000);
+    const paused = await state(), start = Date.now();
+    expect(paused).toMatchObject({ status: "paused", paused_kind: "result_repair", repair_error_code: "STORAGE_ENOSPC", attempts: 1, repair_attempts: 0 });
+    expect((await db.query("SELECT status FROM credit_reservations WHERE request_id=$1", [`request-${id}`])).rows[0].status).toBe("held");
+    scheduler = startTaskRepairScheduler(db, redis.cache, 3, 60);
+    await next(start + 135_000);
+    const result = await state();
+    expect(result).toMatchObject({ status: "success", paused_kind: null, repair_attempts: 1, attempts: 1, upstream_task_id: "original-remote", upstream_submission_started_at: paused.upstream_submission_started_at });
+    expect(methods).toEqual(["POST", "GET", "GET"]);
+    expect(writes).toBe(2);
+    const assets = (await db.query("SELECT id,object_key,mime_type FROM assets WHERE task_id=$1", [id])).rows;
+    expect(assets).toHaveLength(1);
+    expect(assets[0].mime_type).toBe("image/png");
+    expect(objects.get(assets[0].object_key)).toEqual(png);
+    expect(result.result_urls).toEqual([`/api/assets/${assets[0].id}/content`]);
+    expect((await db.query("SELECT status FROM credit_reservations WHERE request_id=$1", [`request-${id}`])).rows[0].status).toBe("captured");
+    expect((await db.query("SELECT count(*)::int AS n FROM generation_history WHERE task_id=$1", [id])).rows[0].n).toBe(1);
+    const elapsedMs = Date.now() - start;
+    expect(elapsedMs).toBeLessThan(300_000);
+    console.log(JSON.stringify({ fixture: "ordinary-image-storage-repair", elapsedMs, mediaPosts: 1, polls: 2, savedBytes: png.length }));
+  } finally { await scheduler?.stop(); await fixture.close(); }
+}, 160_000);
 
 for (const kind of ["video", "image"] as const) integration(`30 mock ${kind}s release worker slots, preserve model inflight quota and recover without a second POST`, async () => {
   const fixture = await databaseFixture(kind);
