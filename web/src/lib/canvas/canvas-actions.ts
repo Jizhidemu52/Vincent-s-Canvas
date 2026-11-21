@@ -12,6 +12,7 @@ export const canvasActions = [
     { id: "copyImage", label: "复制图片" },
     { id: "selectAll", label: "全选节点", key: "a" },
     { id: "commands", label: "搜索命令、节点和素材", key: "k" },
+    { id: "tryout", label: "试款台", key: "t", plain:true },
     { id: "upload", label: "上传素材", contextLabel: "上传图片" },
     { id: "text", label: "添加文本", toolbarLabel: "文本" },
     { id: "image", label: "添加图片节点", toolbarLabel: "图片节点" },

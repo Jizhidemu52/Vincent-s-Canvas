@@ -1,0 +1,55 @@
+import {expect,test} from "bun:test";
+import express,{type ErrorRequestHandler} from "express";
+import {randomUUID} from "node:crypto";
+import {createIsolatedPostgres} from "../helpers/isolated-postgres";
+import {createTryoutRouter} from "../../src/routes/tryout";
+import type {Cache} from "../../src/db";
+
+(process.env.PGLITE_RUNTIME_PATH?test:test.skip)("tryout admission is owned, idempotent, priced, and reuses the concurrency-controlled queue",async()=>{
+    const sql=await createIsolatedPostgres();
+    const [user,other,provider,model,product,person]=Array.from({length:6},()=>randomUUID());
+    const app=express(),cache={eval:async()=>1} as unknown as Cache;
+    app.use(express.json(),(req,_res,next)=>{Object.assign(req,{auth:{id:req.get("x-fixture-user"),role:"designer",departmentId:null}});next();});
+    app.use("/api/tryout",createTryoutRouter(sql.db,cache,{credits:async()=>true,maxInflightTasks:3,maxPausedTasks:3}));
+    app.use(((err,_req,res,_next)=>res.status(err.status??400).json({error:err.code??err.name,message:err.message})) as ErrorRequestHandler);
+    const server=app.listen(0,"127.0.0.1");
+    await new Promise<void>(resolve=>server.once("listening",resolve));
+    const base="http://127.0.0.1:"+(server.address() as {port:number}).port+"/api/tryout/quick";
+    const submit=async(body:unknown,actor=user)=>{const r=await fetch(base,{method:"POST",headers:{"content-type":"application/json","x-fixture-user":actor,"x-canvas-owner-id":actor},body:JSON.stringify(body)});return {status:r.status,...await r.json()};};
+    const input={kind:"color",requestId:randomUUID(),canvasId:"winter",nodeId:"color1",tier:"quick",color:{name:"海军蓝",hex:"#173566"},sourceAssetId:product};
+    try{
+        for(const id of [user,other])await sql.db.query("INSERT INTO users(id,username,display_name,credit_balance,credit_limit,monthly_credit_limit) VALUES($1,$2,'Fixture',100,100,100)",[id,id]);
+        await sql.db.query("INSERT INTO canvas_documents(owner_user_id,external_id,revision,document) VALUES($1,'winter',1,'{}'),($2,'other-design',1,'{}')",[user,other]);
+        await sql.db.query("INSERT INTO providers(id,name,protocol,base_url) VALUES($1,'Tryout test','apimart','https://no-network.invalid')",[provider]);
+        await sql.db.query("INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,credit_cost,rmb_cost) VALUES($1,$2,'Quick image','gpt-image-2.6-flare',ARRAY['generate','edit'],1,0.1)",[model,provider]);
+        await sql.db.query("UPDATE tool_api_configurations SET model_config_id=$1 WHERE tool_key='canvas-edit'",[model]);
+        for(const id of [product,person])await sql.db.query("INSERT INTO assets(id,owner_user_id,object_key,filename,mime_type,kind,status) VALUES($1,$2,$3,'fixture.png','image/png','image','ready')",[id,user,id]);
+        expect((await submit(input)).status).toBe(403);
+        await sql.db.query("UPDATE module_flags SET enabled=true WHERE module_key='canvas-tryout'");
+        const denied=await submit({...input,canvasId:"other-design"},other);
+        expect(denied.error).toBe("TRYOUT_ASSET_UNAVAILABLE");
+        expect((await submit({...input,canvasId:"other-design"})).error).toBe("TRYOUT_CANVAS_UNAVAILABLE");
+        const [first,second]=await Promise.all([submit(input),submit(input)]);
+        expect(typeof first.taskId).toBe("string");
+        expect(first.prompt).toContain("海军蓝");
+        expect(second.taskId).toBe(first.taskId);
+        expect((await submit({...input,color:{...input.color,name:"不同颜色"}})).error).toBe("TRYOUT_REQUEST_CHANGED");
+        const task=(await sql.db.query("SELECT priority,prompt_optimized,parameters,source_urls FROM tasks WHERE id=$1",[first.taskId])).rows[0];
+        expect(task).toMatchObject({priority:"priority",prompt_optimized:false,parameters:{complexity:"low",resolution:"1k",quality:"low"},source_urls:["/api/assets/"+product+"/content"]});
+        expect(task.parameters.size).toBeUndefined();
+        expect((await sql.db.query("SELECT count(*)::int AS n FROM credit_reservations WHERE user_id=$1",[user])).rows[0].n).toBe(1);
+        const wear=await submit({kind:"wear",requestId:randomUUID(),canvasId:"winter",nodeId:"w1",tier:"hd",model:{assetId:person},productAssetIds:[product]});
+        expect(wear.prompt).toContain("图片1是模特");
+        const w=(await sql.db.query("SELECT parameters,source_urls FROM tasks WHERE id=$1",[wear.taskId])).rows[0];
+        expect(w.source_urls).toEqual([person,product].map(id=>"/api/assets/"+id+"/content"));
+        expect(w.parameters).toMatchObject({quality:"high",complexity:"medium",resolution:"2k"});
+        expect((await submit({...input,requestId:randomUUID(),modelConfigId:model})).status).toBe(400);
+        const fabric=await submit({kind:"material",requestId:randomUUID(),canvasId:"winter",nodeId:"fabric",tier:"quick",sourceAssetId:product,material:{assetId:person,useColor:false}});
+        expect(fabric.prompt).toContain("不取它的颜色");
+        const f=(await sql.db.query("SELECT source_urls FROM tasks WHERE id=$1",[fabric.taskId])).rows[0];
+        expect(f.source_urls).toEqual([product,person].map(id=>"/api/assets/"+id+"/content"));
+        await sql.db.query("UPDATE model_configs SET model_id='unvalidated-model' WHERE id=$1",[model]);
+        expect((await submit({...input,requestId:randomUUID()})).error).toBe("TRYOUT_MODEL_UNAVAILABLE");
+        expect((await sql.db.query("SELECT count(*)::int AS n FROM credit_reservations WHERE user_id=$1",[user])).rows[0].n).toBe(3);
+    }finally{await new Promise<void>(done=>server.close(()=>done()));await sql.close();}
+},30000);

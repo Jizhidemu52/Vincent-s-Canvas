@@ -10,6 +10,7 @@ export type CanvasGraphFields = {
     hoveredNodeId: string | null;
     toolbarNodeId: string | null;
     streamedTextById: ReadonlyMap<string, string>;
+    toolboxTab: "toolbox" | "discussion";
 };
 type CanvasGraphState = CanvasGraphFields & {
     nodeById: ReadonlyMap<string, CanvasNodeData>;
@@ -20,7 +21,7 @@ type CanvasGraphState = CanvasGraphFields & {
 export function createCanvasGraphStore() {
     return createStore<CanvasGraphState>((set) => ({
         nodes: [], connections: [], nodeById: new Map(), selectedNodeIds: new Set(),
-        selectedConnectionId: null, hoveredNodeId: null, toolbarNodeId: null, streamedTextById: new Map(),
+        selectedConnectionId: null, hoveredNodeId: null, toolbarNodeId: null, streamedTextById: new Map(), toolboxTab: "toolbox",
         setField: (key, value) => set(state => {
             const next = typeof value === "function" ? (value as (previous: typeof state[typeof key]) => typeof state[typeof key])(state[key]) : value;
             if (Object.is(state[key], next)) return state;

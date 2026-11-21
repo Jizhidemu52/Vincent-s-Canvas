@@ -6,6 +6,7 @@ export type CanvasShortcutActions = {
     duplicate: () => void; group: () => void; undo: () => void; redo: () => void;
     selectAll: () => void; deleteSelection: () => void; escape: () => void;
     commands?: () => void;
+    tryout?: () => void;
     continueFromImage?: () => void;
     select?: () => void; pan?: () => void;
     ungroup?: () => void; lock?: () => void; bringFront?: () => void; sendBack?: () => void; rename?: () => void;

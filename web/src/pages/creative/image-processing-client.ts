@@ -1,10 +1,13 @@
 import type { PixelImage } from "./image-processing";
+import type { ProductRegions } from "@/lib/tryout/product-regions";
+import type { RegionsTask } from "./image-processing-task";
 import type { ImageProcessingTask, ImageWorkerTask, RecolorResult, SelectionImageTask, SelectionUrlTask } from "./image-processing-task";
 
 export function processImageInWorker(task: Extract<ImageProcessingTask, { kind: "recolor" }>, signal?: AbortSignal): Promise<RecolorResult>;
 export function processImageInWorker(task: ImageProcessingTask, signal?: AbortSignal): Promise<PixelImage>;
 export function processImageInWorker(task: SelectionImageTask | SelectionUrlTask, signal?: AbortSignal): Promise<Blob>;
-export function processImageInWorker(task: ImageWorkerTask, signal?: AbortSignal): Promise<PixelImage | Blob> {
+export function processImageInWorker(task: RegionsTask, signal?: AbortSignal): Promise<ProductRegions>;
+export function processImageInWorker(task: ImageWorkerTask, signal?: AbortSignal): Promise<PixelImage | Blob | ProductRegions> {
     return new Promise((resolve, reject) => {
         if (signal?.aborted) { reject(new DOMException("图片处理已取消", "AbortError")); return; }
         let worker: Worker | undefined;
@@ -14,7 +17,7 @@ export function processImageInWorker(task: ImageWorkerTask, signal?: AbortSignal
         const abort = () => fail(new DOMException("图片处理已取消", "AbortError"));
         try {
             worker = new Worker(new URL("./image-processing.worker.ts", import.meta.url), { type: "module" });
-            worker.onmessage = (event: MessageEvent<{ result?: PixelImage | Blob; error?: string; errorName?: string }>) => {
+            worker.onmessage = (event: MessageEvent<{ result?: PixelImage | Blob | ProductRegions; error?: string; errorName?: string }>) => {
                 cleanup();
                 if (event.data.error || !event.data.result) {
                     const error = new Error(event.data.error || "图片处理没有返回结果");

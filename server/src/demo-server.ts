@@ -81,7 +81,7 @@ import { assertVideoMotionPolicy, ensureVideoMotionRecipe, videoMotionParameters
 
 const sessions = new Map<string, string>();
 const modules = moduleKeys;
-const demoModuleFlags = Object.fromEntries(modules.map(key => [key, true]));
+const demoModuleFlags = Object.fromEntries(modules.map(key => [key, key !== "canvas-tryout"]));
 // Preserve existing mock model IDs; adding a formal board must not renumber models.
 const legacyDemoTools = ["detail-enhance", "image-edit", "angle-control", "seamless-stitch", "image", "video"]
   .map(key => toolDefinitions.find(item => item.toolKey === key)!);

@@ -15,6 +15,7 @@ import {
   createPublicModelRouter,
 } from "./routes/model-configuration";
 import { createAdminTasksRouter, createTasksRouter } from "./routes/tasks";
+import { createTryoutRouter } from "./routes/tryout";
 import { createLayerStudioRouter } from "./routes/layer-studio";
 import { createTaskReconciliationRouter } from "./routes/task-reconciliation";
 import { requestLogging } from "./request-logging";
@@ -192,6 +193,7 @@ app.use(
   createModelConfigurationRouter(db, config, { cache, creditPolicy: readCreditsEnabled, maxInflightTasks: config.USER_MAX_INFLIGHT_TASKS, maxPausedTasks: config.PAUSED_TASK_LIMIT_PER_USER }),
 );
 app.use("/api/tasks/events", requireSession, requireAccountReady, createTasksEventsRouter(taskEvents));
+app.use("/api/tryout",requireSession,requireAccountReady,protectModelIdentity,createTryoutRouter(db,cache,{credits:readCreditsEnabled,maxInflightTasks:config.USER_MAX_INFLIGHT_TASKS,maxPausedTasks:config.PAUSED_TASK_LIMIT_PER_USER}));
 app.use(
   "/api/tasks",
   requireSession,

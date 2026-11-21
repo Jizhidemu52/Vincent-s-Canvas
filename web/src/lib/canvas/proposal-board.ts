@@ -1,4 +1,5 @@
 import type { CanvasNodeData } from "@/types/canvas";
+import type { TryoutBoardCell, TryoutBoardOptions } from "../../../../shared/tryout";
 
 export type ProposalBoardSpec = {
     version: 1;
@@ -13,6 +14,8 @@ export type ProposalBoardSpec = {
 };
 
 export type BoardRect = { x: number; y: number; width: number; height: number };
+export type PairedProposalBoard = Omit<ProposalBoardSpec, "version"> & TryoutBoardOptions & { version: 2; cells: TryoutBoardCell[] };
+export type AnyProposalBoard = ProposalBoardSpec | PairedProposalBoard;
 export type BoardLayout = {
     size: { width: number; height: number };
     title: BoardRect;
@@ -56,10 +59,10 @@ function imageCells(layout: ProposalBoardSpec["layout"], box: BoardRect, count: 
     return gridCells(box, count, columns, gap);
 }
 
-export function computeBoardLayout(spec: ProposalBoardSpec): BoardLayout {
-    const count = spec.items.length;
+export function computeBoardLayout(spec: AnyProposalBoard): BoardLayout {
+    const count = spec.version === 2 ? spec.cells.length : spec.items.length;
     if (count < 1 || count > 8) throw new RangeError("提案板需要 1 到 8 张图片");
-    const size = pageSize(spec.page);
+    const size = pageSize(spec.version === 2 ? (spec.orientation === "portrait" ? "a4-portrait" : "a4-landscape") : spec.page);
     const shortSide = Math.min(size.width, size.height);
     const margin = shortSide * 0.04, gap = shortSide * 0.015;
     const width = size.width - margin * 2;
@@ -73,14 +76,15 @@ export function computeBoardLayout(spec: ProposalBoardSpec): BoardLayout {
     const hasFields = Object.values(spec.fields).some(value => value.trim());
     const fieldWidth = (width - gap) * (spec.layout === "single" ? 0.3 : 0.22);
     const fields = hasFields ? { ...body, x: margin + width - fieldWidth, width: fieldWidth } : null;
-    const cells = imageCells(spec.layout, { ...body, width: fields ? width - fieldWidth - gap : width }, count, gap);
+    const available = { ...body, width: fields ? width - fieldWidth - gap : width };
+    const cells = spec.version === 2 ? gridCells(available, count, Math.min(count,spec.columns), gap) : imageCells(spec.layout, available, count, gap);
     const captionHeights = cells.map(cell => Math.min(shortSide * 0.035, cell.height * 0.22));
     const images = cells.map((cell, i) => ({ ...cell, height: cell.height - captionHeights[i] }));
     const captions = cells.map((cell, i) => ({ ...cell, y: cell.y + images[i].height, height: captionHeights[i] }));
     return { size, title, images, captions, fields, palette, footer };
 }
 
-export function boardStaleItems(spec: ProposalBoardSpec, nodesById: ReadonlyMap<string, CanvasNodeData>): number[] {
+export function boardStaleItems(spec: AnyProposalBoard, nodesById: ReadonlyMap<string, CanvasNodeData>): number[] {
     return spec.items.flatMap((item, i) => {
         const node = nodesById.get(item.nodeId);
         if (!node) return [];

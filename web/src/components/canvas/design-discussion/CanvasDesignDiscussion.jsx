@@ -124,11 +124,13 @@ function appendReferences(current, incoming) {
     return added.length ? [...current, ...added] : current;
 }
 
-export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, onBeforeChange, onLocate }) {
+export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, onBeforeChange, onLocate, toolboxOpen }) {
     const identityKey = useUserStore(workspaceIdentity);
     const [nodes, setNodes] = useCanvasGraphField("nodes");
     const [selectedIds, setSelectedIds] = useCanvasGraphField("selectedNodeIds");
-    const [visible, setVisible] = useState(false);
+    const [localVisible, setVisible] = useState(false);
+    const [toolboxTab,setToolboxTab] = useCanvasGraphField("toolboxTab");
+    const visible = toolboxOpen ? toolboxTab==="discussion" : localVisible;
     useCanvasEntryUsage("design-discussion", visible, projectId);
     const [taskView, setTaskView] = useState("closed");
     const expanded = taskView === "preview" || taskView === "pinned";
@@ -174,10 +176,11 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
     const setPanelVisible = useCallback((value) => {
         const next = typeof value === "function" ? value(visibleRef.current) : value;
         visibleRef.current = next;
-        setVisible(next);
+        if (toolboxOpen) setToolboxTab(next ? "discussion" : "toolbox");
+        else setVisible(next);
         if (!next)
             void sessionPersistence.current?.flush().catch((error) => setNotice("讨论保存失败：" + error.message));
-    }, []);
+    }, [toolboxOpen,setToolboxTab]);
     const selectionSequence = useRef(0);
     const isCurrent = useCallback(() => {
         const user = useUserStore.getState();
@@ -887,7 +890,7 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
         setTaskView("closed");
     };
     return (
-        <div className="canvas-design-discussion" data-testid="canvas-design-discussion">
+        <div className="canvas-design-discussion" data-toolbox-tabs={toolboxOpen ? "true" : undefined} data-testid="canvas-design-discussion">
             <div
                 className="dd-island"
                 onMouseEnter={() => setTaskView((value) => (value === "pinned" ? value : "preview"))}

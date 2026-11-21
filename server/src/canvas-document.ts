@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { selectCanvasCoverNode } from "../../shared/canvas-cover";
+import { tryoutKitSchema } from "../../shared/tryout-kit";
 
 export const CANVAS_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
 export class CanvasDocumentError extends Error {
@@ -44,6 +45,7 @@ const groupsSchema = z.array(z.object({
     nodeIds: z.array(idSchema).refine(ids => new Set(ids).size === ids.length),
 }).passthrough()).refine(groups => new Set(groups.map(group => group.id)).size === groups.length);
 const documentSchema = z.object({
+    tryoutKit: tryoutKitSchema.optional(),
     id: idSchema, title: z.string().max(1000), createdAt: dateSchema, updatedAt: dateSchema,
     coverNodeId: idSchema.optional(),
     nodes: z.array(nodeSchema),

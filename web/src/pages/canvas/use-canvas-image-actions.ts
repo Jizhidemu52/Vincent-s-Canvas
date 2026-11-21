@@ -11,6 +11,7 @@ import type { useCanvasGenerationRuntime } from "./use-canvas-generation-runtime
 import type { CanvasImageActionRuntimeContext, createCanvasImageActionsRuntime } from "./canvas-image-actions-runtime";
 
 export type CanvasImageActionsOptions = {
+    flushPendingHistory: () => void;
     projectId: string;
     nodesRef: RefObject<CanvasNodeData[]>;
     designProjectIdRef: RefObject<string>;
@@ -79,5 +80,7 @@ export function useCanvasImageActions(options: CanvasImageActionsOptions) {
         generateAngleNode: (...args: Parameters<ImageActions["generateAngleNode"]>) => invoke("generateAngleNode", ...args),
         quickImageNode: (...args: Parameters<ImageActions["quickImageNode"]>) => invoke("quickImageNode", ...args),
         runLocalImageOperation,
+        makeBoard: (...args: Parameters<ImageActions["makeBoard"]>) => invoke("makeBoard", ...args),
+        toggleTryoutPick: (...args: Parameters<ImageActions["toggleTryoutPick"]>) => invoke("toggleTryoutPick", ...args),
     }), [invoke, runLocalImageOperation]);
 }

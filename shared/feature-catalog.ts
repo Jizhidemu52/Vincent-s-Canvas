@@ -35,6 +35,7 @@ export const toolDefinitions = [
 
 export type ToolKey = (typeof toolDefinitions)[number]["toolKey"];
 export const nonAiDefinitions = [
+  { moduleKey: "canvas-tryout", label: "画布试款台", group: "自由画布", kind: "service", description: "试色、试材质、上身与本地提案；默认关闭，不影响原画布", parent: "canvas" },
   { moduleKey: "creative", label: "创意工具总入口", group: "创意工具", kind: "group", description: "管理创意场景及创意本地工具的总入口", parent: null },
   { moduleKey: "canvas", label: "自由画布总入口", group: "自由画布", kind: "group", description: "管理画布入口；子能力可分别设置", parent: null },
   { moduleKey: "standard-colors", label: "标准色库 / 近似色搜索", group: "创意本地工具", kind: "local", description: "标准色查询、近似色搜索；本地数据，无需 API", parent: "creative" },

@@ -1,4 +1,4 @@
-import { computeBoardLayout, type BoardRect, type ProposalBoardSpec } from "./proposal-board";
+import { computeBoardLayout, type AnyProposalBoard, type BoardRect, type ProposalBoardSpec } from "./proposal-board";
 
 export type BoardImageLoader = (item: ProposalBoardSpec["items"][number], signal?: AbortSignal) => Promise<ImageBitmap>;
 export type BoardRenderOptions = { scale?: 1 | 2; signal?: AbortSignal };
@@ -45,7 +45,7 @@ function swatch(ctx: CanvasRenderingContext2D, value: string, box: BoardRect) {
 }
 
 export async function renderProposalBoard(
-    spec: ProposalBoardSpec,
+    spec: AnyProposalBoard,
     loadImage: BoardImageLoader,
     { scale = 1, signal }: BoardRenderOptions = {},
 ) {
@@ -62,32 +62,37 @@ export async function renderProposalBoard(
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, layout.size.width, layout.size.height);
     textInBox(ctx, spec.title, layout.title, layout.title.height * 0.45, ink, 600);
-    for (const [i, item] of spec.items.entries()) {
+    const drawItem = async (item: ProposalBoardSpec["items"][number], box: BoardRect) => {
         signal?.throwIfAborted();
         const image = await loadImage(item, signal);
         try {
             signal?.throwIfAborted();
-            const box = layout.images[i],
-                caption = layout.captions[i];
             if (!image.width || !image.height) throw new Error("提案板原图尺寸无效");
             const ratio = Math.min(box.width / image.width, box.height / image.height);
             const w = image.width * ratio,
                 h = image.height * ratio;
             ctx.drawImage(image, box.x + (box.width - w) / 2, box.y + (box.height - h) / 2, w, h);
-            const chip = spec.layout === "colorway" && item.dominantHex ? Math.min(caption.height * 0.5, caption.width * 0.18) : 0;
-            if (chip && item.dominantHex)
-                swatch(ctx, item.dominantHex, { x: caption.x, y: caption.y + (caption.height - chip) / 2, width: chip, height: chip });
-            const inset = chip ? chip + chip / 3 : 0;
-            textInBox(
-                ctx,
-                item.caption,
-                { ...caption, x: caption.x + inset, width: caption.width - inset },
-                caption.height * 0.48,
-                secondary,
-            );
         } finally {
             image.close();
         }
+    };
+    const byId = new Map(spec.items.map(item => [item.nodeId,item]));
+    const slots = spec.version === 2 ? spec.cells.map(cell => ({
+        item: byId.get(cell.styleNodeId), wear: spec.showWear ? byId.get(cell.wearNodeIds[0]) : undefined,
+        caption: [cell.label, spec.showCode && cell.color?.code].filter(Boolean).join(" · "), hex: cell.color?.hex,
+    })) : spec.items.map(item => ({ item, wear: undefined, caption:item.caption, hex:spec.layout === "colorway" ? item.dominantHex : undefined }));
+    for (const [i, slot] of slots.entries()) {
+        if (!slot.item) throw new Error("找不到提案款式原图");
+        const box = layout.images[i], caption = layout.captions[i];
+        if (slot.wear) {
+            const gap = Math.min(12, box.height * 0.035), height = (box.height-gap)/2;
+            await drawItem(slot.item,{...box,height});
+            await drawItem(slot.wear,{...box,y:box.y+height+gap,height});
+        } else await drawItem(slot.item,box);
+        const chip = slot.hex ? Math.min(caption.height * 0.5, caption.width * 0.18) : 0;
+        if (slot.hex) swatch(ctx,slot.hex,{x:caption.x,y:caption.y+(caption.height-chip)/2,width:chip,height:chip});
+        const inset = chip ? chip + chip / 3 : 0;
+        textInBox(ctx,slot.caption,{...caption,x:caption.x+inset,width:caption.width-inset},caption.height*0.48,secondary);
     }
     const palette = layout.palette;
     if (palette) {

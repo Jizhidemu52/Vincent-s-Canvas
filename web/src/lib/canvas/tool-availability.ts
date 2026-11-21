@@ -5,6 +5,7 @@ export const canvasActionModules: Partial<Record<string, ModuleKey>> = {
     referenceImport: "reference-import", group: "canvas-local-tools",
     compare: "canvas-local-tools", designTemplate: "canvas-local-tools", manualEdit: "canvas-local-tools", eraser: "canvas-local-tools",
     imageSequence: "canvas-image",
+    tryout: "canvas-tryout",
     crop: "canvas-local-tools", split: "canvas-local-tools", upscale: "canvas-local-tools", resize: "canvas-local-tools",
     maskEdit: "canvas-mask-edit", angle: "canvas-angle", reversePrompt: "canvas-chat",
     generateImage: "canvas-image", generate: "canvas-image", batch: "canvas-batch",

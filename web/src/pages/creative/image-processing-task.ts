@@ -11,7 +11,8 @@ export type SelectionImageTask =
 export type SelectionUrlTask =
     | { kind: "selection-guide-url"; source: string; selection: string }
     | { kind: "composite-url"; source: string; generated: string; selection: string };
-export type ImageWorkerTask = ImageProcessingTask | SelectionImageTask | SelectionUrlTask;
+export type RegionsTask={kind:"product-regions";image:PixelImage};
+export type ImageWorkerTask = ImageProcessingTask | SelectionImageTask | SelectionUrlTask | RegionsTask;
 
 export function executeImageProcessingTask(task: ImageProcessingTask): PixelImage | RecolorResult {
     if (task.kind === "recolor") return recolorPixels(task.image, task.rules, task.tolerance);

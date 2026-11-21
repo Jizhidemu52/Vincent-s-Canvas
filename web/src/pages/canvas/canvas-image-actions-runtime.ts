@@ -507,5 +507,36 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
         }
     };
 
-    return { createImageReversePromptNodes, saveManualImageEdit, cropImageNode, splitImageNode, maskEditImageNode, upscaleImageNode, generateAngleNode, quickImageNode };
+    const toggleTryoutPick = async (node: CanvasNodeData) => {
+        if (!isCurrent()) return;
+        context.flushPendingHistory();
+        setNodes(prev => prev.map(n => {
+            if (n.id !== node.id || n.metadata?.locked || n.metadata?.proposalBoard || n.metadata?.status === "loading" || n.metadata?.status === "error" || n.metadata?.tryout?.kind === "wear") return n;
+            const trace=n.metadata?.tryout ?? {version:1 as const,kind:"original" as const,rootNodeId:n.id,sourceNodeId:n.id};
+            return {...n,metadata:{...n.metadata,tryout:{...trace,picked:!n.metadata?.tryout?.picked}}};
+        }));
+    };
+
+    const makeBoard = async (sources: CanvasNodeData[], groups: readonly {nodeIds: string[];title:string}[], projectTitle:string, reflow?:Partial<import("../../../../shared/tryout").TryoutBoardOptions>) => {
+        if (!sources.length) return;
+        const owner = useUserStore.getState().user;
+        const matchingGroups = groups.filter(group => sources.every(node => group.nodeIds.includes(node.id)));
+        await runLocalImageOperation("proposal-board-create", "出提案板", async signal => {
+            const {createProposalBoard} = await import("./canvas-proposal-board-runtime");
+            await createProposalBoard({sources,reflow, title: (matchingGroups.length === 1 && matchingGroups[0].title) || projectTitle || uiText("未命名画布"),
+                designer: owner?.displayName || "", signal, currentNodes: () => nodesRef.current,
+                writable: async () => await runtime.waitForWriteAccess() && isCurrent() &&
+                    designProjectIdRef.current === projectId && useUserStore.getState().user?.id === owner?.id,
+                commit: board => {
+                    context.flushPendingHistory();
+                    if(reflow) setNodes(prev=>prev.map(n=>n.id===board.id ? {...n,width:board.width,height:board.height,metadata:{...n.metadata,...board.metadata,serverAssetId:undefined}} : n));
+                    else {
+                        setNodes(prev => [...prev, board]);
+                        setSelectedNodeIds(new Set([board.id]));
+                    }
+                },
+            });
+        });
+    };
+    return { makeBoard, toggleTryoutPick, createImageReversePromptNodes, saveManualImageEdit, cropImageNode, splitImageNode, maskEditImageNode, upscaleImageNode, generateAngleNode, quickImageNode };
 }

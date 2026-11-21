@@ -51,6 +51,7 @@ export class MockCanvasApi {
     conflicts = 0;
     batchId = "20000000-0000-4000-8000-000000000001";
     taskStatus = "success";
+    disabledModules = new Set<string>();
     taskReads: string[] = [];
     holdSession = false;
     private heldSessions: Route[] = [];
@@ -138,7 +139,7 @@ export class MockCanvasApi {
             this.displayTranslationCalls.push({ ownerId, input: structuredClone(input), status, response });
             return reply(response, status);
         }
-        if (path === "/api/modules") return json({ modules: moduleDefinitions.map(item => ({ moduleKey: item.moduleKey, enabled: true })) });
+        if (path === "/api/modules") return json({ modules: moduleDefinitions.map(item => ({ moduleKey: item.moduleKey, enabled: !this.disabledModules.has(item.moduleKey) })) });
         if (path === "/api/release-notes") return json({ notes: [], hasMore: false });
         if (path === "/api/models") return json({ models: [MODEL], prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: MODEL.id, configurationVersion: 1 })) });
         if (path === "/api/canvas-documents") return json({ documents: [...this.documents.values()].map(({ document, ...record }) => ({ ...record, summary: document ? { id: document.id, title: document.title, createdAt: document.createdAt, updatedAt: document.updatedAt, nodeCount: document.nodes.length, connectionCount: document.connections.length, cover: null } : null })) });

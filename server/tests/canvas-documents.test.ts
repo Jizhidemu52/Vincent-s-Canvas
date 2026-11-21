@@ -13,6 +13,14 @@ import type { ObjectStorage } from "../src/object-storage";
 import { compactHistoryAssetId, expectedCanvasSummary, largeCanvasDocument } from "./canvas-document-fixtures";
 
 const assetId = "11111111-2222-4333-8444-555555555555";
+test("project tryout kit freezes six distinct slots and checks uploaded fabric as a regular owned media reference",()=>{
+    const write=(kit:unknown)=>parseCanvasDocumentWrite("canvas-1",{baseRevision:0,document:{...project(),nodes:[],connections:[],tryoutKit:kit,chatSessions:[]}});
+    const colors=Array.from({length:6},(_,i)=>({id:String(i),name:"海军蓝",hex:"#183860"}));
+    const kit={version:1,colors,materials:[{id:"fabric",name:"样布",assetId}]};
+    expect(write(kit).document?.tryoutKit).toEqual(kit);
+    expect(write(kit).assetIds).toContain(assetId);
+    for(const invalid of [{colors:[...colors,colors[0]]},{colors:[colors[0],colors[0]]},{colors:[{...colors[0],hex:"blue"}]},{materials:[{...kit.materials[0],presetId:assetId}]},{materials:[{id:"fabric",name:"样布"}]}])expect(()=>write({...kit,...invalid})).toThrow(CanvasDocumentError);
+});
 function project() {
     return {
         id: "canvas-1", title: "完整画布", createdAt: "2026-09-17T00:00:00Z", updatedAt: "2026-09-17T00:00:00Z",

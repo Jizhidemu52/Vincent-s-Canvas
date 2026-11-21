@@ -68,3 +68,5 @@
     .canvas-design-discussion .studio-send button { min-height: 44px; }
 }
 @media (max-width: 760px) { .canvas-design-discussion .proposal-dialog > footer { gap: 7px; padding-top: 10px; } .canvas-design-discussion .proposal-dialog > footer > div:first-child { display: grid; grid-template-columns: 1fr 1fr; } .canvas-design-discussion .proposal-dialog > footer > div:last-child { display: flex; align-items: center; gap: 10px; } .canvas-design-discussion .proposal-dialog > footer p { flex: 1; } .canvas-design-discussion .proposal-options { margin: 12px 0; } }
+.canvas-design-discussion[data-toolbox-tabs="true"] .studio-panel { top: 112px; }
+@media (max-width: 760px) { .canvas-design-discussion[data-toolbox-tabs="true"] .studio-panel { top: 156px; } }

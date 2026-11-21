@@ -45,3 +45,4 @@ export async function createCanvasUploadedNode(file: File, kind: "image" | "vide
     node.position = { x: position.x - node.width / 2, y: position.y - node.height / 2 };
     return { node, largeImage: upload.largeImage };
 }
+export { placeCanvasImportedNodes } from "./canvas-import-placement";

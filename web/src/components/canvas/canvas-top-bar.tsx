@@ -16,7 +16,7 @@ import { canvasTopBarPropsEqual, type CanvasTopBarRenderState } from "@/lib/canv
 
 const CanvasShortcutsDialog = lazy(() => import("./canvas-shortcuts-dialog").then(module => ({ default: module.CanvasShortcutsDialog })));
 const UserStatusActions = lazy(() => import("@/components/layout/user-status-actions").then(module => ({ default: module.UserStatusActions })));
-type TopBarProps = Omit<CanvasTopBarRenderState, "onShare"> & { onShare: () => void | boolean | Promise<void | boolean>; onOpenOnboarding?: () => void };
+type TopBarProps = Omit<CanvasTopBarRenderState, "onShare"> & { onShare: () => void | boolean | Promise<void | boolean>; onOpenOnboarding?: () => void; onToggleTryout?:()=>void; tryoutOpen?:boolean };
 
 export const CanvasTopBar = memo(function CanvasTopBar({
     title,
@@ -38,6 +38,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
     compactAgentStatus,
     onToggleAgent,
     onOpenOnboarding,
+    onToggleTryout,tryoutOpen,
 }: TopBarProps) {
     const locale = useUiLocale();
     const display = useDisplayText();
@@ -96,6 +97,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
                     <Tooltip title={uiText("复制链接；不会公开画布。本机试用跨设备请导出")}><button type="button" className="cw-share" aria-live="polite" onClick={() => void copyLink()}>{copied ? <><Check size={14} />{uiText("已复制")}</> : (locale === "en-US" ? "Copy link" : staticUiText("复制链接"))}</button></Tooltip>
                 </div>
                 <div className="cw-account-card">
+                    {onToggleTryout ? <button type="button" className="cw-share" aria-expanded={tryoutOpen} onClick={onToggleTryout}>{uiText("试款台")}</button> : null}
                     <LanguageSwitch compact />
                     <span className="cw-account-avatar" aria-hidden="true">{userName.slice(0, 1)}</span>
                     <Tooltip title={userName}><span className="cw-account-name">{userName}</span></Tooltip>
@@ -107,7 +109,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
             {shortcutsOpen ? <Suspense fallback={null}><CanvasShortcutsDialog open onClose={() => setShortcutsOpen(false)} /></Suspense> : null}
         </>
     );
-}, (previous, next) => canvasTopBarPropsEqual(previous, next) && previous.onOpenOnboarding === next.onOpenOnboarding);
+}, (previous, next) => canvasTopBarPropsEqual(previous, next) && previous.onOpenOnboarding === next.onOpenOnboarding && previous.onToggleTryout === next.onToggleTryout && previous.tryoutOpen === next.tryoutOpen);
 
 function CompactAgentStatus({ status, onClick }: { status: { connected: boolean; enabled: boolean; activity: string }; onClick: () => void }) {
     useUiLocale();

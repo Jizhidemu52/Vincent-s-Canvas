@@ -2,9 +2,11 @@ import { useUiText } from "@/lib/i18n";
 import { Modal } from "antd";
 import { canvasActions, canvasActionShortcut } from "@/lib/canvas/canvas-actions";
 import { canvasShortcutLabel } from "@/lib/canvas/canvas-shortcut-label";
+import { useModuleEnabled } from "@/stores/use-module-store";
 
 export function CanvasShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     const t = useUiText();
+    const tryout = useModuleEnabled("canvas-tryout");
     const gestures = [
         ["空格 + 拖动 / 手形工具", "平移视图"], ["滚轮 / Shift + 滚轮", "纵向 / 横向平移"], ["Ctrl / Cmd + 滚轮 / 触控板捏合", "缩放画布"],
         ["选择工具 + 空白处拖动", "框选多个节点"], ["Shift / Ctrl / Cmd + 点击", "追加选择节点"],
@@ -13,7 +15,7 @@ export function CanvasShortcutsDialog({ open, onClose }: { open: boolean; onClos
         ["Enter", "编辑聚焦节点"], ["Esc", "取消选择并关闭浮层"],
     ];
     return <Modal title={t("快捷键与画布操作")} open={open} onCancel={onClose} footer={null} centered>
-        <div className="cw-shortcuts-list">{[...canvasActions.filter(action => "key" in action).map(action => [canvasActionShortcut(action.id), action.label]), ...gestures].map(([keys, label]) =>
+        <div className="cw-shortcuts-list">{[...canvasActions.filter(action => "key" in action && (action.id!=="tryout" || tryout)).map(action => [canvasActionShortcut(action.id), action.label]), ...gestures].map(([keys, label]) =>
             <div key={`${keys}-${label}`}><kbd>{canvasShortcutLabel(t(keys))}</kbd><span>{t(label)}</span></div>)}</div>
     </Modal>;
 }

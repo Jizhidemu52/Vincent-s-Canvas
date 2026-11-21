@@ -1,4 +1,5 @@
 import { editorSizeError } from "@/lib/canvas/image-editor-document";
+import { computeRegions } from "@/lib/tryout/product-regions";
 import { compositeSelectedPixels, requireMatchingAspect, type PixelImage } from "./image-processing";
 import { executeImageProcessingTask, type ImageWorkerTask, type SelectionImageTask, type SelectionUrlTask } from "./image-processing-task";
 
@@ -71,6 +72,11 @@ async function selectionUrl(task: SelectionUrlTask) {
 self.onmessage = async (event: MessageEvent<ImageWorkerTask>) => {
     try {
         const task = event.data;
+        if(task.kind==="product-regions"){
+            const result=computeRegions(task.image);
+            self.postMessage({result},{transfer:[result.labels.buffer as ArrayBuffer]});
+            return;
+        }
         if (task.kind === "selection-guide-url" || task.kind === "composite-url") {
             self.postMessage({ result: await selectionUrl(task) });
             return;

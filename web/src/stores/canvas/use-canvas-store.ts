@@ -20,6 +20,7 @@ import type { CanvasProjectSummary } from "@/lib/canvas/canvas-project-summary";
 import { isWorkspaceRole } from "../../../../shared/workspace-access";
 
 export type CanvasProject = {
+    tryoutKit?: import("../../../../shared/tryout-kit").TryoutKit;
     id: string;
     title: string;
     coverNodeId?: string;
@@ -340,6 +341,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     updatedAt: now,
                     nodes: clearImportedCanvasTasks(source.nodes || []),
                     ...(source.groups ? { groups: source.groups } : {}),
+                    ...(source.tryoutKit ? {tryoutKit:structuredClone(source.tryoutKit)} : {}),
                     connections: source.connections || [],
                     chatSessions: source.chatSessions || [],
                     activeChatId: source.activeChatId || null,

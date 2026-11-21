@@ -58,6 +58,7 @@ import { canvasEdgeAutoPanDelta } from "@/lib/canvas/canvas-edge-auto-pan";
 import { collectAffectedConnectionIds, refreshVisibleConnectionsForDrag, sameCanvasIdSet } from "@/lib/canvas/canvas-drag-visible-connections";
 import { beginCanvasHover, commitCanvasHover, endCanvasHover, resetCanvasHover, type CanvasHoverState } from "@/lib/canvas/canvas-hover-stability";
 import { canvasImageExportSelection } from "@/lib/canvas/canvas-image-export-selection";
+import type { TryoutBoardOptions } from "../../../../shared/tryout";
 import { canvasImageBaseName } from "@/lib/canvas/canvas-image-filename";
 import type { PublicImageVersion } from "../../../../shared/image-conversation-public";
 import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
@@ -101,7 +102,6 @@ import { createCanvasVisibleNodeCache } from "@/lib/canvas/canvas-visible-node-c
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { canvasImportGridPosition, canvasUsableArea, fitCanvasNodes } from "@/lib/canvas/canvas-interaction-ux";
-import { placeCanvasImportedNodes } from "./canvas-import-placement";
 import { canvasLibrarySummaries } from "@/lib/canvas/canvas-project-summary";
 import { nextProjectTitle } from "@/lib/project-title";
 import { deploymentFeatures } from "@/lib/deployment-features";
@@ -117,6 +117,7 @@ import { flushCanvasPersistence, useCanvasStore } from "@/stores/canvas/use-canv
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useModuleEnabled } from "@/stores/use-module-store";
+import { useTryoutPanel } from "@/stores/canvas/use-tryout-panel";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import {
@@ -187,6 +188,7 @@ const loadCanvasPanelControls = () => import("@/components/canvas/canvas-panel-s
 const CanvasPanelResizeHandle = lazy(() => loadCanvasPanelControls().then(module => ({ default: module.CanvasPanelResizeHandle })));
 const CanvasPanelSizeControl = lazy(() => loadCanvasPanelControls().then(module => ({ default: module.CanvasPanelSizeControl })));
 const CanvasNodeHoverToolbar = lazy(loadCanvasNodeHoverToolbar);
+const CanvasDesignToolbox = lazy(() => import("@/components/canvas/toolbox/canvas-design-toolbox").then(module => ({ default: module.CanvasDesignToolbox })));
 const CanvasImageQuickActions = lazy(() => import("@/components/canvas/canvas-image-quick-actions").then(module => ({ default: module.CanvasImageQuickActions })));
 
 const VIDEO_NODE_MAX_WIDTH = 420;
@@ -270,6 +272,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const agentPreviewNodeIds = useCanvasAgentStore(state => state.previewNodeIds);
     const localAgentModuleEnabled = useModuleEnabled("canvas-local-agent");
     const localToolsEnabled = useModuleEnabled("canvas-local-tools");
+    const tryoutEnabled = useModuleEnabled("canvas-tryout");
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const quickReferenceInputRef = useRef<HTMLInputElement>(null);
@@ -1083,6 +1086,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const selectedExportImageCount = useMemo(() => canvasImageExportSelection(nodes, Array.from(selectedNodeIds)).length, [nodes, selectedNodeIds]);
 
     const editorOwner = useUserStore(state => state.user ? `user:${state.user.id}:${state.user.role}` : state.status);
+    const tryoutPanel=useTryoutPanel(tryoutEnabled,editorOwner);
     const editorSelectionKey = `${projectId}:${editorOwner}:${Array.from(selectedNodeIds).sort().join(",")}`;
     useEffect(() => {
         if (!projectLoaded) return;
@@ -1996,17 +2000,22 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
 
     const {
         createImageReversePromptNodes, saveManualImageEdit, cropImageNode, splitImageNode,
-        maskEditImageNode, upscaleImageNode, generateAngleNode, quickImageNode, runLocalImageOperation,
+        maskEditImageNode, upscaleImageNode, generateAngleNode, quickImageNode, runLocalImageOperation, toggleTryoutPick, makeBoard,
     } = useCanvasImageActions({
         projectId, nodesRef, designProjectIdRef, savedProjectIdRef, projectSaveQueueRef, runtime: generationRuntime,
-        dialogs: canvasDialogs, setDialogNodeId, setContextMenu, handleMissingModelConfig, isAiConfigReady,
+        dialogs: canvasDialogs, setDialogNodeId, setContextMenu, handleMissingModelConfig, isAiConfigReady, flushPendingHistory,
     });
+
+    const makeSelectionBoard = (reflow?:Partial<TryoutBoardOptions>) => {
+        const sources=canvasImageExportSelection(nodesRef.current,[...selectedNodeIdsRef.current]);
+        return makeBoard(sources,groupsRef.current,projectTitle ?? "",reflow);
+    };
 
     const createImageFileNode = useCallback(async (file: File, position: Position, signal?: AbortSignal, preserveQuickGeneratePrompt = false, openPanel = true) => {
         signal?.throwIfAborted();
         assertCanvasImageUploadSize(file);
         const ownerId = useUserStore.getState().user?.id;
-        const { createCanvasUploadedNode } = await loadCanvasNodeUploadRuntime();
+        const { createCanvasUploadedNode, placeCanvasImportedNodes } = await loadCanvasNodeUploadRuntime();
         const { node: newNode, largeImage } = await createCanvasUploadedNode(file, "image", position);
         signal?.throwIfAborted();
         if (designProjectIdRef.current !== projectId || useUserStore.getState().user?.id !== ownerId) throw new Error(uiText("画布或账号已切换，已停止导入"));
@@ -2027,28 +2036,6 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         if (largeImage) message.info(displayNotice(uiText(CANVAS_LARGE_IMAGE_NOTICE)));
     }, [editorOwner, flushPendingHistory, loadQuickGenerationNode, message, projectId, setQuickGenerateReferences]);
 
-    const createVideoFileNode = useCallback(async (file: File, position: Position, openPanel = true) => {
-        const ownerId = useUserStore.getState().user?.id;
-        const { createCanvasUploadedNode } = await loadCanvasNodeUploadRuntime();
-        const { node } = await createCanvasUploadedNode(file, "video", position);
-        if (designProjectIdRef.current !== projectId || useUserStore.getState().user?.id !== ownerId) throw new Error(uiText("画布或账号已切换，已停止导入"));
-        flushPendingHistory();
-        setNodes(prev => nodesRef.current = [...prev, ...placeCanvasImportedNodes(prev, [node])]);
-        setSelectedNodeIds(new Set([node.id]));
-        setSelectedConnectionId(null);
-        if (openPanel) setDialogNodeId(node.id);
-    }, [flushPendingHistory, projectId]);
-
-    const createAudioFileNode = useCallback(async (file: File, position: Position) => {
-        const ownerId = useUserStore.getState().user?.id;
-        const { createCanvasUploadedNode } = await loadCanvasNodeUploadRuntime();
-        const { node } = await createCanvasUploadedNode(file, "audio", position);
-        if (designProjectIdRef.current !== projectId || useUserStore.getState().user?.id !== ownerId) throw new Error(uiText("画布或账号已切换，已停止导入"));
-        flushPendingHistory();
-        setNodes(prev => nodesRef.current = [...prev, ...placeCanvasImportedNodes(prev, [node])]);
-        setSelectedNodeIds(new Set([node.id]));
-        setSelectedConnectionId(null);
-    }, [flushPendingHistory, projectId]);
 
     const importFiles = useCallback((files: File[], origin: Position, signal?: AbortSignal, append = false) => {
         const ownerId = useUserStore.getState().user?.id;
@@ -2060,7 +2047,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
             const current = () => designProjectIdRef.current === projectId && useUserStore.getState().user?.id === ownerId && !signal?.aborted;
             if (!current()) return;
             try {
-                const { prepareCanvasMediaNode } = await loadCanvasNodeUploadRuntime();
+                const { prepareCanvasMediaNode, placeCanvasImportedNodes } = await loadCanvasNodeUploadRuntime();
                 const prepared = await mapCanvasAsyncPool(files, 3, async (file, index) => {
                     if (!current()) return null;
                     const position = canvasImportGridPosition(origin, index, files.length);
@@ -2171,6 +2158,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         zoomOut: () => setZoomScale(viewportRef.current.k / 1.25),
         zoomActual: () => setZoomScale(1),
         commands: openCommands,
+        tryout: tryoutEnabled ? tryoutPanel.toggle : undefined,
         duplicate: () => duplicateNodes(new Set(selectedNodeIdsRef.current)),
         group: createSelectedGroup, undo: undoCanvas, redo: redoCanvas,
         selectAll: () => {
@@ -2402,19 +2390,13 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         });
     }, [syncQuickGenerationNode]);
 
-    const downloadNodeImage = useCallback(async (node: CanvasNodeData, format: "original" | "png" | "jpg" = "original") => {
+    const downloadNodeImage = useCallback(async (node: CanvasNodeData, format: "original" | "png" | "jpg" = "original", showOptions=false) => {
         try {
             const { downloadCanvasEditorNode } = await loadCanvasFileActions();
-            await downloadCanvasEditorNode(node, { projectId, nodesRef, savedProjectIdRef, message, setImageDownload, format });
+            await downloadCanvasEditorNode(node, { projectId, nodesRef, savedProjectIdRef, message, setImageDownload, format,showOptions });
         } catch (error) { message.error(displayNotice(error instanceof Error ? error.message : uiText("图片下载失败"))); }
     }, [message, projectId]);
 
-    const openNodeDownloadOptions = useCallback(async (node: CanvasNodeData) => {
-        try {
-            const { downloadCanvasEditorNode } = await loadCanvasFileActions();
-            await downloadCanvasEditorNode(node, { projectId, nodesRef, savedProjectIdRef, message, setImageDownload, showOptions: true });
-        } catch (error) { message.error(displayNotice(error instanceof Error ? error.message : uiText("图片下载失败"))); }
-    }, [message, projectId]);
 
     const saveNodeAsset = useCallback(
         async (node: CanvasNodeData) => {
@@ -3004,6 +2986,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         setContextMenu(null);
     }, [size]);
     const commandBindings: CanvasCommandBindings = {
+        tryout:{run:()=>tryoutPanel.change(true),enabled:tryoutEnabled},
         upload: { run: uploadFromToolbar }, text: { run: addTextNodeFromToolbar }, image: { run: addImageNodeFromToolbar },
         video: { run: addVideoNodeFromToolbar }, audio: { run: addAudioNodeFromToolbar }, config: { run: addConfigNodeFromToolbar },
         generate: { run: openQuickGenerateFromToolbar }, batch: { run: openBatchEditFromToolbar },
@@ -3086,6 +3069,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
 
     const renderNodeTools = (toolbarNode: CanvasNodeData, context?: { x: number; y: number }) => <Suspense fallback={null}>
         <CanvasNodeHoverToolbar node={toolbarNode} viewport={viewport}
+            onTryout={tryoutEnabled ? ()=>tryoutPanel.change(true) : undefined} onPickTryout={tryoutPanel.open && !toolbarNode.metadata?.locked ? toggleTryoutPick : undefined}
             contextMenu={context ? { ...context, onClose: () => setContextMenu(null) } : undefined}
             onKeep={keepNodeToolbar} onLeave={hideNodeToolbar}
             onInfo={node => setInfoNodeId(node.id)} onEditText={openTextEditor}
@@ -3094,7 +3078,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
             onFontSize={(node, fontSize) => handleFontSizeChange(node.id, fontSize)}
             onRegenerate={node => void handleRegenerateNode(node)} onVariation={(node, strength) => void handleVariationNode(node, strength)}
             onToggleDialog={editNodeFromToolbar} onGenerateImage={generateImageFromTextNode}
-            onUpload={node => handleUploadRequest(node.id)} onDownload={downloadNodeImage} onDownloadOptions={openNodeDownloadOptions}
+            onUpload={node => handleUploadRequest(node.id)} onDownload={downloadNodeImage} onDownloadOptions={node=>downloadNodeImage(node,"original",true)}
             onSaveAsset={node => void saveNodeAsset(node)} onMaskEdit={node => setMaskEditNodeId(node.id)}
             onManualEdit={(node, initialTool = "select") => { if (node.metadata?.status === "loading") { message.info(t("请等待这张图片生成完成后再编辑")); return; } setDialogNodeId(null); canvasDialogs.setManualEditInitialTool(initialTool); setManualEditNode(node); }}
             onCrop={node => setCropNodeId(node.id)} onSplit={node => setSplitNodeId(node.id)} onUpscale={node => setUpscaleNodeId(node.id)}
@@ -3147,12 +3131,14 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                     onOpenTools={openWorkspaceTools}
                     onOpenCommands={openCommands}
                     onOpenOnboarding={openOnboardingFromTopBar}
+                    onToggleTryout={tryoutEnabled ? tryoutPanel.toggle : undefined}
+                    tryoutOpen={tryoutPanel.open}
                     agentOpen={assistantOpen}
                     compactAgentStatus={compactAgentStatus}
                     onToggleAgent={toggleAgentFromTopBar}
                 />
                 {!isCanvasDesktopLayout ? quickGeneratePanel : null}
-                {projectLoaded ? <Suspense fallback={null}><CanvasDesignDiscussion key={projectId} projectId={projectId} writable={writable} getCanvasCenter={getCanvasCenter} onBeforeChange={flushPendingHistory} onLocate={locateNodes} /></Suspense> : null}
+                {projectLoaded ? <Suspense fallback={null}><CanvasDesignDiscussion key={projectId} projectId={projectId} writable={writable} getCanvasCenter={getCanvasCenter} onBeforeChange={flushPendingHistory} onLocate={locateNodes} toolboxOpen={tryoutPanel.open} /></Suspense> : null}
 
                 <WirelessCanvas
                     ref={wirelessCanvasRef}
@@ -3255,7 +3241,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                 <Suspense fallback={null}><CanvasConflictNotice projectId={projectId} /></Suspense>
                 {commandsOpen ? <Suspense fallback={null}><CanvasCommandPalette nodes={nodes} bindings={commandBindings} onLocate={locateNodes} onAsset={handleAssetInsert} onClose={() => setCommandsOpen(false)} /></Suspense> : null}
                 {performanceModeEnabled ? <Suspense fallback={null}><CanvasPerformancePanel metrics={performanceMetrics} /></Suspense> : null}
-                {singleSelectedNode?.type === CanvasNodeType.Image && !isNodeDragging && !nodeImageSettingsOpen ? <Suspense fallback={null}><CanvasImageQuickActions key={singleSelectedNode.id} node={singleSelectedNode} onRun={quickImageNode} /></Suspense> : null}
+                {!isNodeDragging && !nodeImageSettingsOpen ? <Suspense fallback={null}>{projectLoaded && tryoutPanel.open ? <CanvasDesignToolbox node={singleSelectedNode?.type === CanvasNodeType.Image ? singleSelectedNode : undefined} count={selectedExportImageCount} selectedCount={selectedNodeIds.size} onRun={quickImageNode} onBoard={makeSelectionBoard} onClose={tryoutPanel.toggle}/> : singleSelectedNode?.type===CanvasNodeType.Image ? <CanvasImageQuickActions key={singleSelectedNode.id} node={singleSelectedNode} onRun={quickImageNode}/> : null}</Suspense>:null}
 
                 {!isNodeDragging && !nodeImageSettingsOpen && !(quickGenerateOpen && !isCanvasDesktopLayout && !assistantOpen) ? (
                     <CanvasHoverToolbarHost selectedNode={singleSelectedNode} multipleSelected={hasMultipleSelectedNodes}>{toolbarNode => renderNodeTools(toolbarNode)}</CanvasHoverToolbarHost>
