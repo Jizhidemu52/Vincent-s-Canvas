@@ -4,6 +4,8 @@
 
 ## 随仓库提供的第三方代码
 
+图层拆分的 PSD 导出使用 [ag-psd](https://github.com/Agamnentzar/ag-psd) 34.2.2（MIT），仅在操作导出时加载。其原始版权与许可见包内 LICENSE；压缩和编码依赖保留各自许可。
+
 | 内容 | 来源与声明 | 范围 |
 | --- | --- | --- |
 | 实验工作台的 chroma.js 3.2.0 浏览器模块 | [原始 LICENSE](labs/design-workbench/recipe/vendor/chroma-js/LICENSE) · [版本、来源和校验值](labs/design-workbench/recipe/vendor/chroma-js/来源与许可.txt) | 保留 BSD-3-Clause 及包内 ColorBrewer Apache-2.0 声明；不是本项目原创，也不是实体色标准或品牌色库授权 |

@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import {readFile} from "node:fs/promises";
+import {readPsd} from "ag-psd";
 import { test as base, expect, type Page } from "@playwright/test";
 import { MockCanvasApi, IMAGE } from "./fixtures";
 import { moduleDefinitions } from "../../shared/feature-catalog";
@@ -232,6 +234,7 @@ test("missing layer recovery is actionable in the editor and preserves edits wit
     await expect(recovery).toContainText("部分图片保存失败（1/5）");
     await expect(recovery.getByRole("button", { name: "重新读取已保存原件", exact: true })).toHaveCount(0);
     await expect(pane(page).getByRole("button", { name: "导出合成 PNG", exact: true })).toBeDisabled();
+    await expect(pane(page).getByRole("button", { name: "导出 PSD", exact:true })).toBeDisabled();
     const reads = studio.api.taskReads.length;
     await page.reload();
     await expect(recovery).toContainText("部分图片保存失败（1/5）");
@@ -252,6 +255,15 @@ test("missing layer recovery is actionable in the editor and preserves edits wit
     await expect(position).toHaveValue("24");
     expect(studio.recoveries).toBe(1); expect(studio.api.submissions).toHaveLength(1);
     await expect(pane(page).getByRole("list", { name: "图层列表，最上方在最前景" }).getByRole("listitem")).toHaveCount(5);
+    const download=page.waitForEvent("download");
+    await pane(page).getByRole("button",{name:"导出 PSD",exact:true}).click();
+    const file=testInfo.outputPath("edited-layers.psd");await (await download).saveAs(file);
+    const bytes=await readFile(file);expect(bytes.subarray(0,4).toString()).toBe("8BPS");
+    const psd=readPsd(bytes,{skipLayerImageData:true,skipCompositeImageData:true,skipThumbnail:true});
+    expect(psd.children).toHaveLength(5);
+    expect(psd.children?.some(l=>l.left===24)).toBe(true);
+    expect(psd.children?.every(l=>Boolean(l.name))).toBe(true);
+    expect(studio.api.submissions).toHaveLength(1);
 });
 
 test("missing original request stays recoverable after reload and never creates a replacement", async ({ page, context, studio }) => {

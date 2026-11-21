@@ -91,6 +91,7 @@ function SessionEditor({ document: result, value, onChange, onRefresh, onResume,
     const [renderIssues, setRenderIssues] = useState<Array<{ index: number; message: string }>>([]);
     const [rendering, setRendering] = useState(false);
     const [busy, setBusy] = useState(false);
+    const [psdProgress,setPsdProgress]=useState("");
     const [lockAspect, setLockAspect] = useState(true);
     const [reload, setReload] = useState(0);
     const [scalePercent, setScalePercent] = useState("100");
@@ -220,6 +221,16 @@ function SessionEditor({ document: result, value, onChange, onRefresh, onResume,
             setNotice("PNG 已交给浏览器下载；透明区域已保留，原件未修改。");
         } finally { canvas.width = 1; canvas.height = 1; }
     });
+    const exportPsd=()=>void run(async(sessionMedia,signal)=>{
+        if(!group)return;
+        try{
+            const {exportLayerStudioPsd}=await import("./layer-psd");
+            const blob=await exportLayerStudioPsd(result,editRef.current,group,sessionMedia.readImage,signal,(n,total)=>setPsdProgress(n+"/"+total));
+            sessionMedia.assertCurrent();
+            sessionMedia.download(blob,"图层-"+result.taskId.replace(/[^a-zA-Z0-9_-]/g,"_").slice(0,80)+"-"+(group.index+1)+".psd");
+            setNotice("PSD 已导出，图层可分别编辑。");
+        }finally{if(!signal.aborted)setPsdProgress("");}
+    });
     const downloadOriginal = (item: LayerStudioItem) => void run(async (sessionMedia, signal) => {
         const blob = await sessionMedia.readOriginal(item, signal); sessionMedia.assertCurrent();
         sessionMedia.download(blob, layerStudioFileName(item, blob.type)); setNotice("原始文件已交给浏览器下载，未重新编码。");
@@ -236,7 +247,8 @@ function SessionEditor({ document: result, value, onChange, onRefresh, onResume,
                 if (next) { setGroupIndex(next.index); commit({ ...edit, selectedIndex: next.items[0]?.index ?? null }); }
             }} options={groups.map(candidate => ({ value: candidate.index, label: t("第 {index} 组", { index: candidate.index + 1 }) }))} /></label>}
                 <button type="button" onClick={reset} disabled={busy || !group?.size}>{t("复位当前组")}</button>
-                <button type="button" className="layer-editor-primary" onClick={exportPng} disabled={busy || !canExport}>{busy ? t("处理中…") : t("导出合成 PNG")}</button></div>
+                <button type="button" className="layer-editor-primary" onClick={exportPng} disabled={busy || !canExport}>{busy ? t("处理中…") : t("导出合成 PNG")}</button>
+                <button type="button" onClick={exportPsd} disabled={busy||!canExport} title={!canExport?t("原件尚未全部保存，不能导出 PSD"):undefined}>{t("导出 PSD")}{psdProgress?" "+psdProgress:""}</button></div>
         </header>
         {failure && <div role="alert" className="layer-editor-warning">{layerStudioUiMessage(failure)}</div>}
         {notice && <div role="status" className="layer-editor-notice">{layerStudioUiMessage(notice)}</div>}
