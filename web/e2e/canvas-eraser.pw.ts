@@ -7,7 +7,8 @@ async function alpha(canvas: Locator, x: number, y: number) {
 
 async function openEraser(page: Page, nodeId: string) {
     await page.locator(`[data-node-id="${nodeId}"]`).click({ position: { x: 35, y: 15 } });
-    await page.getByRole("button", { name: "擦除像素并另存透明 PNG，原图保留", exact: true }).click();
+    await page.getByRole("button", { name: "更多图片工具", exact: true }).click();
+    await page.getByRole("menuitem", { name: "橡皮擦", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "编辑图片", exact: true });
     await expect(dialog.getByRole("button", { name: "橡皮擦", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(dialog.getByLabel("图片编辑画布")).toBeVisible();

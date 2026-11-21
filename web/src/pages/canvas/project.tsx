@@ -2914,9 +2914,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         setQuickGenerateReferences((current) => moveImageReference(current, current.findIndex((reference) => reference.id === id), current.findIndex((reference) => reference.id === targetId)));
     }, []);
     const editNodeFromToolbar = useCallback((node: CanvasNodeData) => {
-        if (connectionsRef.current.some((edge) => edge.kind === "config-target" && edge.toNodeId === node.id)) {
-            setDialogNodeId((current) => current === node.id ? null : node.id);
-        } else if (node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey)) {
+        if (node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey)) {
             lastEditorSelectionRef.current = `${projectId}:${editorOwner}:${node.id}`;
             loadQuickGenerationNode(node);
             commitSelectedNodeIds(new Set([node.id])); setDialogNodeId(null); openQuickGenerateFromToolbar();

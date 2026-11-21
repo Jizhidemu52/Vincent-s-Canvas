@@ -109,9 +109,9 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
     {
         id: "maskEdit",
         defaultVisible: true,
-        panelLabel: "局部重绘",
-        label: "局部重绘",
-        title: "局部重绘",
+        panelLabel: "涂抹局部",
+        label: "涂抹局部",
+        title: "涂抹局部",
         icon: () => <Brush className="size-[18px]" />,
         run: (node, handlers) => handlers.onMaskEdit(node),
     },
@@ -162,7 +162,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
     },
 ];
 
-export const defaultImageQuickToolIds: ImageQuickToolId[] = ["manualEdit", "eraser", "edit", "download"];
+export const defaultImageQuickToolIds: ImageQuickToolId[] = ["edit", "maskEdit", "download"];
 
 /** Keep old preferences intact while preventing a legacy full-width toolbar. */
 export function compactImageQuickToolIds(ids: ImageQuickToolId[]) {

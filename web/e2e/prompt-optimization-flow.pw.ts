@@ -297,9 +297,9 @@ test("native mask editing keeps its explicit instruction and mask, without borro
     await expect(prompt).toHaveValue(referencePrompt);
     expect(flow.compilations).toHaveLength(1); expect(api.submissions).toHaveLength(0);
     await node.hover();
-    const mask = page.getByRole("button", { name: "局部重绘", exact: true });
+    const mask = page.getByRole("button", { name: "涂抹局部", exact: true });
     if (await mask.isVisible()) await mask.click();
-    else { await page.getByRole("button", { name: "更多图片工具", exact: true }).click(); await page.getByRole("menuitem", { name: "局部重绘", exact: true }).click(); }
+    else { await page.getByRole("button", { name: "更多图片工具", exact: true }).click(); await page.getByRole("menuitem", { name: "涂抹局部", exact: true }).click(); }
     const dialog = page.getByRole("dialog", { name: "局部遮罩编辑", exact: true });
     await expect(dialog.getByRole("button", { name: "AI 修改", exact: true })).toBeEnabled();
     await expect(dialog).not.toHaveClass(/ant-zoom-(?:enter|appear)/);

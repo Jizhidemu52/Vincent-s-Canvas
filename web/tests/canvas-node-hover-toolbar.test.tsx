@@ -68,15 +68,15 @@ describe("compact image toolbar", () => {
         expect(harness.calls).toEqual([]);
     });
 
-    test("defaults to four common actions including the eraser while preserving stored customization data", () => {
-        expect(defaultImageQuickToolIds).toEqual(["manualEdit", "eraser", "edit", "download"]);
+    test("defaults to edit, brush and download while preserving stored customization data", () => {
+        expect(defaultImageQuickToolIds).toEqual(["edit", "maskEdit", "download"]);
         const saved = { ids: ["info", "delete", "saveAsset", "download", "edit", "copyPrompt", "upscale"], showLabels: false };
         expect(readImageQuickToolsConfig(saved)).toEqual(saved);
     });
 
-    test("shows the eraser alongside the common image actions on the first surface", () => {
+    test("shows both edit entries and download alongside More on the first surface", () => {
         const view = elements(toolbarHarness().render());
-        expect(view.filter((element) => typeof element.props.id === "string" && typeof element.props.onClick === "function").map((element) => element.props.id)).toEqual(["manualEdit", "eraser", "edit"]);
+        expect(view.filter((element) => typeof element.props.id === "string" && typeof element.props.onClick === "function").map((element) => element.props.id)).toEqual(["edit", "maskEdit"]);
         expect(view.some(element => typeof element.props.onDownload === "function" && element.props.showLabel === true)).toBe(true);
         const more = view.find((element) => element.props["aria-label"] === "更多图片工具");
         expect(more?.props["aria-haspopup"]).toBe("menu");

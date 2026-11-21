@@ -168,7 +168,7 @@ test("new imports do not overlap; More and right-click share grouped image actio
     await expect(page.locator("[data-inline-image-compare]")).toHaveCount(0);
     await page.getByRole("button", { name: "更多图片工具", exact: true }).click();
     const more = page.locator(".ant-dropdown:visible");
-    for (const group of ["AI 改图", "本地编辑", "流程", "素材与信息", "排列与管理"]) await expect(more.getByText(group, { exact: true })).toBeVisible();
+    for (const group of ["AI 改图", "本地编辑", "流程", "素材与信息", "排列与管理"]) await expect(more.locator(".ant-dropdown-menu-item-group-title").filter({ hasText: new RegExp(`^${group}$`) })).toBeVisible();
     const moreActions = await more.getByRole("menuitem").allTextContents();
     expect(moreActions).not.toContain("超分");
     await page.getByRole("button", { name: "更多图片工具", exact: true }).click();

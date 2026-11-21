@@ -17,11 +17,11 @@ async function uploadSizedImage(page: Page, width: number, height: number) {
 async function openMask(page: Page, node: Locator) {
     await node.click({ position: { x: 35, y: 15 } });
     await node.hover();
-    const mask = page.getByRole("button", { name: "局部重绘", exact: true });
+    const mask = page.getByRole("button", { name: "涂抹局部", exact: true });
     if (await mask.isVisible()) await mask.click();
     else {
         await page.getByRole("button", { name: "更多图片工具", exact: true }).click();
-        await page.getByRole("menuitem", { name: "局部重绘", exact: true }).click();
+        await page.getByRole("menuitem", { name: "涂抹局部", exact: true }).click();
     }
     const dialog = page.getByRole("dialog", { name: "局部遮罩编辑", exact: true });
     await expect(dialog.getByRole("button", { name: "AI 修改", exact: true })).toBeEnabled();

@@ -1042,6 +1042,8 @@ const enCanvas: Record<string, string> = {
   "下载音频": "Download audio",
   "下载视频": "Download video",
   "AI 编辑": "AI edit",
+  "AI 改图": "AI image edit",
+  "涂抹局部": "Brush an area",
   "编辑": "Edit",
   "编辑文本": "Edit text",
   "编辑文字": "Edit text",
