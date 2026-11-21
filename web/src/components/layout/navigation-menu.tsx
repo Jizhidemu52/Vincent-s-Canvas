@@ -13,6 +13,7 @@ import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 import type { ModuleKey } from "@/services/api/modules";
 import { useEffect } from "react";
+import { TryoutNavigation } from "./tryout-navigation";
 
 const sections: { key: string; label: string; slugs: NavigationToolSlug[] }[] = [
     { key: "workspace", label: "工作空间", slugs: ["canvas", "gpt-chat"] },
@@ -42,6 +43,7 @@ export function NavigationMenu({ onNavigate }: { onNavigate?: () => void }) {
     }, [pathname, search, user?.id]);
     const available = (slug: NavigationToolSlug) => slug === "admin" ? isAdminRole(user?.role)
         : (slug !== "team" || (deploymentFeatures.rolePortalsEnabled && Boolean(user?.groupId))) && isModuleAvailable(flags, bindings, navigationModuleKey(slug) as ModuleKey);
+    if(isModuleAvailable(flags,bindings,"canvas-tryout"))return <TryoutNavigation available={available} module={key=>isModuleAvailable(flags,bindings,key)} onNavigate={onNavigate}/>;
     return <div className="space-y-4">
         {sections.map(section => {
             const tools = section.slugs.map(slug => navigationTools.find(tool => tool.slug === slug)!).filter(tool => available(tool.slug));
