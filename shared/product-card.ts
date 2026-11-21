@@ -9,3 +9,4 @@ export type ProductCard = {version:2;view:"flat"|"hanging"|"on-model"|"mannequin
 export function primaryItem(card:ProductCard) {
     return card.items.find(item=>item.primary) ?? card.items[0] ?? null;
 }
+export function productNoun(item:Pick<ProductCardItem,"category">|null){return item?.category||"产品";}

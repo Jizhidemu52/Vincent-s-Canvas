@@ -1,4 +1,4 @@
-import type { ProductCardItem, WearPosition } from "./product-card";
+import {productNoun,type ProductCardItem,type WearPosition} from "./product-card";
 import type { TryoutColor } from "./tryout";
 
 const positions:Record<WearPosition,string>={head:"头部",neck:"颈部",upper:"上身",lower:"下身",full:"全身",hand:"手部",foot:"脚部",shoulder:"肩背",none:""};
@@ -9,15 +9,15 @@ export function wearVerb(position:WearPosition) {
     return "穿上";
 }
 function subject(item:Item|null,part?:string|null) {
-    return "图片1中"+(item?.category || "产品")+(part ? "的"+part : "");
+    return "图片1中"+productNoun(item)+(part ? "的"+part : "");
 }
 export function colorPrompt(item:Item|null,part:string|null,color:TryoutColor,fallbackHex?:string) {
     const area=subject(item,part)+(part ? "" : fallbackHex ? "上颜色接近 "+fallbackHex+" 的部分" : "的主体颜色");
     return "把"+area+"改为"+color.name+"（色值 "+color.hex+(color.code?"，色号 "+color.code:"")+"）。其余部位的颜色、款式结构、材质纹理、图案位置和背景保持不变。";
 }
 export type TryoutMaterial = {type:"preset";name:string;description:string} | {type:"uploaded";name:string;useColor:boolean};
-export function materialPrompt(item:Item|null,part:string|null,material:TryoutMaterial) {
-    const area=subject(item,part);
+export function materialPrompt(item:Item|null,part:string|null,material:TryoutMaterial,fallbackHex?:string) {
+    const area=subject(item,part)+(!part&&fallbackHex?"上颜色接近 "+fallbackHex+" 的部分":"");
     if(material.type==="preset") return "把"+area+"换成"+material.name+"："+material.description+"。保持款式版型、结构、比例、颜色和图案位置不变，只改变材质的纹理、厚度和垂感。背景保持不变。";
     return "图片2是材质参考。把图片2的材质迁移到"+area+"上。保持图片1的款式版型、结构、比例和图案位置不变。"+(material.useColor?"同时采用图片2的颜色。":"只取图片2的纹理和质感，不取它的颜色。")+"背景保持不变。";
 }

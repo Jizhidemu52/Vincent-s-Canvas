@@ -49,6 +49,8 @@ description: 正式数据存储边界、员工画布文档、公司设计灵感�
 
 `059_canvas_tryout.sql` 为模块表登记默认关闭的 `canvas-tryout`，受父模块 `canvas` 约束；不新增节点类型，不改变既有任务、计费或开关。
 
+`062_product_cards.sql` 增加 `asset_fact_cards` 和 `asset_product_card_overrides`。共享识别缓存只按服务器已验证的字节哈希和版本读取；员工必须先有自己的就绪产品图，接口不接受哈希或任意外部 URL。员工修改按素材与员工分开写，不覆盖共享结果。识别由单独的 `PRODUCT_CARD_MODEL_CONFIG_ID` 绑定一款已启用且支持 chat 和 vision 的模型；不配置时不自动识别。可用 `PRODUCT_CARD_ENABLED=false` 完全关闭。识别没有生图或工具权限；后台结果不可用时，试款使用中性描述继续。已开始的识别在结果未明时不自动重发。
+
 `053_canvas_design_chat.sql` 在现有 `tool_api_configurations` 和 `module_flags` 的键约束中增加 `canvas-design-chat`，不新增数据表。只补齐缺失的新工具／模块记录，默认启用并指向固定 APIMart 平台中现有且启用的 `gemini-4-carbon` 对话模型；独立聊天、原画布聊天和服装配色等已有绑定、提示词、开关与费率不随之改动。管理员之后可以单独调整设计讨论绑定。
 
 旧实例通过发布包的独立 053 操作器执行预检和事务迁移，再做正常零数据库变更发布；操作器要求目标 Carbon 配置满足既有平台、协议和能力条件，并保留全部业务数据及统计停用状态。普通应用启动不代替迁移，也不创建 Flash 模型、Provider 或费率。设计讨论草稿、对话与任务回执仍存当前浏览器的员工／画布分区；实际结果节点和原件复用既有画布文档与媒体存储。

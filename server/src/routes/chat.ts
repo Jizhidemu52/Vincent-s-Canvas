@@ -37,7 +37,7 @@ type ToolCall = { id: string; type: "function"; function: { name: string; argume
 export type ChatCompletionUsage = { inputTokens?: number; outputTokens?: number; actualCost?: number; currency?: string };
 export type ChatCompletionResult = { content: string; toolCalls: ToolCall[]; stopReason?: string; claudeAssistantContent?: Array<Record<string, unknown>>; responsesOutputItems?: Array<Record<string, unknown>>; usage?: ChatCompletionUsage };
 export type ChatCompletionInput = { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number }; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number }; privateProfile?: boolean;
-    waitForResult?: boolean; signal?: AbortSignal; providerImages?: { access: ProviderChatImageAccess; userId: string } };
+    productCardTokenCap?:300; waitForResult?: boolean; signal?: AbortSignal; providerImages?: { access: ProviderChatImageAccess; userId: string } };
 type ChatModel = { model_id: string; base_url: string; protocol: string; encrypted_credentials: string | null };
 /** Shared by explicit administrator analysis selection and the execution adapter. */
 export const CHAT_COMPLETION_PROTOCOLS = ["openai", "custom", "apimart", "gemini", "anthropic", "openai-chat"] as const;
@@ -585,6 +585,7 @@ async function requestOpenAiCompletion(
         body: JSON.stringify({
             model: model.model_id,
             input: responseInput,
+            ...(input.productCardTokenCap?{max_output_tokens:input.productCardTokenCap,stream:false}:{}),
             tools: input.tools,
             tool_choice: input.toolChoice ?? "auto",
             parallel_tool_calls: false,
@@ -732,6 +733,7 @@ async function requestOpenAiChatCompletion(
             // APIMart documents stream=true by default. This endpoint returns one JSON result.
             ...(model.protocol === "apimart" ? { stream: false } : {}),
             ...(model.model_id === "gemini-4-carbon" && input.gemini ? { max_tokens: input.gemini.maxOutputTokens } : {}),
+            ...(input.productCardTokenCap?{max_tokens:input.productCardTokenCap,stream:false}:{}),
             ...(input.tools.length ? {
                 tools: input.tools.map(({ type, ...definition }) => ({ type, function: model.protocol === "apimart" && model.model_id === "gemini-4-carbon"
                     ? { ...definition, parameters: carbonToolParameters(definition.parameters) } : definition })),

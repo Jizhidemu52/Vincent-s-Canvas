@@ -4,7 +4,7 @@ import { loadDeploymentFeatures, normalizeDeploymentFeatures } from "@/lib/deplo
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
-const openFeatures = { authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false, imageConversationsEnabled: false };
+const openFeatures = { authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false, imageConversationsEnabled: false,productCardsEnabled:false };
 
 describe("deployment switches", () => {
     test("opens creative workspaces without account or credit gates by default", () => {
@@ -31,6 +31,9 @@ describe("deployment switches", () => {
         expect(await loadDeploymentFeatures()).toBe(false);
     });
     test("accepts the real open deployment contract", async () => {
+        expect(normalizeDeploymentFeatures({productCardsEnabled:true}).productCardsEnabled).toBe(false);
+        expect(normalizeDeploymentFeatures({authenticationEnabled:true}).productCardsEnabled).toBe(false);
+        expect(normalizeDeploymentFeatures({authenticationEnabled:true,productCardsEnabled:true}).productCardsEnabled).toBe(true);
         globalThis.fetch = (async () => Response.json(openFeatures)) as typeof fetch;
         expect(await loadDeploymentFeatures()).toBe(true);
     });

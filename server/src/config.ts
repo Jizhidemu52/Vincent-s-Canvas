@@ -45,6 +45,8 @@ const schema = z.object({
     APIMART_UPLOAD_CACHE_ENABLED: z.enum(["true","false"]).default("true"),
     APIMART_UPLOAD_RETENTION_DAYS: z.coerce.number().pipe(z.literal(3)).default(3),
     TRYOUT_REFERENCE_MAX_EDGE: z.coerce.number().int().min(512).max(2048).default(1536),
+    PRODUCT_CARD_ENABLED:z.enum(["true","false"]).default("true"),
+    PRODUCT_CARD_MODEL_CONFIG_ID:z.string().uuid().optional(),
     APIMART_DEFAULT_QUALITY: z.enum(["low", "medium", "high"]).default("medium"),
     APIMART_DEFAULT_COMPLEXITY: z.enum(["low", "medium", "high"]).default("low"),
     PROMPT_FALLBACK_TOOL_KEYS: z.string().default(""),

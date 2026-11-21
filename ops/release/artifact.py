@@ -90,10 +90,10 @@ def verify_054_055_payload(root, manifest):
 
 def verify_repair_payload(root, manifest):
     rows = [row for row in manifest["migrations"] if row["name"] >= "056"]
-    require(tuple(row["name"] for row in rows) == TASK_REPAIR_MIGRATIONS + TRYOUT_MIGRATIONS, "FIXED_056_061_MIGRATIONS_REQUIRED")
+    require(tuple(row["name"] for row in rows) == TASK_REPAIR_MIGRATIONS + TRYOUT_MIGRATIONS, "FIXED_056_062_MIGRATIONS_REQUIRED")
     for row in rows:
         sql = root / "server/src/migrations" / row["name"]
-        require(sql.is_file() and not sql.is_symlink() and digest_file(sql) == row["sha256"], "PACKAGED_056_061_SQL_MIGRATION_HASH_MISMATCH")
+        require(sql.is_file() and not sql.is_symlink() and digest_file(sql) == row["sha256"], "PACKAGED_056_062_SQL_MIGRATION_HASH_MISMATCH")
 
 
 def repository_commit(root):

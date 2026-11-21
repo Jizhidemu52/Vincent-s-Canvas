@@ -17,6 +17,8 @@ import {
 import { createAdminTasksRouter, createTasksRouter } from "./routes/tasks";
 import { createTryoutRouter } from "./routes/tryout";
 import {createTryoutPrewarm} from "./tryout-prewarm";
+import {createProductCards} from "./product-card-service";
+import {createProductCardRouter} from "./routes/product-cards";
 import {createMaterialLibraryRouter,createAdminMaterialPresetsRouter} from "./routes/material-presets";
 import { createLayerStudioRouter } from "./routes/layer-studio";
 import { createTaskReconciliationRouter } from "./routes/task-reconciliation";
@@ -124,7 +126,7 @@ if (config.PROVIDER_IMAGE_PUBLIC_ORIGIN) {
 const readCreditsEnabled = async (client: Pick<typeof db, "query"> = db) => features.authenticationEnabled && await getCreditsEnabled(client, features.creditsEnabled);
 const imageConversations = createImageConversationRuntime(db, cache, config, { storage, providerImages: providerChatImages, creditsEnabled: readCreditsEnabled });
 app.get("/api/deployment", async (_request, response, next) => {
-  try { response.set("Cache-Control", "no-store").json({ ...features, creditsEnabled: await readCreditsEnabled(), imageConversationsEnabled: config.IMAGE_CONVERSATIONS_ENABLED === "true" }); }
+  try { response.set("Cache-Control", "no-store").json({ ...features, creditsEnabled: await readCreditsEnabled(), imageConversationsEnabled: config.IMAGE_CONVERSATIONS_ENABLED === "true",productCardsEnabled:features.authenticationEnabled&&config.PRODUCT_CARD_ENABLED==="true"&&Boolean(config.PRODUCT_CARD_MODEL_CONFIG_ID) }); }
   catch (error) { next(error); }
 });
 
@@ -197,7 +199,7 @@ app.use(
 app.use("/api/tasks/events", requireSession, requireAccountReady, createTasksEventsRouter(taskEvents));
 app.use("/api/materials",requireSession,requireAccountReady,createMaterialLibraryRouter(db));
 app.use("/api/admin/material-presets",requireAdminSession,requireAccountReady,createAdminMaterialPresetsRouter(db));
-app.use("/api/tryout",requireSession,requireAccountReady,protectModelIdentity,createTryoutRouter(db,cache,{credits:readCreditsEnabled,maxInflightTasks:config.USER_MAX_INFLIGHT_TASKS,maxPausedTasks:config.PAUSED_TASK_LIMIT_PER_USER},createTryoutPrewarm(db,storage,config)));
+app.use("/api/tryout",requireSession,requireAccountReady,protectModelIdentity,createTryoutRouter(db,cache,{credits:readCreditsEnabled,maxInflightTasks:config.USER_MAX_INFLIGHT_TASKS,maxPausedTasks:config.PAUSED_TASK_LIMIT_PER_USER,productCards:config.PRODUCT_CARD_ENABLED==="true"},createTryoutPrewarm(db,storage,config)));
 app.use(
   "/api/tasks",
   requireSession,
@@ -231,6 +233,7 @@ app.use(
   requireSession,
   requireAccountReady,
   protectModelIdentity,
+  createProductCardRouter(createProductCards(db,storage,config)),
   createAssetsRouter(db, storage, videoPlayback),
 );
 app.use(

@@ -46,7 +46,7 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
             const original=nodesRef.current.find(n=>n.id===sourceId)?.metadata;
             if(!original||canvasImageSource(original)!==url||original.storageKey!==metadata.storageKey)throw new Error("原图已变更，未提交试款");
             const common={tier:"quick",canvasId:projectId,nodeId:id,requestId,sourceAssetId} as const;
-            const input:TryoutSubmissionInput=color?{...common,kind:"color",color,fallbackHex:regionHex}:{...common,kind:"material",material:material!.presetId?{presetId:material!.presetId}:{assetId:material!.assetId!}};
+            const input:TryoutSubmissionInput=color?{...common,kind:"color",color,fallbackHex:regionHex}:{...common,kind:"material",fallbackHex:regionHex,material:material!.presetId?{presetId:material!.presetId}:{assetId:material!.assetId!}};
             uncertain=true;
             const res=await fetch("/api/tryout/quick",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","X-Canvas-Owner-Id":owner},body:JSON.stringify(input)});
             if(!res.ok){

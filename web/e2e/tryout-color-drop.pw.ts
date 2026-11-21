@@ -12,6 +12,16 @@ for(const mode of ["acknowledged color","lost submission response","preset mater
     const now=new Date().toISOString(),nodes=[{id:"sample",type:"image",title:"隔离色块样品",width:220,height:220,position:{x:250,y:180},metadata:{serverAssetId:asset,status:"success"}}];
     api.documents.set(project,{id:project,revision:1,deleted:false,updatedAt:now,document:{id:project,title:"拖色恢复验证",createdAt:now,updatedAt:now,nodes,connections:[],groups:[],viewport:{x:0,y:0,k:1},backgroundMode:"dots",showImageInfo:false,chatSessions:[],activeChatId:null,history:{past:[],future:[]}}});
     const calls:Array<{requestId:string;nodeId:string;sourceAssetId:string;fallbackHex:string}>=[];
+    const inspect=mode==="acknowledged color";
+    api.productCardsEnabled=inspect;
+    let visible=false,observations=0,edits=0;
+    let card={version:2,view:"flat",background:"白",items:[{category:"针织帽",parts:["帽体","翻边"],material:"罗纹",audience:"unknown",wearPosition:"head",colors:[{name:"蓝",hex:"#263754",part:"帽体"}],pattern:"",primary:true}]};
+    if(inspect)await page.route("**/api/assets/"+asset+"/product-card",async route=>{
+        const method=route.request().method();
+        if(method==="POST")observations++;
+        if(method==="PUT"){edits++;card=route.request().postDataJSON();}
+        return route.fulfill({json:visible?{status:"ready",card}:{status:"pending"}});
+    });
     let lookups=0;
     await page.route("**/api/tasks/by-request/*",route=>{
         const requestId=decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-1)!);
@@ -42,11 +52,21 @@ for(const mode of ["acknowledged color","lost submission response","preset mater
     await swatch.click();await expect(page.getByRole("status").filter({hasText:"拖到产品上松手"})).toBeVisible();
     await drop(.04);await expect(page.getByRole("status").filter({hasText:"这里是背景"})).toBeVisible();expect(calls).toHaveLength(0);
     await drop(.5);await expect.poll(()=>calls.length).toBe(1);
+    if(inspect){
+        expect(observations).toBeGreaterThan(0);await expect(page.getByRole("button",{name:"修改产品标签"})).toHaveCount(0);
+        visible=true;
+        const chip=page.getByRole("button",{name:"修改产品标签"});
+        await chip.click();await page.getByRole("textbox",{name:"品类",exact:true}).fill("翻边冷帽");await page.getByRole("textbox",{name:"部位 1",exact:true}).fill("帽身");
+        await page.getByRole("button",{name:"保存标签",exact:true}).click();await expect(chip).toHaveText(/翻边冷帽/);
+        expect(edits).toBe(1);expect(card.items[0]?.colors[0]?.part).toBe("帽身");
+        await page.screenshot({path:info.outputPath("corrected-product-card.png")});
+    }
     const output=()=>api.document(project)?.nodes.find((n:any)=>n.id===calls[0]?.nodeId);
     await expect.poll(()=>output()?.metadata.imageTask?.taskId).toBe(taskId);
     expect(calls[0]).toMatchObject(material?{sourceAssetId:asset,kind:"material",tier:"quick",material:{presetId}}:{sourceAssetId:asset,fallbackHex:"#263754",kind:"color",tier:"quick",color:{name:"酒红",hex:"#7A1F2B"}});
     const saved=output().metadata.imageTask.requestId;
     await page.reload();
+    if(inspect)await expect(page.getByRole("button",{name:"修改产品标签"})).toHaveText(/翻边冷帽/);
     const task=api.tasks.get(taskId)!;api.assetBytes.set(taskId,fixturePng(68));Object.assign(task,{status:"success",resultUrls:["/api/assets/"+taskId+"/content"],completedAt:new Date().toISOString()});
     await expect.poll(()=>output()?.metadata.status,{timeout:35000}).toBe("success");
     expect(output().metadata.imageTask).toBeUndefined();expect(task.requestId).toBe(saved);

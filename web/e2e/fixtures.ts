@@ -32,6 +32,7 @@ type DisplayTranslationRequest = { target: "en-US"; texts: string[] };
 
 /** Stateful HTTP double. Test actions use the public UI; no app stores are injected. */
 export class MockCanvasApi {
+    productCardsEnabled=false;
     constructor(private origin = ORIGIN) {}
     role: "designer" | "super_admin" | "department_admin" = "designer";
     documents = new Map<string, CloudDocument>();
@@ -108,7 +109,8 @@ export class MockCanvasApi {
         if (url.origin !== this.origin) { this.blocked.push(request.url()); return route.abort("blockedbyclient"); }
         if (!path.startsWith("/api/")) return route.continue();
         const json = (value: unknown, status = 200) => this.json(route, value, status);
-        if (path === "/api/deployment") return json({ authenticationEnabled: true, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false });
+        if(/^\/api\/assets\/[^/]+\/product-card$/.test(path))return json({status:"unavailable"});
+        if (path === "/api/deployment") return json({ authenticationEnabled: true, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false,productCardsEnabled:this.productCardsEnabled });
         if (path === "/api/auth/session") {
             if (this.holdSession) { this.heldSessions.push(route); return; }
             return this.session(route);

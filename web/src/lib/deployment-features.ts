@@ -6,6 +6,7 @@ export type DeploymentFeatures = {
     rolePortalsEnabled: boolean;
     oaLoginEnabled: boolean;
     imageConversationsEnabled: boolean;
+    productCardsEnabled: boolean;
 };
 
 export function normalizeDeploymentFeatures(value: Partial<DeploymentFeatures> = {}): DeploymentFeatures {
@@ -17,6 +18,7 @@ export function normalizeDeploymentFeatures(value: Partial<DeploymentFeatures> =
         rolePortalsEnabled: authenticationEnabled && value.rolePortalsEnabled === true,
         oaLoginEnabled,
         imageConversationsEnabled: authenticationEnabled && value.imageConversationsEnabled === true,
+        productCardsEnabled: authenticationEnabled && value.productCardsEnabled === true,
     };
 }
 
@@ -31,8 +33,8 @@ export async function loadDeploymentFeatures() {
         const response = await fetch("/api/deployment", { credentials: "include", cache: "no-store", referrerPolicy: "no-referrer", signal: AbortSignal.timeout(5000) });
         if (!response.ok) return false;
         const value = await response.json();
-        if (!value || typeof value !== "object" || Object.keys(deploymentFeatures).filter(key => key !== "imageConversationsEnabled").some((key) => typeof value[key] !== "boolean")
-            || (value.imageConversationsEnabled !== undefined && typeof value.imageConversationsEnabled !== "boolean")) return false;
+        if (!value || typeof value !== "object" || ["authenticationEnabled","oaLoginEnabled","creditsEnabled","rolePortalsEnabled"].some(key=>typeof value[key]!=="boolean")
+            || ["imageConversationsEnabled","productCardsEnabled"].some(key=>value[key]!==undefined&&typeof value[key]!=="boolean")) return false;
         Object.assign(deploymentFeatures, normalizeDeploymentFeatures(value));
         return true;
     } catch {

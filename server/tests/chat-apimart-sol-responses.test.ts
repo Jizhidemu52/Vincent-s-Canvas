@@ -24,6 +24,18 @@ function localProvider(reply: (call: ProviderCall) => Response) {
     return { calls, server, model: { model_id: "gpt-6.2-sol", protocol: "apimart", base_url: `http://127.0.0.1:${server.port}/v1/`, encrypted_credentials: null } };
 }
 
+test.each([{protocol:"openai-chat",field:"max_tokens"},{protocol:"openai",field:"max_output_tokens"}])("product observation sets a hard wire budget without changing ordinary chat: $protocol",async({protocol,field})=>{
+    const provider=localProvider(call=>Response.json(call.path==="/v1/responses"?nativeText:choicesText));
+    try{
+        const model={...provider.model,protocol};
+        await requestChatCompletion(model,credentials,{...plainInput,productCardTokenCap:300});
+        await requestChatCompletion(model,credentials,plainInput);
+        expect(provider.calls).toHaveLength(2);
+        expect(provider.calls[0]!.body).toMatchObject({[field]:300,stream:false});
+        expect(provider.calls[1]!.body).not.toHaveProperty(field);
+    }finally{provider.server.stop(true);}
+});
+
 test("exact APIMart Sol sends the full planner tool through one flat non-streaming Responses request", async () => {
     const provider = localProvider(call => Response.json(call.path === "/v1/responses"
         ? { status: "completed", output: nativeOutput, usage: { input_tokens: 40, output_tokens: 12 } } : choicesText));

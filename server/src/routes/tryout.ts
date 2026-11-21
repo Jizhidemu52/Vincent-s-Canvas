@@ -12,24 +12,31 @@ import { BillingError,prepareTaskEnqueue,enqueueTaskInTransaction,publishEnqueue
 import type { AuthenticatedRequest } from "../types";
 import {prewarmInput,type createTryoutPrewarm} from "../tryout-prewarm";
 
-type Policy={credits:()=>Promise<boolean>;maxInflightTasks:number;maxPausedTasks:number};
+import {tryoutProductItems} from "../product-card-service";
+import {closestProductPart} from "../../../shared/product-card-region";
+import type {ProductCardItem} from "../../../shared/product-card";
+type Policy={credits:()=>Promise<boolean>;maxInflightTasks:number;maxPausedTasks:number;productCards?:boolean};
 async function assertTryoutImageModel(db:Pick<Database,"query">,id:string,lock=false){
     const model=(await db.query(`SELECT m.model_id,p.protocol,m.workflow_config_id FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1 AND m.enabled AND p.enabled`+(lock?" FOR SHARE OF m,p":""),[id])).rows[0];
     if(model?.protocol!=="apimart"||model.workflow_config_id||!MARK_GPT26_IMAGE_MODELS.some(m=>m.modelId===model.model_id))throw new BillingError("TRYOUT_MODEL_UNAVAILABLE","当前画布改图模型未验证支持试款参数，未提交任务");
 }
-async function recipe(input:TryoutSubmission,db:Pick<Database,"query">,ownerId:string,locked=false) {
-    if(input.kind==="color")return {prompt:colorPrompt(null,input.part??null,input.color,input.fallbackHex),ids:[input.sourceAssetId]};
+async function recipe(input:TryoutSubmission,db:Pick<Database,"query">,ownerId:string,items:Map<string,ProductCardItem|null>,locked=false) {
+    const item=input.kind==="wear"?null:items.get(input.sourceAssetId)??null;
+    const part=input.kind==="wear"?null:input.part??closestProductPart(item,input.fallbackHex);
+    if(input.kind==="color")return {prompt:colorPrompt(item,part,input.color,input.fallbackHex),ids:[input.sourceAssetId]};
     if(input.kind==="material"){
         if("presetId" in input.material){
             const preset=(await db.query<{name:string;description:string}>("SELECT name,description FROM material_presets WHERE id=$1 AND status='published'"+(locked?" FOR SHARE":""),[input.material.presetId])).rows[0];
             if(!preset)throw new BillingError("TRYOUT_MATERIAL_UNAVAILABLE","该预设材质已下架或不存在，未提交任务");
-            return {prompt:materialPrompt(null,input.part??null,{type:"preset",...preset}),ids:[input.sourceAssetId]};
+            return {prompt:materialPrompt(item,part,{type:"preset",...preset},input.fallbackHex),ids:[input.sourceAssetId]};
         }
         const material=(await db.query("SELECT metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND metadata->>'source'='material-library' AND COALESCE(metadata->>'tryoutArchived','false')<>'true' AND kind='image' AND status='ready' AND deleted_at IS NULL"+(locked?" FOR SHARE":""),[input.material.assetId,ownerId])).rows[0];
         if(!material)throw new BillingError("TRYOUT_MATERIAL_UNAVAILABLE","该个人材质已移除或不属于当前账号");
-        return {prompt:materialPrompt(null,input.part??null,{type:"uploaded",name:material.metadata.name,useColor:material.metadata.useColor===true}),ids:[input.sourceAssetId,input.material.assetId]};
+        return {prompt:materialPrompt(item,part,{type:"uploaded",name:material.metadata.name,useColor:material.metadata.useColor===true},input.fallbackHex),ids:[input.sourceAssetId,input.material.assetId]};
     }
-    return {prompt:wearPrompt(input.productAssetIds.map(()=>null)),ids:[input.model.assetId,...input.productAssetIds]};
+    const products=input.productAssetIds.map(id=>items.get(id)??null);
+    if(products.some(p=>p?.wearPosition==="none"))throw new BillingError("TRYOUT_NOT_WEARABLE","这件产品不适合上身，可使用场景展示或修正产品卡");
+    return {prompt:wearPrompt(products),ids:[input.model.assetId,...input.productAssetIds]};
 }
 export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm?:ReturnType<typeof createTryoutPrewarm>) {
     const router=Router();
@@ -60,8 +67,9 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
             };
             const prior=await read(db);
             if(prior){res.json({taskId:prior.id,prompt:prior.prompt});return;}
+            const items=await tryoutProductItems(db,actor.id,input.kind==="refine"?[]:input.kind==="wear"?input.productAssetIds:[input.sourceAssetId],policy.productCards!==false);
             const original=async(query:Pick<Database,"query">,locked=false)=>{
-                if(input.kind!=="refine")return {...await recipe(input,query,actor.id,locked),kind:input.kind,tier:input.tier};
+                if(input.kind!=="refine")return {...await recipe(input,query,actor.id,items,locked),kind:input.kind,tier:input.tier};
                 const row=(await query.query(`SELECT prompt,source_urls,parameters->>'tryoutKind' AS kind FROM tasks
                     WHERE id=$1 AND user_id=$2 AND project_id=$3 AND parameters->>'tryoutNodeId'=$4 AND status='success'
                     AND parameters->>'tryoutTier'='quick' AND request_id LIKE $5`+(locked?" FOR SHARE":""),[input.sourceTaskId,actor.id,input.canvasId,input.nodeId,"tryout:"+actor.id+":%"])).rows[0];
@@ -83,7 +91,7 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
                 await assertModuleEnabled(client,"canvas-edit");
                 if(prepared.execution && prepared.execution.modelConfigId!==execution.modelConfigId)throw new BillingError("TRYOUT_MODEL_CHANGED","模型绑定已变更，未提交任务");
                 await assertTryoutImageModel(client,execution.modelConfigId,true);
-                if(input.kind==="material"&&(await recipe(input,client,actor.id,true)).prompt!==prompt)throw new BillingError("TRYOUT_MATERIAL_CHANGED","材质描述已变更，请重新选择后再提交");
+                if(input.kind==="material"&&(await recipe(input,client,actor.id,items,true)).prompt!==prompt)throw new BillingError("TRYOUT_MATERIAL_CHANGED","材质描述已变更，请重新选择后再提交");
                 if(input.kind==="refine"&&JSON.stringify(await original(client,true))!==JSON.stringify(spec))throw new BillingError("TRYOUT_ORIGIN_CHANGED","快速档原始记录已变化，未提交高清任务");
                 const canvas=await client.query("SELECT 1 FROM canvas_documents WHERE owner_user_id=$1 AND external_id=$2 AND NOT deleted FOR SHARE",[actor.id,input.canvasId]);
                 if(!canvas.rows.length)throw new BillingError("TRYOUT_CANVAS_UNAVAILABLE","请先保存到自己的画布");

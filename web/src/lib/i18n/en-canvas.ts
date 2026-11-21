@@ -1,5 +1,12 @@
 /** Canvas presentation only: never used to rewrite saved titles, prompts or messages. */
 const enCanvas: Record<string, string> = {
+  "产品卡":"Product details",
+  "修改产品标签":"Edit product tags",
+  "保存标签":"Save tags",
+  "穿戴位置":"Wear position",
+  "人群未知":"Audience unknown",
+  "不穿戴":"Not wearable",
+  "未能确认保存，请重新打开核对":"Could not confirm the save. Reopen to check.",
   "高清档": "HD",
   "快速档": "Quick",
   "正在出高清，保留快速档": "Rendering HD; the quick image stays in place",

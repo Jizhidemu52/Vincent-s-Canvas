@@ -6,6 +6,8 @@ import { FolderOpen, ImagePlus, Palette, Plus, Trash2, Upload } from "lucide-rea
 import { lazy, Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { useImageDrop } from "@/hooks/use-image-drop";
+import {deploymentFeatures} from "@/lib/deployment-features";
+const ProductCardChips=lazy(()=>import("@/components/product-card-chips"));
 import { useWorkbenchTask } from "@/components/workbench-tasks";
 import type { ReferenceImage } from "@/types/image";
 import { useModuleEnabled } from "@/stores/use-module-store";
@@ -279,6 +281,7 @@ function SceneUploadSlot({ slot, reference, onImage, onAsset, disabled, scopeKey
     latest.current = { selectionScope, disabled, active: task.active };
     useEffect(() => { setAssetPickerOpen(false); }, [selectionScope, task.active]);
     const uploadId = `cs-upload-${slot.id}-${useId()}`;
+    const productSource=deploymentFeatures.productCardsEnabled&&task.active&&slot.id==="primary"&&reference&&(reference.serverAssetId||reference.sourceAssetId||reference.storageKey||reference.dataUrl);
     const imageDrop = useImageDrop({
         scopeKey: `${scopeKey}:${task.id}:${slot.id}:${slot.label}`,
         disabled: disabled || !task.active,
@@ -300,6 +303,7 @@ function SceneUploadSlot({ slot, reference, onImage, onAsset, disabled, scopeKey
                         <span className="cs-upload-replace"><Upload size={14} aria-hidden="true" />{uiText("重新上传")}</span>
                     </> : <span className="cs-upload-empty"><ImagePlus size={28} strokeWidth={1.5} aria-hidden="true" /><strong>{uiText("上传")}{uiText(slot.label || "")}</strong><span>{uiText("点击或拖入 PNG / JPG / WebP")}</span></span>}
                 </label>
+                {productSource?<div className="relative min-h-px"><Suspense fallback={null}><ProductCardChips key={productSource} source={productSource} inline/></Suspense></div>:null}
                 {onAsset && <button type="button" className="cs-tool-entry" aria-label={uiText("从素材库选择{label}", { label: uiText(slot.label) })} disabled={disabled || !task.active} onClick={() => setAssetPickerOpen(true)}><FolderOpen size={14} aria-hidden="true" />{uiText("从素材库选择")}</button>}
                 {assetPickerOpen && onAsset && task.active && <AssetPickerModal open selectionMode="single-image" onClose={() => setAssetPickerOpen(false)} onInsert={async asset => {
                     if (asset.kind !== "image") throw new Error("请选择图片素材");
