@@ -197,8 +197,8 @@ integration("Worker completion receipt actual SQL recovery", () => {
       await api.runTask(taskId);
       const paused = await state();
       expect(paused).toMatchObject({ status: "paused", attempts: 1, receipt: original });
-      if (kind === "unknown") { expect(paused.model_slot_token).toBeNull(); expect(paused.model_slot_expires_at).toBeNull(); }
-      else { expect(paused.model_slot_token).not.toBeNull(); expect(paused.model_slot_expires_at).not.toBeNull(); }
+      expect(paused.model_slot_token).toBeNull();
+      expect(paused.model_slot_expires_at).toBeNull();
       expect(imageStorageCalls).toBe(0); expect(imageSettlementCalls).toBe(0);
       expect(paused.failure_reason).not.toContain("可恢复原任务继续下载和保存");
       expect(queries).toBe(kind === "unknown" ? 1 : 0);

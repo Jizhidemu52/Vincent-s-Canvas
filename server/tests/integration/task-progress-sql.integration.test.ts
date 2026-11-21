@@ -84,8 +84,10 @@ integration("progress HTTP runs real SQL/Lua: priority/FIFO, delayed gates, infl
     expect(denied.status).toBe(404);
     expect(f.statements.length - before).toBe(1);
     expect((await fetch(`${origin}/api/tasks/not-a-uuid/progress`)).status).toBe(400);
-    await f.db.query("UPDATE tasks SET status='paused' WHERE id=$1", [inflight]);
+    await f.db.query("UPDATE tasks SET status='paused',paused_kind='submission_unknown',upstream_task_id=NULL WHERE id=$1", [inflight]);
     expect(await readTaskProgress(f.db, f.redis.cache, target, f.owner)).toMatchObject({ queuePosition: 2, estimatedRemainingSeconds: null, estimateReason: "unresolved_inflight" });
+    await f.db.query("UPDATE tasks SET paused_kind='result_repair',upstream_task_id='remote-original' WHERE id=$1", [inflight]);
+    expect(await readTaskProgress(f.db, f.redis.cache, target, f.owner)).toMatchObject({ queuePosition: 2, estimateReason: null });
     await f.db.query("UPDATE tasks SET status='success' WHERE id=$1", [target]);
     const terminalBefore = f.statements.length;
     expect(await readTaskProgress(f.db, f.redis.cache, target, f.owner)).toMatchObject({ phase: "complete", queuePosition: null });

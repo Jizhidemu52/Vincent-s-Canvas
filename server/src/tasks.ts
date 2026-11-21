@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import { IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX } from "../../shared/generation-error";
 import { singleImageTaskParameters } from "./image-task-policy";
 import { BillingError, reserveCredits, settleReservation, type PriceSnapshot } from "./billing";
+import { workflowPollWindow } from "./task-poll-window";
 import type { Cache, Database } from "./db";
 import { withTransaction } from "./db-transaction";
 import { preflightStoredVideoTask, validateStoredVideoPreflightSnapshot } from "./stored-video-preflight";
@@ -25,6 +26,7 @@ export type TaskInput = {
   creditsEnabled?: boolean;
   /** Server-only admission policy, never accepted from the request body. */
   maxInflightTasks?: number;
+  maxPausedTasks?: number;
   requestId: string;
   userId: string;
   departmentId: string | null;
@@ -154,13 +156,20 @@ async function assertTaskCapacity(db: Pick<Database, "query">, input: TaskInput)
   if (input[QUICK_IMAGE_SNAPSHOT] && (await db.query("SELECT id FROM tasks WHERE request_id=$1", [input.requestId])).rows[0]) {
     throw new BillingError("DUPLICATE_REQUEST", "请求编号已被其他账号占用");
   }
-  const maxInflightTasks = input.maxInflightTasks ?? 100;
-  if (!Number.isInteger(maxInflightTasks) || maxInflightTasks < 1 || maxInflightTasks > 1000) {
-    throw new Error("Invalid server-side in-flight task limit");
-  }
-  const active = await db.query<{ count: number }>(
-    "SELECT count(*)::int AS count FROM tasks WHERE user_id=$1 AND status IN ('waiting','processing','paused')", [input.userId],
+  await assertUserTaskCapacity(db, input.userId, input);
+}
+
+export async function assertUserTaskCapacity(db: Pick<Database, "query">, userId: string,
+  { maxInflightTasks = 100, maxPausedTasks = 20 }: Pick<TaskInput, "maxInflightTasks" | "maxPausedTasks">) {
+  if (![maxInflightTasks, maxPausedTasks].every(limit => Number.isInteger(limit) && limit >= 1 && limit <= 1000))
+    throw new Error("Invalid server-side task limit");
+  const active = await db.query<{ count: number; paused: number }>(
+    `SELECT count(*) FILTER (WHERE status IN ('waiting','processing'))::int AS count,
+       count(*) FILTER (WHERE status='paused')::int AS paused FROM tasks
+     WHERE user_id=$1 AND status IN ('waiting','processing','paused')`, [userId],
   );
+  if (active.rows[0]!.paused >= maxPausedTasks)
+    throw new BillingError("USER_TASK_LIMIT_REACHED", `待核查任务已达到 ${maxPausedTasks} 个上限，请先处理待核查任务`);
   if (active.rows[0]!.count >= maxInflightTasks) {
     throw new BillingError("USER_TASK_LIMIT_REACHED", `在途任务已达到 ${maxInflightTasks} 个上限，请等待任务完成或取消未提交的任务`);
   }
@@ -466,9 +475,7 @@ export async function transitionTask(
     const changed = await db.query(
       `UPDATE tasks SET status='waiting',available_at=now(),execution_token=NULL,lease_expires_at=NULL,
        poll_deadline_at=CASE WHEN upstream_task_id IS NOT NULL THEN now()+CASE
-         WHEN upstream_workflow_context IS NOT NULL THEN
-           CASE WHEN upstream_workflow_context->>'timeoutSeconds' ~ '^[0-9]{1,4}$'
-             THEN LEAST(7200,GREATEST(30,(upstream_workflow_context->>'timeoutSeconds')::int)) ELSE 600 END * interval '1 second'
+         WHEN upstream_workflow_context IS NOT NULL THEN ${workflowPollWindow}
          WHEN operation_type='video_generation' THEN interval '20 minutes' ELSE interval '15 minutes' END
        ELSE poll_deadline_at END,updated_at=now() WHERE id=$1 AND status='paused'
        AND paused_kind IS NULL AND COALESCE(failure_reason,'') NOT LIKE $2

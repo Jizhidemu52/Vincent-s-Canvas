@@ -11,6 +11,7 @@ import { makeCursorPage, parseCursorPage } from "../cursor-pagination";
 import { requireRole } from "../rbac";
 import {
   BillingError,
+  assertUserTaskCapacity,
   enqueueTask,
   queueScore,
   recalculateBatch,
@@ -78,7 +79,7 @@ const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COALESCE(SUM(t.rmb_cost) FILTER (WHERE t.status='success'),0)::float8 AS consumed_rmb_cost
   FROM tasks t WHERE t.batch_id=b.id) stats ON true`;
 
-export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask, options: { maxRepairAttempts?: number; maxInflightTasks?: number; promptCompiler?: PromptCompiler; quickImagePreflight?: typeof preflightStoredQuickImageTask } = {}) {
+export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask, options: { maxRepairAttempts?: number; maxInflightTasks?: number; maxPausedTasks?: number; promptCompiler?: PromptCompiler; quickImagePreflight?: typeof preflightStoredQuickImageTask } = {}) {
   const router = Router();
   router.use((_request, response, next) => {
     const json = response.json.bind(response);
@@ -125,8 +126,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
       return finish({ ...input, optimized: false });
     }
     if (!options.promptCompiler) throw new PromptOptimizationError("PROMPT_UNAVAILABLE", "提示词优化尚未配置，未提交生成", 503);
-    const active = await db.query<{ count: number }>("SELECT count(*)::int AS count FROM tasks WHERE user_id=$1 AND status IN ('waiting','processing','paused')", [actor.id]);
-    if (Number(active.rows[0]?.count) >= (options.maxInflightTasks ?? 100)) throw new BillingError("USER_TASK_LIMIT_REACHED", "在途任务已达到上限，请等待任务完成或取消未提交的任务");
+    await assertUserTaskCapacity(db, actor.id, options);
     const prior = actor.role === "super_admin" && input.promptInput?.compilationId ? await options.promptCompiler.store.getCompilation(input.promptInput.compilationId, actor.id) : null;
     const execution = await resolveToolExecution(db, input, { allowModelOverride: prior?.adminTest === true });
     if (input.operationType === "video_generation") {
@@ -267,6 +267,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
           ...prepared,
           creditsEnabled,
           maxInflightTasks: options.maxInflightTasks,
+          maxPausedTasks: options.maxPausedTasks,
           userId: actor.id,
           departmentId: actor.departmentId,
         }, videoPreflight, options.quickImagePreflight);
@@ -328,6 +329,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
             priceSnapshot,
             creditsEnabled,
             maxInflightTasks: options.maxInflightTasks,
+            maxPausedTasks: options.maxPausedTasks,
             requestId: `${input.requestId}:${index}`,
             sourceUrls: item.sourceUrls,
             userId: actor.id,

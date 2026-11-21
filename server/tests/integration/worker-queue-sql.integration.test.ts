@@ -267,7 +267,7 @@ integration("two inconclusive original image queries retain their slots, then se
   } finally { await fixture.close(); }
 }, 60_000);
 
-for (const failure of ["not-found", "deadline"] as const) integration(`known image ID with a missing legacy submission timestamp preserves its hold and slot after ${failure}`, async () => {
+for (const failure of ["not-found", "deadline"] as const) integration(`known image ID with a missing legacy submission timestamp preserves its hold but frees its slot after ${failure}`, async () => {
   const fixture = await databaseFixture("image");
   const { db, redis } = fixture;
   let queries = 0;
@@ -294,7 +294,8 @@ for (const failure of ["not-found", "deadline"] as const) integration(`known ima
     expect(await popReadyTask(redis.cache)).toBe(id);
     await worker.runTask(id);
     expect(queries).toBe(failure === "deadline" ? 0 : 1);
-    expect((await db.query("SELECT request_id,upstream_task_id,upstream_submission_started_at,attempts,model_slot_token,poll_deadline_at FROM tasks WHERE id=$1", [id])).rows[0]).toEqual(original);
+    expect((await db.query("SELECT request_id,upstream_task_id,upstream_submission_started_at,attempts,model_slot_token,poll_deadline_at FROM tasks WHERE id=$1", [id])).rows[0]).toEqual({ ...original, model_slot_token: null });
+    expect(await redis.zCard(`model:${fixture.model}:leases`)).toBe(0);
     expect((await db.query("SELECT status,execution_token,lease_expires_at FROM tasks WHERE id=$1", [id])).rows[0]).toEqual({ status: "paused", execution_token: null, lease_expires_at: null });
     expect((await db.query("SELECT status FROM credit_reservations WHERE request_id=$1", [`request-${id}`])).rows[0].status).toBe("held");
     expect((await db.query("SELECT count(*)::int AS n FROM generation_history")).rows[0].n).toBe(0);

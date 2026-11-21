@@ -38,6 +38,7 @@ const schema = z.object({
     PROVIDER_IMAGE_PUBLIC_ORIGIN: z.string().optional(),
     WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(40).default(10),
     USER_MAX_INFLIGHT_TASKS: z.coerce.number().int().min(1).max(1000).default(100),
+    PAUSED_TASK_LIMIT_PER_USER: z.coerce.number().int().min(1).max(1000).default(20),
     PROMPT_OPTIMIZATION_TIMEOUT_MS: z.coerce.number().int().min(5000).max(180000).default(45000),
     PROMPT_OPTIMIZATION_FALLBACK: z.enum(["off", "original"]).default("off"),
     PROMPT_FALLBACK_TOOL_KEYS: z.string().default(""),

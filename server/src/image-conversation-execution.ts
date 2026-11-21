@@ -60,6 +60,7 @@ export type ImageConversationExecutionOptions = {
     readAsset?: (asset: Readonly<SourceAsset>) => Promise<Uint8Array>;
     creditsEnabled: (client?: Query) => Promise<boolean>;
     maxInflightTasks?: number;
+    maxPausedTasks?: number;
     outputLimits?: ImageOutputPolicyInput["limits"];
 };
 
@@ -391,6 +392,7 @@ export async function prepareConversationImage(
         priority: "normal",
         creditsEnabled,
         maxInflightTasks: options.maxInflightTasks,
+        maxPausedTasks: options.maxPausedTasks,
         priceSnapshot: price,
         optimized: false,
     });

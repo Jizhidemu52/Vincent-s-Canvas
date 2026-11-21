@@ -1,4 +1,4 @@
-import { classifyResultFailure, pauseOwnedTask } from "../../src/task-repair";
+import { classifyResultFailure, pauseOwnedTask, requeueRepairs } from "../../src/task-repair";
 import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import ts from "typescript";
@@ -125,10 +125,12 @@ integration("changed workflow config pauses before GET; restoring it resumes the
     await h.db.query("UPDATE providers SET base_url='https://workflow.invalid' WHERE id=$1", [h.provider]);
     await h.db.query("UPDATE tasks SET poll_deadline_at=now()-interval '1 hour' WHERE id=$1", [id]);
     const before = Date.now();
-    expect(await transitionTask(h.db, h.redis.cache, id, "resume")).not.toBeNull();
+    expect(await transitionTask(h.db, h.redis.cache, id, "resume")).toBeNull();
+    expect(await requeueRepairs(h.db, h.redis.cache, { taskId: id, ownerId: submitted.user_id, maxAttempts: 3 })).toBe(1);
     const resumed = await h.row(id), deadline = new Date(resumed.poll_deadline_at).getTime();
     expect(deadline).toBeGreaterThanOrEqual(before + 37_000); expect(deadline).toBeLessThanOrEqual(Date.now() + 37_000);
-    for (const field of ["upstream_task_id", "upstream_submission_started_at", "upstream_workflow_context", "attempts", "queued_at", "model_slot_token"])
+    expect(resumed.model_slot_token).toBeNull();
+    for (const field of ["upstream_task_id", "upstream_submission_started_at", "upstream_workflow_context", "attempts", "queued_at"])
       expect(resumed[field]).toEqual(submitted[field]);
     expect(await h.reservation(id)).toEqual(held);
     await h.drain(); expect(calls).toEqual(["POST", "GET"]);
@@ -197,7 +199,7 @@ integration(`workflow ${mode} preserves the existing settlement policy without r
     const row = await h.row(id);
     expect(row.status).toBe(mode === "submission-rejected" ? "failed" : "paused");
     expect((await h.reservation(id)).status).toBe(mode === "submission-rejected" ? "released" : "held");
-    expect(Boolean(row.model_slot_token)).toBe(mode !== "submission-rejected");
+    expect(row.model_slot_token).toBeNull();
     expect(calls).toEqual(mode === "submission-rejected" ? ["POST"] : ["POST", "GET"]);
     expect(row.attempts).toBe(1);
   } finally { await h.close(); }

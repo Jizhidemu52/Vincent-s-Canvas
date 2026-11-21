@@ -1,4 +1,5 @@
 import type { Cache, Database } from "./db";
+import { occupiedModelSlot } from "./model-concurrency";
 import { DELAYED_QUEUE, READY_QUEUE } from "./task-queue";
 
 const MAX_QUEUE_CANDIDATES = 1_000;
@@ -50,13 +51,10 @@ for _, id in ipairs(ARGV) do
 end
 return cjson.encode(result)`;
 
-const occupiedSlot = `(t.model_slot_token IS NOT NULL AND t.status NOT IN ('success','failed','cancelled')
-    AND (t.model_slot_expires_at>now() OR t.upstream_submission_started_at IS NOT NULL
-      OR (t.status='paused' AND t.attempts>0 AND t.operation_type<>'video_generation')))`;
 const taskProjection = `t.id,t.status,t.model_config_id AS "modelConfigId",t.operation_type AS "operationType",
   (extract(epoch FROM COALESCE(t.upstream_submission_started_at,t.started_at))*1000)::float8 AS "startedMs",
   (t.upstream_submission_started_at IS NOT NULL OR t.upstream_task_id IS NOT NULL) AS submitted,
-  ${occupiedSlot} AS "slotOccupied"`;
+  ${occupiedModelSlot} AS "slotOccupied"`;
 
 /** Owner authorization happens before any shared-queue or historical lookup. */
 export async function readTaskProgress(db: Database, cache: Cache, taskId: string, ownerId: string): Promise<TaskProgress | null> {
@@ -76,7 +74,7 @@ export async function readTaskProgress(db: Database, cache: Cache, taskId: strin
       COALESCE((SELECT jsonb_agg(candidate) FROM (
         SELECT ${taskProjection} FROM tasks t
         WHERE t.model_config_id=$1::uuid
-          AND (t.status IN ('waiting','processing') OR (t.status='paused' AND ${occupiedSlot}))
+          AND (t.status IN ('waiting','processing') OR (t.status='paused' AND ${occupiedModelSlot}))
         ORDER BY t.id LIMIT $3
       ) candidate),'[]'::jsonb) AS tasks,
       COALESCE((SELECT jsonb_agg(duration) FROM (

@@ -220,8 +220,8 @@ async function runTask(taskId: string) {
       return;
     }
     if (error instanceof VideoSubmissionClaimLost || error instanceof TaskExecutionLost) {
-      await pauseOwnedTask(db, task, { kind: "needs_review", code: "TASK_EXECUTION_LOST" }, "执行权或提交回执需要管理员核查，未重新提交", config.RESULT_REPAIR_MAX_ATTEMPTS);
-      keepModelSlot = true; outcome = "paused"; return;
+      const paused = await pauseOwnedTask(db, task, { kind: "needs_review", code: "TASK_EXECUTION_LOST" }, "执行权或提交回执需要管理员核查，未重新提交", config.RESULT_REPAIR_MAX_ATTEMPTS);
+      keepModelSlot = !paused.rowCount; outcome = "paused"; return;
     }
     const transportDiagnostics = readProviderSubmissionDiagnostics(error);
     const layerOutputLimitFailure = isSeedream55 && error instanceof Seedream55OutputLimitExceeded;
@@ -253,7 +253,7 @@ async function runTask(taskId: string) {
         } catch { /* An invalid or foreign receipt cannot prove upstream completion. */ }
       }
       const kind = !keepModelSlot ? "result_repair" : task.operation_type === "video_generation" && task.upstream_result_document != null ? "needs_review" : task.upstream_task_id ? "awaiting_query" : "submission_unknown";
-      keepModelSlot = kind === "submission_unknown" || kind === "needs_review";
+      keepModelSlot = kind === "submission_unknown";
       await pauseOwnedTask(db, task, { kind, code: kind === "submission_unknown" ? "SUBMISSION_UNKNOWN" : kind === "awaiting_query" ? "UPSTREAM_QUERY_PENDING" : kind === "needs_review" ? "INVALID_UPSTREAM_RECEIPT" : "RESULT_DOWNLOAD_FAILED" },
         kind === "result_repair" ? `${reason}；视频上游结果已保存，可恢复原任务继续下载和保存，不会重新生成。` : reason, config.RESULT_REPAIR_MAX_ATTEMPTS);
       outcome = "paused";

@@ -11,7 +11,7 @@ import { prepareConfiguredQuickImageTask, quickImageActions, quickImageActionSch
   readQuickImageConfiguration, readQuickImageModel, readQuickImageModels, validateQuickImageConfiguration } from "../quick-image-configuration";
 import type { preflightStoredQuickImageTask } from "../stored-quick-image-preflight";
 
-export type QuickImageRouterOptions = { cache?: Cache; creditPolicy?: boolean | (() => Promise<boolean>); maxInflightTasks?: number; quickImagePreflight?: typeof preflightStoredQuickImageTask };
+export type QuickImageRouterOptions = { cache?: Cache; creditPolicy?: boolean | (() => Promise<boolean>); maxInflightTasks?: number; maxPausedTasks?: number; quickImagePreflight?: typeof preflightStoredQuickImageTask };
 
 /** Mounted only behind the model-configuration router's authenticated super-admin guard. */
 export function createQuickImageConfigurationRouter(db: Database, options: QuickImageRouterOptions = {}) {
@@ -60,7 +60,7 @@ export function createQuickImageConfigurationRouter(db: Database, options: Quick
         projectId: "admin-quick-image-test", ...quickImageTaskTarget(action), prompt: "", parameters: { quickImageAction: action },
         sourceUrls: [input.sourceUrl], priority: "normal" as const, optimized: false }, input.configuration);
       const creditsEnabled = typeof options.creditPolicy === "function" ? await options.creditPolicy() : options.creditPolicy ?? true;
-      const task = await enqueueTask(db, options.cache, { ...prepared, creditsEnabled, maxInflightTasks: options.maxInflightTasks }, undefined, options.quickImagePreflight);
+      const task = await enqueueTask(db, options.cache, { ...prepared, creditsEnabled, maxInflightTasks: options.maxInflightTasks, maxPausedTasks: options.maxPausedTasks }, undefined, options.quickImagePreflight);
       response.status(201).json({ task: { ...task, prompt: prepared.prompt, parameters: prepared.parameters, optimized: false } });
     } catch (error) { next(error); }
   });

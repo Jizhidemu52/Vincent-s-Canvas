@@ -60,22 +60,42 @@ integration("SQL task admission and atomic cancellation", () => {
     method: "POST", headers: { "content-type": "application/json", "x-fixture-user": userId, "x-fixture-role": role }, body: JSON.stringify(body),
   });
 
-  test("queued, processing and paused work share capacity while terminal work does not", async () => {
+  test("queued and processing work consume capacity; a paused task frees its slot but keeps its hold", async () => {
     const userId = await user();
     const first = await submit(input(userId, { maxInflightTasks: 2 }));
     const secondInput = input(userId, { maxInflightTasks: 2 });
     const second = await submit(secondInput);
     await fixture.db.query("UPDATE tasks SET status='processing' WHERE id=$1", [first.id]);
-    await fixture.db.query("UPDATE tasks SET status='paused' WHERE id=$1", [second.id]);
     const rejected = input(userId, { maxInflightTasks: 2 });
     await expect(submit(rejected)).rejects.toMatchObject({ code: "USER_TASK_LIMIT_REACHED" });
     expect((await row("SELECT count(*)::int AS count FROM credit_reservations WHERE request_id=$1", [rejected.requestId])).count).toBe(0);
     expect((await row("SELECT count(*)::int AS count FROM tasks WHERE request_id=$1", [rejected.requestId])).count).toBe(0);
-    await settleReservation(fixture.db, secondInput.requestId, "capture");
-    await fixture.db.query("UPDATE tasks SET status='success' WHERE id=$1", [second.id]);
+    await fixture.db.query("UPDATE tasks SET status='paused',paused_kind='awaiting_query' WHERE id=$1", [second.id]);
     expect((await submit(rejected)).status).toBe("waiting");
+    expect((await row("SELECT status FROM credit_reservations WHERE request_id=$1", [secondInput.requestId])).status).toBe("held");
     expect(await balance(userId)).toBe(76);
     expect(fixture.statements.some(sql => sql.includes("pg_advisory_xact_lock(hashtext('user-inflight-quota')"))).toBe(true);
+  });
+
+  test("five paused tasks do not block a sixth via HTTP; the independent paused limit never blocks a replay", async () => {
+    const userId = await user();
+    await fixture.db.query(`INSERT INTO tasks(request_id,user_id,project_id,operation_type,model_config_id,prompt,status,paused_kind)
+      SELECT gen_random_uuid()::text,$1,'capacity','image_generation',$2,'held','paused','submission_unknown'
+      FROM generate_series(1,5)`, [userId, modelId]);
+    const sixth = input(userId), response = await request(userId, "", sixth);
+    expect(response.status).toBe(201);
+    const created = await response.json();
+    expect(created.task.status).toBe("waiting");
+    await fixture.db.query(`INSERT INTO tasks(request_id,user_id,project_id,operation_type,model_config_id,prompt,status,paused_kind)
+      SELECT gen_random_uuid()::text,$1,'capacity','image_generation',$2,'held','paused','needs_review'
+      FROM generate_series(1,15)`, [userId, modelId]);
+    const overflow = input(userId);
+    const denied = await request(userId, "", { ...overflow, maxPausedTasks: 1000 });
+    expect(denied.status).toBe(429);
+    expect(await denied.json()).toMatchObject({ error: "USER_TASK_LIMIT_REACHED", message: expect.stringContaining("20") });
+    expect((await row("SELECT count(*)::int AS n FROM credit_reservations WHERE request_id=$1", [overflow.requestId])).n).toBe(0);
+    expect((await (await request(userId, "", sixth)).json()).task.id).toBe(created.task.id);
+    expect(await balance(userId)).toBe(92);
   });
 
   test("parallel requests are capped per actor and a duplicate consumes no extra slot or hold", async () => {

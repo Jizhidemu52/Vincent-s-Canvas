@@ -73,6 +73,26 @@ async function fixture(kind: "image" | "video" = "image", limit = 7) {
   return { ...sql, ...mock, user, model, input, seedTask };
 }
 
+isolated("model admission excludes parked repairs but preserves unknown submissions and active upstream polls", async () => {
+  const f = await fixture();
+  try {
+    const parked = await f.seedTask(), candidate = await f.seedTask(), executionToken = randomUUID();
+    await f.db.query("UPDATE tasks SET status='processing',execution_token=$2 WHERE id=$1", [candidate, executionToken]);
+    await f.db.query("UPDATE tasks SET model_slot_token=gen_random_uuid(),upstream_submission_started_at=now(),model_slot_expires_at=now()+interval '1 hour' WHERE id=$1", [parked]);
+    const admission = { taskId: candidate, modelConfigId: f.model, executionToken, limit: 1 };
+    for (const kind of ["result_repair", "awaiting_query", "needs_review", "submission_unknown"]) {
+      await f.db.query("UPDATE tasks SET status='paused',paused_kind=$2 WHERE id=$1", [parked, kind]);
+      f.clear();
+      const slot = await acquireModelLease(f.db, f.cache, admission);
+      expect(Boolean(slot)).toBe(kind !== "submission_unknown");
+      if (slot) await releaseModelLease(f.db, f.cache, slot);
+    }
+    await f.db.query("UPDATE tasks SET status='processing',paused_kind=NULL,execution_token=NULL,upstream_task_id='remote',model_slot_expires_at=now()-interval '1 hour' WHERE id=$1", [parked]);
+    f.clear();
+    expect(await acquireModelLease(f.db, f.cache, admission)).toBeNull();
+  } finally { await f.close(); }
+}, 30_000);
+
 isolated("128 concurrent same-request admissions and 128 distinct admissions preserve dedup and 64 inflight cap", async () => {
   const f = await fixture();
   const started = performance.now();

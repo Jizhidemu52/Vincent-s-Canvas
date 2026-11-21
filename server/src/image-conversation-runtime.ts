@@ -53,6 +53,7 @@ export function createImageConversationRuntime(db: Database, cache: Cache, confi
   const events = new ImageConversationEvents();
   const wake = (id: string) => events.wake(id);
   const executionOptions = { storage: options.storage, creditsEnabled: options.creditsEnabled, maxInflightTasks: config.USER_MAX_INFLIGHT_TASKS,
+    maxPausedTasks: config.PAUSED_TASK_LIMIT_PER_USER,
     outputLimits: config.IMAGE_CONVERSATION_OUTPUT_LIMITS };
   const dependencies: ImageConversationWorkerDependencies = {
     preparePlanner: async (execution, updateManifest) => {

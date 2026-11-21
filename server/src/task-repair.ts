@@ -1,5 +1,6 @@
 import type { Database, Cache } from "./db";
 import { scheduleQueuedTask } from "./task-queue";
+import { workflowPollWindow } from "./task-poll-window";
 import { queueScore, type TaskPriority } from "./tasks";
 import { ImageResultProcessingError } from "./image-result-processing";
 
@@ -45,7 +46,8 @@ export async function requeueRepairs(db: Database, cache: Pick<Cache, "eval">, o
         AND (($2::uuid IS NULL AND next_repair_at<=now()) OR (id=$2 AND user_id=$3::uuid))
       ORDER BY next_repair_at,id LIMIT 20 FOR UPDATE SKIP LOCKED
     ) UPDATE tasks t SET status='waiting',repair_attempts=repair_attempts+1,next_repair_at=NULL,
-      available_at=now(),poll_deadline_at=now()+interval '10 minutes',updated_at=now()
+      available_at=now(),poll_deadline_at=now()+CASE WHEN upstream_workflow_context IS NOT NULL
+        THEN ${workflowPollWindow} ELSE interval '10 minutes' END,updated_at=now()
       FROM due WHERE t.id=due.id RETURNING t.id,t.priority,t.queued_at,t.available_at`,
     [options.maxAttempts, options.taskId ?? null, options.ownerId ?? null]);
   for (const row of rows) await scheduleQueuedTask(cache, row.id, queueScore(row.priority, new Date(row.queued_at).getTime()), new Date(row.available_at).getTime());

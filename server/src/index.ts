@@ -189,7 +189,7 @@ app.use(
   "/api/admin/model-configuration",
   requireAdminSession,
   requireAccountReady,
-  createModelConfigurationRouter(db, config, { cache, creditPolicy: readCreditsEnabled, maxInflightTasks: config.USER_MAX_INFLIGHT_TASKS }),
+  createModelConfigurationRouter(db, config, { cache, creditPolicy: readCreditsEnabled, maxInflightTasks: config.USER_MAX_INFLIGHT_TASKS, maxPausedTasks: config.PAUSED_TASK_LIMIT_PER_USER }),
 );
 app.use("/api/tasks/events", requireSession, requireAccountReady, createTasksEventsRouter(taskEvents));
 app.use(
@@ -197,7 +197,7 @@ app.use(
   requireSession,
   requireAccountReady,
   protectModelIdentity,
-  createTasksRouter(db, cache, readCreditsEnabled, undefined, { maxInflightTasks: config.USER_MAX_INFLIGHT_TASKS, maxRepairAttempts: config.RESULT_REPAIR_MAX_ATTEMPTS, promptCompiler }),
+  createTasksRouter(db, cache, readCreditsEnabled, undefined, { maxInflightTasks: config.USER_MAX_INFLIGHT_TASKS, maxPausedTasks: config.PAUSED_TASK_LIMIT_PER_USER, maxRepairAttempts: config.RESULT_REPAIR_MAX_ATTEMPTS, promptCompiler }),
 );
 app.use(
   "/api/admin/tasks",

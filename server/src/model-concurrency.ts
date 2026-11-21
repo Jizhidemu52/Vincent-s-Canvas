@@ -3,6 +3,9 @@ import type { Cache, Database } from "./db";
 import { withTransaction } from "./db-transaction";
 
 export const MODEL_LEASE_SECONDS = 180;
+export const occupiedModelSlot = `(t.model_slot_token IS NOT NULL AND (
+  (t.status='processing' AND (t.model_slot_expires_at>clock_timestamp() OR t.upstream_submission_started_at IS NOT NULL OR t.upstream_task_id IS NOT NULL))
+  OR (t.status='paused' AND t.paused_kind='submission_unknown' AND t.upstream_submission_started_at IS NOT NULL)))`;
 export class TaskExecutionLost extends Error {}
 export type TaskLease = { taskId: string; executionToken: string; modelConfigId: string | null; slotToken: string };
 
@@ -45,10 +48,7 @@ export async function acquireModelLease(db: Database, cache: Cache, input: Omit<
     const active = await client.query<{ id: string; model_slot_token: string; expires_ms: number }>(
       `SELECT id,model_slot_token,
           GREATEST(extract(epoch FROM model_slot_expires_at)*1000,$2::float8)::float8 AS expires_ms
-       FROM tasks WHERE model_config_id IS NOT DISTINCT FROM $1::uuid AND model_slot_token IS NOT NULL
-         AND status NOT IN ('success','failed','cancelled')
-         AND (model_slot_expires_at>clock_timestamp() OR upstream_submission_started_at IS NOT NULL
-              OR (status='paused' AND attempts>0 AND operation_type<>'video_generation'))`,
+       FROM tasks t WHERE model_config_id IS NOT DISTINCT FROM $1::uuid AND ${occupiedModelSlot}`,
       [input.modelConfigId, now + MODEL_LEASE_SECONDS * 1000],
     );
     const accepted = await cache.eval(acquireScript, { keys: [modelKey(input.modelConfigId)], arguments: [
