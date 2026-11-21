@@ -10,6 +10,7 @@ import { loadConfig } from "../../src/config";
 import type { Cache } from "../../src/db";
 import type { ObjectStorage, ObjectReadOptions } from "../../src/object-storage";
 import { ProviderImageAccess, PROVIDER_IMAGE_PATH } from "../../src/provider-image-access";
+import { stepApiMartImageTask } from "../../src/apimart-image";
 import { createProviderImagesRouter } from "../../src/routes/provider-images";
 import { ProviderChatImageAccess, createProviderChatImagesRouter } from "../../src/provider-chat-images";
 import { createAssetsRouter } from "../../src/routes/assets";
@@ -72,6 +73,28 @@ integration("formal route wiring and real SQL allow only a live task original; a
       return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     };
     const base = await serve(true);
+    const nextId = randomUUID(), nextLease = randomUUID();
+    await fixture.db.query("INSERT INTO tasks(id,request_id,user_id,project_id,operation_type,status,source_urls,execution_token,lease_expires_at) VALUES($1,$2,$3,'http-fixture','inpaint','processing',$4::jsonb,$5,now()+interval '5 minutes')", [nextId, `http-${nextId}`, owner, JSON.stringify([`/api/assets/${assetId}/content`]), nextLease]);
+    const nextUrl = await access.issue({ ...input, taskId: nextId, executionToken: nextLease });
+    expect(nextUrl).not.toBe(url);
+    const submissions: string[] = [];
+    for (const [reference, id] of [[url, taskId], [nextUrl, nextId]] as const) {
+      await stepApiMartImageTask({ baseUrl: "https://mock.invalid/v1", apiKey: "fixture-only", modelId: "gpt-image-2.6-flare", prompt: "保留款式", parameters: {}, sourceImages: [reference] }, {
+        fetch: async (endpoint, init) => {
+          expect(endpoint).toBe("https://mock.invalid/v1/images/generations");
+          expect(init?.method).toBe("POST");
+          expect(JSON.parse(String(init?.body)).image_urls).toEqual([reference]);
+          const original = await fetch(base + new URL(reference).pathname);
+          expect(original.status).toBe(200);
+          expect(Buffer.from(await original.arrayBuffer())).toEqual(png);
+          submissions.push(id);
+          return Response.json({ data: [{ task_id: id }] });
+        },
+      });
+    }
+    expect(submissions).toEqual([taskId, nextId]);
+    await fixture.db.query("UPDATE tasks SET status='success' WHERE id=$1", [nextId]);
+    expect((await fetch(base + new URL(nextUrl).pathname)).status).toBe(404);
     const get = await fetch(base + path);
     expect(get.status).toBe(200); expect(get.headers.get("cache-control")).toBe("no-store");
     expect(Buffer.from(await get.arrayBuffer())).toEqual(png);
