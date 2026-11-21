@@ -64,5 +64,10 @@ export async function releaseLedger(directory:string,candidate:Candidate){
         const result=await immutable(doneFile(output.slot),output);
         if(JSON.stringify(result.value)!==JSON.stringify(output))throw Error("不得覆盖已验结果");
     }
-    return {claim,verify,operationIds,origin:identity.origin};
+    async function readIntent(group:Group,inputDigest:string){
+        casesFor(group);
+        const intent=JSON.parse(await readFile(claimFile(group),"utf8"));
+        if(intent.inputDigest!==inputDigest||JSON.stringify(intent.requestIds)!==JSON.stringify(operationIds(group)))throw Error("只能核对已锁定的原请求");
+    }
+    return {claim,verify,operationIds,readIntent,origin:identity.origin};
 }
