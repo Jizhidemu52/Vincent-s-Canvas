@@ -197,7 +197,8 @@ app.use(
   requireSession,
   requireAccountReady,
   protectModelIdentity,
-  createTasksRouter(db, cache, readCreditsEnabled, undefined, { maxInflightTasks: config.USER_MAX_INFLIGHT_TASKS, maxPausedTasks: config.PAUSED_TASK_LIMIT_PER_USER, maxRepairAttempts: config.RESULT_REPAIR_MAX_ATTEMPTS, promptCompiler }),
+  createTasksRouter(db, cache, readCreditsEnabled, undefined, { maxInflightTasks: config.USER_MAX_INFLIGHT_TASKS, maxPausedTasks: config.PAUSED_TASK_LIMIT_PER_USER, maxRepairAttempts: config.RESULT_REPAIR_MAX_ATTEMPTS, promptCompiler,
+    imageDefaults: config.APIMART_IMAGE_DEFAULTS_ENABLED === "true" ? { quality: config.APIMART_DEFAULT_QUALITY, complexity: config.APIMART_DEFAULT_COMPLEXITY } : undefined }),
 );
 app.use(
   "/api/admin/tasks",

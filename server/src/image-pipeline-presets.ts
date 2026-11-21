@@ -19,8 +19,7 @@ export const IMAGE_PIPELINES = {
     params: {
       size: "2048x2048",
       resolution: "2k",
-      quality: "max",
-      complexity: "high"
+      quality: "max"
     },
     description: "精细出图，适合最终定稿与结构重构"
   },
@@ -29,8 +28,7 @@ export const IMAGE_PIPELINES = {
     params: {
       size: "3840x2160",
       resolution: "4k",
-      quality: "max",
-      complexity: "high"
+      quality: "max"
     },
     description: "极致画质，用于最终定稿"
   }

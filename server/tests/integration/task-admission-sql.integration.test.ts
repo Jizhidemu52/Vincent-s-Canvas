@@ -35,6 +35,7 @@ integration("SQL task admission and atomic cancellation", () => {
       next();
     });
     app.use("/tasks", createTasksRouter(fixture.db, cache, true, undefined, { maxInflightTasks: 2 }));
+    app.use("/trial", createTasksRouter(fixture.db, cache, true, undefined, { imageDefaults: { quality: "medium", complexity: "low" } }));
     app.use(((error, _request, response, _next) => response.status(error.name === "ZodError" ? 400 : 500).json({ error: error.code, message: error.message })) as ErrorRequestHandler);
     server = app.listen(0, "127.0.0.1");
     await new Promise<void>(done => server.once("listening", done));
@@ -56,8 +57,26 @@ integration("SQL task admission and atomic cancellation", () => {
     toolKey: "image", modelConfigId: modelId, prompt: "Database-only admission check", sourceUrls: [], priority: "normal", ...patch,
   });
   const submit = (value: TaskInput) => enqueueTask(fixture.db, cache, value);
-  const request = (userId: string, path: string, body: unknown, role = "designer") => fetch(base + path, {
+  const request = (userId: string, path: string, body: unknown, role = "designer", router = base) => fetch(router + path, {
     method: "POST", headers: { "content-type": "application/json", "x-fixture-user": userId, "x-fixture-role": role }, body: JSON.stringify(body),
+  });
+
+  test("trial freezes effective parameters in the new task without changing existing billing rules", async () => {
+    const provider = randomUUID(), model = randomUUID(), userId = await user();
+    await fixture.db.query("INSERT INTO providers(id,name,protocol,base_url) VALUES($1,'Fixture defaults','apimart','https://no-network.invalid')", [provider]);
+    await fixture.db.query("INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,credit_cost,rmb_cost) VALUES($1,$2,'Image defaults fixture','gpt-image-2.6-flare',ARRAY['generate'],0,0)", [model,provider]);
+    const body = input(userId, {modelConfigId:model,parameters:{quality:"auto", resolution:"1k"}});
+    const response = await request(userId, "", body, "designer", new URL("/trial", base).href);
+    const json = await response.json();
+    expect([response.status, json.error]).toEqual([201, undefined]);
+    const saved = await row("SELECT t.parameters, r.price_snapshot FROM tasks t JOIN credit_reservations r ON t.request_id=r.request_id WHERE t.request_id=$1", [body.requestId]);
+    expect(saved.parameters).toMatchObject({quality:"medium",complexity:"low"});
+    const control = { ...body, requestId: randomUUID() };
+    expect((await request(userId, "", control)).status).toBe(201);
+    const baseline = await row("SELECT t.parameters,r.price_snapshot FROM tasks t JOIN credit_reservations r ON t.request_id=r.request_id WHERE t.request_id=$1", [control.requestId]);
+    expect(baseline.parameters.quality).toBe("auto");
+    expect(baseline.parameters).not.toHaveProperty("complexity");
+    expect(saved.price_snapshot).toEqual(baseline.price_snapshot);
   });
 
   test("queued and processing work consume capacity; a paused task frees its slot but keeps its hold", async () => {

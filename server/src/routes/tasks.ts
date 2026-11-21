@@ -33,6 +33,7 @@ import type { PromptCompiler } from "../prompt-compiler";
 import { preparePromptTaskInput } from "../prompt-task-input";
 import { readImageAgentGenerationProfile } from "../image-agent-profile";
 import { applyImagePromptExclusions, isImagePromptOperation, validateImagePromptExclusions } from "../image-prompt-exclusions";
+import { imageAdmissionParameters, type ImageAdmissionDefaults } from "../image-admission-defaults";
 import { PromptOptimizationError } from "../prompt-safety";
 import { promptHash } from "../prompt-recipe-store";
 import { withTransaction } from "../db-transaction";
@@ -81,7 +82,7 @@ const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COALESCE(SUM(t.rmb_cost) FILTER (WHERE t.status='success'),0)::float8 AS consumed_rmb_cost
   FROM tasks t WHERE t.batch_id=b.id) stats ON true`;
 
-export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask, options: { readOriginalSizeSource?: Parameters<typeof prepareOriginalSizeReissue>[4]; maxRepairAttempts?: number; maxInflightTasks?: number; maxPausedTasks?: number; promptCompiler?: PromptCompiler; quickImagePreflight?: typeof preflightStoredQuickImageTask } = {}) {
+export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask, options: { imageDefaults?: ImageAdmissionDefaults; readOriginalSizeSource?: Parameters<typeof prepareOriginalSizeReissue>[4]; maxRepairAttempts?: number; maxInflightTasks?: number; maxPausedTasks?: number; promptCompiler?: PromptCompiler; quickImagePreflight?: typeof preflightStoredQuickImageTask } = {}) {
   const router = Router();
   router.use((_request, response, next) => {
     const json = response.json.bind(response);
@@ -151,6 +152,15 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
     const prepared = await finish(await preparePromptTaskInput(options.promptCompiler, actor, { ...input, modelConfigId: execution.modelConfigId, toolKey: execution.toolKey, toolConfiguration: execution }));
     return { ...prepared, ...(seedreamPreflightResult ? { seedreamPreflightResult } : {}) };
   };
+  const prepareSingle = async (actor: AuthenticatedRequest["auth"], input: ReturnType<typeof singleSchema.parse>) => {
+    const prepared = await prepare(actor, input);
+    if (!options.imageDefaults || !isImagePromptOperation(prepared.operationType) || prepared.parameters.quickImageAction) return prepared;
+    const execution = "toolConfiguration" in prepared && prepared.toolConfiguration
+      ? prepared.toolConfiguration as Awaited<ReturnType<typeof resolveToolExecution>> : await resolveToolExecution(db, prepared);
+    const target = (await db.query<{ modelId: string; protocol: string; workflowConfigId: string | null }>('SELECT m.model_id AS "modelId",p.protocol,m.workflow_config_id AS "workflowConfigId" FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1', [execution.modelConfigId])).rows[0];
+    return { ...prepared, toolConfiguration: execution, modelConfigId: execution.modelConfigId, toolKey: execution.toolKey,
+      parameters: imageAdmissionParameters(prepared.parameters, target, execution.toolKey, prepared.sourceUrls.length > 0, options.imageDefaults) };
+  };
   const existingBatchResult = async (requestId: string, userId: string) => {
     const batch = await readBatchAdmission(db, requestId, userId);
     if (!batch) return null;
@@ -176,7 +186,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
       const actor = (request as unknown as AuthenticatedRequest).auth;
       // Same authorization, source hashing, compilation and exclusion processing as admission.
       // This endpoint never enqueues, reserves image credits or invokes the image provider.
-      const prepared = await prepare(actor, input);
+      const prepared = await prepareSingle(actor, input);
       response.json({ preview: publicPromptTaskPreview(prepared) });
     } catch (error) { next(error); }
   });
@@ -264,7 +274,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
         const existing = (await db.query(`SELECT ${taskSelect} FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.request_id=$1 AND t.user_id=$2`, [input.requestId, actor.id])).rows[0];
         if (existing) { response.status(200).json({ task: existing }); return; }
       }
-      const prepared = await prepare(actor, input);
+      const prepared = await prepareSingle(actor, input);
       const task = await enqueueTask(db, cache, {
           ...prepared,
           creditsEnabled,
@@ -310,6 +320,9 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
       input.modelConfigId = execution.modelConfigId;
       input.parameters = { ...input.parameters, tool: execution.toolKey };
       const target = (await db.query<{ modelId: string; protocol: string; workflowConfigId: string | null }>(`SELECT m.model_id AS "modelId",p.protocol,m.workflow_config_id AS "workflowConfigId" FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [execution.modelConfigId])).rows[0];
+      if (isImagePromptOperation(input.operationType) && !input.parameters.quickImageAction) {
+        input.parameters = imageAdmissionParameters(input.parameters, target, execution.toolKey, input.items.every(item => item.sourceUrls.length > 0), options.imageDefaults);
+      }
       const priceSnapshot = target && isLayerStudioModel(target)
         ? await loadLayerStudioPriceSnapshot(db, { ...applyImagePromptExclusions(input, target), toolConfiguration: execution, modelConfigId: execution.modelConfigId, sourceCount: input.items[0]!.sourceUrls.length, creditsEnabled })
         : await loadTaskPriceSnapshot(db, { ...input, toolConfiguration: execution, quantity: 1, creditsEnabled });
