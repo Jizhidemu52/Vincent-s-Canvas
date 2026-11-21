@@ -1,0 +1,30 @@
+import {expect,newCanvas,test} from "./fixtures";
+
+test("a designer can replace, remove, undo, reload and inherit a six-slot project palette without generating",async({page,api},info)=>{
+    const id=await newCanvas(page);
+    await page.getByRole("button",{name:"试款台",exact:true}).click();
+    const panel=page.getByRole("region",{name:"企划色板"});
+    await panel.getByRole("button",{name:"从色库换颜色"}).click();
+    const dialog=page.getByRole("dialog",{name:"企划色库"});
+    const color=dialog.locator('[aria-label="色库结果"] button').first();
+    const chosen=await color.getAttribute("title");
+    await color.click();
+    await expect(dialog.getByRole("button",{name:"加为新的"})).toBeDisabled();
+    await dialog.getByRole("button",{name:"替换 海军蓝"}).click();
+    const colors=()=>api.document(id)?.tryoutKit?.colors;
+    await expect.poll(()=>colors()?.length).toBe(6);
+    expect(chosen).toContain(colors()[0].name);
+    await panel.getByRole("button",{name:"移除 酒红"}).focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(()=>colors()?.length).toBe(5);
+    await page.keyboard.press("Control+z");
+    await expect.poll(()=>colors()?.length).toBe(6);
+    await page.reload();
+    await expect(panel.getByRole("button",{name:"移除 酒红"})).toBeAttached();
+    await expect(panel.getByRole("button",{name:"移除 海军蓝"})).toHaveCount(0);
+    await page.screenshot({path:info.outputPath("project-palette.png")});
+    const next=await newCanvas(page);
+    await expect.poll(()=>api.document(next)?.tryoutKit?.colors).toEqual(colors());
+    expect(api.submissions).toHaveLength(0);
+    expect(api.batchSubmissions).toHaveLength(0);
+});

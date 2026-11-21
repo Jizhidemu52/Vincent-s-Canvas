@@ -28,6 +28,8 @@ import { AssetObjectError, isMissingAssetObject } from "../asset-object-error";
 import { VideoPreviewError, type AssetVideoPreviewService, type VideoPlaybackAsset } from "../asset-video-preview";
 import { archiveLocalProcessing, assertLocalProcessingUploadInput, listLocalProcessing, LocalProcessingError, reserveLocalProcessingUpload } from "../local-processing";
 
+import { isTryoutLibrarySource,ordinaryAsset,personalAssetAccess } from "../tryout-private-assets";
+
 const createSchema = z.object({
   filename: z.string().trim().min(1).max(255),
   mimeType: z.string().min(1).max(120).transform(normalizeAssetMime).refine(value => allowedAssetMimeTypes.has(value), "不支持的文件类型"),
@@ -66,14 +68,14 @@ const lightAssetSelect = assetSelect.replace('a.prompt,', `(COALESCE(NULLIF(btri
 const assetJoins = "FROM assets a JOIN users u ON u.id=a.owner_user_id LEFT JOIN departments d ON d.id=a.department_id LEFT JOIN projects p ON p.id=a.project_id LEFT JOIN model_configs m ON m.id=a.model_config_id";
 
 export function accessClause(actor: SessionUser, alias = "a") {
-  if (actor.role === "super_admin") return { sql: "TRUE", values: [] as unknown[] };
+  if (actor.role === "super_admin") return { sql: personalAssetAccess(alias,"$1"), values: [actor.id] as unknown[] };
   const values: unknown[] = [actor.id, actor.departmentId];
   if (actor.groupRole === "leader") values.push(actor.groupId);
   const leaderScope = actor.groupRole === "leader"
     ? ` OR EXISTS(SELECT 1 FROM group_memberships gm WHERE gm.group_id=$3 AND gm.user_id=${alias}.owner_user_id AND gm.effective_at<=${alias}.created_at AND (gm.ended_at IS NULL OR gm.ended_at>${alias}.created_at))`
     : "";
   return {
-    sql: `(${alias}.owner_user_id=$1 OR ${alias}.visibility_scope='company' OR (${alias}.department_id=$2 AND $2::uuid IS NOT NULL AND EXISTS(SELECT 1 FROM asset_shares s WHERE s.asset_id=${alias}.id AND s.department_id=$2)) OR EXISTS(SELECT 1 FROM asset_shares s JOIN project_members pm ON pm.project_id=s.project_id WHERE s.asset_id=${alias}.id AND pm.user_id=$1) OR EXISTS(SELECT 1 FROM asset_shares s WHERE s.asset_id=${alias}.id AND s.user_id=$1)${actor.role === "department_admin" ? ` OR ${alias}.department_id=$2` : ""}${leaderScope})`,
+    sql: `${personalAssetAccess(alias,"$1")} AND (${alias}.owner_user_id=$1 OR ${alias}.visibility_scope='company' OR (${alias}.department_id=$2 AND $2::uuid IS NOT NULL AND EXISTS(SELECT 1 FROM asset_shares s WHERE s.asset_id=${alias}.id AND s.department_id=$2)) OR EXISTS(SELECT 1 FROM asset_shares s JOIN project_members pm ON pm.project_id=s.project_id WHERE s.asset_id=${alias}.id AND pm.user_id=$1) OR EXISTS(SELECT 1 FROM asset_shares s WHERE s.asset_id=${alias}.id AND s.user_id=$1)${actor.role === "department_admin" ? ` OR ${alias}.department_id=$2` : ""}${leaderScope})`,
     values,
   };
 }
@@ -107,6 +109,7 @@ async function listAssets(db: Database, actor: SessionUser, query: Record<string
   const orderColumn = trash ? 'a.deleted_at' : 'a.created_at';
   const direction = input.sort === 'oldest' ? 'ASC' : 'DESC';
   const parameter = (value: unknown) => { values.push(value); return `$${values.length}`; };
+  if(admin||trash)where.push(personalAssetAccess("a",parameter(actor.id)));
   if (input.cursor) where.push(`(${orderColumn},a.id)${input.sort === 'oldest' ? '>' : '<'}(${parameter(input.cursor.time)}::timestamptz,${parameter(input.cursor.id)}::uuid)`);
   if (input.kind) where.push(`a.kind=${parameter(input.kind)}`);
   if (input.projectId) where.push(`a.project_id=${parameter(input.projectId)}::uuid`);
@@ -260,6 +263,10 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage, playbac
       const actor = (request as unknown as AuthenticatedRequest).auth;
       if (request.get("X-Canvas-Owner-Id") !== undefined) assertCanvasOwner(request.get("X-Canvas-Owner-Id"), actor.id);
       assertLocalProcessingUploadInput(input);
+      if(isTryoutLibrarySource(input.metadata.source)){
+        assertCanvasOwner(request.get("X-Canvas-Owner-Id"),actor.id);
+        if(input.kind!=="image"||!input.mimeType.startsWith("image/")||input.projectId||input.localProcessingOperationId){response.status(400).json({message:"个人样图必须是独立的图片素材"});return;}
+      }
       if (!storage.configured) {
         response.status(503).json({ error: "STORAGE_NOT_CONFIGURED", message: "公司对象存储尚未配置" });
         return;
@@ -309,9 +316,9 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage, playbac
         }
       }
       const contentHash = requestedContentHash(input.metadata);
-      if (contentHash && input.kind === "image" && !input.projectId) {
+      if (contentHash && input.kind === "image" && !input.projectId && !isTryoutLibrarySource(input.metadata.source)) {
         const existing = await db.query<UploadAsset>(
-          `SELECT ${uploadAssetFields} FROM assets WHERE owner_user_id=$1 AND content_sha256=$2 AND byte_size=$3 AND kind='image' AND status='ready' AND deleted_at IS NULL ORDER BY created_at,id LIMIT 1`,
+          `SELECT ${uploadAssetFields} FROM assets WHERE ${ordinaryAsset("assets")} AND owner_user_id=$1 AND content_sha256=$2 AND byte_size=$3 AND kind='image' AND status='ready' AND deleted_at IS NULL ORDER BY created_at,id LIMIT 1`,
           [actor.id, contentHash, input.byteSize],
         );
         if (existing.rows[0]) {
@@ -649,10 +656,11 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage, playbac
   router.patch("/:id/metadata", async (request, response, next) => {
     try {
       const input = assetMetadataSchema.parse(request.body);
+      if(isTryoutLibrarySource(input.source)){response.status(400).json({message:"请在个人试款库修改样图"});return;}
       const actor = (request as unknown as AuthenticatedRequest).auth;
       const result = await db.query<{ id: string; department_id: string | null }>(
         `UPDATE assets SET metadata=COALESCE(metadata,'{}'::jsonb) || $2::jsonb,updated_at=now()
-         WHERE id=$1 AND deleted_at IS NULL AND (owner_user_id=$3 OR $4='super_admin' OR ($4='department_admin' AND department_id=$5 AND $5::uuid IS NOT NULL))
+         WHERE id=$1 AND deleted_at IS NULL AND ${ordinaryAsset("assets")} AND (owner_user_id=$3 OR $4='super_admin' OR ($4='department_admin' AND department_id=$5 AND $5::uuid IS NOT NULL))
          RETURNING id,department_id`,
         [request.params.id, JSON.stringify(input), actor.id, actor.role, actor.departmentId],
       );
@@ -666,7 +674,7 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage, playbac
     try {
       const input = visibilitySchema.parse(request.body);
       const actor = (request as unknown as AuthenticatedRequest).auth;
-      const result = await db.query<{ owner_user_id: string; department_id: string | null }>("SELECT owner_user_id,department_id FROM assets WHERE id=$1 AND deleted_at IS NULL", [request.params.id]);
+      const result = await db.query<{ owner_user_id: string; department_id: string | null }>(`SELECT owner_user_id,department_id FROM assets WHERE id=$1 AND deleted_at IS NULL AND ${ordinaryAsset("assets")}`, [request.params.id]);
       const asset = result.rows[0];
       const adminCanManage = actor.role === "super_admin" || (actor.role === "department_admin" && actor.departmentId === asset?.department_id);
       if (!asset || (input.visibility === "company" ? !adminCanManage : actor.id !== asset.owner_user_id && !adminCanManage)) {
@@ -699,7 +707,7 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage, playbac
     try {
       const input = shareSchema.parse(request.body);
       const actor = (request as unknown as AuthenticatedRequest).auth;
-      const owned = await db.query<{ department_id: string | null }>("SELECT department_id FROM assets WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL", [request.params.id, actor.id]);
+      const owned = await db.query<{ department_id: string | null }>(`SELECT department_id FROM assets WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL AND ${ordinaryAsset("assets")}`, [request.params.id, actor.id]);
       if (!owned.rows[0]) { response.status(403).json({ error: "FORBIDDEN", message: "只有素材所有者可以主动共享" }); return; }
       if (input.scope === "department" && input.targetId !== actor.departmentId) { response.status(403).json({ error: "FORBIDDEN", message: "只能共享到本人所在部门" }); return; }
       const columns = { department: ["department_id", input.targetId], project: ["project_id", input.targetId], user: ["user_id", input.targetId] } as const;
@@ -714,7 +722,7 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage, playbac
     try {
       const input = shareSchema.parse(request.body);
       const actor = (request as unknown as AuthenticatedRequest).auth;
-      const owned = await db.query<{ department_id: string | null }>("SELECT department_id FROM assets WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL", [request.params.id, actor.id]);
+      const owned = await db.query<{ department_id: string | null }>(`SELECT department_id FROM assets WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL AND ${ordinaryAsset("assets")}`, [request.params.id, actor.id]);
       if (!owned.rows[0]) { response.status(403).json({ error: "FORBIDDEN", message: "只有素材所有者可以取消共享" }); return; }
       const columns = { department: "department_id", project: "project_id", user: "user_id" } as const;
       await db.query(`DELETE FROM asset_shares WHERE asset_id=$1 AND scope=$2 AND ${columns[input.scope]}=$3`, [request.params.id, input.scope, input.targetId]);

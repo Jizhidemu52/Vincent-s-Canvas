@@ -1,3 +1,6 @@
+import type {DropColor} from "./tryout-swatch";
+import { TryoutPalette } from "./tryout-palette";
+import {TryoutMaterials} from "./tryout-materials";
 import { useState } from "react";
 import { ChevronUp, LayoutPanelLeft, LoaderCircle } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -9,11 +12,13 @@ import type { CanvasNodeData } from "@/types/canvas";
 import type { QuickImageAction } from "@/lib/quick-image-tools";
 import type { TryoutBoardOptions } from "../../../../../shared/tryout";
 
-export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onClose}: {
+export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onClose,writable,beforeEdit,onColor}: {
     node?:CanvasNodeData;count:number;selectedCount:number;
     onRun:(node:CanvasNodeData,action:QuickImageAction)=>Promise<void>;
     onBoard:(options?:Partial<TryoutBoardOptions>)=>Promise<void>;
     onClose:()=>void;
+    onColor:DropColor;
+    writable:{current:boolean};beforeEdit:()=>void;
 }) {
     const theme=canvasThemes[useThemeStore(s=>s.theme)];
     const [tab,setTab]=useCanvasGraphField("toolboxTab");
@@ -40,6 +45,8 @@ export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onCl
             <button type="button" aria-label={t("收起试款台")} onClick={onClose} className="ml-auto grid size-8 place-items-center"><ChevronUp size={15}/></button>
         </div>
         {body?<div className="max-h-[min(55vh,460px)] overflow-auto border-t p-3" style={{borderColor:theme.toolbar.border}}>
+            <TryoutPalette onColor={onColor} writable={writable} beforeEdit={beforeEdit}/>
+            <TryoutMaterials onColor={onColor} writable={writable} beforeEdit={beforeEdit}/>
             {!count?<p className="mb-2" style={{color:theme.node.muted}}>{t(selectedCount?"这个工具只对图片可用":"选中图片后可用")}</p>:null}
             {board?.version===2 ? <fieldset className="grid gap-2" disabled={busy||node?.metadata?.locked}>
                 <legend className="mb-2 font-semibold">{t("提案板排版")}</legend>

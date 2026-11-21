@@ -17,6 +17,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, CanvasNodeGroup, ViewportTransform } from "@/types/canvas";
 import type { CanvasProjectSummary } from "@/lib/canvas/canvas-project-summary";
+import {inheritTryoutKit,readLastTryoutKit,rememberTryoutKit} from "./last-tryout-kit";
 import { isWorkspaceRole } from "../../../../shared/workspace-access";
 
 export type CanvasProject = {
@@ -38,7 +39,7 @@ export type CanvasProject = {
     history?: { past: CanvasHistorySnapshot[]; future: CanvasHistorySnapshot[] };
     persistenceConflict?: CanvasPersistenceConflict;
 };
-export type CanvasHistorySnapshot = Pick<CanvasProject, "nodes" | "groups" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "selectedNodeIds">;
+export type CanvasHistorySnapshot = Pick<CanvasProject, "tryoutKit" | "nodes" | "groups" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "selectedNodeIds">;
 
 type CanvasStore = {
     hydrated: boolean;
@@ -257,7 +258,7 @@ if (typeof window !== "undefined") {
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
         if (!isCanvasOwnerValid()) return null;
-        const library = await readCanvasLibrary(name);
+        const [library] = await Promise.all([readCanvasLibrary(name),readLastTryoutKit()]);
         const local = library.projects;
         localUnloadedProjects = library.summaries;
         if (isCanvasOwnerValid() && library.summaries.length) useCanvasStore.setState({ unloadedProjects: library.summaries });
@@ -315,6 +316,7 @@ export const useCanvasStore = create<CanvasStore>()(
                 const now = new Date().toISOString();
                 const id = nanoid();
                 const project: CanvasProject = {
+                    ...inheritTryoutKit(),
                     id,
                     title,
                     createdAt: now,
@@ -382,6 +384,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     if (index < 0) return state;
                     const updated = applyCanvasProjectPatch(state.projects[index], patch);
                     if (updated === state.projects[index]) return state;
+                    if(updated.tryoutKit!==state.projects[index].tryoutKit)rememberTryoutKit(updated.tryoutKit);
                     const projects = state.projects.slice();
                     projects[index] = updated;
                     return { projects };

@@ -80,6 +80,7 @@ export function useCanvasImageActions(options: CanvasImageActionsOptions) {
         generateAngleNode: (...args: Parameters<ImageActions["generateAngleNode"]>) => invoke("generateAngleNode", ...args),
         quickImageNode: (...args: Parameters<ImageActions["quickImageNode"]>) => invoke("quickImageNode", ...args),
         runLocalImageOperation,
+        tryoutColorNode: (...args: Parameters<ImageActions["tryoutColorNode"]>) => invoke("tryoutColorNode", ...args),
         makeBoard: (...args: Parameters<ImageActions["makeBoard"]>) => invoke("makeBoard", ...args),
         toggleTryoutPick: (...args: Parameters<ImageActions["toggleTryoutPick"]>) => invoke("toggleTryoutPick", ...args),
     }), [invoke, runLocalImageOperation]);

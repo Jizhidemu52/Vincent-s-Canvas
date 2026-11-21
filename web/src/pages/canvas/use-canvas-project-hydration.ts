@@ -47,6 +47,7 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
     const navigate = useNavigate();
     const hydrated = useCanvasStore((state) => state.hydrated);
     const openProject = useCanvasStore((state) => state.openProject);
+    const setTryoutKit = useCanvasGraphSetter("tryoutKit");
     const setNodes = useCanvasGraphSetter("nodes");
     const setConnections = useCanvasGraphSetter("connections");
     const setSelectedNodeIds = useCanvasGraphSetter("selectedNodeIds");
@@ -89,6 +90,7 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
             if (!await waitForWriteAccess() || !lifecycle.isCurrent(restoreToken)) return;
             const scenario = createCanvasPerformanceScenario(performanceFixtureSize, { includeImageContent: performanceScenarioIncludesImages });
             historyPausedRef.current = true;
+            setTryoutKit(undefined);
             setNodes(scenario.nodes);
             setConnections(scenario.connections);
             setGroups([]);
@@ -134,6 +136,7 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
         const restoredGroups = project.groups || [];
         const commitRestoredProject = async (restoredNodes: CanvasNodeData[], restoredSessions: CanvasAssistantSession[], restoredHistory = boundedCanvasHistory(project.history)) => {
             if (!await waitForWriteAccess() || !lifecycle.isCurrent(restoreToken)) return;
+            setTryoutKit(project.tryoutKit);
             setNodes(restoredNodes);
             // Creation visibility is a small remembered layout preference, not a project default.
             setConnections(project.connections);
@@ -150,6 +153,7 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
                 historyCommitTimerRef.current = null;
             }
             lastHistoryRef.current = {
+                tryoutKit: project.tryoutKit,
                 nodes: restoredNodes,
                 connections: project.connections,
                 groups: restoredGroups,

@@ -1,3 +1,4 @@
+import { colorDrop } from "./canvas-tryout-color";
 import { displayNotice } from "@/hooks/use-display-text";
 import { uiText } from "@/lib/i18n";
 import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
@@ -538,5 +539,5 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             });
         });
     };
-    return { makeBoard, toggleTryoutPick, createImageReversePromptNodes, saveManualImageEdit, cropImageNode, splitImageNode, maskEditImageNode, upscaleImageNode, generateAngleNode, quickImageNode };
+    return { tryoutColorNode:colorDrop(context), makeBoard, toggleTryoutPick, createImageReversePromptNodes, saveManualImageEdit, cropImageNode, splitImageNode, maskEditImageNode, upscaleImageNode, generateAngleNode, quickImageNode };
 }

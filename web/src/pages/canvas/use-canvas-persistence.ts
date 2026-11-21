@@ -8,7 +8,7 @@ import { canvasHistoryForSave, type CanvasHistoryEntry, type useCanvasHistorySta
 
 export type CanvasProjectSaveSnapshot = {
     projectId: string;
-    patch: Pick<CanvasProject, "nodes" | "connections" | "groups" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "history">;
+    patch: Pick<CanvasProject, "tryoutKit" | "nodes" | "connections" | "groups" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "history">;
 };
 
 type UpdateProject = (id: string, patch: CanvasProjectPatch) => void;
@@ -34,7 +34,7 @@ export function useCanvasPersistence(options: {
     const { projectId, projectLoaded, usePerformanceScenario, projectSaveQueueRef, updateProject, batchEditRunning, runningNodeId, viewport, selectedNodeIds } = options;
     const canWrite = options.writable?.current !== false;
     const { historyRef, lastHistoryRef, historyPausedRef, applyingHistoryRef, historyState } = options.history;
-    const { nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo } = options.current;
+    const { tryoutKit, nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo } = options.current;
     const savedProjectIdRef = useRef(projectId);
     const viewportSaveQueueRef = useRef<CanvasProjectSaveQueue<{ projectId: string; viewport: ViewportTransform; selectedNodeIds?: string[] }> | null>(null);
     const viewportSaveHandlerRef = useRef(updateProject);
@@ -55,13 +55,13 @@ export function useCanvasPersistence(options: {
             {
                 projectId,
                 patch: {
-                    nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo,
-                    history: canvasHistoryForSave(historyRef.current, lastHistoryRef.current, { nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo }, applyingHistoryRef.current),
+                    tryoutKit, nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo,
+                    history: canvasHistoryForSave(historyRef.current, lastHistoryRef.current, { tryoutKit, nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo }, applyingHistoryRef.current),
                 },
             },
             batchEditRunning || runningNodeId ? 900 : 180,
         );
-    }, [activeChatId, backgroundMode, batchEditRunning, chatSessions, connections, groups, historyState, nodes, projectId, projectLoaded, runningNodeId, showImageInfo, usePerformanceScenario]);
+    }, [tryoutKit, activeChatId, backgroundMode, batchEditRunning, chatSessions, connections, groups, historyState, nodes, projectId, projectLoaded, runningNodeId, showImageInfo, usePerformanceScenario]);
 
     useEffect(() => {
         if (!canWrite) return;

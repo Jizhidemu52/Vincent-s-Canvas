@@ -10,6 +10,7 @@ export type CanvasGraphFields = {
     hoveredNodeId: string | null;
     toolbarNodeId: string | null;
     streamedTextById: ReadonlyMap<string, string>;
+    tryoutKit?: import("../../../../shared/tryout-kit").TryoutKit;
     toolboxTab: "toolbox" | "discussion";
 };
 type CanvasGraphState = CanvasGraphFields & {

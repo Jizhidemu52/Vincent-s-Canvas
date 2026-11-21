@@ -6,7 +6,7 @@ import type { CSSProperties, ChangeEvent as ReactChangeEvent, MouseEvent as Reac
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { hasPendingImageTask, INTERRUPTED_IMAGE_TASK_ERROR } from "./canvas-project-utils";
-import { applyNodeConfigPatch, createCanvasNode, getInputSummary, imageMetadata, type CanvasGenerationResult } from "./canvas-project-utils";
+import { applyNodeConfigPatch, createCanvasNode, getInputSummary, type CanvasGenerationResult } from "./canvas-project-utils";
 import { useCanvasBatchEdit } from "./use-canvas-batch-edit";
 import { useCanvasConnections } from "./use-canvas-connections";
 import { useCanvasGeneration } from "./use-canvas-generation";
@@ -74,7 +74,7 @@ import { loadCanvasNodePromptPanel, loadCanvasQuickGeneratePanel } from "@/lib/c
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
 import { canvasNodeHasImagePreview } from "@/lib/canvas/canvas-node-rendering";
 import { canvasNodeResizeStartPosition } from "@/lib/canvas/canvas-node-resize";
-import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
+
 import { findCanvasOverviewNodeHit } from "@/lib/canvas/canvas-overview-hit-test";
 import { clampCanvasPanelWidth, clampCanvasPromptHeight } from "@/lib/canvas/canvas-panel-width";
 import { createCanvasPerformanceTracker, type CanvasInteractionMetrics, type CanvasVisibilityCounts } from "@/lib/canvas/canvas-performance-metrics";
@@ -106,9 +106,9 @@ import { canvasLibrarySummaries } from "@/lib/canvas/canvas-project-summary";
 import { nextProjectTitle } from "@/lib/project-title";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { moveImageReference } from "@/lib/image-reference-policy";
-import { readImageMeta } from "@/lib/image-utils";
-import { resolveMediaUrl } from "@/services/file-storage";
-import { resolveImageUrl, uploadImage } from "@/services/image-storage";
+
+
+
 import { CanvasGraphProvider, useCanvasGraphField, useCanvasGraphSetter } from "@/stores/canvas/canvas-graph-store";
 import { useCanvasAgentStore } from "@/stores/canvas/use-canvas-agent-store";
 import { useCanvasPanelStore } from "@/stores/canvas/use-canvas-panel-store";
@@ -191,8 +191,8 @@ const CanvasNodeHoverToolbar = lazy(loadCanvasNodeHoverToolbar);
 const CanvasDesignToolbox = lazy(() => import("@/components/canvas/toolbox/canvas-design-toolbox").then(module => ({ default: module.CanvasDesignToolbox })));
 const CanvasImageQuickActions = lazy(() => import("@/components/canvas/canvas-image-quick-actions").then(module => ({ default: module.CanvasImageQuickActions })));
 
-const VIDEO_NODE_MAX_WIDTH = 420;
-const VIDEO_NODE_MAX_HEIGHT = 420;
+
+
 const ConnectionCreateMenu = lazy(() => import("@/components/canvas/canvas-connection-create-menu").then(module => ({ default: module.ConnectionCreateMenu })));
 const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
@@ -415,6 +415,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         try { localStorage.setItem("canvas-agent-layout", next); } catch { /* Private storage may be unavailable. */ }
         return next;
     }), []);
+    const [tryoutKit,setTryoutKit]=useCanvasGraphField("tryoutKit");
     const [showImageInfo, setShowImageInfo] = useState(false);
 
     const isCanvasDesktopLayout = useCanvasDesktopLayout();
@@ -554,10 +555,11 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
             groups: groupsRef.current,
             selectedNodeIds: [...selectedNodeIdsRef.current],
             ...historyChatRef.current,
+            tryoutKit,
             backgroundMode,
             showImageInfo,
         }),
-        [backgroundMode, showImageInfo],
+        [backgroundMode, showImageInfo, tryoutKit],
     );
 
     const applyHistory = useCallback((entry: CanvasHistoryEntry) => {
@@ -579,6 +581,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         setNodes(restoredNodes);
         setConnections(entry.connections);
         setGroups(restoredEntry.groups);
+        setTryoutKit(entry.tryoutKit);
         // Historical chat fields are legacy data, never a canvas undo command.
         setSelectedNodeIds(new Set(normalizeCanvasSelectedNodeIds(entry.selectedNodeIds, restoredNodes, restoredGroups)));
         setSelectedConnectionId(null);
@@ -591,7 +594,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         }).catch(() => { void message.info(displayNotice(uiText("已{value1}画布操作", { value1: kind === "undo" ? uiText("撤销") : uiText("重做") }))); });
     }, [message]);
     const { flushPendingHistory, undoCanvas: undoCanvasNow, redoCanvas } = useCanvasHistory(history, {
-        current: { nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo },
+        current: { tryoutKit, nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo },
         projectLoaded, createHistoryEntry, applyHistory,
         onHistoryAction: notifyHistoryAction,
         beforeHistoryAction: flushEditorDrafts,
@@ -718,7 +721,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const savedProjectIdRef = useCanvasPersistence({
         projectId, projectLoaded, usePerformanceScenario, projectSaveQueueRef, history, updateProject,
         writable,
-        current: { nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo },
+        current: { tryoutKit, nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo },
         batchEditRunning: batchEdit.batchEditBatches.some(batch => batch.running), runningNodeId, viewport, selectedNodeIds,
     });
 
@@ -2000,7 +2003,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
 
     const {
         createImageReversePromptNodes, saveManualImageEdit, cropImageNode, splitImageNode,
-        maskEditImageNode, upscaleImageNode, generateAngleNode, quickImageNode, runLocalImageOperation, toggleTryoutPick, makeBoard,
+        maskEditImageNode, upscaleImageNode, generateAngleNode, quickImageNode, runLocalImageOperation, toggleTryoutPick, makeBoard, tryoutColorNode,
     } = useCanvasImageActions({
         projectId, nodesRef, designProjectIdRef, savedProjectIdRef, projectSaveQueueRef, runtime: generationRuntime,
         dialogs: canvasDialogs, setDialogNodeId, setContextMenu, handleMissingModelConfig, isAiConfigReady, flushPendingHistory,
@@ -2649,30 +2652,19 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         : new Set<string>(), [contextMenu, selectedNodeIds]);
     const contextMenuImageCount = useMemo(() => canvasImageExportSelection(nodes, Array.from(contextMenuNodeIds)).length, [nodes, contextMenuNodeIds]);
 
-    const insertAssistantImage = useCallback(
-        async (image: CanvasAssistantImage) => {
-            const storedImage = image.storageKey ? { url: image.dataUrl, storageKey: image.storageKey, width: 1, height: 1, bytes: 0, mimeType: image.mimeType || "image/png" } : await uploadImage(image.dataUrl);
-            const meta = storedImage.width === 1 && storedImage.height === 1 ? await readImageMeta(storedImage.url) : storedImage;
-            const config = fitNodeSize(meta.width, meta.height);
-            const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-            const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-            const node: CanvasNodeData = {
-                id,
-                type: CanvasNodeType.Image,
-                title: image.prompt.slice(0, 32) || "Generated Image",
-                position: { x: center.x - config.width / 2, y: center.y - config.height / 2 },
-                width: config.width,
-                height: config.height,
-                metadata: { ...imageMetadata({ ...storedImage, width: meta.width, height: meta.height }), prompt: image.prompt, imageName: image.imageName, imageVersion: image.imageVersion || 1 },
-            };
-
-            setNodes((prev) => [...prev, node]);
-            setSelectedNodeIds(new Set([id]));
-            setSelectedConnectionId(null);
-            setDialogNodeId(id);
-        },
-        [screenToCanvas, size.height, size.width],
-    );
+    const insertCenter = useCallback(() => {
+        const rect=containerRef.current?.getBoundingClientRect();
+        return screenToCanvas((rect?.left||0)+size.width/2,(rect?.top||0)+size.height/2);
+    },[screenToCanvas,size.height,size.width]);
+    const insertMedia = useCallback(async (load:(center:()=>Position)=>Promise<CanvasNodeData>)=>{
+        const owner=useUserStore.getState().user?.id;
+        const node=await load(insertCenter);
+        if(!writable.current||designProjectIdRef.current!==projectId||useUserStore.getState().user?.id!==owner)return;
+        setNodes(prev=>[...prev,node]);
+        setSelectedNodeIds(new Set([node.id]));
+        if(node.type===CanvasNodeType.Image){setSelectedConnectionId(null);setDialogNodeId(node.id);}
+    },[insertCenter,projectId,writable]);
+    const insertAssistantImage = useCallback((image:CanvasAssistantImage)=>insertMedia(async center=>(await loadCanvasNodeUploadRuntime()).assistantImageNode(image,center)),[insertMedia]);
 
     const insertAssistantText = useCallback(
         (text: string) => {
@@ -2694,35 +2686,15 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
             try {
             if (payload.kind === "text") {
                 insertAssistantText(payload.content);
-            } else if (payload.kind === "video") {
-                const url = payload.storageKey ? await resolveMediaUrl(payload.storageKey, payload.url) : payload.url;
-                const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
-                const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-                const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-                const nextSize = fitNodeSize(payload.width || spec.width, payload.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                setNodes((prev) => [
-                    ...prev,
-                    {
-                        id,
-                        type: CanvasNodeType.Video,
-                        title: payload.title,
-                        position: { x: center.x - nextSize.width / 2, y: center.y - nextSize.height / 2 },
-                        width: nextSize.width,
-                        height: nextSize.height,
-                        metadata: { content: url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height },
-                    },
-                ]);
-                setSelectedNodeIds(new Set([id]));
             } else {
-                const dataUrl = payload.storageKey ? await resolveImageUrl(payload.storageKey, payload.dataUrl) : payload.dataUrl;
-                await insertAssistantImage({ id: `asset-${Date.now()}`, prompt: payload.title, dataUrl, storageKey: payload.storageKey, mimeType: payload.mimeType, imageName: payload.imageName, imageVersion: payload.imageVersion });
+                await insertMedia(async center=>(await loadCanvasNodeUploadRuntime()).pickedMediaNode(payload,center));
             }
             setAssetPickerOpen(false);
             } catch (error) {
                 message.error(displayNotice(error instanceof Error ? error.message : uiText("素材读取失败，请重试")));
             }
         },
-        [insertAssistantImage, insertAssistantText, message, screenToCanvas, size.height, size.width],
+        [insertMedia, insertAssistantText, message],
     );
 
     const openAgent = useCallback((mode: CanvasAgentMode = agentMode) => {
@@ -3241,7 +3213,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                 <Suspense fallback={null}><CanvasConflictNotice projectId={projectId} /></Suspense>
                 {commandsOpen ? <Suspense fallback={null}><CanvasCommandPalette nodes={nodes} bindings={commandBindings} onLocate={locateNodes} onAsset={handleAssetInsert} onClose={() => setCommandsOpen(false)} /></Suspense> : null}
                 {performanceModeEnabled ? <Suspense fallback={null}><CanvasPerformancePanel metrics={performanceMetrics} /></Suspense> : null}
-                {!isNodeDragging && !nodeImageSettingsOpen ? <Suspense fallback={null}>{projectLoaded && tryoutPanel.open ? <CanvasDesignToolbox node={singleSelectedNode?.type === CanvasNodeType.Image ? singleSelectedNode : undefined} count={selectedExportImageCount} selectedCount={selectedNodeIds.size} onRun={quickImageNode} onBoard={makeSelectionBoard} onClose={tryoutPanel.toggle}/> : singleSelectedNode?.type===CanvasNodeType.Image ? <CanvasImageQuickActions key={singleSelectedNode.id} node={singleSelectedNode} onRun={quickImageNode}/> : null}</Suspense>:null}
+                {!isNodeDragging && !nodeImageSettingsOpen ? <Suspense fallback={null}>{projectLoaded && tryoutPanel.open ? <CanvasDesignToolbox node={singleSelectedNode?.type === CanvasNodeType.Image ? singleSelectedNode : undefined} count={selectedExportImageCount} selectedCount={selectedNodeIds.size} onRun={quickImageNode} onColor={tryoutColorNode} onBoard={makeSelectionBoard} onClose={tryoutPanel.toggle} writable={writable} beforeEdit={flushPendingHistory}/> : singleSelectedNode?.type===CanvasNodeType.Image ? <CanvasImageQuickActions key={singleSelectedNode.id} node={singleSelectedNode} onRun={quickImageNode}/> : null}</Suspense>:null}
 
                 {!isNodeDragging && !nodeImageSettingsOpen && !(quickGenerateOpen && !isCanvasDesktopLayout && !assistantOpen) ? (
                     <CanvasHoverToolbarHost selectedNode={singleSelectedNode} multipleSelected={hasMultipleSelectedNodes}>{toolbarNode => renderNodeTools(toolbarNode)}</CanvasHoverToolbarHost>

@@ -1,0 +1,41 @@
+import {expect,test} from "bun:test";
+import express,{type ErrorRequestHandler} from "express";
+import {randomUUID} from "node:crypto";
+import {createIsolatedPostgres} from "../helpers/isolated-postgres";
+import {createAdminMaterialPresetsRouter,createMaterialLibraryRouter} from "../../src/routes/material-presets";
+import {accessClause} from "../../src/routes/assets";
+
+(process.env.PGLITE_RUNTIME_PATH?test:test.skip)("material presets are curated, audited, hideable and never publish a personal thumbnail",async()=>{
+    const sql=await createIsolatedPostgres(),admin=randomUUID(),employee=randomUUID(),asset=randomUUID(),app=express();
+    app.use(express.json(),(req,_res,next)=>{const elevated=req.get("x-fixture-role")==="super_admin";Object.assign(req,{auth:{id:elevated?admin:employee,role:elevated?"super_admin":"designer",departmentId:null}});next();});
+    app.use("/api/materials",createMaterialLibraryRouter(sql.db));app.use("/api/admin/material-presets",createAdminMaterialPresetsRouter(sql.db));
+    app.use(((err,_req,res,_next)=>res.status(err.status??400).json({message:err.message})) as ErrorRequestHandler);
+    const server=app.listen(0,"127.0.0.1");await new Promise<void>(resolve=>server.once("listening",resolve));
+    const base="http://127.0.0.1:"+(server.address() as {port:number}).port;
+    const request=async(path:string,method="GET",body?:unknown,elevated=false)=>{const res=await fetch(base+path,{method,headers:{"content-type":"application/json","x-fixture-role":elevated?"super_admin":"designer","x-canvas-owner-id":elevated?admin:employee},body:body?JSON.stringify(body):undefined});return {status:res.status,...res.status===204?{}:await res.json()};};
+    try{
+        for(const id of [admin,employee])await sql.db.query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Fixture')",[id,id]);
+        await sql.db.query("INSERT INTO assets(id,owner_user_id,object_key,filename,mime_type,kind,status,metadata) VALUES($1,$2,$3,'fabric.png','image/png','image','ready',$4)",[asset,employee,asset,JSON.stringify({source:"material-library",name:"我的小样",useColor:true})]);
+        expect((await request("/api/materials")).status).toBe(403);
+        await sql.db.query("UPDATE module_flags SET enabled=true WHERE module_key='canvas-tryout'");
+        const listing=await request("/api/materials");expect(listing.presets).toHaveLength(6);expect(listing.mine).toEqual([{id:asset,name:"我的小样",useColor:true}]);
+        expect((await request("/api/materials","GET",undefined,true)).mine).toHaveLength(0);
+        await sql.db.query("UPDATE assets SET visibility_scope='company' WHERE id=$1",[asset]);
+        const scope=accessClause({id:admin,role:"super_admin"} as Parameters<typeof accessClause>[0]);
+        expect((await sql.db.query("SELECT 1 FROM assets a WHERE "+scope.sql,scope.values)).rows).toHaveLength(0);
+        expect((await request("/api/materials/mine/"+asset,"PATCH",{name:"越权"},true)).status).toBe(404);
+        expect((await request("/api/materials/mine/"+asset,"PATCH",{useColor:false})).status).toBe(200);
+        expect((await request("/api/materials")).mine[0].useColor).toBe(false);
+        expect((await request("/api/materials/mine/"+asset,"DELETE")).status).toBe(204);
+        expect((await request("/api/materials")).mine).toHaveLength(0);
+        expect((await request("/api/materials/mine","POST",{assetId:asset,name:"重新加入",useColor:true})).status).toBe(200);
+        const path="/api/admin/material-presets",body={name:"斜纹",description:"紧密斜向纹理"};
+        expect((await request(path,"POST",body)).status).toBe(403);
+        expect((await request(path,"POST",{...body,thumbAssetId:asset},true)).status).toBe(400);
+        const created=await request(path,"POST",body,true);expect(created.status).toBe(201);
+        expect((await request(path+"/"+created.preset.id,"PATCH",{status:"hidden"},true)).status).toBe(200);
+        expect((await request("/api/materials")).presets).toHaveLength(6);
+        expect((await request(path,"GET",undefined,true)).presets).toHaveLength(7);
+        expect((await sql.db.query("SELECT count(*)::int n FROM audit_logs WHERE target_id=$1",[created.preset.id])).rows[0].n).toBe(2);
+    }finally{await new Promise<void>(resolve=>server.close(()=>resolve()));await sql.close();}
+},30000);

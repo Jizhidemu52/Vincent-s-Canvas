@@ -42,6 +42,7 @@ function nodeUploadRuntime(scope: Record<string, unknown>) {
         "./canvas-project-utils": { audioMetadata, replaceCanvasNodeImage, videoMetadata },
         "./use-canvas-clipboard-drop": { isCanvasAudioFile },
         "./canvas-import-media": { prepareCanvasMediaNode: scope.prepareCanvasMediaNode },
+        "./canvas-import-placement": { placeCanvasImportedNodes },
     };
     const module = { exports: {} };
     new Function("require", "module", "exports", uploadRuntimeCode)((name: string) => dependencies[name], module, module.exports);

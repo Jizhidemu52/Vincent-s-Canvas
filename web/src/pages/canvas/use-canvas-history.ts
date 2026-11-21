@@ -5,7 +5,7 @@ import { mergeCanvasGenerationHistory } from "@/lib/canvas/canvas-generation-his
 export type CanvasHistoryEntry = CanvasHistorySnapshot;
 
 export function canvasHistoryContentChanged(previous: CanvasHistoryEntry, current: CanvasHistoryEntry) {
-    if (previous.nodes !== current.nodes || previous.connections !== current.connections) return true;
+    if (previous.tryoutKit !== current.tryoutKit || previous.nodes !== current.nodes || previous.connections !== current.connections) return true;
     const before = previous.groups || [], after = current.groups || [];
     return before.length !== after.length || before.some((group, index) => {
         const next = after[index];
@@ -54,7 +54,7 @@ export function useCanvasHistory(history: ReturnType<typeof useCanvasHistoryStat
 }) {
     const { historyRef, lastHistoryRef, historyCommitTimerRef, applyingHistoryRef, pendingHistoryEntryRef, historyPausedRef, setHistoryState } = history;
     const { projectLoaded, createHistoryEntry, applyHistory, onHistoryAction, beforeHistoryAction } = options;
-    const { nodes, connections, groups, backgroundMode, showImageInfo } = options.current;
+    const { tryoutKit, nodes, connections, groups, backgroundMode, showImageInfo } = options.current;
     const flushPendingHistory = useCallback(() => {
         if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current || !lastHistoryRef.current) return false;
         if (historyCommitTimerRef.current) {
@@ -77,7 +77,7 @@ export function useCanvasHistory(history: ReturnType<typeof useCanvasHistoryStat
         const availability = { canUndo: pendingHistory.past.length > 0, canRedo: pendingHistory.future.length > 0 };
         setHistoryState(current => current.canUndo === availability.canUndo && current.canRedo === availability.canRedo ? current : availability);
         if (
-            previous?.nodes === next.nodes &&
+            previous?.nodes === next.nodes && previous.tryoutKit === next.tryoutKit &&
             previous.connections === next.connections &&
             previous.groups === next.groups &&
             previous.backgroundMode === next.backgroundMode &&
@@ -94,18 +94,18 @@ export function useCanvasHistory(history: ReturnType<typeof useCanvasHistoryStat
                 historyCommitTimerRef.current = null;
             }
         };
-    }, [backgroundMode, connections, groups, createHistoryEntry, flushPendingHistory, nodes, projectLoaded, showImageInfo]);
+    }, [tryoutKit, backgroundMode, connections, groups, createHistoryEntry, flushPendingHistory, nodes, projectLoaded, showImageInfo]);
 
     useLayoutEffect(() => {
         const restored = pendingHistoryEntryRef.current;
-        if (!restored || nodes !== restored.nodes || connections !== restored.connections || groups !== restored.groups ||
+        if (!restored || tryoutKit !== restored.tryoutKit || nodes !== restored.nodes || connections !== restored.connections || groups !== restored.groups ||
             backgroundMode !== restored.backgroundMode || showImageInfo !== restored.showImageInfo) return;
         // The visible graph is ready now; a timer would leave rapid redo/undo ignored.
         lastHistoryRef.current = restored;
         pendingHistoryEntryRef.current = null;
         applyingHistoryRef.current = false;
         setHistoryState({ canUndo: historyRef.current.past.length > 0, canRedo: historyRef.current.future.length > 0 });
-    }, [backgroundMode, connections, groups, nodes, showImageInfo]);
+    }, [tryoutKit, backgroundMode, connections, groups, nodes, showImageInfo]);
 
     const undoCanvas = useCallback(() => {
         beforeHistoryAction?.();

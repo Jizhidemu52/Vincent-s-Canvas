@@ -1,7 +1,8 @@
+import { tryoutKitSchema } from "../../../../shared/tryout-kit";
 import type { CanvasHistorySnapshot, CanvasProject } from "@/stores/canvas/use-canvas-store";
 
 const historyFormat = "canvas-history-delta-v1";
-const snapshotKeys = ["nodes", "groups", "connections", "chatSessions", "activeChatId", "backgroundMode", "showImageInfo", "selectedNodeIds"] as const;
+const snapshotKeys = ["tryoutKit", "nodes", "groups", "connections", "chatSessions", "activeChatId", "backgroundMode", "showImageInfo", "selectedNodeIds"] as const;
 const arrayKeys = new Set<string>(["nodes", "groups", "connections", "chatSessions", "selectedNodeIds"]);
 const allowedKeys = new Set<string>(snapshotKeys);
 type SnapshotKey = typeof snapshotKeys[number];
@@ -132,12 +133,13 @@ function applySnapshotDelta(before: CanvasHistorySnapshot, value: unknown): Canv
     const remove = (value.remove || []) as unknown[];
     const touched = [...Object.keys(set), ...Object.keys(arrays), ...remove];
     if (touched.some(key => typeof key !== "string" || !allowedKeys.has(key)) || new Set(touched).size !== touched.length) return invalid();
-    if (remove.some(key => key !== "groups" && key !== "selectedNodeIds")) return invalid();
+    if (remove.some(key => key !== "tryoutKit" && key !== "groups" && key !== "selectedNodeIds")) return invalid();
     if (Object.keys(arrays).some(key => !arrayKeys.has(key))) return invalid();
     for (const [key, field] of Object.entries(set)) if (arrayKeys.has(key) && !Array.isArray(field)) return invalid();
     if (Object.hasOwn(set, "activeChatId") && set.activeChatId !== null && typeof set.activeChatId !== "string") return invalid();
     if (Object.hasOwn(set, "backgroundMode") && !["dots", "lines", "blank"].includes(set.backgroundMode as string)) return invalid();
     if (Object.hasOwn(set, "showImageInfo") && typeof set.showImageInfo !== "boolean") return invalid();
+    if (Object.hasOwn(set,"tryoutKit") && !tryoutKitSchema.safeParse(set.tryoutKit).success) return invalid();
     if (!touched.length) return before;
     const result = { ...before, ...set } as Record<string, unknown>;
     for (const key of remove as string[]) delete result[key];
