@@ -1,4 +1,4 @@
-import type {DropColor} from "./tryout-swatch";
+import {TryoutSwatch,type DropColor,type TryoutChip} from "./tryout-swatch";
 import { TryoutPalette } from "./tryout-palette";
 import {TryoutMaterials} from "./tryout-materials";
 import {TryoutModels} from "./tryout-models";
@@ -25,11 +25,13 @@ export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onCl
     const theme=canvasThemes[useThemeStore(s=>s.theme)];
     const [tab,setTab]=useCanvasGraphField("toolboxTab");
     const [busy,setBusy]=useState(false);
+    const [groupNotice,setGroupNotice]=useState("");
     const [pending,setPending]=useState<{id:string;patch:Partial<TryoutBoardOptions>}>();
     const t=useUiText();
     const discussion=tab==="discussion";
     const body=!discussion;
     const batch=useTryoutBatch(onColor,writable),selectedProduct=batch.products[0];
+    const groupButton=(chips:TryoutChip[],label:string)=>chips[0]&&<TryoutSwatch selectedId={selectedProduct} color={chips[0]} groupLabel={label+" · "+Math.min(12,(batch.products.length||1)*chips.length)+" "+t("款")} onDrop={(id,_chip,region)=>batch.group(id,chips,region)} writable={writable} notice={setGroupNotice}/>;
     const saved=node?.metadata?.proposalBoard;
     const board=saved?.version===2 && pending && pending.id===node?.id ? {...saved,...pending.patch} : saved;
     const run=async(options?:Partial<TryoutBoardOptions>)=>{
@@ -50,8 +52,10 @@ export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onCl
         {body?<div className="max-h-[min(55vh,460px)] overflow-auto border-t p-3" style={{borderColor:theme.toolbar.border}}>
             {selectedProduct?<p className="mb-2">{t("点击色块或材质，给所选产品生成")} {Math.min(12,batch.products.length)} {t("款；拖动可指定部位。")}</p>:null}
             <TryoutPalette selectedId={selectedProduct} onColor={batch.apply} writable={writable} beforeEdit={beforeEdit}/>
-            {selectedProduct&&batch.colors.length>0?<button type="button" className="mb-2 min-h-9 w-full rounded border border-current/20" onClick={()=>void batch.run(batch.products.flatMap(nodeId=>batch.colors.map(chip=>({nodeId,chip}))))}>{t("试整组色板")} · {Math.min(12,batch.products.length*batch.colors.length)} {t("款")}</button>:null}
+            {groupButton(batch.kit.colors,t("试整组色板"))}
             <TryoutMaterials selectedId={selectedProduct} onColor={batch.apply} writable={writable} beforeEdit={beforeEdit}/>
+            {groupButton(batch.kit.materials,t("试整组材质"))}
+            {groupNotice&&<p role="status">{groupNotice}</p>}
             <TryoutModels nodeId={selectedProduct} count={batch.products.length} writable={writable} onDrop={batch.apply}/>
             {!count?<p className="mb-2" style={{color:theme.node.muted}}>{t(selectedCount?"这个工具只对图片可用":"选中图片后可用")}</p>:null}
             {board?.version===2 ? <fieldset className="grid gap-2" disabled={busy||node?.metadata?.locked}>
