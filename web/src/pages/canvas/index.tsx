@@ -18,6 +18,7 @@ import { nextProjectTitle } from "@/lib/project-title";
 import { sortCanvasLibraryProjects, type CanvasLibrarySort } from "@/lib/canvas/canvas-library-ux";
 import { cleanupVerifiedCanvasCache } from "@/services/canvas-cache-maintenance";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { useModuleEnabled } from "@/stores/use-module-store";
 
 export default function CanvasPage() {
     const t = useUiText();
@@ -49,8 +50,10 @@ export default function CanvasPage() {
     const mode = searchParams.get("mode");
     const tool = searchParams.get("tool");
     const chatMode = tool === "gpt-chat";
+    const tryoutEnabled = useModuleEnabled("canvas-tryout");
+    const tryoutMode = tryoutEnabled && tool === "tryout";
     const agentMode = mode === "new" || mode === "recent" || mode === "choose";
-    const agentQuery = agentMode || chatMode ? `?${searchParams.toString()}` : "";
+    const agentQuery = tryoutMode ? "?tool=tryout" : agentMode || chatMode ? `?${searchParams.toString()}` : "";
     const enterProject = (id: string) => {
         navigate(`/canvas/${id}${agentQuery}`);
     };
@@ -128,6 +131,7 @@ export default function CanvasPage() {
                     <div>
                         <p className="wb-eyebrow">{chatMode ? t("在线功能") : t("画布库")}</p>
                         <h1 className="wb-title">{chatMode ? t("对话改图") : t("自由画布")}</h1>
+                        {tryoutMode && <p className="wb-description">{t("选择或新建画布，打开试款台。此操作不会生成图片。")}</p>}
                         {!chatMode ? <p className="wb-description">{t("{count} 个画布", { count: projects.length })} · <CanvasSaveStatus /></p> : null}
                         {chatMode ? <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">{t("选择或新建一个画布后，助手会围绕当前项目内容进行对话、拆解提示词和生成建议，后台会把相关任务归入画布项目历史。")}</p> : null}
                     </div>

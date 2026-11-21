@@ -1,4 +1,6 @@
 const english: Record<string, string> = {
+    "在画布里试款": "Try it on the canvas",
+    "选择或新建画布，打开试款台。此操作不会生成图片。": "Choose or create a canvas to open the tryout panel. This will not generate any images.",
     "请先完成原任务记录核对，再提交生成。": "Finish checking the original task records before submitting.",
     "正在核对原任务记录…": "Checking original task records…",
     "原记录已保留；读取成功前不能提交或关闭此任务。": "Original records are preserved. This task cannot be submitted or closed until they are read successfully.",

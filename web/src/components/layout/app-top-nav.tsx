@@ -14,17 +14,19 @@ import { useModuleEnabled } from "@/stores/use-module-store";
 
 export function AppTopNav() {
     useUiLocale();
-    const { pathname } = useLocation();
+    const { pathname, search } = useLocation();
     const navigate = useNavigate();
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
     const hideShell = /^\/canvas\/[^/]+/.test(pathname) || pathname === "/login" || pathname === "/admin/login";
     const createProject = useCanvasStore(state => state.createProject);
     const hydrated = useCanvasStore(state => state.hydrated);
     const canvasEnabled = useModuleEnabled("canvas");
+    const tryoutEnabled = useModuleEnabled("canvas-tryout");
     const createAndEnter = () => {
         const current = useCanvasStore.getState();
         if (!current.hydrated || !canvasEnabled) return;
-        navigate("/canvas/" + createProject(nextProjectTitle(canvasLibrarySummaries(current.projects, current.unloadedProjects))));
+        const openTryout = pathname === "/canvas" && tryoutEnabled && new URLSearchParams(search).get("tool") === "tryout";
+        navigate("/canvas/" + createProject(nextProjectTitle(canvasLibrarySummaries(current.projects, current.unloadedProjects))) + (openTryout ? "?tool=tryout" : ""));
     };
     return <>
         {!hideShell && <>

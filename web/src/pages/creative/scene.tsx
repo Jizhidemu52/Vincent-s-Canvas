@@ -72,6 +72,7 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
     const recolorEnabled = useModuleEnabled("pattern-recolor");
     const traceEnabled = useModuleEnabled("svg-trace");
     const canvasEnabled = useModuleEnabled("canvas");
+    const tryoutEnabled = useModuleEnabled("canvas-tryout");
     const imageEditEnabled = useModuleEnabled("image-edit");
     const navigate = useNavigate();
     const flags = useModuleStore(state => state.flags);
@@ -117,6 +118,7 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
             {standalone ? <span className="font-medium">{uiText(preset.title)}</span> : <div className="cs-scene-picker">
                 <Select aria-label={uiText("切换设计场景")} value={preset.id} variant="borderless" options={available.map(item => ({ value: item.id, label: uiText(item.title || "") }))} onChange={value => { const next = getCreativePreset(value); if (next) navigate(buildCreativePresetHref(next)); }} />
             </div>}
+            {canvasEnabled && tryoutEnabled && (preset.id === "virtual-try-on" || preset.id === "garment-colorway") && <Link to="/canvas?tool=tryout" className="cs-back">{uiText("在画布里试款")}<ArrowRight size={16} /></Link>}
             <Tooltip title={ws.running ? uiText("任务在后台继续，可切换工作区或查看历史。") : ws.loading ? uiText("正在恢复场景草稿…") : undefined}><span className="cs-new"><button className="cs-new" type="button" disabled={ws.running || ws.loading} onClick={() => { ws.reset(); setView("history"); }}><Plus size={15} />{uiText("清空当前草稿")}</button></span></Tooltip>
         </header>
         <div className="cs-layout">

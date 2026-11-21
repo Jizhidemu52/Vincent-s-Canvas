@@ -251,7 +251,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const copyText = useCopyText();
     const params = useParams<{ id: string }>();
     const navigate = useNavigate();
-    const [searchParams] = useSearchParams();
+    const [searchParams, setPageSearch] = useSearchParams();
     const projectId = params.id || "";
     const [commandsOpen, setCommandsOpen] = useState(false);
     const [taskHighlightIds, setTaskHighlightIds] = useState<string[]>([]);
@@ -1091,6 +1091,11 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const editorOwner = useUserStore(state => state.user ? `user:${state.user.id}:${state.user.role}` : state.status);
     const tryoutPanel=useTryoutPanel(tryoutEnabled,editorOwner);
     const setTryoutTab=useCanvasGraphSetter("toolboxTab");
+    useEffect(()=>{
+        if(!projectLoaded||!tryoutEnabled||searchParams.get("tool")!=="tryout")return;
+        setTryoutTab("toolbox");tryoutPanel.change(true);
+        const remaining=new URLSearchParams(searchParams);remaining.delete("tool");setPageSearch(remaining,{replace:true});
+    },[projectLoaded,tryoutEnabled,searchParams,setTryoutTab,tryoutPanel.change,setPageSearch]);
     const showColors=(target?:CanvasNodeData)=>{if(target)commitSelectedNodeIds(new Set([target.id]));setTryoutTab("toolbox");tryoutPanel.change(true);};
     const editorSelectionKey = `${projectId}:${editorOwner}:${Array.from(selectedNodeIds).sort().join(",")}`;
     useEffect(() => {
