@@ -257,7 +257,7 @@ describe("video planner orchestration", () => {
       if (sql.includes("FROM module_flags")) return { rows: [{ enabled: true }] };
       if (sql.includes("FROM tool_api_configurations")) return { rows: [] };
       if (sql.includes("FROM model_configs")) return { rows: [{ id: targetId, modelId: "doubao-seedance-2.5", capabilities: ["video"], enabled: true, providerEnabled: true }] };
-      if (sql.includes("SELECT count(*)::int")) return { rows: [{ count: 0 }] };
+      if (sql.includes("AS paused FROM tasks")) return { rows: [{ count: 0, paused: 0 }] };
       if (sql.startsWith("SELECT")) return { rows: [] };
       writes++; throw new Error("Unexpected task or credit write for invalid timeline");
     } };
@@ -280,7 +280,7 @@ describe("video planner orchestration", () => {
       if (sql.includes("FROM module_flags")) return { rows: [{ enabled: true }] };
       if (sql.includes("FROM tool_api_configurations")) return { rows: [] };
       if (sql.includes("FROM model_configs")) return { rows: [{ id: targetId, modelId: "doubao-seedance-2.5", capabilities: ["video"], enabled: true, providerEnabled: true }] };
-      if (sql.includes("SELECT count(*)::int")) return { rows: [{ count: 0 }] };
+      if (sql.includes("AS paused FROM tasks")) return { rows: [{ count: 0, paused: 0 }] };
       if (sql.startsWith("SELECT")) return { rows: [] };
       throw new Error("Unexpected write before valid preflight");
     } };

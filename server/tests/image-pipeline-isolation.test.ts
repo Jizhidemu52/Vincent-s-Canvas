@@ -34,7 +34,7 @@ async function fixture(modelId = "gemini-nano-banana-2.1", boundModelId: string 
       }] };
       if (sql.includes("FROM layer_studio_prices")) return { rows: [{ inputRmb: 0.01, lowOutputRmb: 0.1, highOutputRmb: 0.2, version: 1 }] };
       if (sql.includes("FROM model_configs")) return { rows: [model] };
-      if (sql.startsWith("SELECT count(*)::int AS count FROM tasks")) return { rows: [{ count: 0 }] };
+      if (sql.includes("AS count,") && sql.includes("AS paused FROM tasks")) return { rows: [{ count: 0, paused: 0 }] };
       if (sql.includes("FROM tasks") || sql.includes("FROM credit_reservations")) return { rows: [] };
       if (sql.includes("FROM pricing_rule_versions")) return { rows: [{ credits: 0, rmb_cost: "0", version: 1 }] };
       if (sql.includes("FROM users")) return { rows: [{ department_id: null }] };

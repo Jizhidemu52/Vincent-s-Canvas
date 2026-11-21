@@ -162,7 +162,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
         "@/services/api/tool-runtime": { ...toolRuntime, resolveToolConfig: async (config: configModule.AiConfig, operation: string, key?: string) => {
             const toolKey = toolRuntime.requireToolKey(operation, key);
             const resolved = toolRuntime.applyToolModel(config, business, toolKey);
-            return { toolKey, config: resolved, model: toolRuntime.resolveConfiguredToolModel(business, toolKey, resolved.model) };
+            return { business, toolKey, config: resolved, model: toolRuntime.resolveConfiguredToolModel(business, toolKey, resolved.model) };
         } },
         "@/services/api/generation-tasks": {
             ...generationTasks,
@@ -281,7 +281,13 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
             composer().props.onPromptChange(prompt); await composer().props.onSubmit();
         },
         approve(messageId: string) { findElements(render()).find((element) => typeof element.props.onApproveTool === "function")!.props.onApproveTool(messageId); },
-        approvalHandler() { return findElements(render()).find((element) => typeof element.props.onApproveTool === "function")!.props.onApproveTool as (messageId: string) => void; },
+        async submitAndAcceptMedia(prompt: string) {
+            const prior = new Set(messages().map(message => message.id));
+            await this.submit(prompt);
+            const pending = messages().find(message => !prior.has(message.id) && message.title === "确认工具调用" && message.detail?.status === "pending");
+            if (pending) await this.approvalHandler()(pending.id);
+        },
+        approvalHandler() { return findElements(render()).find((element) => typeof element.props.onApproveTool === "function")!.props.onApproveTool as (messageId: string) => Promise<void>; },
         async uploadReference(name = "uploaded-reference.png", dataUrl = "data:image/png;base64,dXBsb2FkZWQtcmVmZXJlbmNl") {
             const original = globalThis.FileReader;
             class Reader {
@@ -318,7 +324,7 @@ describe("canvas conversational image selection without target controls", () => 
         const harness = panelHarness({ history: history(), replies: [tool("look_at_images", { image_ids: [oldId] }), tool("edit_image", { base: oldId, prompt: "图2再亮一点", note_update: "白背景花瓶，光线更亮" })] });
         expect(harness.composer().props.imageTarget.props.images).toBeUndefined();
         expect(harness.composer().props.imageTarget.props.onSelect).toBeUndefined();
-        await harness.submit("图2再亮一点");
+        await harness.submitAndAcceptMedia("图2再亮一点");
         const request = harness.requests.find(item => item.type === "edit")!;
         expect(request.args[2].map((image: any) => image.storageKey)).toEqual(["image:old"]);
         expect(harness.imageSizeReads).toEqual([oldId]);
@@ -333,7 +339,7 @@ describe("canvas conversational image selection without target controls", () => 
         const gate = Promise.withResolvers<Array<{ id: string; dataUrl: string }>>();
         const other: CanvasNodeData = { id: "other", type: CanvasNodeType.Image, title: "另一张", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: "blob:other" } };
         const harness = panelHarness({ history: history(), session: { focusImageId: oldId, focusLocked: true }, nodes: [other], confirmTools: true, taskLifecycle: true, generate: () => gate.promise, replies: [tool("edit_image", { base: "original", prompt: "从原图再亮一点" })] });
-        const submitted = harness.submit("从原图再亮一点");
+        const submitted = harness.submitAndAcceptMedia("从原图再亮一点");
         await waitFor(() => harness.messages().some(message => (message.detail?.pendingTask as { taskIds?: string[] })?.taskIds?.includes("accepted-image")) && !harness.composer().props.sending);
         harness.select([other]);
         gate.resolve([{ id: "bright-result", dataUrl: "/api/assets/bright/content" }]);
@@ -352,8 +358,8 @@ describe("canvas conversational image selection without target controls", () => 
         const harness = panelHarness({ history: messages, selected: [selected], session: { focusImageId: latestId, focusLocked: true },
             generate: async () => [{ id: `result-${++generated}`, dataUrl: `/api/assets/result-${generated}/content` }],
             replies: [tool("edit_image", { base: "previous", prompt: "回上一版调亮" }), tool("edit_image", { base: "original", prompt: "从原图重新改颜色" })] });
-        await harness.submit("回上一版调亮");
-        await harness.submit("从原图重新改颜色");
+        await harness.submitAndAcceptMedia("回上一版调亮");
+        await harness.submitAndAcceptMedia("从原图重新改颜色");
         const plans = harness.requests.filter(request => request.type === "agent");
         expect(plans[0].args[5].profileContext.focusImageId).toBe(latestId);
         expect(plans.every(request => !request.args[5].profileContext.lockedImageId)).toBe(true);
@@ -370,7 +376,7 @@ describe("canvas conversational image selection without target controls", () => 
         const node: CanvasNodeData = { id: "generator", type: CanvasNodeType.Config, title: "生成", position: { x: 0, y: 0 }, width: 200, height: 200, metadata: { generationMode: "image" } };
         const harness = panelHarness({ history: history(), session: { imageAgentRegion: { imageId: oldId, mask: { id: "mask", name: "mask", type: "image/png", dataUrl: "data:image/png;base64,MASK" }, selection: { id: "selection", name: "selection", type: "image/png", dataUrl: "data:image/png;base64,SELECTION" } } }, nodes: [node], replies: [tool(name, args)] });
         const before = JSON.stringify(harness.snapshotRef.current.nodes);
-        await harness.submit("再亮一点");
+        await harness.submitAndAcceptMedia("再亮一点");
         expect(harness.requests.map(request => request.type)).toEqual(["agent"]);
         expect(JSON.stringify(harness.snapshotRef.current.nodes)).toBe(before);
         expect(harness.messages().some(message => message.text.includes("不会通过节点生成绕过"))).toBe(true);
@@ -396,7 +402,7 @@ describe("canvas conversational image selection without target controls", () => 
 
     test("new creation does not silently reuse a prior result as edit pixels", async () => {
         const harness = panelHarness({ history: history(), replies: [tool("edit_image", { base: "none", prompt: "生成新包" })] });
-        await harness.submit("重新创作一个包");
+        await harness.submitAndAcceptMedia("重新创作一个包");
         expect(harness.requests.map(request => request.type)).toEqual(["agent", "image"]);
         expect(harness.requests[1].args[3]).toEqual([]);
     });
@@ -424,7 +430,7 @@ describe("canvas historical-image repair reads before its only replanning reques
     test("the five-version branch loads image 3 and submits its exact original once, preserving focus and lineage", async () => {
         const original = history(), before = structuredClone(original);
         const harness = panelHarness({ history: original, session: { focusImageId: id(5) }, replies: [editPlan(), editPlan()] });
-        await harness.submit(prompt);
+        await harness.submitAndAcceptMedia(prompt);
         expect(harness.requests.map(request => request.type)).toEqual(["agent", "agent", "edit"]);
         const [initial, repaired, edit] = harness.requests;
         expect(previewUrls(initial)).toEqual([pixels(5), pixels(1)]);
@@ -456,7 +462,7 @@ describe("canvas historical-image repair reads before its only replanning reques
     test("required historical references are loaded together without replacing the actual edit base", async () => {
         const plan = () => tool("edit_image", { base: "图3", references: ["图4"], prompt });
         const harness = panelHarness({ history: history(), session: { focusImageId: id(5) }, replies: [plan(), plan()] });
-        await harness.submit(prompt);
+        await harness.submitAndAcceptMedia(prompt);
         expect(harness.requests.map(request => request.type)).toEqual(["agent", "agent", "edit"]);
         expect(previewUrls(harness.requests[1])).toEqual([pixels(3), pixels(4), pixels(5), pixels(1)]);
         expect(harness.requests[2].args[2].map((reference: any) => reference.storageKey)).toEqual(["image:v3", "image:v4"]);
@@ -537,7 +543,7 @@ describe("online Agent cancellation", () => {
                 { id: "c", dataUrl: "/api/assets/c/content", sourceTaskId: "task-b" },
             ],
         });
-        await harness.submit("生成图片");
+        await harness.submitAndAcceptMedia("生成图片");
         expect(harness.snapshotRef.current.nodes.map(node => node.id)).toEqual(["agent-task-a-0", "agent-task-b-0", "agent-task-b-1"]);
     });
 
@@ -550,7 +556,7 @@ describe("online Agent cancellation", () => {
             ],
             replies: [tool("canvas_run_generation", { nodeId: "source", mode: "audio", prompt: "Read this" }), { content: "done", toolCalls: [] }],
         });
-        await harness.submit("生成音频");
+        await harness.submitAndAcceptMedia("生成音频");
         expect(harness.requests.filter(request => request.type === "audio")).toHaveLength(1);
         expect(harness.snapshotRef.current.nodes.find(node => node.id === "agent-accepted-audio-0")?.metadata).toMatchObject({ sourceTaskId: "accepted-audio", status: "success" });
         expect(harness.snapshotRef.current.connections).toContainEqual(expect.objectContaining({ fromNodeId: "source", toNodeId: "agent-accepted-audio-0" }));
@@ -559,8 +565,10 @@ describe("online Agent cancellation", () => {
     test("stopping during the pre-submit save clears the unsubmitted identity and permits a later message", async () => {
         const saved = Promise.withResolvers<void>();
         const harness = panelHarness({ taskLifecycle: true, replies: [tool("edit_image", { prompt: "A red vase" }), { content: "ready", toolCalls: [] }] });
+        await harness.submit("生成花瓶");
+        const pending = harness.messages().find(message => message.title === "确认工具调用" && message.detail?.status === "pending")!;
         harness.pauseCommit(saved.promise);
-        const submitted = harness.submit("生成花瓶");
+        const submitted = harness.approvalHandler()(pending.id);
         await waitFor(() => harness.messages().some(message => Boolean(message.detail?.pendingTask)));
         harness.stop();
         saved.resolve();
@@ -630,7 +638,7 @@ describe("online Agent cancellation", () => {
         const gate = Promise.withResolvers<Array<{ id: string; dataUrl: string }>>();
         const harness = panelHarness({ taskLifecycle: true, generate: () => gate.promise,
             replies: [tool("edit_image", { prompt: "A red vase" }), tool("edit_image", { prompt: "A red vase" })] });
-        const submitted = harness.submit("生成花瓶");
+        const submitted = harness.submitAndAcceptMedia("生成花瓶");
         await waitFor(() => harness.messages().some(message => (message.detail?.pendingTask as { taskIds?: string[] })?.taskIds?.includes("accepted-image")));
         const saved = harness.sessionCommits.find(commit => JSON.stringify(commit).includes("accepted-image"));
         expect(saved).toBeDefined();
@@ -645,7 +653,7 @@ describe("online Agent cancellation", () => {
         const paused = harness.messages().find(message => message.detail?.pendingTask)!;
         expect(paused.detail?.status).toBe("paused");
         expect(paused.text).toContain("服务端任务可能继续");
-        await harness.submit("生成花瓶");
+        await harness.submitAndAcceptMedia("生成花瓶");
         expect(harness.requests.filter(request => request.type === "image")).toHaveLength(1);
         expect(harness.messages().some(message => message.text.includes("相同请求的原任务尚未核实"))).toBe(true);
     });
@@ -653,7 +661,7 @@ describe("online Agent cancellation", () => {
     test("stopping an empty new conversation does not cancel an accepted task in another conversation", async () => {
         const gate = Promise.withResolvers<Array<{ id: string; dataUrl: string }>>();
         const harness = panelHarness({ taskLifecycle: true, generate: () => gate.promise, replies: [tool("edit_image", { prompt: "A red vase" })] });
-        const submitted = harness.submit("生成花瓶");
+        const submitted = harness.submitAndAcceptMedia("生成花瓶");
         await waitFor(() => harness.messages().some(message => (message.detail?.pendingTask as { taskIds?: string[] })?.taskIds?.includes("accepted-image")) && !harness.composer().props.sending);
         const request = harness.requests.find(item => item.type === "image")!;
         harness.newChat();
@@ -669,7 +677,7 @@ describe("online Agent cancellation", () => {
     test("a download finishing after stop cannot write nodes, assets or completion messages", async () => {
         const download = Promise.withResolvers<UploadedImage>();
         const harness = panelHarness({ replies: [tool("edit_image", { prompt: "A red vase" })], storeImage: () => download.promise });
-        const submitted = harness.submit("生成花瓶");
+        const submitted = harness.submitAndAcceptMedia("生成花瓶");
         await waitFor(() => harness.imageUploads.length === 1);
         harness.stop();
         download.resolve({ url: "/api/assets/late/content", storageKey: "cached", width: 100, height: 100, bytes: 5, mimeType: "image/png" });
@@ -752,7 +760,7 @@ describe("canvas assistant submission", () => {
     test("new canvas image defaults reach the task as 2K / high while explicit choices remain unchanged", async () => {
         for (const quality of ["", "low"]) {
             const harness = panelHarness({ config: { imageModel: "gpt-image-2.6-flare", quality, imageOptions: quality ? '{"resolution":"1k"}' : "" }, replies: [tool("edit_image", { base: "none", prompt: "红色花瓶" })] });
-            await harness.submit("制作红色花瓶");
+            await harness.submitAndAcceptMedia("制作红色花瓶");
             const image = harness.requests.find(request => request.type === "image");
             expect(image).toBeDefined();
             expect(image!.args[0]).toMatchObject({ quality: quality || "high", count: "1" });
@@ -765,7 +773,7 @@ describe("canvas assistant submission", () => {
         const draft: CanvasAssistantSession["requirementCard"] = { id: "draft", status: "draft", updatedAt: "now", title: "草稿", documentIds: [], subject: "花瓶", colors: "红色", materials: "陶瓷", must: [], avoid: [], unknowns: [], referenceFigureIds: [], sources: [] };
         for (const requirementCard of [undefined, draft]) {
             const harness = panelHarness({ requirementCard, selected: editing ? [selected] : [], replies: [tool("edit_image", { base: editing ? "focus" : "none", prompt: "红色花瓶" })] });
-            await harness.submit("制作红色花瓶");
+            await harness.submitAndAcceptMedia("制作红色花瓶");
             const image = harness.requests.find(request => request.type === (editing ? "edit" : "image"));
             expect(image).toBeDefined();
             const options = image!.args[editing ? 4 : 2];
@@ -1017,7 +1025,7 @@ describe("canvas assistant submission", () => {
     test("waits for image output and finishes a write without a paid planner-summary call", async () => {
         const gate = Promise.withResolvers<Array<{ id: string; dataUrl: string }>>();
         const harness = panelHarness({ replies: [tool("edit_image", { base: "none", prompt: "静态海报：电影镜头与相机" })], generate: () => gate.promise });
-        const submitted = harness.submit("生成静态海报：电影镜头与相机");
+        const submitted = harness.submitAndAcceptMedia("生成静态海报：电影镜头与相机");
         await waitFor(() => harness.requests.some(request => request.type === "image"));
         expect(harness.requests.filter(request => request.type === "agent")).toHaveLength(1);
         expect(harness.messages().some(message => message.attachments?.length)).toBe(false);
@@ -1033,7 +1041,7 @@ describe("canvas assistant submission", () => {
         const selected: CanvasNodeData = { id: "selected", type: CanvasNodeType.Image, title: "原款", position: { x: 0, y: 0 }, width: 200, height: 200, metadata: { content: "data:image/png;base64,SELECTED", storageKey: "image:selected", status: "success" } };
         const harness = panelHarness({ selected: [selected], replies: [tool("edit_image", { prompt: "保留原款，只改背景", references: [] })] });
         await harness.uploadReference();
-        await harness.submit("按两张图改背景");
+        await harness.submitAndAcceptMedia("按两张图改背景");
         const planner = harness.requests.find(request => request.type === "agent")!;
         const previews = planner.args[1].flatMap((message: any) => Array.isArray(message.content) ? message.content.filter((part: any) => part.type === "image_url") : []);
         expect(previews).toHaveLength(2);
@@ -1091,7 +1099,7 @@ describe("canvas assistant submission", () => {
         const invalidPlan = tool("edit_image", { prompt: "红色花瓶", model: "other-provider", count: 7 });
         invalidPlan.toolCalls.unshift({ ...tool("canvas_create_text_node", { title: "必须拦截", text: "invalid plan must not write" }).toolCalls[0], id: "blocked-write" });
         const harness = panelHarness({ replies: [invalidPlan, tool("edit_image", { prompt: "红色花瓶" }), tool("edit_image", { prompt: "must not repeat generation" })] });
-        await harness.submit("生成红色花瓶");
+        await harness.submitAndAcceptMedia("生成红色花瓶");
         expect(harness.requests.map(request => request.type)).toEqual(["agent", "agent", "image"]);
         const [initial, repaired] = harness.requests.slice(0, 2).map(request => request.args[5].profileContext);
         expect(initial.stage).toBe("plan");
@@ -1117,7 +1125,7 @@ describe("canvas assistant submission", () => {
         const three = harness.referenceTray();
         three.onRemove(three.references[2].id);
         const submittedIds = harness.referenceTray().references.map((reference: any) => reference.id);
-        await harness.submit("按花型图修改衣服");
+        await harness.submitAndAcceptMedia("按花型图修改衣服");
         expect(harness.messages().find(message => message.role === "user")!.references?.map(reference => reference.id)).toEqual(submittedIds);
         const previews = harness.requests[0].args[1].flatMap((message: any) => Array.isArray(message.content) ? message.content.filter((part: any) => part.type === "image_url").map((part: any) => part.image_url.url) : []);
         expect(previews).toEqual(["data:image/png;base64,cHJpbnQ=", "data:image/png;base64,c2VsZWN0ZWQ="]);
@@ -1135,7 +1143,7 @@ describe("canvas assistant submission", () => {
             tool("look_at_images", { image_ids: ["offscreen"] }),
             tool("edit_image", { base: "canvas-image:offscreen", prompt: "背景改白" }),
         ] });
-        await harness.submit("找到画布的屏外图并修改");
+        await harness.submitAndAcceptMedia("找到画布的屏外图并修改");
         expect(harness.requests.map(request => request.type)).toEqual(["agent", "agent", "agent", "edit"]);
         const previews = harness.requests[2].args[1].flatMap((message: any) => Array.isArray(message.content) ? message.content.filter((part: any) => part.type === "image_url") : []);
         expect(previews).toHaveLength(1);
@@ -1146,7 +1154,7 @@ describe("canvas assistant submission", () => {
     test("Midjourney keeps a supported reference and the user's model", async () => {
         const harness = panelHarness({ config: { imageModel: "midjourney-v7" }, replies: [tool("edit_image", { prompt: "修改背景" })] });
         await harness.uploadReference();
-        await harness.submit("用 Midjourney 修改这张图");
+        await harness.submitAndAcceptMedia("用 Midjourney 修改这张图");
         const edit = harness.requests.find(request => request.type === "edit")!;
         expect(edit.args[0]).toMatchObject({ model: "midjourney-v7", count: "1" });
         expect(edit.args[2]).toHaveLength(1);
@@ -1157,7 +1165,7 @@ describe("canvas assistant submission", () => {
         const selected: CanvasNodeData = { id: "selected-reference", type: CanvasNodeType.Image, title: "原款", position: { x: 0, y: 0 }, width: 200, height: 200, metadata: { content: "data:image/png;base64,cmVm", status: "success" } };
         const harness = panelHarness({ config: { imageModel: "midjourney-blend", quality: "turbo" }, selected: [selected], replies: [tool("edit_image", { prompt: "合成这两张图" })] });
         await harness.uploadReference();
-        await harness.submit("用 Blend 合成");
+        await harness.submitAndAcceptMedia("用 Blend 合成");
         expect(harness.requests.map(request => request.type)).toEqual(["agent", "image"]);
         const image = harness.requests[1];
         expect(image.args[0]).toMatchObject({ model: "midjourney-blend", count: "1", quality: "turbo" });
@@ -1169,7 +1177,7 @@ describe("canvas assistant submission", () => {
     test("Chinese final prompts stay visible and dispatch without translation or hidden recipe text", async () => {
         const harness = panelHarness({ replies: [tool("edit_image", { prompt: "背景改成纯白，保留针织纹理", keep: ["保留主体比例"], note_update: "白背景针织包" })] });
         await harness.uploadReference();
-        await harness.submit("背景改白色");
+        await harness.submitAndAcceptMedia("背景改白色");
         const edit = harness.requests.find(request => request.type === "edit")!;
         expect(edit.args[1]).toContain("背景改成纯白，保留针织纹理");
         expect(edit.args[1]).toContain("保留主体比例");
@@ -1180,7 +1188,7 @@ describe("canvas assistant submission", () => {
 
     test("a media failure ends the turn without another planner or image submission", async () => {
         const harness = panelHarness({ replies: [tool("edit_image", { prompt: "绿色花瓶" }), tool("edit_image", { prompt: "must not retry" })], generate: async () => { throw new Error("provider failed"); } });
-        await harness.submit("生成花瓶");
+        await harness.submitAndAcceptMedia("生成花瓶");
         expect(harness.requests.map(request => request.type)).toEqual(["agent", "image"]);
         expect(harness.assets).toEqual([]);
         expect(harness.messages().some(message => message.role === "error" && message.text.includes("provider failed"))).toBe(true);
@@ -1264,7 +1272,7 @@ describe("canvas assistant submission", () => {
             { type: "add_node", id: "image-config", nodeType: "config", metadata: { generationMode: "image", prompt: "红色花瓶", count: 1, size: "1:1", quality: "1k" } },
             { type: "run_generation", nodeId: "image-config", mode: "image", prompt: "红色花瓶" },
         ] })] });
-        await harness.submit("创建图片生成节点并执行");
+        await harness.submitAndAcceptMedia("创建图片生成节点并执行");
         expect(harness.requests.map(request => request.type)).toEqual(["agent", "image"]);
         expect(harness.snapshotRef.current.nodes.find(node => node.id === "image-config")?.metadata?.status).toBe("success");
         expect(harness.snapshotRef.current.connections).toContainEqual(expect.objectContaining({ fromNodeId: "image-config", toNodeId: "generated-image" }));
@@ -1273,7 +1281,7 @@ describe("canvas assistant submission", () => {
     test("explicit video tools preserve duration, ratio, quality, audio and reference pixels", async () => {
         const harness = panelHarness({ replies: [tool("generate_video", { prompt: "花瓶缓慢旋转", seconds: "8", size: "16:9", vquality: "720P" })] });
         await harness.uploadReference();
-        await harness.submit("生成视频");
+        await harness.submitAndAcceptMedia("生成视频");
         const video = harness.requests.find(request => request.type === "video")!;
         expect(harness.requests.map(request => request.type)).toEqual(["agent", "video"]);
         expect(video.args[0]).toMatchObject({ model: "MiniMax-H3", videoSeconds: "8", size: "16:9", vquality: "720P", videoGenerateAudio: "true" });
@@ -1285,7 +1293,7 @@ describe("canvas assistant submission", () => {
         const gate = Promise.withResolvers<void>();
         const harness = panelHarness({ confirmTools: true, replies: [tool("generate_video", { prompt: "花瓶旋转" })] });
         harness.pauseReply(gate.promise);
-        const submitted = harness.submit("生成花瓶旋转视频");
+        const submitted = harness.submitAndAcceptMedia("生成花瓶旋转视频");
         await waitFor(() => harness.requests.some(request => request.type === "agent"));
         harness.composer().props.generationControls.props.onChange({ mode: "video", size: "1:1" });
         harness.composer().props.generationControls.props.onChange({ size: "16:9" });
@@ -1299,7 +1307,7 @@ describe("canvas assistant submission", () => {
     test("paused video preserves original identity without retry or local outputs", async () => {
         const paused = new QueuedTaskPausedError({ id: "paused-video", requestId: "video-request", operationType: "video_generation", status: "paused", upstreamTaskId: "upstream-video", resultUrls: [], failureReason: "查询超时" });
         const harness = panelHarness({ replies: [tool("generate_video", { prompt: "花瓶旋转" }), tool("generate_video", { prompt: "must not retry" })], video: async () => { throw paused; } });
-        await harness.submit("生成视频");
+        await harness.submitAndAcceptMedia("生成视频");
         expect(harness.requests.map(request => request.type)).toEqual(["agent", "video"]);
         expect(harness.messages().find(message => message.role === "error")?.detail).toMatchObject({ status: "paused", taskId: "paused-video", canRecover: true, resubmitAllowed: false });
         expect(harness.assets).toEqual([]);
@@ -1310,7 +1318,7 @@ describe("canvas assistant submission", () => {
         const serverAssetId = "7075c394-1184-44cc-9077-068d78e8b36d";
         const url = `/api/assets/${serverAssetId}/content`;
         const harness = panelHarness({ replies: [tool("edit_image", { prompt: "绿色花瓶" })], generate: async () => [{ id: "green-vase", dataUrl: url }], storedImage: { url: "blob:cached-image", storageKey: "image:cached", width: 1024, height: 1024, bytes: 12345, mimeType: "image/png" } });
-        await harness.submit("生成绿色花瓶");
+        await harness.submitAndAcceptMedia("生成绿色花瓶");
         expect(harness.imageUploads).toEqual([url]);
         expect(harness.assets).toHaveLength(1);
         expect(harness.assets[0]).toMatchObject({ kind: "image", data: { dataUrl: "blob:cached-image", storageKey: "image:cached" }, metadata: { serverAssetId, nodeId: "green-vase", projectId: "project", prompt: "绿色花瓶", model: "gpt-image-2" } });
@@ -1321,7 +1329,7 @@ describe("canvas assistant submission", () => {
         const serverAssetId = "7075c394-1184-44cc-9077-068d78e8b36d";
         const url = `/api/assets/${serverAssetId}/content`;
         const harness = panelHarness({ replies: [tool("generate_video", { prompt: "花瓶缓慢旋转" })], video: async () => ({ url, mimeType: "video/mp4" }), storedVideo: { url: "blob:cached-video", storageKey: "video:cached", width: 768, height: 768, bytes: 2048, mimeType: "video/mp4", serverAssetId } });
-        await harness.submit("生成视频");
+        await harness.submitAndAcceptMedia("生成视频");
         expect(harness.videoStores).toEqual([{ url, mimeType: "video/mp4" }]);
         expect(harness.assets).toHaveLength(1);
         expect(harness.assets[0]).toMatchObject({ kind: "video", data: { url: "blob:cached-video", storageKey: "video:cached", width: 768, height: 768 }, metadata: { serverAssetId, prompt: "花瓶缓慢旋转" } });

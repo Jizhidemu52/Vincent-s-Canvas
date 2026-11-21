@@ -17,7 +17,7 @@ async function fixture() {
     if (sql.includes("FROM module_flags")) return { rows: [{ enabled: true }] };
     if (sql.includes("FROM tool_api_configurations")) return { rows: [] };
     if (sql.includes("FROM model_configs")) return { rows: [{ id: modelId, modelId: "seedream-5-5", protocol: "apimart", enabled: true, providerEnabled: true, workflowConfigId: null, capabilities: ["generate", "edit"] }] };
-    if (sql.includes("count(*)::int AS count FROM tasks")) return { rows: [{ count: 0 }] };
+    if (sql.includes("AS paused FROM tasks")) return { rows: [{ count: 0, paused: 0 }] };
     return { rows: [] };
   } } as unknown as Database;
   const compiler = { compile: async () => { compilations++; return { id: "22222222-2222-4222-8222-222222222222", status: "success", prompt: "A plain knitted scarf", optimized: true }; } } as unknown as PromptCompiler;

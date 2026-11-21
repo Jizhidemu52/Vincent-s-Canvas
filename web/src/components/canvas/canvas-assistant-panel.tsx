@@ -3447,7 +3447,7 @@ const LegacyCanvasAssistantPanel = memo(function LegacyCanvasAssistantPanel({
         onlineActionHandlersRef.current.imageAction(action, imageId);
     }, []);
     const handleApproveOnlineTool = useCallback((messageId: string) => {
-        void onlineActionHandlersRef.current.approve(messageId);
+        return onlineActionHandlersRef.current.approve(messageId);
     }, []);
     const handleRejectOnlineTool = useCallback((messageId: string) => {
         onlineActionHandlersRef.current.reject(messageId);

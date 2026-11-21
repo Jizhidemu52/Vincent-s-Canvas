@@ -46,7 +46,7 @@ function fixture() {
       if (sql.startsWith("SELECT ") && sql.includes("FROM batch_tasks WHERE request_id")) return { rows: [...batches.values()].filter(row => row.requestId === values[0] && (values.length < 2 || row.userId === values[1])) };
       if (sql.startsWith("SELECT t.id") && sql.includes("WHERE t.batch_id=")) return { rows: [...tasks.values()].filter(row => row.batchId === values[0] && row.userId === values[1]) };
       if (sql.startsWith("SELECT t.id") && sql.includes("WHERE t.request_id=")) return { rows: [] };
-      if (sql.startsWith("SELECT count(*)::int AS count FROM tasks")) return { rows: [{ count: tasks.size }] };
+      if (sql.includes("AS paused FROM tasks")) return { rows: [{ count: tasks.size, paused: 0 }] };
       if (sql.includes("FROM model_presentation_settings")) return { rows: [] };
       if (sql.includes("FROM module_flags")) return { rows: [{ enabled: flags.get(String(values[0])) }] };
       if (sql.includes("FROM quick_image_configurations")) return { rows: [] };

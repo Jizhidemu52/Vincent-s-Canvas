@@ -176,7 +176,7 @@ integration("single-connection SQL shared task transactions", () => {
     const observed = new Proxy(fixture.db, { get(target, property) {
       if (property !== "query") return Reflect.get(target, property);
       return async (sql: string, values?: unknown[]) => {
-        if (!created && sql.startsWith("SELECT count(*)::int AS count FROM tasks")) created = await enqueueTask(fixture.db, cache, value.input);
+        if (!created && sql.includes("AS paused FROM tasks")) created = await enqueueTask(fixture.db, cache, value.input);
         return target.query(sql, values);
       };
     } });
