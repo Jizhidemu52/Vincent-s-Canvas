@@ -6,6 +6,7 @@ import { taskSubmissionSchema as singleSchema, batchSubmissionSchema as batchSch
 
 import { writeAudit } from "../audit";
 import { readTaskReviewOriginals } from "../task-review-originals";
+import { prepareOriginalSizeReissue } from "../task-original-size";
 import { requeueRepairs, type PausedKind } from "../task-repair";
 import type { Cache, Database } from "../db";
 import { makeCursorPage, parseCursorPage } from "../cursor-pagination";
@@ -80,7 +81,7 @@ const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COALESCE(SUM(t.rmb_cost) FILTER (WHERE t.status='success'),0)::float8 AS consumed_rmb_cost
   FROM tasks t WHERE t.batch_id=b.id) stats ON true`;
 
-export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask, options: { maxRepairAttempts?: number; maxInflightTasks?: number; maxPausedTasks?: number; promptCompiler?: PromptCompiler; quickImagePreflight?: typeof preflightStoredQuickImageTask } = {}) {
+export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask, options: { readOriginalSizeSource?: Parameters<typeof prepareOriginalSizeReissue>[4]; maxRepairAttempts?: number; maxInflightTasks?: number; maxPausedTasks?: number; promptCompiler?: PromptCompiler; quickImagePreflight?: typeof preflightStoredQuickImageTask } = {}) {
   const router = Router();
   router.use((_request, response, next) => {
     const json = response.json.bind(response);
@@ -508,6 +509,29 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
       }
       response.json({ task: result.rows[0] });
     } catch (error) { next(error); }
+  });
+
+  router.route("/:id/original-size-reissue").all(async (request,response,next) => {
+    response.set("Cache-Control","private, no-store");
+    if (!["GET","POST"].includes(request.method)) { response.status(405).set("Allow","GET, POST").end(); return; }
+    try {
+      const taskId = z.string().uuid().parse(request.params.id);
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const acceptance = request.method === "POST" ? z.object({confirmation:z.string().regex(/^[a-f0-9]{64}$/)}).strict().parse(request.body) : null;
+      const prior = (await db.query<{id:string;status:string;output:string|null}>(`SELECT id,status,CASE WHEN status='success' AND (result_urls->>0) ~ '^/api/assets/[0-9a-f-]{36}/content$' THEN result_urls->>0 END AS output FROM tasks WHERE original_size_source_id=$1 AND user_id=$2`,[taskId,actor.id])).rows[0];
+      if (prior) { response.json({task:prior}); return; }
+      const creditsEnabled = typeof creditPolicy === "function" ? await creditPolicy() : creditPolicy;
+      const {quote,input} = await prepareOriginalSizeReissue(db,taskId,actor,creditsEnabled,options.readOriginalSizeSource);
+      if (!acceptance) { response.json({quote}); return; }
+      if (quote.confirmation !== acceptance.confirmation) throw new ToolConfigurationError("REISSUE_QUOTE_CHANGED","原图、模型或价格已变化，请重新检查并确认；未提交新任务。",409);
+      const task = await enqueueTask(db,cache,{...input,maxInflightTasks:options.maxInflightTasks,maxPausedTasks:options.maxPausedTasks},videoPreflight,options.quickImagePreflight);
+      response.status(201).json({task:{id:task.id,status:task.status}});
+    } catch (error) {
+      if (error instanceof ToolConfigurationError || error instanceof BillingError) {
+        response.status(error instanceof ToolConfigurationError ? error.status : error.code === "USER_TASK_LIMIT_REACHED" ? 429 : 409).json({error:error.code,message:error.message}); return;
+      }
+      next(error);
+    }
   });
 
   router.get("/:id/review-originals", async (request, response, next) => {

@@ -1,6 +1,6 @@
 import { loadConfig } from "./config";
 import { videoFileExtension } from "../../shared/video-output";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createCache, createDatabase, type Cache, type Database } from "./db";
 import { classifyResultFailure, pauseOwnedTask, startTaskRepairScheduler, type PausedKind } from "./task-repair";
 import { decryptSecret } from "./security";
@@ -36,7 +36,7 @@ import { fetchProviderResult } from "./provider-result";
 import { inlineProviderImageDataUrl } from "./provider-image-result";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "./image-edit-input";
 import { imageResultExtension, ImageResultPersistenceError, storeImageResult } from "./image-result-storage";
-import { validateQuickImageSource } from "./image-result-processing";
+import { ImageResultProcessingError, validateQuickImageSource } from "./image-result-processing";
 import { scheduleAssetThumbnails } from "./asset-thumbnails";
 import { assertWorkflowTaskContext, workflowTaskContext, WorkflowTaskPending, type WorkflowTaskContext } from "./workflow-task-context";
 import { resetWorkerHealth, startWorkerHealth } from "./worker-health";
@@ -54,6 +54,7 @@ import { settleLayerStudioReservation } from "./layer-studio-billing";
 import { readApiMartVideoReceipt, saveApiMartVideoReceipt, type ApiMartVideoReceipt } from "./video-provider-receipt";
 
 type WorkRow = {
+  original_size_source_id?: string | null;
   paused_kind: PausedKind | null;
   repair_attempts: number;
   id: string;
@@ -129,7 +130,7 @@ async function runTask(taskId: string) {
   );
   if (!claimed.rows[0]) return;
   const details = await db.query<WorkRow>(
-    `SELECT t.id,t.request_id,t.paused_kind,t.repair_attempts,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.tool_key,t.result_document,t.upstream_result_document,t.prompt,t.parameters,t.source_urls,t.attempts,t.execution_token,t.started_at,t.poll_deadline_at,t.upstream_task_id,t.upstream_submission_started_at,t.upstream_workflow_context,t.priority,t.queued_at,m.model_id,m.provider_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
+    `SELECT t.id,t.request_id,t.original_size_source_id,t.paused_kind,t.repair_attempts,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.tool_key,t.result_document,t.upstream_result_document,t.prompt,t.parameters,t.source_urls,t.attempts,t.execution_token,t.started_at,t.poll_deadline_at,t.upstream_task_id,t.upstream_submission_started_at,t.upstream_workflow_context,t.priority,t.queued_at,m.model_id,m.provider_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
         FROM tasks t LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id AND w.enabled=true WHERE t.id=$1 AND t.execution_token=$2`,
     [taskId, executionToken],
   );
@@ -333,6 +334,10 @@ import { OPENAI_IMAGE_TIMEOUT_MS } from "./opentoken-image";
 import { validateConversationTaskBinding, validateConversationTaskSources } from "./image-conversation-task";
 
 async function executeProvider(task: WorkRow, timing: GenerationTiming) {
+  if (task.original_size_source_id) {
+    const receipt = task.parameters.originalSizeReplay as {modelId?: string;providerId?: string;size?: string} | undefined;
+    if (!receipt || receipt.modelId !== task.model_id || receipt.providerId !== task.provider_id || receipt.size !== task.parameters.size || task.protocol !== "apimart" || task.workflow_config_id) throw new Error("重出任务的原模型或精确尺寸已变化，未进行新的供应商提交");
+  }
   if (task.request_id?.startsWith("ic:")) validateConversationTaskBinding(task);
   // A completed, identity-bound receipt no longer needs provider credentials or
   // another status query. Invalid non-null documents fail closed in the reader.
@@ -480,6 +485,10 @@ async function executeApiMartImage(
   }
   const sourceAssets = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadSourceAssets(task.source_urls, task.user_id, isSeedream55 ? 1 : 4, isSeedream55 ? 30 * 1024 * 1024 : undefined);
   if (task.request_id?.startsWith("ic:") && !task.upstream_task_id && !task.upstream_submission_started_at) validateConversationTaskSources(task, sourceAssets);
+  if (task.original_size_source_id && !task.upstream_task_id && !task.upstream_submission_started_at) {
+    const { hashes } = task.parameters.originalSizeReplay as { hashes: string[] };
+    if (!Array.isArray(hashes) || hashes.length !== sourceAssets.length || sourceAssets.some((asset,index) => createHash("sha256").update(asset.bytes).digest("hex") !== hashes[index])) throw new Error("原输入在确认后已变化，未提交付费重出任务");
+  }
   if (isSeedream55) for (const source of sourceAssets) await validateSeedream55Reference(source);
   const editInput = !isSeedream55 && sourceAssets.length ? await prepareImageEditInput(sourceAssets, task.parameters, {
     protocol: "apimart", modelId: task.model_id!, operationType: task.operation_type,
@@ -489,9 +498,10 @@ async function executeApiMartImage(
   if (!task.upstream_task_id && !task.upstream_submission_started_at && editInput.references.length) {
     // Validate the owned bytes before replacing them with URLs: URL-only adapter
     // validation cannot enforce each model's size, MIME or combined-byte limits.
-    preflightApiMartImageRequest({ modelId: task.model_id!, prompt: providerPrompt, parameters: task.parameters,
+    const preflight = preflightApiMartImageRequest({ modelId: task.model_id!, prompt: providerPrompt, parameters: task.parameters,
       sourceImages: editInput.references, ...(editInput.mask ? { maskImage: editInput.mask } : {}),
       ...(editInput.markup ? { markupImage: editInput.markup } : {}) });
+    if (task.original_size_source_id && preflight.payload.size !== task.parameters.size) throw new Error("原模型不再支持已确认的精确尺寸，未提交重出");
     if (!config.PROVIDER_IMAGE_PUBLIC_ORIGIN) throw Object.assign(
       new Error("服务端未配置参考图访问域名；尚未上传到供应商或提交生成，请联系管理员配置 PROVIDER_IMAGE_PUBLIC_ORIGIN"),
       { code: "PROVIDER_IMAGE_ORIGIN_REQUIRED" },
@@ -897,10 +907,12 @@ async function storeResults(
 ) {
   if (!storage.configured)
     throw new Error("公司对象存储尚未配置，不能保存生成结果");
+  if (task.original_size_source_id && (results.length !== 1 || !results[0] || !("bytes" in results[0]) || !["image/png","image/jpeg","image/webp"].includes(results[0].mimeType))) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT","未返回已确认的一张静态图片，无法验证原尺寸");
   const urls: string[] = [];
   for (const [index, result] of results.entries()) {
     if ("bytes" in result && ["image/png", "image/jpeg", "image/webp", "image/gif"].includes(result.mimeType)) {
       const primary = await storeImageResult({
+        expectedOriginalSize: task.original_size_source_id ? String(task.parameters.size) : undefined,
         result, parameters: task.parameters, resultIndex: index,
         prepareEditInput: async () => {
           const archive = task.parameters.inputArchive as Record<string, unknown> | undefined;

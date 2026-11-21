@@ -1,4 +1,5 @@
-import { processImageResult } from "./image-result-processing";
+import { ImageResultProcessingError, processImageResult } from "./image-result-processing";
+import { inspectEditImage } from "./image-edit-input";
 import { IMAGE_RESULT_POSTPROCESS_FAILURE_CODE, IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX } from "../../shared/generation-error";
 import { quickImageResultAction } from "./quick-image-tools";
 import { inspectGifFrames } from "./gif-image";
@@ -8,6 +9,7 @@ type AssetReference = { assetId: string; mimeType: string; filename: string };
 type ResultRole = "primary" | "provider-original" | "export";
 type EditInput = { references: ImageBytes[]; mask?: ImageBytes };
 type StoredResultInput = {
+  expectedOriginalSize?: string;
   result: ImageBytes;
   parameters: Record<string, unknown>;
   resultIndex: number;
@@ -31,10 +33,18 @@ export function hasImageResultProcessing(parameters: Record<string, unknown>) {
 
 /** Persist upstream bytes before any fallible local decoding, mask loading or conversion. */
 export async function storeImageResult(input: StoredResultInput): Promise<AssetReference> {
-  if (!hasImageResultProcessing(input.parameters)) return input.save("primary", input.result, {});
+  const postprocess = hasImageResultProcessing(input.parameters);
+  if (!postprocess && !input.expectedOriginalSize) return input.save("primary", input.result, {});
   // Initially visible: if processing is interrupted this original remains recoverable in the library.
   const original = await input.save("provider-original", input.result, {});
   try {
+    if (input.expectedOriginalSize) {
+      let dimensions;
+      try { dimensions = await inspectEditImage(input.result,"original"); }
+      catch { throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT","重出结果无法校验实际尺寸，已保留供应商原件"); }
+      if (`${dimensions.width}x${dimensions.height}` !== input.expectedOriginalSize) throw new ImageResultProcessingError("IMAGE_RESULT_DIMENSION_MISMATCH",`重出结果为 ${dimensions.width}×${dimensions.height}，未达到已确认的 ${input.expectedOriginalSize} 像素`);
+      if (!postprocess) return original;
+    }
     if (input.parameters.output_format === "gif") {
       const gif = await inspectGifFrames(input.result.bytes);
       if (input.result.mimeType !== "image/gif" || input.parameters.background === "transparent" || input.parameters.output_compression !== undefined) throw new Error("GIF 结果格式或参数不一致；原件已保留");

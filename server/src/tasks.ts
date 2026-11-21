@@ -19,9 +19,12 @@ import { layerStudioTaskOptions } from "../../shared/layer-studio-options";
 import { seedream55TaskOptions } from "../../shared/seedream55-options";
 import { layerStudioCostEstimate, loadLayerStudioPriceSnapshot } from "./layer-studio-billing";
 
+import { isReviewValidationFailure } from "../../shared/task-repair";
+
 export type TaskPriority = "normal" | "priority" | "urgent";
 export type QueueTaskAction = "pause" | "resume" | "cancel";
 export type TaskInput = {
+  originalSizeSourceId?: string;
   [QUICK_IMAGE_SNAPSHOT]?: QuickImageSnapshot;
   creditsEnabled?: boolean;
   /** Server-only admission policy, never accepted from the request body. */
@@ -194,6 +197,7 @@ export async function prepareTaskEnqueue(
   quickImagePreflight = preflightStoredQuickImageTask,
   layerStudioPreflight = preflightStoredSeedream55Task,
 ): Promise<PreparedTaskEnqueue> {
+  if (input.requestId.startsWith("review-size:") && (!input.originalSizeSourceId || input.requestId !== `review-size:${input.originalSizeSourceId}`)) throw new BillingError("RESERVED_REQUEST_ID", "请求编号仅供原图尺寸重出使用");
   input = { ...structuredClone(input), ...(input[QUICK_IMAGE_SNAPSHOT] ? { [QUICK_IMAGE_SNAPSHOT]: structuredClone(input[QUICK_IMAGE_SNAPSHOT]) } : {}) };
   const isLayerStudio = (input.toolKey ?? input.parameters?.tool) === "layer-studio";
   if (isLayerStudio) {
@@ -239,7 +243,14 @@ export async function enqueueTaskInTransaction(client: PoolClient, prepared: Pre
   }
   await lockTaskAdmission(client, input.userId);
   const existing = await findEnqueuedTask(client, input);
-  if (existing) return existing;
+  if (existing) {
+    if (input.originalSizeSourceId && !(await client.query("SELECT 1 FROM tasks WHERE id=$1 AND original_size_source_id=$2",[existing.task.id,input.originalSizeSourceId])).rows.length) throw new BillingError("DUPLICATE_REQUEST","请求编号与原任务不匹配");
+    return input.originalSizeSourceId ? {...existing,shouldQueue:false} : existing;
+  }
+  if (input.originalSizeSourceId) {
+    const source = await client.query("SELECT repair_error_code FROM tasks WHERE id=$1 AND user_id=$2 AND status='paused' AND paused_kind='needs_review' FOR UPDATE",[input.originalSizeSourceId,input.userId]);
+    if (!source.rows.length || !isReviewValidationFailure(source.rows[0].repair_error_code)) throw new BillingError("TASK_PREPARATION_STALE","原任务状态已变化，未提交重出");
+  }
   await assertTaskCapacity(client, input);
   if (!prepared.execution) throw new BillingError("TASK_PREPARATION_STALE", "原任务已不存在，请重新提交");
   const execution = input.toolConfiguration ?? await resolveToolExecution(client, input);
@@ -300,7 +311,7 @@ export async function enqueueTaskInTransaction(client: PoolClient, prepared: Pre
     await validateStoredVideoPreflightSnapshot(client, { ...input, modelConfigId: execution.modelConfigId }, prepared.video.snapshot);
     parameters = { ...parameters, ...prepared.video.normalized };
   }
-  await client.query("UPDATE tasks SET model_config_id=$1,tool_key=$2,parameters=$3 WHERE id=$4", [execution.modelConfigId, execution.toolKey, parameters, taskId]);
+  await client.query("UPDATE tasks SET model_config_id=$1,tool_key=$2,parameters=$3,original_size_source_id=$5 WHERE id=$4", [execution.modelConfigId, execution.toolKey, parameters, taskId,input.originalSizeSourceId ?? null]);
   const reservation = await reserveCredits(db, {
     requestId: input.requestId,
     userId: input.userId,

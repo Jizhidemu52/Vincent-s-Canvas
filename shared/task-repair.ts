@@ -11,7 +11,7 @@ export function taskRepairMessage(task: TaskRepairState) {
         case "submission_unknown": return "提交结果待核查，请联系管理员；不会自动重发。";
         case "needs_review": {
             const reason = reviewReasons.get(String(task.repairErrorCode));
-            return reason ? `已出图，但${reason}；请查看已保存原件或联系管理员。` : "原任务需管理员处理，请核查结果及已有素材；不会自动重新生成。";
+            return reason ? `已出图，但${reason}；不会自动重新生成。如需核查，请联系管理员。` : "原任务需管理员处理，请核查结果及已有素材；不会自动重新生成。";
         }
     }
 }
@@ -38,4 +38,8 @@ export function repairDiagnosticMessage(code?: string) {
         case "IMAGE_RESULT_PROCESSING_TIMEOUT": case "RESULT_DOWNLOAD_FAILED": case "RESULT_STORAGE_FAILED": case "LAYER_PARTIAL_SAVE":
             return "原结果尚未保存完整，请查询原任务，不要重复生成。";
     }
+}
+
+export function isReviewValidationFailure(code: unknown) {
+    return reviewReasons.has(String(code));
 }

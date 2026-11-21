@@ -120,7 +120,7 @@ export async function prepareImageEditInput<T extends ImageEditSource>(sources: 
 }
 
 /** Decode bounded local files with the existing FFmpeg installation; never fetch a client URL. */
-async function inspectEditImage(source: ImageEditSource, layer: "mask" | "markup" = "mask") {
+export async function inspectEditImage(source: ImageEditSource, layer: "mask" | "markup" | "original" = "mask") {
   const formats: Record<string, string> = { "image/png": "png_pipe", "image/jpeg": "jpeg_pipe", "image/webp": "webp_pipe" };
   if (!formats[source.mimeType] || !source.bytes.byteLength || source.bytes.byteLength > 50 * 1024 * 1024) {
     throw new ImageEditInputError("蒙版编辑原图必须为不超过 50 MiB 的 PNG、JPEG 或 WebP；尚未提交生成");

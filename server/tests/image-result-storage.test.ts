@@ -2,6 +2,19 @@ import { describe, expect, test } from "bun:test";
 import { storeImageResult, hasImageResultProcessing, ImageResultPersistenceError } from "../src/image-result-storage";
 import { isAuxiliaryImageResult, resolveImageResultVariants, type ImageResultAsset } from "../src/image-result-variants";
 import { prepareQuickImageTask } from "../src/quick-image-tools";
+import { execFileSync } from "node:child_process";
+
+test("a supplier returning the wrong pixels for a confirmed original-size reissue leaves its bytes available for review", async () => {
+  const bytes=execFileSync(process.env.FFMPEG_PATH || "ffmpeg",["-v","error","-f","lavfi","-i","color=s=1024x896","-frames:v","1","-threads","1","-f","image2pipe","-c:v","png","pipe:1"]);
+  const h=harness(), replay={...h,result:{bytes,mimeType:"image/png"},parameters:{},resultIndex:0};
+  const failure=await storeImageResult({...replay,expectedOriginalSize:"1024x1024"}).catch(error=>error);
+  expect(failure).toBeInstanceOf(ImageResultPersistenceError);
+  expect(failure.cause.code).toBe("IMAGE_RESULT_DIMENSION_MISMATCH");
+  expect(h.calls).toEqual(["save:provider-original"]);
+  expect(h.assets[0]?.bytes).toEqual(bytes);
+  const checked=await storeImageResult({...replay,expectedOriginalSize:"1024x896"});
+  expect(checked.assetId).toBe(h.assets[1]?.id);
+});
 
 const result = { bytes: new Uint8Array([1, 2, 3, 4]), mimeType: "image/png" };
 function harness() {
