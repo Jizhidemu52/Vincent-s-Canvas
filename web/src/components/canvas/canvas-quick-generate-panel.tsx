@@ -1,4 +1,5 @@
 import { CanvasEntryUsage } from "@/components/canvas/canvas-entry-usage";
+import { ImageQualityTierPicker } from "@/components/image-quality-tier-picker";
 import { Tooltip } from "antd";
 import { useUiText } from "@/lib/i18n";
 import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
@@ -150,6 +151,10 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                 {!referenceValidation.valid ? <p className="cw-reference-error" role="alert">{referenceValidation.message}</p> : null}
             </div>
             <div className="cw-generator-footer">
+                {availableModel && model === availableModel ? <ImageQualityTierPicker profile={profile} quality={quality} imageOptions={imageOptions} disabled={!open || running || referenceBusy} onChange={patch => {
+                    onQualityChange(patch.quality);
+                    onImageOptionsChange(patch.imageOptions);
+                }} /> : null}
                         <CanvasQuickSettingsPopovers config={{ ...config, model: model || availableModel, imageModel: model || availableModel, ...settings, quality: activeQuality, imageOptions }} profile={profile} referenceCount={references.length} uploadContextKey={referenceScopeKey ? JSON.stringify([referenceScopeKey, sourceNode?.id, prompt, references.map(reference => [reference.id, reference.storageKey, reference.dataUrl, reference.url])]) : undefined} theme={theme} disabled={!open || running || !availableModel || model !== availableModel} disabledReason={disabledReason} onConfigChange={(key, value) => {
                             if (key === "size") onSizeChange(value);
                             if (key === "quality") onQualityChange(value);

@@ -1,5 +1,7 @@
 /** Canvas presentation only: never used to rewrite saved titles, prompts or messages. */
 const enCanvas: Record<string, string> = {
+  "高清": "HD",
+  "超清": "Ultra HD",
   "{count} 个任务": "{count} tasks",
   "放大图片": "Upscale image",
   "该批次已有原请求，请在画布结果节点查询原任务；不会重复提交。新批次请重新选择图片。": "This batch already has original requests. Check them on the result nodes; they will not be resubmitted. Select images again to start a new batch.",
