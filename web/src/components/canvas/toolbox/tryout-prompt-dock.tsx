@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { ArrowUp } from "lucide-react";
 import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 import { useUiText } from "@/lib/i18n";
+import { recordUsage } from "@/stores/use-usage-store";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { imageOptionFields } from "@/lib/image-advanced-settings";
 import { availableQualityTiers, qualityTierPatch } from "@/lib/image-quality-tier";
@@ -86,7 +87,11 @@ export default function TryoutPromptDock({ owner, onRun, onFocus, busy, hidden }
     };
     if (hidden) return null;
     return (
-        <section className="tryout-prompt-dock" aria-label={t("试款输入条")} onFocusCapture={onFocus}>
+        <section className="tryout-prompt-dock" aria-label={t("试款输入条")} onFocusCapture={e=>{
+            if(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))return;
+            recordUsage({boardKey:"canvas",action:"open",controlKey:"canvas_entry_open.prompt-dock",occurredAt:new Date().toISOString()});
+            onFocus?.();
+        }}>
             <div className="tpd-main">
                 <span className="tpd-target" title={target?.title}>
                     {source ? t("改这件") + "：" + source.title : t(selected.size > 1 ? "已选多项" : selected.size ? "当前节点不可编辑" : "生成新产品")}
