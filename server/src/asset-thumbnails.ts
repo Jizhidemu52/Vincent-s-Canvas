@@ -20,14 +20,14 @@ function run(tool: "ffmpeg" | "ffprobe", args: string[], maxBuffer = 8 * 1024 * 
   });
 }
 const limits = ["-v", "error", "-max_alloc", "134217728", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", formats];
-async function thumbnailsFromFile(file: string, signal?: AbortSignal, sizes: readonly (256 | 1024)[] = [256, 1024]) {
+async function thumbnailsFromFile(file: string, signal?: AbortSignal, sizes: readonly number[] = [256, 1024], still=false) {
   const info = JSON.parse((await run("ffprobe", [...limits, "-select_streams", "v:0", "-show_entries", "stream=width,height,duration:format=duration,format_name", "-of", "json", file], 64 * 1024, signal)).toString());
   const { width, height } = info.streams?.[0] || {};
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 16384 || height > 16384 || width * height > 67_108_864) {
     throw new Error("缩略图媒体尺寸无效或超出安全限制");
   }
-  const result = {} as Record<256 | 1024, Buffer>;
-  const animated = info.format?.format_name === "gif";
+  const result:Record<number,Buffer> = {};
+  const animated = !still && info.format?.format_name === "gif";
   for (const size of sizes) {
     result[size] = await run("ffmpeg", ["-nostdin", ...limits, "-i", file, "-map", "0:v:0", "-frames:v", animated ? "128" : "1",
       "-vf", `scale=w='min(${size},iw)':h='min(${size},ih)':force_original_aspect_ratio=decrease`,
@@ -39,10 +39,10 @@ async function thumbnailsFromFile(file: string, signal?: AbortSignal, sizes: rea
   const duration = Number.isFinite(streamDuration) && streamDuration > 0 ? streamDuration : Number(info.format?.duration);
   return { thumbnails: result, metadata: { width, height, ...(Number.isFinite(duration) && duration > 0 ? { durationMs: Math.round(duration * 1000) } : {}) } };
 }
-async function withInput(write: (path: string) => Promise<void>, signal?: AbortSignal, sizes?: readonly (256 | 1024)[]) {
+async function withInput(write: (path: string) => Promise<void>, signal?: AbortSignal, sizes?: readonly number[], still=false) {
   const directory = await mkdtemp(join(tmpdir(), "canvas-asset-thumb-"));
   const input = join(directory, "original");
-  try { signal?.throwIfAborted(); await write(input); return await thumbnailsFromFile(input, signal, sizes); }
+  try { signal?.throwIfAborted(); await write(input); return await thumbnailsFromFile(input, signal, sizes,still); }
   finally { await unlink(input).catch(() => undefined); await rmdir(directory).catch(() => undefined); }
 }
 
@@ -56,6 +56,12 @@ export async function createAssetThumbnailBytes(bytes: Uint8Array, sizes: readon
 export async function createAssetThumbnailDetails(bytes: Uint8Array, sizes: readonly (256 | 1024)[] = [256, 1024]) {
   if (!bytes.length || bytes.length > maxBytes) throw new Error("缩略图原文件超过限制");
   return withInput(path => writeFile(path, bytes), undefined, sizes);
+}
+
+export async function createTryoutReferenceBytes(bytes:Uint8Array,edge:number){
+  if(!Number.isInteger(edge)||edge<512||edge>2048||!bytes.length||bytes.length>maxBytes)throw new Error("试款参考图尺寸或文件大小超限");
+  const {thumbnails}=await withInput(path=>writeFile(path,bytes),undefined,[edge],true);
+  return thumbnails[edge]!;
 }
 
 export async function generateAssetThumbnails(db: Database, storage: ObjectStorage, assetId: string, options: { signal?: AbortSignal; leaseToken?: string } = {}) {

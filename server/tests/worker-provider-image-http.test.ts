@@ -38,7 +38,7 @@ const providerTask = () => ({ ...newTask(), protocol: "apimart", encrypted_crede
   external_task_path: null, status_value_path: null, success_values: null, failure_values: null,
   poll_interval_ms: null, timeout_seconds: null, upstream_workflow_context: null as WorkflowTaskContext | null });
 
-function harness(options: { origin?: string; failIssue?: boolean; realCacheFailure?: boolean; failQuickValidation?: boolean; sourceAssets?: typeof sources } = {}) {
+function harness(options: { origin?: string; failIssue?: boolean; realCacheFailure?: boolean; failQuickValidation?: boolean; sourceAssets?: typeof sources; hotTryoutUrls?:string[] } = {}) {
   const calls: Array<{ url: string; method: string; payload?: Record<string, any>; form?: FormData }> = [];
   const grants: Record<string, any>[] = [];
   const mediaDispatches: Array<{ kind: "video" | "audio"; task: ReturnType<typeof providerTask> }> = [];
@@ -81,6 +81,9 @@ function harness(options: { origin?: string; failIssue?: boolean; realCacheFailu
     throw new Error(`Unexpected provider request: ${method} ${url}`);
   };
   const dependencies = {
+    tryoutModels:[{modelId:"gpt-image-2.6-flare"}],
+    assertTryoutModuleEnabled:async()=>{events.push("tryout-gate");},
+    lookupReadyTryoutInputs:async()=>{events.push("owned-cache-lookup");return options.hotTryoutUrls;},
     db, cache, storage, config: { PROVIDER_IMAGE_PUBLIC_ORIGIN: options.origin ?? origin, PROVIDER_ENCRYPTION_KEY: "fixture-key" }, ProviderImageAccess: options.realCacheFailure ? ProviderImageAccess : FakeProviderImageAccess,
     decryptSecret: (cipher: string, key: string) => { expect([cipher, key]).toEqual(["fixture-encrypted", "fixture-key"]); return JSON.stringify({ apiKey: "fixture-only" }); },
     assertImageEditMaskSupport, imageAgentProviderPrompt, openAiImageParameters, OPENAI_IMAGE_TIMEOUT_MS: 180_000,
@@ -105,6 +108,18 @@ function harness(options: { origin?: string; failIssue?: boolean; realCacheFailu
     calls, grants, events, queries, mediaDispatches,
     loaded: () => loaded, downloads: () => downloads };
 }
+
+test("prewarmed tryout worker sends the ordered cached references once without reading original bytes and only polls on resume",async()=>{
+  const cached=sources.map(s=>"https://supplier.invalid/ref/"+s.assetId),h=harness({hotTryoutUrls:cached,origin:""});
+  const task={...providerTask(),request_id:"tryout:"+newTask().user_id+":fixture",tool_key:"canvas-edit",parameters:{tryoutTier:"quick"}};
+  await expect(h.dispatch(task)).rejects.toBeInstanceOf(ApiMartImageTaskPending);
+  expect(h.events).toEqual(["tryout-gate","owned-cache-lookup","persist","fetch","persist"]);
+  expect(h.calls[0].payload?.image_urls).toEqual(cached);
+  expect(task.upstream_task_id).toBe("upstream-owned");
+  task.poll_deadline_at=new Date(Date.now()+60_000).toISOString();
+  await h.dispatch(task);expect(h.calls.map(c=>c.method)).toEqual(["POST","GET"]);expect(h.loaded()).toBe(0);
+  expect(h.events.filter(e=>e==="owned-cache-lookup")).toHaveLength(1);
+});
 
 test("fresh Flare uses ordered HTTP references through the real provider adapter: zero uploads and one paid POST", async () => {
   const h = harness(), task = newTask();

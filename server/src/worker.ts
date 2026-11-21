@@ -4,6 +4,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { createCache, createDatabase, type Cache, type Database } from "./db";
 import { classifyResultFailure, pauseOwnedTask, startTaskRepairScheduler, type PausedKind } from "./task-repair";
 import { decryptSecret } from "./security";
+import {tryoutReferenceService,invalidateTryoutReferences,pruneTryoutReferences,lookupReadyTryoutInputs} from "./tryout-reference";
+import {assertModuleEnabled as assertTryoutModuleEnabled} from "./module-flags";
+import {MARK_GPT26_IMAGE_MODELS as tryoutModels} from "../../shared/mark-image-models";
 import { settleReservation } from "./billing";
 import { withTransaction } from "./db-transaction";
 import { popReadyTask, scheduleQueuedTask } from "./task-queue";
@@ -485,7 +488,16 @@ async function executeApiMartImage(
       throw new Error("图片状态查询超时；可恢复查询原任务，不会重新生成");
     }
   }
-  const sourceAssets = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadSourceAssets(task.source_urls, task.user_id, isSeedream55 ? 1 : 4, isSeedream55 ? 30 * 1024 * 1024 : undefined);
+  const fresh=!task.upstream_task_id&&!task.upstream_submission_started_at;
+  let tryout: {tier:"quick"|"hd";provider:{providerId:string;baseUrl:string;apiKey:string}}|undefined;
+  if(fresh&&task.request_id?.startsWith("tryout:"+task.user_id+":")){
+    const tier=task.parameters.tryoutTier;
+    if(!task.provider_id||task.workflow_config_id||task.tool_key!=="canvas-edit"||(tier!=="quick"&&tier!=="hd")||!tryoutModels.some(m=>m.modelId===task.model_id)||!task.source_urls.length||task.original_size_source_id)throw new Error("试款任务与当前模型或参考图规格不匹配，未提交生成");
+    await assertTryoutModuleEnabled(db,"canvas-tryout");
+    tryout={tier,provider:{providerId:task.provider_id,baseUrl:task.base_url!,apiKey:credentials.apiKey||""}};
+  }
+  const hot=tryout?await lookupReadyTryoutInputs(db,config,{...tryout,ownerId:task.user_id,taskId:task.id,sourceUrls:task.source_urls}):undefined;
+  const sourceAssets = !fresh||hot ? [] : await loadSourceAssets(task.source_urls, task.user_id, isSeedream55 ? 1 : 4, isSeedream55 ? 30 * 1024 * 1024 : undefined);
   if (task.request_id?.startsWith("ic:") && !task.upstream_task_id && !task.upstream_submission_started_at) validateConversationTaskSources(task, sourceAssets);
   if (task.original_size_source_id && !task.upstream_task_id && !task.upstream_submission_started_at) {
     const { hashes } = task.parameters.originalSizeReplay as { hashes: string[] };
@@ -496,7 +508,7 @@ async function executeApiMartImage(
     protocol: "apimart", modelId: task.model_id!, operationType: task.operation_type,
   }) : { references: sourceAssets };
   if (!task.upstream_task_id && !task.upstream_submission_started_at && task.parameters.quickImageAction) await validateQuickImageSource(editInput.references[0], task.parameters);
-  let sourceImages: Array<SourceAsset | string> = editInput.references;
+  let sourceImages: Array<SourceAsset | string> = hot??editInput.references;
   if (!task.upstream_task_id && !task.upstream_submission_started_at && editInput.references.length) {
     // Validate the owned bytes before replacing them with URLs: URL-only adapter
     // validation cannot enforce each model's size, MIME or combined-byte limits.
@@ -504,17 +516,27 @@ async function executeApiMartImage(
       sourceImages: editInput.references, ...(editInput.mask ? { maskImage: editInput.mask } : {}),
       ...(editInput.markup ? { markupImage: editInput.markup } : {}) });
     if (task.original_size_source_id && preflight.payload.size !== task.parameters.size) throw new Error("原模型不再支持已确认的精确尺寸，未提交重出");
-    if (!config.PROVIDER_IMAGE_PUBLIC_ORIGIN) throw Object.assign(
-      new Error("服务端未配置参考图访问域名；尚未上传到供应商或提交生成，请联系管理员配置 PROVIDER_IMAGE_PUBLIC_ORIGIN"),
-      { code: "PROVIDER_IMAGE_ORIGIN_REQUIRED" },
-    );
-    const access = new ProviderImageAccess(db, cache, storage, config.PROVIDER_IMAGE_PUBLIC_ORIGIN);
-    sourceImages = [];
-    // Publish only validated, owned references; never expose mask/markup layers or reload a submitted task.
-    for (const source of editInput.references) {
-      if (!source.assetId) throw new Error("参考图缺少素材身份；尚未提交生成");
-      sourceImages.push(await access.issue({ taskId: task.id, userId: task.user_id, executionToken: task.execution_token,
-        source: { ...source, assetId: source.assetId } }));
+    if(tryout){
+      if(editInput.mask||editInput.markup)throw new Error("试款参考图规格不匹配，未提交生成");
+      const reference=tryoutReferenceService(db,config);
+      const uploaded:string[]=[];
+      for(const image of editInput.references){
+        if(!image.assetId)throw new Error("试款参考图缺少素材身份，未提交生成");
+        uploaded.push(await reference({...tryout,ownerId:task.user_id,taskId:task.id,sha256:createHash("sha256").update(image.bytes).digest("hex"),read:async()=>image}));
+      }
+      sourceImages=uploaded;
+    } else {
+      if (!config.PROVIDER_IMAGE_PUBLIC_ORIGIN) throw Object.assign(
+        new Error("服务端未配置参考图访问域名；尚未上传到供应商或提交生成，请联系管理员配置 PROVIDER_IMAGE_PUBLIC_ORIGIN"),
+        { code: "PROVIDER_IMAGE_ORIGIN_REQUIRED" },
+      );
+      const access = new ProviderImageAccess(db, cache, storage, config.PROVIDER_IMAGE_PUBLIC_ORIGIN);
+      sourceImages = [];
+      for (const source of editInput.references) {
+        if (!source.assetId) throw new Error("参考图缺少素材身份；尚未提交生成");
+        sourceImages.push(await access.issue({ taskId: task.id, userId: task.user_id, executionToken: task.execution_token,
+          source: { ...source, assetId: source.assetId } }));
+      }
     }
   }
   let result: Awaited<ReturnType<typeof stepApiMartImageTask>>;
@@ -544,6 +566,9 @@ async function executeApiMartImage(
       if (!persisted.rows[0]) throw new VideoSubmissionClaimLost("原上游任务身份已改变");
     },
   }); } catch (error) {
+    if(task.request_id?.startsWith("tryout:"+task.user_id+":")&&error instanceof ApiMartImageProviderFailure&&"referenceDownloadConfirmed" in error&&error.referenceDownloadConfirmed===true){
+      await invalidateTryoutReferences(db,task.id).catch(()=>console.warn(JSON.stringify({event:"tryout.reference_invalidation_failed",taskId:task.id})));
+    }
     if (!(error instanceof ApiMartImageQueryRetryable) || !task.upstream_task_id) throw error;
     const remaining = new Date(task.poll_deadline_at!).getTime() - Date.now();
     if (!(remaining > 0)) throw new Error("图片状态查询超时；可恢复查询原任务，不会重新生成");
@@ -1060,6 +1085,7 @@ async function reconcileTaskQueue() {
     try {
       const recovered = await restoreWaitingTasksToQueue(db, cache);
       if (recovered) console.log(JSON.stringify({ event: "worker.queue_reconciled", recovered }));
+      await pruneTryoutReferences(db).catch(()=>console.warn(JSON.stringify({event:"tryout.reference_prune_failed"})));
     } catch {
       console.error(JSON.stringify({ event: "worker.queue_reconciliation_failed" }));
     }

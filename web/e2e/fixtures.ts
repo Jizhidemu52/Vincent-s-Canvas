@@ -41,6 +41,7 @@ export class MockCanvasApi {
     localProcessingRecords = new Map<string, Json>();
     localProcessingUploads = new Map<string, string>();
     submissions: Json[] = [];
+    tryoutPrewarms:string[]=[];
     batchSubmissions: Json[] = [];
     batchActions: string[] = [];
     displayTranslationValues = new Map<string, string>([["隔离回归账号", "Isolated regression account"]]);
@@ -173,6 +174,11 @@ export class MockCanvasApi {
                 this.localProcessingRecords.set(input.clientOperationId, record);
                 return json({ record, reused: false }, 201);
             }
+        }
+        if(path==="/api/tryout/prewarm"&&method==="POST"){
+            const {assetId}=request.postDataJSON();
+            if(request.headers()["x-canvas-owner-id"]!==OWNER||!this.assetBytes.has(assetId))return json({message:"素材不可用"},404);
+            this.tryoutPrewarms.push(assetId);return json({status:"accepted"},202);
         }
         if (path === "/api/assets/upload-request") {
             const input = request.postDataJSON(), old = input.localProcessingOperationId ? this.localProcessingUploads.get(input.localProcessingOperationId) : undefined;

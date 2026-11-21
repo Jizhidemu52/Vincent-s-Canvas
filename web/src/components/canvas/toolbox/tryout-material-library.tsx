@@ -4,6 +4,7 @@ import {canvasThemes} from "@/lib/canvas-theme";
 import {createClientUuid} from "@/lib/client-uuid";
 import {useUiText} from "@/lib/i18n";
 import {uploadServerAsset} from "@/services/api/server-assets";
+import {prewarmTryoutSource} from "@/lib/tryout/prewarm";
 import {useUserStore} from "@/stores/use-user-store";
 import {useThemeStore} from "@/stores/use-theme-store";
 import type {KitMaterial} from "./tryout-swatch";
@@ -52,7 +53,7 @@ export default function TryoutMaterialLibrary({materials,onEdit,onClose,notice}:
                 void change(async(id,signal)=>{
                     const name=f.name.replace(/\.[^.]+$/,"").trim().slice(0,80)||t("面料小样");
                     const assetId=await uploadServerAsset(f,{source:"material-library",name,useColor:false},{expectedOwnerId:id,clientReferenceId:"material:"+createClientUuid(),signal});
-                    if(!signal.aborted)select({id:assetId,assetId,name});
+                    if(!signal.aborted){select({id:assetId,assetId,name});void prewarmTryoutSource(assetId,id,()=>!signal.aborted);}
                 });
             }}/>
             <button type="button" onClick={()=>file.current?.click()} className="my-2 min-h-9">{t("上传我的面料图")}</button>

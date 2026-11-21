@@ -34,6 +34,7 @@ for(const mode of ["acknowledged color","lost submission response","preset mater
     }
     const swatch=page.getByRole("button",{name:material?"拖动换材质：粗针":"拖动换色：酒红",exact:true}),img=page.locator('[data-node-id="sample"] img[data-canvas-image-resolution]').first();
     await expect(img).toBeVisible();await expect.poll(()=>img.evaluate(el=>(el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    await expect.poll(()=>api.tryoutPrewarms.filter(a=>a===asset)).toHaveLength(1);expect(calls).toHaveLength(0);
     const drop=async(frac:number)=>{
         const a=(await swatch.boundingBox())!,b=(await img.boundingBox())!;
         await page.mouse.move(a.x+a.width/2,a.y+a.height/2);await page.mouse.down();await page.mouse.move(b.x+b.width*frac,b.y+b.height*frac,{steps:12});await page.mouse.up();

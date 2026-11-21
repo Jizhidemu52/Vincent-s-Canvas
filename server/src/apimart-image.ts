@@ -572,7 +572,7 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
   const status = readStatus(statusPayload);
   if (status === "failed" && isReferenceDownloadFailure(statusPayload)) {
     if (!input.inputDownloadRecheckScheduled) return {status:"pending",upstreamTaskId:taskId,nextPollMs:3_000,confirmInputDownloadFailure:true};
-    throw new ApiMartImageProviderFailure("供应商未能读取参考图，复查原任务后仍为失败；未重新提交生成。");
+    throw Object.assign(new ApiMartImageProviderFailure("供应商未能读取参考图，复查原任务后仍为失败；未重新提交生成。"),{referenceDownloadConfirmed:true});
   }
   if (IMAGE_FAILURE_STATUSES.has(status)) throw new ApiMartImageProviderFailure(redactProviderCredential(readFailureMessage(statusPayload), input.apiKey) || "APIMart 图片任务失败");
   if (status === "completed") {

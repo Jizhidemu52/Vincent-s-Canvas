@@ -16,6 +16,7 @@ import {
 } from "./routes/model-configuration";
 import { createAdminTasksRouter, createTasksRouter } from "./routes/tasks";
 import { createTryoutRouter } from "./routes/tryout";
+import {createTryoutPrewarm} from "./tryout-prewarm";
 import {createMaterialLibraryRouter,createAdminMaterialPresetsRouter} from "./routes/material-presets";
 import { createLayerStudioRouter } from "./routes/layer-studio";
 import { createTaskReconciliationRouter } from "./routes/task-reconciliation";
@@ -196,7 +197,7 @@ app.use(
 app.use("/api/tasks/events", requireSession, requireAccountReady, createTasksEventsRouter(taskEvents));
 app.use("/api/materials",requireSession,requireAccountReady,createMaterialLibraryRouter(db));
 app.use("/api/admin/material-presets",requireAdminSession,requireAccountReady,createAdminMaterialPresetsRouter(db));
-app.use("/api/tryout",requireSession,requireAccountReady,protectModelIdentity,createTryoutRouter(db,cache,{credits:readCreditsEnabled,maxInflightTasks:config.USER_MAX_INFLIGHT_TASKS,maxPausedTasks:config.PAUSED_TASK_LIMIT_PER_USER}));
+app.use("/api/tryout",requireSession,requireAccountReady,protectModelIdentity,createTryoutRouter(db,cache,{credits:readCreditsEnabled,maxInflightTasks:config.USER_MAX_INFLIGHT_TASKS,maxPausedTasks:config.PAUSED_TASK_LIMIT_PER_USER},createTryoutPrewarm(db,storage,config)));
 app.use(
   "/api/tasks",
   requireSession,

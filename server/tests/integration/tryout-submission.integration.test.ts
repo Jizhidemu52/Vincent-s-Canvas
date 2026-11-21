@@ -4,28 +4,50 @@ import {randomUUID} from "node:crypto";
 import {createIsolatedPostgres} from "../helpers/isolated-postgres";
 import {createTryoutRouter} from "../../src/routes/tryout";
 import type {Cache} from "../../src/db";
+import type {ObjectStorage} from "../../src/object-storage";
+import {loadConfig} from "../../src/config";
+import {encryptSecret} from "../../src/security";
+import {createTryoutPrewarm} from "../../src/tryout-prewarm";
 
 (process.env.PGLITE_RUNTIME_PATH?test:test.skip)("tryout admission is owned, idempotent, priced, and reuses the concurrency-controlled queue",async()=>{
     const sql=await createIsolatedPostgres();
     const [user,other,provider,model,product,person]=Array.from({length:6},()=>randomUUID());
     const app=express(),cache={eval:async()=>1} as unknown as Cache;
     app.use(express.json(),(req,_res,next)=>{Object.assign(req,{auth:{id:req.get("x-fixture-user"),role:"designer",departmentId:null}});next();});
-    app.use("/api/tryout",createTryoutRouter(sql.db,cache,{credits:async()=>true,maxInflightTasks:4,maxPausedTasks:3}));
+    const key=Buffer.alloc(32,7).toString("base64"),config=loadConfig({NODE_ENV:"test",DATABASE_URL:"isolated",REDIS_URL:"isolated",PROVIDER_ENCRYPTION_KEY:key});
+    const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAFUlEQVR4nGP8////fwYGBgYWEAHCAD4KBAICIHhuAAAAAElFTkSuQmCC","base64");
+    let reads=0,uploads=0;
+    const storage={get:async()=>{reads++;return {Body:{transformToWebStream:()=>new Blob([png]).stream()}};}} as unknown as ObjectStorage;
+    const warm=createTryoutPrewarm(sql.db,storage,config,{upload:async input=>{uploads++;expect(input.apiKey).toBe("fixture");expect(input.mimeType).toBe("image/webp");return "https://fixture.invalid/ready";}});
+    app.use("/api/tryout",createTryoutRouter(sql.db,cache,{credits:async()=>true,maxInflightTasks:4,maxPausedTasks:3},warm));
     app.use(((err,_req,res,_next)=>res.status(err.status??400).json({error:err.code??err.name,message:err.message})) as ErrorRequestHandler);
     const server=app.listen(0,"127.0.0.1");
     await new Promise<void>(resolve=>server.once("listening",resolve));
     const base="http://127.0.0.1:"+(server.address() as {port:number}).port+"/api/tryout/quick";
     const submit=async(body:unknown,actor=user)=>{const r=await fetch(base,{method:"POST",headers:{"content-type":"application/json","x-fixture-user":actor,"x-canvas-owner-id":actor},body:JSON.stringify(body)});return {status:r.status,...await r.json()};};
     const input={kind:"color",requestId:randomUUID(),canvasId:"winter",nodeId:"color1",tier:"quick",color:{name:"海军蓝",hex:"#173566"},sourceAssetId:product};
+    const prewarm=(actor=user,header=actor)=>fetch(base.replace(/quick$/,"prewarm"),{method:"POST",headers:{"content-type":"application/json","x-fixture-user":actor,"x-canvas-owner-id":header},body:JSON.stringify({assetId:product})});
     try{
         for(const id of [user,other])await sql.db.query("INSERT INTO users(id,username,display_name,credit_balance,credit_limit,monthly_credit_limit) VALUES($1,$2,'Fixture',100,100,100)",[id,id]);
         await sql.db.query("INSERT INTO canvas_documents(owner_user_id,external_id,revision,document) VALUES($1,'winter',1,'{}'),($2,'other-design',1,'{}')",[user,other]);
-        await sql.db.query("INSERT INTO providers(id,name,protocol,base_url) VALUES($1,'Tryout test','apimart','https://no-network.invalid')",[provider]);
+        await sql.db.query("INSERT INTO providers(id,name,protocol,base_url,encrypted_credentials) VALUES($1,'Tryout test','apimart','https://no-network.invalid',$2)",[provider,encryptSecret(JSON.stringify({apiKey:"fixture"}),key)]);
         await sql.db.query("INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,credit_cost,rmb_cost) VALUES($1,$2,'Quick image','gpt-image-2.6-flare',ARRAY['generate','edit'],1,0.1)",[model,provider]);
         await sql.db.query("UPDATE tool_api_configurations SET model_config_id=$1 WHERE tool_key='canvas-edit'",[model]);
         for(const id of [product,person])await sql.db.query("INSERT INTO assets(id,owner_user_id,object_key,filename,mime_type,kind,status) VALUES($1,$2,$3,'fixture.png','image/png','image','ready')",[id,user,id]);
-        expect((await submit(input)).status).toBe(403);
+        await sql.db.query("UPDATE assets SET byte_size=$1 WHERE id=$2",[png.length,product]);
+        expect((await submit(input)).status).toBe(403);expect((await prewarm()).status).toBe(403);
         await sql.db.query("UPDATE module_flags SET enabled=true WHERE module_key='canvas-tryout'");
+        expect((await prewarm(other)).status).toBe(404);expect((await prewarm(user,other)).status).toBe(403);
+        expect(reads).toBe(0);expect(uploads).toBe(0);
+        expect((await Promise.all([prewarm(),prewarm()])).map(r=>r.status)).toEqual([202,202]);
+        for(let n=0;n<120;n++){
+            if((await sql.db.query("SELECT 1 FROM provider_upload_cache WHERE url IS NOT NULL")).rows.length)break;
+            await Bun.sleep(25);
+        }
+        expect((await sql.db.query("SELECT url FROM provider_upload_cache")).rows).toEqual([{url:"https://fixture.invalid/ready"}]);
+        expect(reads).toBe(1);expect(uploads).toBe(1);
+        expect((await sql.db.query("SELECT 1 FROM tasks")).rows).toHaveLength(0);
+        expect((await sql.db.query("SELECT 1 FROM credit_reservations")).rows).toHaveLength(0);
         const denied=await submit({...input,canvasId:"other-design"},other);
         expect(denied.error).toBe("TRYOUT_ASSET_UNAVAILABLE");
         expect((await submit({...input,canvasId:"other-design"})).error).toBe("TRYOUT_CANVAS_UNAVAILABLE");

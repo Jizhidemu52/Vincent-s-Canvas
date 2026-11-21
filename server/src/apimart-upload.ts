@@ -8,6 +8,21 @@ export const APIMART_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const extensions: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
 const upload429Delays = [2_000, 5_000, 15_000] as const;
 
+async function quotaWaitReason(response:Response){
+  const reader=response.body?.getReader();
+  if(!reader)return;
+  let length=0;const chunks:Uint8Array[]=[];
+  try{
+    for(;;){
+      const part=await reader.read();if(part.done)break;
+      length+=part.value.length;if(length>8192)return;chunks.push(part.value);
+    }
+    const body=JSON.parse(Buffer.concat(chunks,length).toString("utf8"));
+    if(body?.overage?.needs_reconfirm===true)return "上传留存价格待管理员核对";
+    if(body?.overage?.enabled===false||body?.error?.type==="rate_limit_exceeded")return "供应商免费上传额度已用完，请等额度恢复";
+  }catch{}finally{await reader.cancel().catch(()=>undefined);reader.releaseLock();}
+}
+
 function uploadTransportFailure(cause: unknown, purposeName: "图片" | "视频") {
   const diagnostics = readProviderSubmissionDiagnostics(cause);
   const errorName = cause instanceof Error ? cause.name : "";
@@ -43,8 +58,11 @@ export async function uploadApiMartImage(input: {
   mimeType: string;
   filename?: string;
   purpose?: "image" | "video";
+  retentionDays?: number;
+  onReceipt?:(receipt:{expiresAt?:number;quotaRemaining?:number;charged:boolean})=>void;
 }, runtime: { fetch?: (url: string, init?: RequestInit) => Promise<Response>; sleep?: (ms:number) => Promise<unknown>; shouldRetry?: () => boolean } = {}): Promise<string> {
   const purposeName = input.purpose === "image" ? "图片" : "视频";
+  if(input.retentionDays!==undefined&&input.retentionDays!==3)throw new Error("试款参考图仅支持三天留存档");
   if (!input.apiKey.trim()) throw new Error(`APIMart ${purposeName}服务端凭据未配置`);
   if (input.purpose === "image") validateApiMartGenerationImage(input);
   else validateApiMartVideoImage(input);
@@ -59,11 +77,14 @@ export async function uploadApiMartImage(input: {
   const signal = AbortSignal.timeout(180_000);
   let response: Response;
   for (let attempt = 0;; attempt++) {
-    response = await (runtime.fetch || fetchProviderSubmission)(`${input.baseUrl.replace(/\/+$/, "")}/uploads/images`, {
+    response = await (runtime.fetch || fetchProviderSubmission)(`${input.baseUrl.replace(/\/+$/, "")}/uploads/images${input.retentionDays===undefined?"":"?retention_days="+input.retentionDays}`, {
       method: "POST", headers: { authorization: `Bearer ${input.apiKey}` }, body: form, redirect: "error", signal,
     }).catch((error: unknown) => { throw uploadTransportFailure(error, purposeName); });
     if (response.ok) break;
-    await response.body?.cancel().catch(() => undefined);
+    if(response.status===429&&input.retentionDays!==undefined){
+      const reason=await quotaWaitReason(response),retryAfter=Number(response.headers.get("Retry-After"));
+      if(reason||retryAfter>15)throw Object.assign(new Error((reason||"供应商要求稍后再上传")+"；尚未提交生成"),{code:"PROVIDER_REFERENCE_UPLOAD_HTTP_ERROR",httpStatus:429});
+    }else await response.body?.cancel().catch(() => undefined);
     const waitMs = upload429Delays[attempt];
     const rejected = () => Object.assign(new Error(`APIMart 参考图上传失败（${response.status}），尚未提交${purposeName}生成`), {code:"PROVIDER_REFERENCE_UPLOAD_HTTP_ERROR",httpStatus:response.status});
     if (response.status !== 429 || waitMs === undefined || runtime.shouldRetry?.() === false) throw rejected();
@@ -74,8 +95,13 @@ export async function uploadApiMartImage(input: {
   const result = await response.json().catch((error: unknown) => {
     if (error instanceof SyntaxError) return null;
     throw uploadTransportFailure(error, purposeName);
-  }) as { url?: unknown } | null;
+  }) as { url?: unknown;expires_at?:unknown;overage?:{charged?:unknown};quota?:{remaining?:unknown} } | null;
   if (typeof result?.url !== "string" || !isPublicHttpsUrl(result.url)) throw new Error(`APIMart 参考图上传未返回公开 HTTPS 地址，尚未提交${purposeName}生成`);
+  if(input.onReceipt){
+    const header=response.headers.get("X-Upload-Quota-Remaining"),remaining=header!==null&&/^\d+$/.test(header)?Number(header):result.quota?.remaining;
+    input.onReceipt({expiresAt:typeof result.expires_at==="number"&&Number.isSafeInteger(result.expires_at)?result.expires_at*1000:undefined,
+      quotaRemaining:typeof remaining==="number"&&Number.isSafeInteger(remaining)&&remaining>=0?remaining:undefined,charged:result.overage?.charged===true});
+  }
   return normalizeApiMartImageUrl(result.url);
 }
 

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { promptInputSchema } from "./prompt-contracts";
 
 export const taskBaseSchema = z.object({
-  requestId: z.string().min(8).max(200),
+  requestId: z.string().min(8).max(200).refine(id=>!id.startsWith("tryout:"),"试款请求编号由专用入口分配"),
   projectId: z.string().min(1).max(200),
   operationType: z.string().min(1).max(80),
   toolKey: z.string().min(1).max(100).optional(),

@@ -3,6 +3,8 @@ import { cachedRegions } from "@/lib/tryout/region-cache";
 import { regionAtPoint, type ProductRegions } from "@/lib/tryout/product-regions";
 import type { KitColor } from "./tryout-palette";
 import type {TryoutKit} from "../../../../../shared/tryout-kit";
+import {prewarmTryoutSource} from "@/lib/tryout/prewarm";
+import {useUserStore} from "@/stores/use-user-store";
 
 export type KitMaterial=TryoutKit["materials"][number];
 export type TryoutChip=KitColor|KitMaterial;
@@ -21,6 +23,7 @@ function regionMap(img:HTMLImageElement) {
     return map;
 }
 export function prewarmVisibleRegions(){
+    const owner=useUserStore.getState().user?.id;
     const selector="img[data-canvas-image-resolution]",queue=new Set<HTMLImageElement>();
     let active=false,closed=false,timer=0;
     const drain=async()=>{
@@ -30,7 +33,10 @@ export function prewarmVisibleRegions(){
             for(const img of queue){
                 queue.delete(img);
                 if(closed)break;
-                if(img.isConnected&&img.naturalWidth){try{await regionMap(img);}catch{}}
+                if(img.isConnected&&img.naturalWidth){
+                    if(img.dataset.tryoutSource)void prewarmTryoutSource(img.dataset.tryoutSource,owner,()=>!closed&&img.isConnected);
+                    try{await regionMap(img);}catch{}
+                }
             }
         }finally{active=false;}
     };

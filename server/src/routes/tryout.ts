@@ -10,6 +10,7 @@ import { assertModuleEnabled } from "../module-flags";
 import { resolveToolExecution } from "../tool-configuration";
 import { BillingError,prepareTaskEnqueue,enqueueTaskInTransaction,publishEnqueuedTask } from "../tasks";
 import type { AuthenticatedRequest } from "../types";
+import {prewarmInput,type createTryoutPrewarm} from "../tryout-prewarm";
 
 type Policy={credits:()=>Promise<boolean>;maxInflightTasks:number;maxPausedTasks:number};
 async function assertTryoutImageModel(db:Pick<Database,"query">,id:string,lock=false){
@@ -30,8 +31,20 @@ async function recipe(input:TryoutSubmission,db:Pick<Database,"query">,ownerId:s
     }
     return {prompt:wearPrompt(input.productAssetIds.map(()=>null)),ids:[input.model.assetId,...input.productAssetIds]};
 }
-export function createTryoutRouter(db:Database,cache:Cache,policy:Policy) {
+export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm?:ReturnType<typeof createTryoutPrewarm>) {
     const router=Router();
+    router.post("/prewarm",async(req,res,next)=>{
+        try{
+            const actor=(req as AuthenticatedRequest).auth;
+            assertCanvasOwner(req.headers["x-canvas-owner-id"],actor.id);
+            await assertModuleEnabled(db,"canvas-tryout");await assertModuleEnabled(db,"canvas-edit");
+            const {assetId}=prewarmInput.parse(req.body);
+            if(!prewarm){res.status(503).json({message:"预热服务未配置"});return;}
+            const status=await prewarm(actor.id,assetId);
+            if(status==="busy")res.setHeader("Retry-After","5");
+            res.status(status==="busy"?429:202).json({status});
+        }catch(error){next(error);}
+    });
     router.post("/quick",async(req,res,next)=>{
         try{
             const actor=(req as AuthenticatedRequest).auth;
