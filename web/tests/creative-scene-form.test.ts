@@ -6,6 +6,14 @@ import { addSceneColor, scenePromptInput, cloneSceneForm, createSceneForm, getSc
 import type { StandardColorSelection } from "@/lib/standard-colors";
 import type { ReferenceImage } from "@/types/image";
 
+test("restyle does not silently add a neckline instruction to a sleeve request", () => {
+    const form = { ...createSceneForm(), change: "把袖口改成喇叭袖" };
+    const input = scenePromptInput("local-restyle", form);
+    expect(input.userText).toBe(form.change);
+    expect(input.fields).not.toHaveProperty("restyleArea");
+    expect(scenePromptInput("local-restyle", { ...form, restyleArea: "袖子" }).fields.restyleArea).toBe("袖子");
+});
+
 const primary: ReferenceImage = { id: "main", name: "主体.png", type: "image/png", dataUrl: "data:image/png;base64,cHJpbWFyeQ==" };
 const secondary: ReferenceImage = { id: "reference", name: "参考.png", type: "image/png", dataUrl: "data:image/png;base64,c2Vjb25kYXJ5" };
 const images = { primary, secondary };

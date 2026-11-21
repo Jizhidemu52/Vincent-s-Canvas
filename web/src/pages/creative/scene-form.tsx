@@ -135,10 +135,10 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
             break;
         case "local-restyle":
             fields = <>
-                {choice("restyleArea", "改动部位", ["领口", "袖子", "下摆", "口袋", "其他"])}
+                {choice("restyleArea", "改动部位", [{ value: "", label: "按描述判断" }, "领口", "袖子", "下摆", "口袋", "其他"])}
                 <div className="cs-field">
                     <label className="cs-label" htmlFor={id("change")}>{uiText("要改成什么样")}<span className="cs-required" aria-hidden="true"> *</span></label>
-                    <textarea id={id("change")} className="cs-textarea" value={form.change} onChange={(event) => update("change", event.target.value)} required rows={3} maxLength={3000} disabled={disabled} placeholder={form.restyleArea === "其他" ? uiText("请写清具体部位，以及要调整的结构或细节。") : uiText("如：{value1}。", { value1: uiText(form.restyleArea === "领口" ? "圆领改为小 V 领，保留细罗纹领边" : form.restyleArea === "袖子" ? "直筒袖改为轻微喇叭袖，袖长不变" : form.restyleArea === "下摆" ? "下摆改为平直收边，两侧增加小开衩" : "去掉前胸口袋，用原面料自然补齐") })} />
+                    <textarea id={id("change")} className="cs-textarea" value={form.change} onChange={(event) => update("change", event.target.value)} required rows={3} maxLength={3000} disabled={disabled} placeholder={!form.restyleArea || form.restyleArea === "其他" ? uiText("请写清具体部位，以及要调整的结构或细节。") : uiText("如：{value1}。", { value1: uiText(form.restyleArea === "领口" ? "圆领改为小 V 领，保留细罗纹领边" : form.restyleArea === "袖子" ? "直筒袖改为轻微喇叭袖，袖长不变" : form.restyleArea === "下摆" ? "下摆改为平直收边，两侧增加小开衩" : "去掉前胸口袋，用原面料自然补齐") })} />
                 </div>
                 <div className="cs-field">
                     <label className="cs-label" htmlFor={id("preserve")}>{uiText("特别要保留的细节 ")}<span className="cs-help">{uiText("可选")}</span></label>

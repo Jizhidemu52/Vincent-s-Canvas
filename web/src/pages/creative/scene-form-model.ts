@@ -47,7 +47,7 @@ export function createSceneForm(_sceneId: string): SceneForm {
         presentation: "白底平铺",
         sketchStyle: "technical",
         sketchDetail: "standard",
-        restyleArea: "领口",
+        restyleArea: "",
         change: "",
         preserve: "",
         colorMode: "smart",
@@ -257,7 +257,7 @@ export function scenePromptInput(sceneId: string, form: SceneForm, images: Parti
     const keys: Record<string, Array<keyof SceneForm>> = {
         "text-to-style": ["category", "silhouette", "fabric", "presentation"],
         "style-to-sketch": ["sketchStyle", "sketchDetail"],
-        "local-restyle": ["restyleArea", "change", "preserve"],
+        "local-restyle": [...(form.restyleArea ? ["restyleArea"] : []), "change", "preserve"],
         "garment-colorway": ["colorMode", "colorRegion", ...(form.colorMode === "specific" ? ["colors", "colorSelections"] as const : form.colorMode === "smart" ? ["colorMood"] as const : [])],
         "pattern-colorway": ["colorMode", "colorRegion", ...(form.colorMode === "specific" ? ["colors", "colorSelections"] as const : form.colorMode === "smart" ? ["colorMood"] as const : [])],
         "back-design": ["backStructure", "backMotif"],
