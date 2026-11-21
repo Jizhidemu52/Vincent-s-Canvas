@@ -153,7 +153,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                 {!referenceValidation.valid ? <p className="cw-reference-error" role="alert">{referenceValidation.message}</p> : null}
             </div>
             <div className="cw-generator-footer">
-                {availableModel && model === availableModel ? <ImageQualityTierPicker profile={profile} quality={quality} imageOptions={imageOptions} disabled={!open || running || referenceBusy} onChange={patch => {
+                {availableModel && model === availableModel ? <ImageQualityTierPicker profile={profile} size={settings.size} quality={quality} imageOptions={imageOptions} referenceCount={references.length} disabled={!open || running || referenceBusy} onChange={patch => {
                     onQualityChange(patch.quality);
                     onImageOptionsChange(patch.imageOptions);
                 }} /> : null}

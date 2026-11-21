@@ -5,6 +5,8 @@ import { Button, Input, Modal, Select, Tag, Switch, theme as antdTheme } from "a
 import { Pause, Play, X } from "lucide-react";
 import { ModelPicker } from "@/components/model-picker";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { ImageQualityTierPicker } from "@/components/image-quality-tier-picker";
+import { useImageModelProfile } from "@/lib/image-model-settings";
 import { useToolConfig } from "@/hooks/use-tool-config";
 import { canvasThemes } from "@/lib/canvas-theme";
 import type { BatchEditFileItem } from "@/pages/canvas/canvas-batch-edit-runtime";
@@ -48,6 +50,7 @@ export default function CanvasBatchEditDialog({
     const effectiveConfig = useEffectiveConfig("canvas");
     const config = useToolConfig({ ...effectiveConfig, ...imageSettings, model: imageSettings.model || effectiveConfig.imageModel || effectiveConfig.model, count: "1" }, "canvas-batch");
     const hasOriginalRequest = items.some(item => item.requestId);
+    const profile = useImageModelProfile(config.model);
     const inputLocked = running || hasOriginalRequest;
     const submitReason = hasOriginalRequest ? "已有原请求，请查询原任务" : !items.length ? "请先选择要修改的图片" : !prompt.trim() ? "请写一句修改要求" : "";
     return (
@@ -77,6 +80,8 @@ export default function CanvasBatchEditDialog({
                 <fieldset disabled={inputLocked} className="space-y-2 border-0 p-0">
                     <ModelPicker toolKey="canvas-batch" config={config} value={config.model} capability="image" fullWidth disabled={inputLocked}
                         onChange={model => onImageSettingsChange(current => ({ ...current, model, imageModel: model }))} />
+                    <ImageQualityTierPicker profile={profile} size={config.size} quality={config.quality} imageOptions={config.imageOptions} referenceCount={1} disabled={inputLocked}
+                        onChange={patch => onImageSettingsChange(current => ({ ...current, ...patch }))} />
                     <ImageSettingsPanel config={config} referenceCount={items.length ? 1 : 0} theme={theme} maxCount={1} showTitle={false}
                         onConfigChange={(key, value) => onImageSettingsChange(current => ({ ...current, [key]: value }))} />
                 </fieldset>

@@ -225,7 +225,7 @@ export function CanvasConfigNodePanel({ node, isRunning, templateTaskCount = 0, 
             </div> : null}
 
             {mode === "text" ? <div className="mb-2 text-xs" style={{ color: theme.node.muted }}>{t("文本模型")}：{textModelName || t(businessConfigStatus === "ready" ? "未配置" : "正在加载模型…")} · {t("后台统一指定 · 每次生成 1 份")}</div> : null}
-            {mode === "image" && hasAvailableModel ? <ImageQualityTierPicker profile={profile} quality={config.quality} imageOptions={config.imageOptions} disabled={isRunning} onChange={patch => onConfigChange(node.id, patch)} /> : null}
+            {mode === "image" && hasAvailableModel ? <ImageQualityTierPicker profile={profile} size={config.size} quality={config.quality} imageOptions={config.imageOptions} referenceCount={separateImages ? 1 : imageCount} disabled={isRunning} onChange={patch => onConfigChange(node.id, patch)} /> : null}
             {!isRunning && !canGenerate && disabledReason ? <div role="status" className="mb-2 text-xs" style={{ color: theme.node.muted }}>{t(disabledReason)}</div> : null}
             {!workflow && taskCount > 1 && onRetryFailed ? <Button size="small" className="mb-2" disabled={isRunning} onClick={() => onRetryFailed(node.id)}>{staticUiText("仅重试失败或未完成项")}</Button> : null}
             </div>

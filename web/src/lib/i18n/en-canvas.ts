@@ -633,6 +633,7 @@ const enCanvas: Record<string, string> = {
   "原图已变化，请移除蒙版并重新涂抹。": "The original image has changed. Remove the mask and select the area again.",
   "局部编辑模型已变化，请重新打开涂抹工具。": "The masked editing model has changed. Reopen the selection tool.",
   "只提交这张原图与蒙版，生成 1 张。": "Only this original and its mask will be submitted for one image.",
+  "GIF 使用单帧像素尺寸，不使用比例或分辨率档位。": "GIF uses pixel dimensions per frame, not aspect ratios or resolution presets.",
   "放弃本次蒙版编辑？": "Discard this mask edit?",
   "放弃编辑": "Discard edit",
   "继续编辑": "Keep editing",

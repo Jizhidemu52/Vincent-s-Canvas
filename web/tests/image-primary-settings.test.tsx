@@ -1,8 +1,25 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { imagePrimaryControls, ImagePrimarySettings } from "@/components/image-settings-panel";
+import { ImageQualityTierPicker } from "@/components/image-quality-tier-picker";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { defaultConfig } from "@/stores/use-config-store";
+
+test("combined quality presets cannot promise a resolution ignored by an exact size, GIF, or reference edit", () => {
+    const flare = imageModelProfile("gpt-image-2.6-flare", []);
+    const markup = (profile: typeof flare, size: string, imageOptions: string, referenceCount: number) =>
+        renderToStaticMarkup(<ImageQualityTierPicker profile={profile} size={size} quality="high" imageOptions={imageOptions}
+            referenceCount={referenceCount} onChange={() => { throw new Error("render must not modify the draft"); }} />);
+    expect(markup(flare, "1:1", '{"resolution":"2k"}', 1)).toContain('type="radio"');
+    for (const [view, reason] of [
+        [markup(flare, "1536x1024", '{"resolution":"2k"}', 0), "精确像素"],
+        [markup(flare, "auto", '{"output_format":"gif"}', 0), "GIF"],
+        [markup(imageModelProfile("grok", [{ id: "grok", modelId: "grok", name: "aplmart-grok2", imageParameterProfile: "grok-image", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 }]), "1:1", "{}", 1), "参考图模式不提交图片质量"],
+    ]) {
+        expect(view).toContain(reason);
+        expect(view).not.toContain('type="radio"');
+    }
+});
 
 test("independent resolution controls do not replace quality or normalize saved data on mount", () => {
     const config = { ...defaultConfig, model: "gpt-image-2.6-flare", size: "16:9", quality: "high", imageOptions: '{"resolution":"2k","background":"transparent"}' };
