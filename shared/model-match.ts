@@ -1,4 +1,5 @@
 import type {ProductCardItem,ProductAudience} from "./product-card";
+import {framingFor} from "./try-on-recipes";
 
 export const modelIdentities=[
     {identity:"white-woman",audience:"women",name:"女模特"},{identity:"white-man",audience:"men",name:"男模特"},
@@ -20,7 +21,7 @@ export function pickModel(presets:readonly ModelPreset[],item:Pick<ProductCardIt
     const audience=item?.audience??"unknown";
     const personal=mine.find(m=>m.id===pref.assetId);
     if(item&&personal&&compatible(personal.audience,audience))return {assetId:personal.id};
-    const target=item?.wearPosition,frame:ModelFraming=target==="head"||target==="neck"?"head":target==="upper"||target==="hand"?"half":"full";
+    const frame=framingFor(item?.wearPosition);
     const group:ModelAudience=audience==="kids"?pref.lastChild??"girls":audience==="men"?"men":"women";
     const choices=presets.filter(p=>compatible(p.audience,audience));
     const ranked=choices.filter(p=>item&&p.identity===pref.presetIdentity||p.audience===group||audience==="kids").sort((a,b)=>{

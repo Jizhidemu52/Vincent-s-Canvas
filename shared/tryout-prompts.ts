@@ -1,5 +1,6 @@
 import {productNoun,type ProductCardItem,type WearPosition} from "./product-card";
 import type { TryoutColor } from "./tryout";
+import {recipeFor} from "./try-on-recipes";
 
 const positions:Record<WearPosition,string>={head:"头部",neck:"颈部",upper:"上身",lower:"下身",full:"全身",hand:"手部",foot:"脚部",shoulder:"肩背",none:""};
 type Item=Pick<ProductCardItem,"category"|"wearPosition">;
@@ -25,7 +26,9 @@ export function wearPrompt(products:readonly (Item|null)[]) {
     if(!products.length) throw new Error("请选择上身产品");
     const lines=products.map((p,i)=>{
         const ref="图片"+(i+2);
-        return p?.category && p.wearPosition!=="none" ? "让图片1的模特"+wearVerb(p.wearPosition)+ref+"的"+p.category+"，位置在"+positions[p.wearPosition]+"。" : "让图片1的模特穿戴"+ref+"中的产品，按这件产品本来的穿戴方式。";
+        if(!p?.category||p.wearPosition==="none")return "让图片1的模特穿戴"+ref+"中的产品，按这件产品本来的穿戴方式。";
+        const recipe=recipeFor(p),verb=p.wearPosition==="hand"&&recipe.group==="包"?"提起":wearVerb(p.wearPosition);
+        return "让图片1的模特"+verb+ref+"的"+p.category+"，位置在"+positions[p.wearPosition]+"。"+(recipe.guard?"只按"+ref+"中实际存在的细节处理，不新增部件。"+recipe.guard:"");
     });
     return ["图片1是模特，决定人物的外貌、姿势和背景。",...lines,products.length>1?"每件产品保持各自的款式、颜色、图案和材质，不互相混合。":"产品的款式、颜色、图案和材质与图片2完全一致。","模特的脸、体型、姿势和背景保持不变。"].join("\n");
 }
