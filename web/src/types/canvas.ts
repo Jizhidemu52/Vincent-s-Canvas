@@ -69,6 +69,7 @@ export type CanvasGenerationRecord = {
 };
 
 export type CanvasNodeMetadata = {
+    proposalBoard?: import("@/lib/canvas/proposal-board").ProposalBoardSpec;
     imageConversation?: { conversationId: string; versionId: string; assetId: string; turnId: string | null };
     designTask?: { requestId: string; status: string; label: string };
     designExecutionId?: string;
