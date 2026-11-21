@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { Router } from "express";
 import { outfitTryout,refineTryout,tryoutSubmission,tryoutBatch,TRYOUT_BATCH_MAX,type TryoutSubmission } from "../../../shared/tryout-submission";
 import {outfitRecipe} from "../tryout-outfit";
+import {readTryoutPreview} from "../tryout-result-preview";
+import {z} from "zod";
 import { colorPrompt,materialPrompt,wearPrompt,tryoutImageOptions } from "../../../shared/tryout-prompts";
 import { assertCanvasOwner,CanvasDocumentError } from "../canvas-document";
 import { withTransaction } from "../db-transaction";
@@ -17,7 +19,7 @@ import {tryoutProductItems} from "../product-card-service";
 import {closestProductPart} from "../../../shared/product-card-region";
 import type {ProductCardItem} from "../../../shared/product-card";
 import {resolvePortrait,lockPreset} from "../model-library";
-type Policy={credits:()=>Promise<boolean>;maxInflightTasks:number;maxPausedTasks:number;productCards?:boolean};
+type Policy={credits:()=>Promise<boolean>;maxInflightTasks:number;maxPausedTasks:number;productCards?:boolean;displayBeforeSave?:boolean};
 async function recipe(input:TryoutSubmission,db:Pick<Database,"query">,ownerId:string,items:Map<string,ProductCardItem|null>,locked=false):Promise<{prompt:string;ids:string[];model?:{name:string;presetId?:string;assetId?:string};presetId?:string;child?:"boys"|"girls"}> {
     const item=input.kind==="wear"?null:items.get(input.sourceAssetId)??null;
     const part=input.kind==="wear"?null:input.part??closestProductPart(item,input.fallbackHex);
@@ -39,6 +41,16 @@ async function recipe(input:TryoutSubmission,db:Pick<Database,"query">,ownerId:s
 }
 export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm?:ReturnType<typeof createTryoutPrewarm>) {
     const router=Router();
+    router.get("/results/:id/preview",async(req,res,next)=>{try{
+        const owner=(req as unknown as AuthenticatedRequest).auth.id;
+        assertCanvasOwner(req.headers["x-canvas-owner-id"],owner);
+        res.set({"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"});
+        if(!policy.displayBeforeSave){res.sendStatus(204);return;}
+        await assertModuleEnabled(db,"canvas-tryout");
+        const id=z.string().uuid().parse(req.params.id),preview=await readTryoutPreview(db,cache,owner,id);
+        if(!preview){res.sendStatus(204);return;}
+        res.set("X-Tryout-Save-State",preview.saving).type("image/webp").send(preview.bytes);
+    }catch(e){next(e);}});
     router.post("/prewarm",async(req,res,next)=>{
         try{
             const actor=(req as AuthenticatedRequest).auth;

@@ -12,7 +12,7 @@ export type SavedLayerOriginal = { assetId: string; contentUrl: string; bytes: U
 export type LayerOriginal = Omit<SavedLayerOriginal, "assetId" | "contentUrl">;
 export const hashLayerOriginal = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-async function downloadPinnedOriginal(url: string) {
+export async function downloadPinnedOriginal(url: string) {
   const node = Bun.which("node");
   if (!node) throw new Error("服务端缺少原生 Node.js 安全下载运行时");
   return new Promise<Buffer>((resolve, reject) => {

@@ -7,6 +7,8 @@ import { decryptSecret } from "./security";
 import {tryoutReferenceService,invalidateTryoutReferences,pruneTryoutReferences,lookupReadyTryoutInputs} from "./tryout-reference";
 import {publishedPortrait} from "./model-library";
 import {createTryoutPrewarm} from "./tryout-prewarm";
+import {downloadTryoutResult,recordTryoutResult,type TryoutResultReceipt} from "./tryout-result-receipt";
+import {createTryoutPreviewWriter} from "./tryout-result-preview";
 import {assertModuleEnabled as assertTryoutModuleEnabled} from "./module-flags";
 import {MARK_GPT26_IMAGE_MODELS as tryoutModels} from "../../shared/mark-image-models";
 import { settleReservation } from "./billing";
@@ -72,7 +74,7 @@ type WorkRow = {
   model_config_id: string | null;
   tool_key: string | null;
   result_document: LayerStudioResultDocument | null;
-  upstream_result_document: Seedream55Manifest | ApiMartVideoReceipt | null;
+  upstream_result_document: Seedream55Manifest | ApiMartVideoReceipt | TryoutResultReceipt | null;
   prompt: string;
   parameters: Record<string, unknown>;
   source_urls: string[];
@@ -109,6 +111,7 @@ type WorkRow = {
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
 let cache: Cache;
+let writeTryoutPreview:ReturnType<typeof createTryoutPreviewWriter>;
 const storage = new ObjectStorage(config);
 let stopping = false;
 let queueReconciliation: Promise<void> | null = null;
@@ -146,7 +149,7 @@ async function runTask(taskId: string) {
   // A durable Seedream receipt remains recoverable even if an administrator
   // changes the model configuration after the paid request completed. A foreign
   // image manifest cannot establish completion for a video/audio task.
-  const isSeedream55 = ["image_generation", "inpaint", "upscale", "batch_image", "seamless_stitch"].includes(task.operation_type)
+  const isSeedream55 = !task.request_id?.startsWith("tryout:") && ["image_generation", "inpaint", "upscale", "batch_image", "seamless_stitch"].includes(task.operation_type)
     && (task.tool_key === "layer-studio"
     || (task.model_id === "seedream-5-5" && task.protocol === "apimart" && !task.workflow_config_id)
     || (task.upstream_result_document?.version === 1 && !("kind" in task.upstream_result_document)
@@ -188,6 +191,10 @@ async function runTask(taskId: string) {
     providerProducedResult = true;
     heartbeat.assertOwned();
     await assertTaskExecution(task);
+    let saved=false;
+    const first=providerResults[0];
+    if(config.TRYOUT_DISPLAY_BEFORE_SAVE==="true"&&task.upstream_result_document&&"kind" in task.upstream_result_document&&task.upstream_result_document.kind==="tryout-image"&&first&&"bytes" in first)
+      void writeTryoutPreview(task,first.bytes,()=>saved).catch(()=>console.warn(JSON.stringify({event:"tryout.preview_unavailable",taskId:task.id})));
     const resultUrls = await timing.measure("result_store", async () => {
       if (!isSeedream55) return storeResults(task, providerResults);
       const manifest = task.upstream_result_document;
@@ -214,6 +221,7 @@ async function runTask(taskId: string) {
         );
       });
     });
+    saved=true;
     outcome = "success";
   } catch (error) {
     if (error instanceof VideoTaskPending || error instanceof ApiMartImageTaskPending || error instanceof WorkflowTaskPending) {
@@ -347,6 +355,7 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
     if (!receipt || receipt.modelId !== task.model_id || receipt.providerId !== task.provider_id || receipt.size !== task.parameters.size || task.protocol !== "apimart" || task.workflow_config_id) throw new Error("重出任务的原模型或精确尺寸已变化，未进行新的供应商提交");
   }
   if (task.request_id?.startsWith("ic:")) validateConversationTaskBinding(task);
+  if(task.upstream_result_document!=null&&task.request_id?.startsWith("tryout:"))return downloadTryoutResult(task,task.upstream_result_document,config.PROVIDER_ENCRYPTION_KEY!);
   // A completed, identity-bound receipt no longer needs provider credentials or
   // another status query. Invalid non-null documents fail closed in the reader.
   if (task.operation_type === "video_generation" && task.upstream_result_document != null)
@@ -579,6 +588,10 @@ async function executeApiMartImage(
     throw new ApiMartImageTaskPending(Math.min(error.nextPollMs, remaining), { code: error.code, httpStatus: error.httpStatus });
   }
   if (result.status === "pending") throw new ApiMartImageTaskPending(result.nextPollMs,undefined,result.confirmInputDownloadFailure);
+  if(task.request_id?.startsWith("tryout:")){
+    task.upstream_result_document=await recordTryoutResult(db,task,result.urls,config.PROVIDER_ENCRYPTION_KEY!);
+    return downloadTryoutResult(task,task.upstream_result_document,config.PROVIDER_ENCRYPTION_KEY!);
+  }
   if (isSeedream55) {
     if (!result.manifest) throw new Error("图层任务缺少结果清单");
     const document = seedream55PublicDocument(task.id, result.manifest);
@@ -1126,6 +1139,7 @@ let workerHealth: ReturnType<typeof startWorkerHealth> | undefined;
 // must not make this instance healthy before dependency initialization.
 await resetWorkerHealth();
 cache = await createCache(config.REDIS_URL);
+writeTryoutPreview=createTryoutPreviewWriter(db,cache);
 await reconcileTaskQueue();
 console.log(JSON.stringify({ event: "worker.started", concurrency: config.WORKER_CONCURRENCY }));
 if (!stopping) workerHealth = startWorkerHealth({

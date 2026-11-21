@@ -9,18 +9,22 @@ import type {ObjectStorage} from "../../src/object-storage";
 import {loadConfig} from "../../src/config";
 import {encryptSecret} from "../../src/security";
 import {createTryoutPrewarm} from "../../src/tryout-prewarm";
+import {recordTryoutResult,openTryoutResult} from "../../src/tryout-result-receipt";
+import {createIsolatedQueueCache} from "../helpers/isolated-queue-cache";
+import {createTryoutPreviewWriter,readTryoutPreview} from "../../src/tryout-result-preview";
 
 (process.env.PGLITE_RUNTIME_PATH?test:test.skip)("tryout admission is owned, idempotent, priced, and reuses the concurrency-controlled queue",async()=>{
     const sql=await createIsolatedPostgres();
     const [user,other,provider,model,product,person]=Array.from({length:6},()=>randomUUID());
-    const app=express(),cache={eval:async()=>1} as unknown as Cache;
+    let previewCache:Cache|undefined;
+    const app=express(),cache={eval:async()=>1,get:(k:string)=>previewCache?.get(k)} as unknown as Cache;
     app.use(express.json(),(req,_res,next)=>{const id=req.get("x-fixture-user");Object.assign(req,{auth:{id,role:id===other?"super_admin":"designer",departmentId:null}});next();});
     const key=Buffer.alloc(32,7).toString("base64"),config=loadConfig({NODE_ENV:"test",DATABASE_URL:"isolated",REDIS_URL:"isolated",PROVIDER_ENCRYPTION_KEY:key});
     const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAFUlEQVR4nGP8////fwYGBgYWEAHCAD4KBAICIHhuAAAAAElFTkSuQmCC","base64");
     let reads=0,uploads=0;
     const storage={get:async()=>{reads++;return {Body:{transformToWebStream:()=>new Blob([png]).stream()}};}} as unknown as ObjectStorage;
     const warm=createTryoutPrewarm(sql.db,storage,config,{upload:async input=>{uploads++;expect(input.apiKey).toBe("fixture");expect(input.mimeType).toBe("image/webp");return "https://fixture.invalid/ready";}});
-    const policy={credits:async()=>true,maxInflightTasks:4,maxPausedTasks:3};
+    const policy={credits:async()=>true,maxInflightTasks:4,maxPausedTasks:3,displayBeforeSave:false};
     app.use("/api/tryout",createTryoutRouter(sql.db,cache,policy,warm));
     app.use("/api/admin/tryout-bindings",createTryoutBindingsAdmin(sql.db));
     app.use(((err,_req,res,_next)=>res.status(err.status??400).json({error:err.code??err.name,message:err.message})) as ErrorRequestHandler);
@@ -189,5 +193,40 @@ import {createTryoutPrewarm} from "../../src/tryout-prewarm";
         }
         await sql.db.query("UPDATE tasks SET status='success' WHERE id=$1",[previousTask]);
         expect((await submit({...outfit,requestId:randomUUID(),originTaskId:previousTask,originNodeId:previousNode,sourceAssetId:randomUUID()})).error).toBe("TRYOUT_OUTFIT_LIMIT");
+        const claimed=(await sql.db.query("UPDATE tasks SET status='processing',execution_token=$2,upstream_task_id='provider-job',lease_expires_at=now()+interval '1 minute' WHERE id=$1 RETURNING *",[previousTask,randomUUID()])).rows[0];
+        const supplierUrl="https://results.example/output.png?ticket=private";
+        await expect(recordTryoutResult(sql.db,{...claimed,execution_token:randomUUID()},[supplierUrl],key)).rejects.toThrow();
+        const completion=await recordTryoutResult(sql.db,claimed,[supplierUrl],key);
+        expect(openTryoutResult(claimed,completion,key)).toBe(supplierUrl);
+        await expect(recordTryoutResult(sql.db,claimed,["https://other.example/wrong.png"],key)).rejects.toThrow();
+        expect((await sql.db.query("SELECT result_urls,upstream_result_document FROM tasks WHERE id=$1",[claimed.id])).rows[0]).toMatchObject({result_urls:[],upstream_result_document:completion});
+        if(process.env.QUEUE_TEST_REDIS_URL){
+            const fixture=await createIsolatedQueueCache();
+            try{
+                const write=createTryoutPreviewWriter(sql.db,fixture.cache);
+                await write(claimed,png,()=>true);expect(await readTryoutPreview(sql.db,fixture.cache,user,claimed.id)).toBeNull();
+                await write(claimed,png,()=>false);
+                const preview=await readTryoutPreview(sql.db,fixture.cache,user,claimed.id);
+                expect(preview?.bytes.subarray(8,12).toString()).toBe("WEBP");expect(preview?.saving).toBe("saving");
+                previewCache=fixture.cache;
+                const requestPreview=(method:string,actor=user,header=actor)=>fetch(base.replace(/quick$/,"results/"+claimed.id+"/preview"),{method,headers:{"x-fixture-user":actor,"x-canvas-owner-id":header}});
+                expect((await requestPreview("GET")).status).toBe(204);
+                policy.displayBeforeSave=true;
+                const bytes=await requestPreview("GET");
+                expect(bytes.status).toBe(200);expect(bytes.headers.get("content-type")).toBe("image/webp");
+                expect(bytes.headers.get("cache-control")).toBe("private, no-store");expect(bytes.headers.get("x-content-type-options")).toBe("nosniff");
+                expect(Buffer.from(await bytes.arrayBuffer())).toEqual(preview!.bytes);
+                const head=await requestPreview("HEAD");
+                expect(head.headers.get("x-tryout-save-state")).toBe("saving");expect((await head.arrayBuffer()).byteLength).toBe(0);
+                expect((await requestPreview("GET",other)).status).toBe(204);expect((await requestPreview("GET",other,user)).status).toBe(403);
+                expect(await readTryoutPreview(sql.db,fixture.cache,other,claimed.id)).toBeNull();
+                await sql.db.query("UPDATE tasks SET status='paused',paused_kind='result_repair' WHERE id=$1",[claimed.id]);
+                expect((await readTryoutPreview(sql.db,fixture.cache,user,claimed.id))?.saving).toBe("retryable");
+                const fast=createTryoutPreviewWriter(sql.db,fixture.cache,async()=>Buffer.from("test preview"),async()=>{});
+                for(let n=0;n<128;n++)await fast({id:randomUUID(),user_id:user},png,()=>false);
+                expect(await readTryoutPreview(sql.db,fixture.cache,user,claimed.id)).toBeNull();
+                expect(await fixture.zCard("tryout:temporary-preview:recent")).toBe(128);
+            }finally{await fixture.close();}
+        }
     }finally{await new Promise<void>(done=>server.close(()=>done()));await sql.close();}
 },30000);

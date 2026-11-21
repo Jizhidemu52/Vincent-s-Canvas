@@ -16,7 +16,7 @@ function loadFunction(path: string, name: string, dependencies: Record<string, u
     const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     const declaration = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
     if (!declaration) throw new Error(`${name} not found`);
-    const code = ts.transpileModule(`${declaration.getText(ast).replace(/^export\s+/, "")}; return ${name};`, {
+    const code = ts.transpileModule(`${declaration.getText(ast).replace(/^export\s+(?:default\s+)?/, "")}; return ${name};`, {
         compilerOptions: { target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React },
     }).outputText;
     return new Function(...Object.keys(dependencies), code)(...Object.values(dependencies));
@@ -36,7 +36,7 @@ function harness(patch: Partial<CanvasNodeData["metadata"]> = {}, options: { onR
     const Diagnostic = loadFunction("../src/components/generation-diagnostic.tsx", "GenerationDiagnostic", { React, Button, DisplayText, ...i18nHarness, generationErrorMessage, isImageResultProcessingFailure, mergeGenerationDiagnostics,
         useUserStore: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: binding.ownerId } }),
         useCopyFeedback: () => ({ copied: false, copy: (value: string) => { copies.push(value); return Promise.resolve(true); } }) });
-    const ErrorContent = loadFunction("../src/components/canvas/canvas-node.tsx", "ErrorContent", { React, RefreshCw, ...i18nHarness, CanvasNodeType, GenerationDiagnostic: Diagnostic,
+    const ErrorContent = loadFunction("../src/components/canvas/canvas-node-error-details.tsx", "NodeErrorDetails", { React, RefreshCw, ...i18nHarness, CanvasNodeType, GenerationDiagnostic: Diagnostic,
         imageResultProcessingFailureMessage, isImageResultProcessingFailure, mergeGenerationDiagnostics });
     const current = { ...node, type: options.type ?? node.type, metadata: { ...node.metadata, ...patch } };
     const tree = ErrorContent({ node: current, theme: canvasThemes.light, onRetry: (value: CanvasNodeData) => retries.push(value.id), onReload: options.onReload });

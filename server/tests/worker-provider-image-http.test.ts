@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import ts from "typescript";
+import {recordTryoutResult,downloadTryoutResult} from "../src/tryout-result-receipt";
 import { ApiMartImageQueryRetryable, ApiMartImageTaskPending, preflightApiMartImageRequest, stepApiMartImageTask, type ApiMartImageTaskInput } from "../src/apimart-image";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "../src/image-edit-input";
 import { validateQuickImageSource } from "../src/image-result-processing";
@@ -81,11 +82,12 @@ function harness(options: { origin?: string; failIssue?: boolean; realCacheFailu
     throw new Error(`Unexpected provider request: ${method} ${url}`);
   };
   const dependencies = {
+    recordTryoutResult,downloadTryoutResult:(task:Parameters<typeof downloadTryoutResult>[0],doc:unknown,key:string)=>downloadTryoutResult(task,doc,key,async()=>{downloads++;return bytes;}),
     tryoutModels:[{modelId:"gpt-image-2.6-flare"}],
     assertTryoutModuleEnabled:async()=>{events.push("tryout-gate");},
     lookupReadyTryoutInputs:async()=>{events.push("owned-cache-lookup");return options.hotTryoutUrls;},
-    db, cache, storage, config: { PROVIDER_IMAGE_PUBLIC_ORIGIN: options.origin ?? origin, PROVIDER_ENCRYPTION_KEY: "fixture-key" }, ProviderImageAccess: options.realCacheFailure ? ProviderImageAccess : FakeProviderImageAccess,
-    decryptSecret: (cipher: string, key: string) => { expect([cipher, key]).toEqual(["fixture-encrypted", "fixture-key"]); return JSON.stringify({ apiKey: "fixture-only" }); },
+    db, cache, storage, config: { PROVIDER_IMAGE_PUBLIC_ORIGIN: options.origin ?? origin, PROVIDER_ENCRYPTION_KEY: Buffer.alloc(32,5).toString("base64") }, ProviderImageAccess: options.realCacheFailure ? ProviderImageAccess : FakeProviderImageAccess,
+    decryptSecret: (cipher: string, key: string) => { expect([cipher, key]).toEqual(["fixture-encrypted", Buffer.alloc(32,5).toString("base64")]); return JSON.stringify({ apiKey: "fixture-only" }); },
     assertImageEditMaskSupport, imageAgentProviderPrompt, openAiImageParameters, OPENAI_IMAGE_TIMEOUT_MS: 180_000,
     assertWorkflowTaskContext, workflowTaskContext, WorkflowTaskPending, normalizeWorkflowOutputs, parsePromptVariables, readPath, renderTemplate,
     fetch: fakeFetch, fetchProviderSubmission: fakeFetch,
@@ -118,6 +120,8 @@ test("prewarmed tryout worker sends the ordered cached references once without r
   expect(task.upstream_task_id).toBe("upstream-owned");
   task.poll_deadline_at=new Date(Date.now()+60_000).toISOString();
   await h.dispatch(task);expect(h.calls.map(c=>c.method)).toEqual(["POST","GET"]);expect(h.loaded()).toBe(0);
+  task.protocol="custom";task.base_url="https://changed.invalid";task.encrypted_credentials="removed";
+  await h.dispatch(task);expect(h.downloads()).toBe(2);expect(h.calls.map(c=>c.method)).toEqual(["POST","GET"]);
   expect(h.events.filter(e=>e==="owned-cache-lookup")).toHaveLength(1);
 });
 

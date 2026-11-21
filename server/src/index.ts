@@ -128,7 +128,7 @@ if (config.PROVIDER_IMAGE_PUBLIC_ORIGIN) {
 const readCreditsEnabled = async (client: Pick<typeof db, "query"> = db) => features.authenticationEnabled && await getCreditsEnabled(client, features.creditsEnabled);
 const imageConversations = createImageConversationRuntime(db, cache, config, { storage, providerImages: providerChatImages, creditsEnabled: readCreditsEnabled });
 app.get("/api/deployment", async (_request, response, next) => {
-  try { response.set("Cache-Control", "no-store").json({ ...features, creditsEnabled: await readCreditsEnabled(), imageConversationsEnabled: config.IMAGE_CONVERSATIONS_ENABLED === "true",productCardsEnabled:features.authenticationEnabled&&config.PRODUCT_CARD_ENABLED==="true"&&Boolean(config.PRODUCT_CARD_MODEL_CONFIG_ID) }); }
+  try { response.set("Cache-Control", "no-store").json({ ...features, creditsEnabled: await readCreditsEnabled(), imageConversationsEnabled: config.IMAGE_CONVERSATIONS_ENABLED === "true",tryoutDisplayBeforeSave:features.authenticationEnabled&&config.TRYOUT_DISPLAY_BEFORE_SAVE==="true",productCardsEnabled:features.authenticationEnabled&&config.PRODUCT_CARD_ENABLED==="true"&&Boolean(config.PRODUCT_CARD_MODEL_CONFIG_ID) }); }
   catch (error) { next(error); }
 });
 
@@ -204,7 +204,7 @@ app.use("/api/tryout/models",requireSession,requireAccountReady,createModelLibra
 app.use("/api/admin/model-presets",requireAdminSession,requireAccountReady,createAdminModelPresetsRouter(db,storage));
 app.use("/api/admin/tryout-bindings",requireAdminSession,requireAccountReady,createTryoutBindingsAdmin(db));
 app.use("/api/admin/material-presets",requireAdminSession,requireAccountReady,createAdminMaterialPresetsRouter(db));
-app.use("/api/tryout",requireSession,requireAccountReady,protectModelIdentity,createTryoutRouter(db,cache,{credits:readCreditsEnabled,maxInflightTasks:config.USER_MAX_INFLIGHT_TASKS,maxPausedTasks:config.PAUSED_TASK_LIMIT_PER_USER,productCards:config.PRODUCT_CARD_ENABLED==="true"},createTryoutPrewarm(db,storage,config)));
+app.use("/api/tryout",requireSession,requireAccountReady,protectModelIdentity,createTryoutRouter(db,cache,{credits:readCreditsEnabled,maxInflightTasks:config.USER_MAX_INFLIGHT_TASKS,maxPausedTasks:config.PAUSED_TASK_LIMIT_PER_USER,displayBeforeSave:config.TRYOUT_DISPLAY_BEFORE_SAVE==="true",productCards:config.PRODUCT_CARD_ENABLED==="true"},createTryoutPrewarm(db,storage,config)));
 app.use(
   "/api/tasks",
   requireSession,

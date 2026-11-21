@@ -7,6 +7,7 @@ export type DeploymentFeatures = {
     oaLoginEnabled: boolean;
     imageConversationsEnabled: boolean;
     productCardsEnabled: boolean;
+    tryoutDisplayBeforeSave:boolean;
 };
 
 export function normalizeDeploymentFeatures(value: Partial<DeploymentFeatures> = {}): DeploymentFeatures {
@@ -19,6 +20,7 @@ export function normalizeDeploymentFeatures(value: Partial<DeploymentFeatures> =
         oaLoginEnabled,
         imageConversationsEnabled: authenticationEnabled && value.imageConversationsEnabled === true,
         productCardsEnabled: authenticationEnabled && value.productCardsEnabled === true,
+        tryoutDisplayBeforeSave:authenticationEnabled&&value.tryoutDisplayBeforeSave===true,
     };
 }
 
@@ -34,7 +36,7 @@ export async function loadDeploymentFeatures() {
         if (!response.ok) return false;
         const value = await response.json();
         if (!value || typeof value !== "object" || ["authenticationEnabled","oaLoginEnabled","creditsEnabled","rolePortalsEnabled"].some(key=>typeof value[key]!=="boolean")
-            || ["imageConversationsEnabled","productCardsEnabled"].some(key=>value[key]!==undefined&&typeof value[key]!=="boolean")) return false;
+            || ["imageConversationsEnabled","productCardsEnabled","tryoutDisplayBeforeSave"].some(key=>value[key]!==undefined&&typeof value[key]!=="boolean")) return false;
         Object.assign(deploymentFeatures, normalizeDeploymentFeatures(value));
         return true;
     } catch {

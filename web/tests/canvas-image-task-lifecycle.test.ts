@@ -4,6 +4,7 @@ import ts from "typescript";
 
 import { observeCanvasImageTask, type CanvasImageTaskBinding } from "@/lib/canvas/canvas-image-task-recovery";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
+import {serverMediaId} from "@/services/canvas-media-links";
 import { shouldCancelCanvasGeneration, stopCanvasObservation } from "@/lib/canvas/canvas-project-async-lifecycle";
 import { QueuedTaskFailedError, QueuedTaskPausedError, imageTaskPrompts, type QueuedTask } from "@/services/api/generation-tasks";
 import { restoreCanvasMaskResult } from "@/lib/canvas/canvas-mask-adaptation";
@@ -114,6 +115,7 @@ function harness(options: {
             requestEdit: (_config: unknown, _prompt: string, _references: unknown, _mask: unknown, requestOptions: { tool?: string }) => { if (options.imageRequest) return options.imageRequest(requestOptions.tool, true); throw new Error("Unexpected fresh image edit"); },
             requestGeneration: (_config: unknown, _prompt: string, requestOptions: { tool?: string }) => { if (options.imageRequest) return options.imageRequest(requestOptions.tool, false); throw new Error("Unexpected fresh image generation"); },
         },
+        "@/services/canvas-media-links": {serverMediaId},
         "@/services/image-storage": {
             uploadImage: async (url: string) => { uploads.push(url); return options.loadImage ? options.loadImage(url) : image; },
         },

@@ -4,7 +4,7 @@ import { loadDeploymentFeatures, normalizeDeploymentFeatures } from "@/lib/deplo
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
-const openFeatures = { authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false, imageConversationsEnabled: false,productCardsEnabled:false };
+const openFeatures = { authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false, imageConversationsEnabled: false,productCardsEnabled:false,tryoutDisplayBeforeSave:false };
 
 describe("deployment switches", () => {
     test("opens creative workspaces without account or credit gates by default", () => {
