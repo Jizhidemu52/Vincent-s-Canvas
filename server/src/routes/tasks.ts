@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { IMAGE_RESULT_POSTPROCESS_FAILURE_CODE, IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX, publicTaskFailurePayload } from "../../../shared/generation-error";
 import { Router } from "express";
 import { z } from "zod";
-import { taskSubmissionSchema as singleSchema, batchSubmissionSchema as batchSchema } from "../../../shared/task-contracts";
+import { taskSubmissionSchema as singleSchema, batchSubmissionSchema as batchSchema,taskLookupRequestId } from "../../../shared/task-contracts";
 
 import { writeAudit } from "../audit";
 import {assertCanvasOwner} from "../canvas-document";
@@ -511,7 +511,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
   router.get("/by-request/:requestId", async (request, response, next) => {
     response.set("Cache-Control", "private, no-store");
     try {
-      const requestId = singleSchema.shape.requestId.parse(request.params.requestId);
+      const requestId = taskLookupRequestId.parse(request.params.requestId);
       const actor = (request as unknown as AuthenticatedRequest).auth;
       const result = await db.query(
         `SELECT ${taskSelect} FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.request_id=$1 AND t.user_id=$2`,

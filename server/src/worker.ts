@@ -7,7 +7,7 @@ import { decryptSecret } from "./security";
 import {tryoutReferenceService,invalidateTryoutReferences,pruneTryoutReferences,lookupReadyTryoutInputs} from "./tryout-reference";
 import {publishedPortrait} from "./model-library";
 import {createTryoutPrewarm} from "./tryout-prewarm";
-import {downloadTryoutResult,recordTryoutResult,type TryoutResultReceipt} from "./tryout-result-receipt";
+import {downloadSingleImageOriginal,downloadTryoutResult,recordTryoutResult,type TryoutResultReceipt} from "./tryout-result-receipt";
 import {assertPortraitSubmission,portraitSourceOwner,stageGeneratedPortrait} from "./model-preset-generation";
 import {createTryoutPreviewWriter} from "./tryout-result-preview";
 import {assertModuleEnabled as assertTryoutModuleEnabled} from "./module-flags";
@@ -619,6 +619,7 @@ async function executeApiMartImage(
     task.result_document = document;
     return [];
   }
+  if(task.request_id?.startsWith("preset-gen:"+task.user_id+":"))return downloadSingleImageOriginal(result.urls);
   return Promise.all(result.urls.map(url => fetchProviderResult(url)));
 }
 

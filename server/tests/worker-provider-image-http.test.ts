@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import ts from "typescript";
 import {createHash} from "node:crypto";
-import {recordTryoutResult,downloadTryoutResult} from "../src/tryout-result-receipt";
+import {recordTryoutResult,downloadTryoutResult,downloadSingleImageOriginal} from "../src/tryout-result-receipt";
 import { ApiMartImageQueryRetryable, ApiMartImageTaskPending, preflightApiMartImageRequest, stepApiMartImageTask, type ApiMartImageTaskInput } from "../src/apimart-image";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "../src/image-edit-input";
 import { validateQuickImageSource } from "../src/image-result-processing";
@@ -87,6 +87,7 @@ function harness(options: { origin?: string; creativeUpload?:boolean; failIssue?
     withTransaction:async(_db:unknown,f:(c:typeof db)=>Promise<unknown>)=>f(db),
     tryoutReferenceService:()=>async(input:{ownerId:string;tier:string;read:()=>Promise<{assetId?:string;bytes:Uint8Array}>})=>{expect(input.ownerId).toBe(options.creativeUpload?newTask().user_id:"original-admin");expect(input.tier).toBe("hd");const source=await input.read();expect(source.bytes).toEqual(bytes);return "https://provider.invalid/"+(options.creativeUpload?source.assetId:"portrait-original")+".png";},
     recordTryoutResult,downloadTryoutResult:(task:Parameters<typeof downloadTryoutResult>[0],doc:unknown,key:string)=>downloadTryoutResult(task,doc,key,async()=>{downloads++;return bytes;}),
+    downloadSingleImageOriginal:(urls:string[])=>downloadSingleImageOriginal(urls,async()=>{events.push("read-pinned-original");downloads++;return bytes;}),
     tryoutModels:[{modelId:"gpt-image-2.6-flare"}],
     assertTryoutModuleEnabled:async()=>{events.push("tryout-gate");},
     lookupReadyTryoutInputs:async()=>{events.push("owned-cache-lookup");return options.hotTryoutUrls;},
@@ -131,7 +132,7 @@ test("admin portrait crop uses the full portrait exactly once, checks the slot b
     await expect(h.dispatch(task)).rejects.toBeInstanceOf(ApiMartImageTaskPending);
     expect(h.events.indexOf("validate-portrait-slot")).toBeGreaterThan(-1);expect(h.events.indexOf("validate-portrait-slot")).toBeLessThan(h.events.indexOf("fetch"));
     expect(h.calls[0]?.payload?.image_urls).toEqual(["https://provider.invalid/portrait-original.png"]);expect(h.grants).toHaveLength(0);
-    await h.dispatch(task);expect(h.calls.filter(c=>c.method==="POST")).toHaveLength(1);
+    await h.dispatch(task);expect(h.events).toContain("read-pinned-original");expect(h.calls.filter(c=>c.method==="POST")).toHaveLength(1);
     const different={...task,protocol:"openai",upstream_task_id:null};await expect(h.dispatch(different)).rejects.toThrow("高清配置");
     expect(h.calls.filter(c=>c.method==="POST")).toHaveLength(1);
 });

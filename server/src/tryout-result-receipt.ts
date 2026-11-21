@@ -33,9 +33,13 @@ export async function recordTryoutResult(db:Pick<Database,"query">,t:Task&{execu
 }
 export async function downloadTryoutResult(t:Task,doc:unknown,key:string,download=downloadPinnedOriginal){
     const url=openTryoutResult(t,doc,key);
+    return downloadSingleImageOriginal([url],download);
+}
+export async function downloadSingleImageOriginal(urls:readonly string[],download=downloadPinnedOriginal){
     try{
+        const [url]=urls;if(urls.length!==1||!safeUrl(url))throw new Error();
         const bytes=await download(url),mimeType=providerImageMimeType(bytes,"");
         if(!["image/jpeg","image/png","image/webp"].includes(mimeType))throw new Error();
         return [{bytes,mimeType}];
-    }catch{throw Object.assign(new Error("试款图已生成，未能下载原结果；只恢复本单，不会重新生成"),{code:"RESULT_DOWNLOAD_FAILED"});}
+    }catch{throw Object.assign(new Error("上游图片已生成，未能下载原图；只恢复本单，不会重新生成"),{code:"RESULT_DOWNLOAD_FAILED"});}
 }

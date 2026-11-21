@@ -117,8 +117,7 @@ describe("production generation routes", () => {
     expect(deps.reads).toHaveLength(readCount);
   });
 
-  test("looks up the exact owned request ID without a recent-history limit or task side effects", async () => {
-    const requestId = "original-request:/图片%:0";
+  test.each(["original-request:/图片%:0","tryout:"+actorId+":dedicated-designer-request","tryout:"+actorId+":hd:"+taskId])("looks up the exact owned request ID %s without a recent-history limit or task side effects", async requestId => {
     for (const status of ["processing", "success", "paused"]) {
       const task = { id: taskId, requestId, userId: actorId, status, credits: 7, resultUrls: status === "success" ? ["/api/assets/result/content"] : [] };
       const deps = dependencies({ task });

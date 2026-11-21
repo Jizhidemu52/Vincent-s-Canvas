@@ -14,6 +14,6 @@ test("completion receipt is private, scoped to the original paid job, and expire
 test("unreadable originals never become displayable results or disclose signed URLs",async()=>{
     const doc=sealTryoutResult(task,[address],key);
     for(const fetch of [async()=>Buffer.from("not an image"),async()=>{throw new Error(address);}]){
-        await expect(downloadTryoutResult(task,doc,key,fetch)).rejects.toMatchObject({code:"RESULT_DOWNLOAD_FAILED",message:"试款图已生成，未能下载原结果；只恢复本单，不会重新生成"});
+        await expect(downloadTryoutResult(task,doc,key,fetch)).rejects.toMatchObject({code:"RESULT_DOWNLOAD_FAILED",message:"上游图片已生成，未能下载原图；只恢复本单，不会重新生成"});
     }
 });

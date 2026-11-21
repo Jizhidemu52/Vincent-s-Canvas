@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { promptInputSchema } from "./prompt-contracts";
 
+export const taskLookupRequestId=z.string().min(8).max(200);
 export const taskBaseSchema = z.object({
-  requestId: z.string().min(8).max(200).refine(id=>!id.startsWith("tryout:"),"试款请求编号由专用入口分配"),
+  requestId: taskLookupRequestId.refine(id=>!id.startsWith("tryout:"),"试款请求编号由专用入口分配"),
   projectId: z.string().min(1).max(200),
   operationType: z.string().min(1).max(80),
   toolKey: z.string().min(1).max(100).optional(),
@@ -22,7 +23,7 @@ export const batchSubmissionSchema = taskBaseSchema.extend({
 export const taskStatusSchema = z.enum(["waiting", "processing", "paused", "success", "failed", "cancelled"]);
 export const taskResponseSchema = z.object({
   task: z.object({
-    id: z.string().uuid(), requestId: z.string().min(8).max(200), status: taskStatusSchema,
+    id: z.string().uuid(), requestId: taskLookupRequestId, status: taskStatusSchema,
     resultUrls: z.array(z.string()).optional(), failureReason: z.string().nullable().optional(),
   }).passthrough(),
 }).passthrough();
