@@ -22,7 +22,7 @@ const grantSchema = z.object({
 });
 type Grant = z.infer<typeof grantSchema>;
 type Binding = { taskId: string; userId: string; assetId: string; objectKey: string };
-type BoundAsset = { object_key: string; mime_type: string; filename: string; byte_size: string | number; workflow_config_id?: string | null;
+type BoundAsset = { object_key: string; mime_type: string; filename: string; byte_size: string | number; queued_at: string | Date; workflow_config_id?: string | null;
   tool_key?: string | null; model_id?: string | null; protocol?: string | null; operation_type?: string; kind?: string };
 
 // Expanded formats belong to this persisted task route, never to a caller's policy flag.
@@ -77,7 +77,7 @@ export class ProviderImageAccess {
     // issuance requires that lease; every read still requires a live task and
     // exactly the same employee, source membership and ready original object.
     const result = await this.db.query<BoundAsset>(
-      `SELECT a.object_key,a.mime_type,a.filename,a.byte_size,a.kind,t.operation_type,t.tool_key,m.model_id,m.workflow_config_id,p.protocol FROM assets a JOIN tasks t ON t.id=$1
+      `SELECT a.object_key,a.mime_type,a.filename,a.byte_size,a.kind,t.queued_at,t.operation_type,t.tool_key,m.model_id,m.workflow_config_id,p.protocol FROM assets a JOIN tasks t ON t.id=$1
        JOIN users u ON u.id=t.user_id
        LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id
        WHERE a.id=$3 AND a.owner_user_id=$2 AND a.object_key=$4
@@ -151,7 +151,8 @@ export class ProviderImageAccess {
     assertBoundReferencePolicy(asset, grant.mimeType, grant.length);
     if (Number(asset.byte_size) !== grant.length || normalizeAssetMime(asset.mime_type) !== grant.mimeType) throw new ProviderImageAccessError(404);
     return { asset: { object_key: grant.objectKey, mime_type: grant.mimeType, filename: grant.filename },
-      expectedObject: { etag: grant.etag, length: grant.length } };
+      expectedObject: { etag: grant.etag, length: grant.length },
+      timing: { taskId: grant.taskId, queuedAt: new Date(asset.queued_at).getTime(), issuedAt: grant.expiresAt - ttlSeconds * 1000 } };
   }
 
   /** Worker has streamed and probed this exact ETag; no public caller can issue grants. */

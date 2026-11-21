@@ -14,6 +14,7 @@ export function publicGenerationFailure(reason: unknown, status?: string): strin
     if (status === "paused" || /待核查|勿重复|不要重复|submission.{0,20}(unknown|uncertain)|query.{0,12}paused/i.test(raw))
         return "原任务结果待核查，请查询原任务或联系管理员；不要重复生成。";
     if (raw === AVIF_REFERENCE_UNSUPPORTED_MESSAGE) return raw;
+    if (raw === "供应商未能读取参考图，复查原任务后仍为失败；未重新提交生成。") return raw;
     if (["图片参考图仅支持 JPEG、PNG、WebP 或 GIF 格式", "视频参考图仅支持 JPEG、PNG、WebP 或 GIF 格式", unsupportedReferenceMessage].includes(raw)) return unsupportedReferenceMessage;
     // Only the exact upload adapter message proves generation never started.
     // A generic 429 may belong to a submitted task and must keep its old guidance.

@@ -1,10 +1,12 @@
 import { isIP } from "node:net";
+import { setTimeout as delay } from "node:timers/promises";
 import { AVIF_REFERENCE_UNSUPPORTED_MESSAGE } from "../../shared/generation-error";
 import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "./provider-submission-transport";
 
 export const APIMART_VIDEO_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 export const APIMART_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const extensions: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
+const upload429Delays = [2_000, 5_000, 15_000] as const;
 
 function uploadTransportFailure(cause: unknown, purposeName: "图片" | "视频") {
   const diagnostics = readProviderSubmissionDiagnostics(cause);
@@ -41,7 +43,7 @@ export async function uploadApiMartImage(input: {
   mimeType: string;
   filename?: string;
   purpose?: "image" | "video";
-}, runtime: { fetch?: (url: string, init?: RequestInit) => Promise<Response> } = {}): Promise<string> {
+}, runtime: { fetch?: (url: string, init?: RequestInit) => Promise<Response>; sleep?: (ms:number) => Promise<unknown>; shouldRetry?: () => boolean } = {}): Promise<string> {
   const purposeName = input.purpose === "image" ? "图片" : "视频";
   if (!input.apiKey.trim()) throw new Error(`APIMart ${purposeName}服务端凭据未配置`);
   if (input.purpose === "image") validateApiMartGenerationImage(input);
@@ -54,17 +56,20 @@ export async function uploadApiMartImage(input: {
   const filename = `reference.${extensions[input.mimeType]}`;
   const form = new FormData();
   form.append("file", file, filename);
-  const response = await (runtime.fetch || fetchProviderSubmission)(`${input.baseUrl.replace(/\/+$/, "")}/uploads/images`, {
-    method: "POST", headers: { authorization: `Bearer ${input.apiKey}` }, body: form,
-    redirect: "error", signal: AbortSignal.timeout(180_000),
-  }).catch((error: unknown) => {
-    throw uploadTransportFailure(error, purposeName);
-  });
-  if (!response.ok) {
-    // The native transport exposes a live stream; close it before the upload
-    // promise settles so a failed concurrent batch leaves no unread response.
+  const signal = AbortSignal.timeout(180_000);
+  let response: Response;
+  for (let attempt = 0;; attempt++) {
+    response = await (runtime.fetch || fetchProviderSubmission)(`${input.baseUrl.replace(/\/+$/, "")}/uploads/images`, {
+      method: "POST", headers: { authorization: `Bearer ${input.apiKey}` }, body: form, redirect: "error", signal,
+    }).catch((error: unknown) => { throw uploadTransportFailure(error, purposeName); });
+    if (response.ok) break;
     await response.body?.cancel().catch(() => undefined);
-    throw new Error(`APIMart 参考图上传失败（${response.status}），尚未提交${purposeName}生成`);
+    const waitMs = upload429Delays[attempt];
+    const rejected = () => Object.assign(new Error(`APIMart 参考图上传失败（${response.status}），尚未提交${purposeName}生成`), {code:"PROVIDER_REFERENCE_UPLOAD_HTTP_ERROR",httpStatus:response.status});
+    if (response.status !== 429 || waitMs === undefined || runtime.shouldRetry?.() === false) throw rejected();
+    if (runtime.sleep) await runtime.sleep(waitMs);
+    else await delay(waitMs, undefined, {signal}).catch(error => { throw uploadTransportFailure(error, purposeName); });
+    if (signal.aborted || runtime.shouldRetry?.() === false) throw rejected();
   }
   const result = await response.json().catch((error: unknown) => {
     if (error instanceof SyntaxError) return null;

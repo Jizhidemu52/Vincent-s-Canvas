@@ -142,6 +142,54 @@ integration("ordinary image recovers from ENOSPC using the production timer, sam
   } finally { await scheduler?.stop(); await fixture.close(); }
 }, 160_000);
 
+integration("reference download failures recheck the original ID after three seconds and settle only definitive outcomes", async () => {
+  const fixture = await databaseFixture("image"), { db, redis } = fixture;
+  try {
+    const cases = new Map<string, { outcome: string; polls: number[]; posts: number }>();
+    for (const outcome of ["success", "failed", "paused"]) cases.set(await fixture.task(), { outcome, polls: [], posts: 0 });
+    const failed = { data: { status: "failed", error: { code: "input_image_download", message: "HTTP 410" } } };
+    const worker = await productionWorker({
+      db, cache: redis.cache, randomUUID, TASK_LEASE_SECONDS, config: { TASK_MOCK_MODE: "false", RESULT_REPAIR_MAX_ATTEMPTS: 3 },
+      acquireModelLease, releaseModelLease, startTaskLeaseHeartbeat, TaskExecutionLost, withTransaction, settleReservation,
+      scheduleQueuedTask, queueScore, canAutomaticallyRetryTask, recalculateBatch, VideoTaskPending, ApiMartImageTaskPending,
+      VideoSubmissionClaimLost, VideoProviderFailure, ApiMartImageProviderFailure, ProviderSubmissionRejected, submissionWasNotSent,
+      readProviderSubmissionDiagnostics: () => undefined, loadSourceAssets: async () => [], storage: { configured: true },
+      createGenerationTiming: () => ({ measure: (_stage: string, action: () => unknown) => action(), finish() {} }),
+      storeResults: async (task: { id: string }) => [`/api/assets/${task.id}/content`],
+      fetchProviderResult: async () => ({ bytes: new Uint8Array([1]), mimeType: "image/png" }),
+      stepApiMartImageTask: (input: ApiMartImageTaskInput) => stepApiMartImageTask(input, { fetch: async (url, init) => {
+        if (init?.method === "POST") {
+          const id = JSON.parse(String(init.body)).prompt.slice(5);
+          cases.get(id)!.posts++;
+          return Response.json({ data: [{ task_id: id }] });
+        }
+        const c = cases.get(String(url).split("/tasks/")[1]!)!;
+        c.polls.push(Date.now());
+        if (c.polls.length === 1 || c.outcome === "failed") return Response.json(failed);
+        if (c.outcome === "paused") return new Response(null, { status: 410 });
+        return Response.json({ data: { status: "completed", result: { images: [{ url: "https://provider.invalid/recovered.png" }] } } });
+      } }),
+    });
+    for (const id of cases.keys()) await worker.runTask(id);
+    const stopAt = Date.now() + 18_000;
+    while ([...cases.values()].some(c => c.polls.length < 2)) {
+      if (Date.now() > stopAt) throw new Error("Original task was not rechecked");
+      const ready = await popReadyTask(redis.cache);
+      if (ready) await worker.runTask(ready);
+      else await Bun.sleep(75);
+    }
+    for (const [id, c] of cases) {
+      const row = (await db.query("SELECT t.status,t.attempts,t.upstream_task_id,t.reference_download_recheck_at,r.status AS reservation,(SELECT count(*)::int FROM generation_history h WHERE h.task_id=t.id) AS history FROM tasks t JOIN credit_reservations r ON r.request_id=t.request_id WHERE t.id=$1", [id])).rows[0];
+      expect(row).toMatchObject({ status: c.outcome, attempts: 1, upstream_task_id: id,
+        reservation: c.outcome === "success" ? "captured" : c.outcome === "failed" ? "released" : "held", history: c.outcome === "paused" ? 0 : 1 });
+      expect(row.reference_download_recheck_at).toBeTruthy();
+      expect(c.posts).toBe(1);
+      expect(c.polls).toHaveLength(2);
+      expect(c.polls[1]! - c.polls[0]!).toBeGreaterThanOrEqual(2990);
+    }
+  } finally { await fixture.close(); }
+}, 40_000);
+
 for (const kind of ["video", "image"] as const) integration(`30 mock ${kind}s release worker slots, preserve model inflight quota and recover without a second POST`, async () => {
   const fixture = await databaseFixture(kind);
   const { db, redis, model } = fixture;

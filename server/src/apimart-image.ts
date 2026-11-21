@@ -448,7 +448,7 @@ export class ApiMartImageProviderFailure extends Error {
 }
 
 export class ApiMartImageTaskPending extends Error {
-  constructor(public readonly nextPollMs = 2_000, public readonly queryFailure?: { code: string; httpStatus?: number }) {
+  constructor(public readonly nextPollMs = 2_000, public readonly queryFailure?: { code: string; httpStatus?: number }, public readonly confirmInputDownloadFailure = false) {
     super(queryFailure ? "图片状态暂时无法确认，等待查询原任务" : "图片仍在生成，等待下一次状态查询");
   }
 }
@@ -473,6 +473,7 @@ export type ApiMartImageTaskInput = ApiMartImageInput & {
   submissionStartedAt?: string | Date | null;
   /** Durable worker deadline; queued retries never extend this observation window. */
   pollDeadlineAt?: string | Date | null;
+  inputDownloadRecheckScheduled?: boolean;
   beforeSubmit?: () => void | Promise<void>;
   onSubmitted?: (taskId: string) => void | Promise<void>;
 };
@@ -484,7 +485,7 @@ type ImageRuntime = {
 };
 
 export type ApiMartImageTaskStep =
-  | { status: "pending"; upstreamTaskId: string; nextPollMs: number }
+  | { status: "pending"; upstreamTaskId: string; nextPollMs: number; confirmInputDownloadFailure?: true }
   | { status: "completed"; upstreamTaskId: string; urls: string[]; manifest?: Seedream55Manifest };
 
 /** One paid submission OR one status query; durable workers schedule the next step. */
@@ -569,6 +570,10 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
   try { statusPayload = await statusResponse.json(); }
   catch { throw new ApiMartImageQueryRetryable("APIMart 图片任务状态响应暂时无法读取", "PROVIDER_POLL_RESPONSE_INVALID", nextQueryMs); }
   const status = readStatus(statusPayload);
+  if (status === "failed" && isReferenceDownloadFailure(statusPayload)) {
+    if (!input.inputDownloadRecheckScheduled) return {status:"pending",upstreamTaskId:taskId,nextPollMs:3_000,confirmInputDownloadFailure:true};
+    throw new ApiMartImageProviderFailure("供应商未能读取参考图，复查原任务后仍为失败；未重新提交生成。");
+  }
   if (IMAGE_FAILURE_STATUSES.has(status)) throw new ApiMartImageProviderFailure(redactProviderCredential(readFailureMessage(statusPayload), input.apiKey) || "APIMart 图片任务失败");
   if (status === "completed") {
     if (kind === "seedream-5-5") {
@@ -594,7 +599,7 @@ async function uploadApiMartImageReferences(sources: ImageReference[], baseUrl: 
       const index = nextIndex++, source = sources[index]!;
       try {
         references[index] = typeof source !== 'string' || source.startsWith("data:")
-          ? await uploadApiMartImage({ baseUrl, apiKey, ...decodeGenerationReference(source), purpose: "image" }, { fetch: runtime.fetch })
+          ? await uploadApiMartImage({ baseUrl, apiKey, ...decodeGenerationReference(source), purpose: "image" }, { fetch: runtime.fetch, sleep:runtime.sleep, shouldRetry:() => !failed })
           : normalizeApiMartImageUrl(source);
       } catch (error) {
         if (!failed) { failed = true; firstFailure = error; }
@@ -610,10 +615,12 @@ async function uploadApiMartImageReferences(sources: ImageReference[], baseUrl: 
 export async function runApiMartImageTask(input: ApiMartImageTaskInput, runtime: ImageRuntime = {}): Promise<string[]> {
   const wait = runtime.sleep || sleep;
   let result = await stepApiMartImageTask(input, runtime);
+  let recheckScheduled = input.inputDownloadRecheckScheduled;
   const deadline = Date.now() + 15 * 60_000;
   while (result.status === "pending" && Date.now() < deadline) {
+    recheckScheduled ||= result.confirmInputDownloadFailure;
     await wait(result.nextPollMs);
-    result = await stepApiMartImageTask({ ...input, upstreamTaskId: result.upstreamTaskId, submissionStarted: true }, runtime);
+    result = await stepApiMartImageTask({ ...input, upstreamTaskId: result.upstreamTaskId, submissionStarted: true, inputDownloadRecheckScheduled:recheckScheduled }, runtime);
   }
   if (result.status === "completed") return result.urls;
   throw Object.assign(new Error("APIMart 图片任务状态查询超时；可恢复查询原任务，不会重新生成"), { code: "PROVIDER_POLL_TIMEOUT" });
@@ -695,6 +702,12 @@ function readOutputUrls(value: unknown): string[] {
     const url = object(image).url;
     return Array.isArray(url) ? url.filter((item): item is string => typeof item === "string" && item.length > 0) : typeof url === "string" ? [url] : [];
   });
+}
+
+function isReferenceDownloadFailure(value: unknown) {
+  const root=object(value), data=object(root.data);
+  const code=string(object(data.error).code) || string(object(root.error).code) || string(data.error_code);
+  return code?.toLowerCase() === "input_image_download" || /\binput_image_download\b|(?:failed|unable) to (?:download|fetch) (?:the |an? )?(?:first |\d+\w* )?input image\b|输入媒体地址读取失败|未能下载第.{0,4}张输入图/i.test(readFailureMessage(value) || "");
 }
 
 function readFailureMessage(value: unknown) {

@@ -75,6 +75,7 @@ type WorkRow = {
   execution_token: string;
   started_at: string | null;
   poll_deadline_at: string | null;
+  reference_download_recheck_at?: string | null;
   upstream_task_id: string | null;
   upstream_submission_started_at: string | null;
   upstream_workflow_context: WorkflowTaskContext | null;
@@ -130,7 +131,7 @@ async function runTask(taskId: string) {
   );
   if (!claimed.rows[0]) return;
   const details = await db.query<WorkRow>(
-    `SELECT t.id,t.request_id,t.original_size_source_id,t.paused_kind,t.repair_attempts,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.tool_key,t.result_document,t.upstream_result_document,t.prompt,t.parameters,t.source_urls,t.attempts,t.execution_token,t.started_at,t.poll_deadline_at,t.upstream_task_id,t.upstream_submission_started_at,t.upstream_workflow_context,t.priority,t.queued_at,m.model_id,m.provider_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
+    `SELECT t.id,t.request_id,t.original_size_source_id,t.paused_kind,t.repair_attempts,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.tool_key,t.result_document,t.upstream_result_document,t.prompt,t.parameters,t.source_urls,t.attempts,t.execution_token,t.started_at,t.poll_deadline_at,t.reference_download_recheck_at,t.upstream_task_id,t.upstream_submission_started_at,t.upstream_workflow_context,t.priority,t.queued_at,m.model_id,m.provider_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
         FROM tasks t LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id AND w.enabled=true WHERE t.id=$1 AND t.execution_token=$2`,
     [taskId, executionToken],
   );
@@ -216,7 +217,7 @@ async function runTask(taskId: string) {
       if (error instanceof ApiMartImageTaskPending && error.queryFailure) {
         console.warn(JSON.stringify({ event: "worker.image_query_deferred", taskId: task.id, ...error.queryFailure, retryMs: error.nextPollMs }));
       }
-      await deferTask(task, error.nextPollMs, true);
+      await deferTask(task, error.nextPollMs, true, null, error instanceof ApiMartImageTaskPending && error.confirmInputDownloadFailure);
       outcome = "retry";
       return;
     }
@@ -294,12 +295,13 @@ async function runTask(taskId: string) {
   }
 }
 
-async function deferTask(task: WorkRow, milliseconds: number, polling: boolean, reason: string | null = null) {
+async function deferTask(task: WorkRow, milliseconds: number, polling: boolean, reason: string | null = null, confirmInputDownload = false) {
   const changed = await db.query<{ available_at: string }>(
     `UPDATE tasks SET status=$1,available_at=clock_timestamp()+($2::int * interval '1 millisecond'),
+        reference_download_recheck_at=CASE WHEN $6 THEN COALESCE(reference_download_recheck_at,clock_timestamp()+($2::int * interval '1 millisecond')) ELSE reference_download_recheck_at END,
         execution_token=NULL,lease_expires_at=NULL,failure_reason=COALESCE($3,failure_reason),updated_at=now()
      WHERE id=$4 AND execution_token=$5 AND status='processing' RETURNING available_at`,
-    [polling ? "processing" : "waiting", milliseconds, reason, task.id, task.execution_token],
+    [polling ? "processing" : "waiting", milliseconds, reason, task.id, task.execution_token,confirmInputDownload],
   );
   if (!changed.rows[0]) throw new TaskExecutionLost("任务执行权已改变，不能重新排队");
   const due = new Date(changed.rows[0].available_at).getTime();
@@ -530,6 +532,7 @@ async function executeApiMartImage(
     submissionStarted: Boolean(task.upstream_submission_started_at),
     submissionStartedAt: task.upstream_submission_started_at || task.started_at,
     pollDeadlineAt: task.poll_deadline_at,
+    inputDownloadRecheckScheduled: Boolean(task.reference_download_recheck_at),
     beforeSubmit: async () => {
       const claimed = await db.query("UPDATE tasks SET upstream_submission_started_at=now(),updated_at=now() WHERE id=$1 AND execution_token=$2 AND lease_expires_at>now() AND status='processing' AND upstream_submission_started_at IS NULL RETURNING id", [task.id, task.execution_token]);
       if (!claimed.rows[0]) throw new VideoSubmissionClaimLost();
@@ -546,7 +549,7 @@ async function executeApiMartImage(
     if (!(remaining > 0)) throw new Error("图片状态查询超时；可恢复查询原任务，不会重新生成");
     throw new ApiMartImageTaskPending(Math.min(error.nextPollMs, remaining), { code: error.code, httpStatus: error.httpStatus });
   }
-  if (result.status === "pending") throw new ApiMartImageTaskPending(result.nextPollMs);
+  if (result.status === "pending") throw new ApiMartImageTaskPending(result.nextPollMs,undefined,result.confirmInputDownloadFailure);
   if (isSeedream55) {
     if (!result.manifest) throw new Error("图层任务缺少结果清单");
     const document = seedream55PublicDocument(task.id, result.manifest);

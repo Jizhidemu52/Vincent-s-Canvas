@@ -7,6 +7,44 @@ const input = {
 };
 const completed = { data: { status: "completed", result: { images: [{ url: ["https://images.example/one.png", "https://images.example/two.png"] }] } } };
 
+for (const exhausted of [true,false]) test(`upload 429 uses 2/5/15 second backoff only before generation; exhausted=${exhausted}`, async () => {
+  const waits:number[] = [], sent:string[]=[]; let uploads=0, cancelled=0, claims=0;
+  const original=Buffer.from([1,2,3]);
+  const result=stepApiMartImageTask({...input,sourceImages:[{bytes:original,mimeType:"image/png"}],beforeSubmit:()=>{claims++;}},{
+    sleep:async ms=>{waits.push(ms);}, fetch:async(url,init)=>{
+      sent.push(url); expect(init?.method).toBe("POST");
+      if (url.endsWith("/uploads/images")) {
+        const file=(init?.body as FormData).get("file") as Blob;
+        expect(Buffer.from(await file.arrayBuffer())).toEqual(original);
+        if (++uploads<4 || exhausted) return new Response(new ReadableStream({cancel(){cancelled++;}}),{status:429});
+        return Response.json({url:"https://cdn.example/reference.png"});
+      }
+      expect(url.endsWith("/images/generations")).toBe(true); return Response.json({data:[{task_id:"saved"}]});
+    }
+  });
+  if (exhausted) await expect(result).rejects.toMatchObject({httpStatus:429,message:"APIMart 参考图上传失败（429），尚未提交图片生成"});
+  else expect(await result).toMatchObject({status:"pending",upstreamTaskId:"saved"});
+  expect(waits).toEqual([2000,5000,15000]); expect(uploads).toBe(4); expect(cancelled).toBe(exhausted?4:3);
+  expect(claims).toBe(exhausted?0:1); expect(sent.length).toBe(4+claims);
+});
+
+for (const final of ["failed","completed","unavailable"] as const) test(`410 in a terminal input-download receipt is confirmed only by GET of that ID: ${final}`,async()=>{
+  const requests:string[]=[], waits:number[]=[];
+  const error={data:{status:"failed",error:{code:"input_image_download",message:"HTTP 410 reading input image"}}};
+  const operation=runApiMartImageTask({...input,upstreamTaskId:"original-id",submissionStarted:true},{
+    sleep:async ms=>{waits.push(ms);},fetch:async(url,init)=>{
+      expect(init?.method).toBe("GET"); expect(url.endsWith("/tasks/original-id")).toBe(true); requests.push(url);
+      if(requests.length===2 && final==="unavailable") return new Response(null,{status:410});
+      return Response.json(requests.length===2 && final==="completed"?completed:error);
+    }
+  });
+  if(final==="failed") await expect(operation).rejects.toBeInstanceOf(ApiMartImageProviderFailure);
+  else if(final==="unavailable") {
+    const failure=await operation.catch(e=>e); expect(failure).not.toBeInstanceOf(ApiMartImageProviderFailure); expect(failure.httpStatus).toBe(410);
+  } else expect(await operation).toEqual(completed.data.result.images[0]!.url);
+  expect(waits).toEqual([3000]); expect(requests).toHaveLength(2);
+});
+
 test("image step submits and persists once, then returns without polling or sleeping", async () => {
   const events: string[] = [];
   const result = await stepApiMartImageTask({ ...input,

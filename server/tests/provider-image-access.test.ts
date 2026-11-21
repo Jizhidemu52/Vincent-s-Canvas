@@ -45,7 +45,7 @@ async function imageReference(mimeType: string) {
 function fixture() {
   const state = {
     owner: userId, user: userId, userStatus: "active", userDeleted: false, assetStatus: "ready", deleted: false, kind: "image", status: "processing",
-    objectKey: "private/employee/original.png", mimeType: "image/png", byteSize: png.length,
+    objectKey: "private/employee/original.png", mimeType: "image/png", byteSize: png.length, queuedAt: new Date(Date.now() - 7_200_000),
     toolKey: null as string | null, modelId: null as string | null, protocol: null as string | null, workflowConfigId: null as string | null, operationType: "inpaint",
     sourceUrls: [`/api/assets/${assetId}/content`], executionToken: "current-worker", leaseValid: true,
     etag: '"original-etag"', bytes: Buffer.from(png), cacheFailure: false, dbFailure: false, storageFailure: false,
@@ -65,7 +65,7 @@ function fixture() {
       && state.userStatus === "active" && !state.userDeleted
       && state.status === "processing" && JSON.parse(String(sources)).every((url: string) => state.sourceUrls.includes(url))
       && (executionToken === undefined || state.executionToken === executionToken && state.leaseValid);
-    return { rows: eligible ? [{ object_key: state.objectKey, mime_type: state.mimeType, filename: "员工原件.png", byte_size: state.byteSize,
+    return { rows: eligible ? [{ object_key: state.objectKey, mime_type: state.mimeType, filename: "员工原件.png", byte_size: state.byteSize, queued_at: state.queuedAt,
       tool_key: state.toolKey, model_id: state.modelId, workflow_config_id: state.workflowConfigId, protocol: state.protocol, operation_type: state.operationType, kind: state.kind }] : [] };
   } } as unknown as Pick<Database, "query">;
   const cache: Pick<Cache, "get" | "set"> = {
@@ -106,9 +106,9 @@ function setReference(f: ReturnType<typeof fixture>, bytes: Buffer, mimeType: st
   Object.assign(f.input.source, { bytes, mimeType });
 }
 
-async function withServer(f: ReturnType<typeof fixture>, run: (base: string) => Promise<void>) {
+async function withServer(f: ReturnType<typeof fixture>, run: (base: string) => Promise<void>, report: Parameters<typeof createProviderImagesRouter>[2] = () => {}) {
   const app = express();
-  app.use(PROVIDER_IMAGE_PATH, createProviderImagesRouter(f.access, f.storage));
+  app.use(PROVIDER_IMAGE_PATH, createProviderImagesRouter(f.access, f.storage, report));
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve, reject) => { server.once("listening", resolve); server.once("error", reject); });
   try { await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}`); }
@@ -116,6 +116,23 @@ async function withServer(f: ReturnType<typeof fixture>, run: (base: string) => 
 }
 const pathOf = (url: string) => new URL(url).pathname;
 const tokenOf = (url: string) => pathOf(url).split("/")[3]!;
+
+test("bound HTTP reads report queue delay separately from grant age without logging bearer material", async () => {
+  const f = fixture(), grant = await f.access.issue(f.input);
+  const receipts: Parameters<NonNullable<Parameters<typeof createProviderImagesRouter>[2]>>[0][] = [];
+  await withServer(f, async base => {
+    const actual = await fetch(base + pathOf(grant));
+    expect(Buffer.from(await actual.arrayBuffer())).toEqual(png);
+    expect((await fetch(base + pathOf(grant).replace(tokenOf(grant), "invalid"))).status).toBe(404);
+  }, receipt => receipts.push(receipt));
+  expect(receipts).toHaveLength(1);
+  const r = receipts[0]!;
+  expect(r).toEqual({ event: "provider_reference.read", method: "GET", taskId, status: 200,
+    queueToRequestMs: expect.any(Number), grantAgeMs: expect.any(Number) });
+  expect(r.queueToRequestMs).toBeGreaterThanOrEqual(7_200_000);
+  expect(r.grantAgeMs).toBeGreaterThanOrEqual(0);
+  expect(r.grantAgeMs).toBeLessThan(10_000);
+});
 
 test.each(["video/mp4", "audio/wav"])("owned video generation %s grants stream the exact ETag-bound original via public HTTP", async mime => {
   const f = fixture();
