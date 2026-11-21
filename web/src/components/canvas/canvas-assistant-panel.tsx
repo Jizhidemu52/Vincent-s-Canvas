@@ -64,6 +64,7 @@ import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 import { useModuleEnabled } from "@/stores/use-module-store";
 import { resolveToolConfig } from "@/services/api/tool-runtime";
+import { estimateServerUsage } from "@/services/api/business-config";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
 import {
@@ -292,6 +293,7 @@ type OnlineAgentLogContext = {
 };
 type OnlineLoopContext = { step: number };
 type OnlineTurnContext = {
+    mediaQuote?: CanvasMediaQuote;
     signal?: AbortSignal;
     userPrompt: string;
     references: CanvasAssistantReference[];
@@ -1631,6 +1633,7 @@ const LegacyCanvasAssistantPanel = memo(function LegacyCanvasAssistantPanel({
                     upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content || streamed });
                 const writableCalls = result.toolCalls.filter(isWritableToolCall);
                 if (canvasToolCallsRequireConfirmation(result.toolCalls, canManageConfig && confirmTools)) {
+                    const summary = await confirmationSummary(result.toolCalls, turn);
                     const toolMessageId = nanoid();
                     pendingToolContextRef.current.set(toolMessageId, {
                         messages,
@@ -1645,7 +1648,7 @@ const LegacyCanvasAssistantPanel = memo(function LegacyCanvasAssistantPanel({
                         id: toolMessageId,
                         role: "tool",
                         title: "确认工具调用",
-                        text: summarizeToolCalls(result.toolCalls),
+                        text: summary,
                         detail: {
                             status: "pending",
                             preview: canvasToolCallPreview(result.toolCalls, snapshotRef.current),
@@ -1840,6 +1843,7 @@ const LegacyCanvasAssistantPanel = memo(function LegacyCanvasAssistantPanel({
         if (next.toolCalls.length) {
             const writableCalls = next.toolCalls.filter(isWritableToolCall);
             if (canvasToolCallsRequireConfirmation(next.toolCalls, canManageConfig && confirmTools)) {
+                const summary = await confirmationSummary(next.toolCalls, turn);
                 const toolMessageId = nanoid();
                 pendingToolContextRef.current.set(toolMessageId, {
                     messages: nextMessages,
@@ -1854,7 +1858,7 @@ const LegacyCanvasAssistantPanel = memo(function LegacyCanvasAssistantPanel({
                     id: toolMessageId,
                     role: "tool",
                     title: "确认工具调用",
-                    text: summarizeToolCalls(next.toolCalls),
+                    text: summary,
                     detail: {
                         status: "pending",
                         preview: canvasToolCallPreview(next.toolCalls, snapshotRef.current),
@@ -2285,6 +2289,7 @@ const LegacyCanvasAssistantPanel = memo(function LegacyCanvasAssistantPanel({
                     turn.signal,
                     undefined,
                     turn.regionSelection,
+                    turn.mediaQuote,
                 );
             }
             if (name === "generate_video") {
@@ -2302,6 +2307,9 @@ const LegacyCanvasAssistantPanel = memo(function LegacyCanvasAssistantPanel({
                     turn.config,
                     undefined,
                     turn.signal,
+                    undefined,
+                    undefined,
+                    turn.mediaQuote,
                 );
             }
             const referenceTools = [
@@ -2725,6 +2733,7 @@ const LegacyCanvasAssistantPanel = memo(function LegacyCanvasAssistantPanel({
         signal?: AbortSignal,
         nodeId?: string,
         regionSelection?: ImageAgentRegionSelection,
+        quote?: CanvasMediaQuote,
     ) => {
         const documentSession = localSessionsRef.current.find((session) => session.id === sessionId);
         const requirements = confirmedDesignRequirements(documentSession?.requirementCard);
@@ -2736,19 +2745,9 @@ const LegacyCanvasAssistantPanel = memo(function LegacyCanvasAssistantPanel({
                 throw new DOMException("生成源节点已删除，可查询原任务", "AbortError");
         };
         assertTarget();
-        const blend = settings.mode === "image" && imageModelProfile(settings.imageModel).kind === "midjourney-blend";
-        const operation =
-            settings.mode === "video"
-                ? "video_generation"
-                : references.length && !blend
-                  ? "inpaint"
-                  : "image_generation";
-        const tool = canvasToolKey(settings.mode, references.length > 0, imageModelProfile(settings.imageModel).kind);
-        const resolved = await resolveToolConfig(
-            { ...baseConfig, model: settings.mode === "video" ? settings.videoModel : settings.imageModel },
-            operation,
-            tool,
-        );
+        const { resolved, tool, operation, quote: currentQuote } = await resolveCanvasMediaQuote(settings, references.length, baseConfig);
+        if (quote && (quote.modelId !== currentQuote.modelId || quote.credits !== currentQuote.credits || quote.tool !== tool))
+            throw new Error("生成模型或计费已变化，本次未提交。请重新确认。");
         assertTarget();
         baseConfig = resolved.config;
         settings = {
@@ -6091,6 +6090,38 @@ function isResponseToolCall(value: unknown): value is ResponseToolCall {
         typeof fn.name === "string" &&
         typeof fn.arguments === "string"
     );
+}
+
+type CanvasMediaQuote = { tool: string; modelId: string; label: string; credits: number | null };
+
+async function resolveCanvasMediaQuote(settings: AgentGenerationSettings, referenceCount: number, config: AiConfig) {
+    const video = settings.mode === "video";
+    const tool = canvasToolKey(settings.mode, referenceCount > 0, imageModelProfile(settings.imageModel).kind);
+    const operation = video ? "video_generation" : tool === "canvas-edit" ? "inpaint" : "image_generation";
+    const resolved = await resolveToolConfig({ ...config, model: video ? settings.videoModel : settings.imageModel }, operation, tool);
+    const estimate = estimateServerUsage(resolved.business, { toolKey: tool, operationType: operation, modelId: resolved.model.modelId, quantity: 1 });
+    if (deploymentFeatures.creditsEnabled && !estimate.configured) throw new Error("模型积分价格尚未配置，本次未提交。");
+    const quote: CanvasMediaQuote = { tool, modelId: resolved.model.id,
+        label: video ? resolved.model.publicName || resolved.model.name : imageModelDisplayName(resolved.model.id, resolved.business.models),
+        credits: deploymentFeatures.creditsEnabled ? estimate.credits : null };
+    return { resolved, operation, tool, quote };
+}
+
+async function confirmationSummary(calls: ResponseToolCall[], turn: OnlineTurnContext) {
+    turn.mediaQuote = undefined;
+    const direct = calls.find(call => ["edit_image", "generate_video"].includes(call.function.name));
+    if (!direct) return summarizeToolCalls(calls);
+    if (canvasOnlineGenerationCallCount(calls, turn.canvasSnapshot, turn.config) !== 1)
+        throw new Error("单轮只允许提交一个生成任务，本轮没有提交；请分别发送要求。");
+    const args = JSON.parse(direct.function.arguments);
+    const video = direct.function.name === "generate_video";
+    const settings = video ? onlineAgentMediaSettings(turn.settings, "video", args) : { ...turn.settings, mode: "image" as const };
+    const references = video ? 0 : resolveCanvasImageAgentEdit(args, turn.images, turn).references.length;
+    const { quote } = await resolveCanvasMediaQuote(settings, references, turn.config);
+    turn.signal?.throwIfAborted();
+    turn.mediaQuote = quote;
+    const fee = quote.credits === null ? "会产生模型费用" : `预计消耗 ${quote.credits} 积分`;
+    return `${calls.length > 1 ? summarizeToolCalls(calls) + "。 " : ""}本轮将生成 ${video ? "1 段视频" : "1 张图片"}（模型：${quote.label}），${fee}。`;
 }
 
 function summarizeToolCalls(calls: ResponseToolCall[]) {

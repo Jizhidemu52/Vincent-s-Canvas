@@ -57,5 +57,5 @@ export async function resolveToolConfig(config: AiConfig, operationType: string,
     const model = resolveConfiguredToolModel(business, toolKey, effectiveConfig.model);
     const requiredCapabilities: Record<string, string[]> = { image_generation: ["generate"], inpaint: ["edit"], upscale: ["upscale", "edit"], seamless_stitch: ["edit"], batch_image: ["batch", "edit"], video_generation: ["video"], audio_generation: ["audio"], chat: ["chat"] };
     if (!requiredCapabilities[operationType]?.some(capability => model.capabilities.includes(capability))) throw new Error("此板块当前模型不支持所请求的操作，请联系管理员调整绑定。");
-    return { toolKey, config: effectiveConfig, model };
+    return { toolKey, config: effectiveConfig, model, business };
 }

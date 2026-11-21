@@ -78,7 +78,10 @@ function panelGeneration(readSize: (source: ReferenceImage) => Promise<{ width: 
     const bindings = {
         imageModelProfile, buildAgentGenerationPlan, snapshotRef, confirmedDesignRequirements, agentDocumentCatalog,
         resolveAgentImageGenerationSettings: (s: AgentGenerationSettings, refs: ReferenceImage[], baseId: string | undefined, profile: typeof ratioProfile, assertCurrent: () => void) => resolveAgentImageGenerationSettings(s, refs, baseId, profile, assertCurrent, readSize),
-        canvasToolKey: () => "canvas-edit", resolveToolConfig: async (config: unknown) => ({ config: { ...config as any, model }, model: { id: model, modelId: model, name: model } }),
+        resolveCanvasMediaQuote: async (_settings: AgentGenerationSettings, _references: number, config: typeof defaultConfig) => ({
+            tool: "canvas-edit", operation: "inpaint", quote: { tool: "canvas-edit", modelId: model, label: model, credits: null },
+            resolved: { config: { ...config, model }, model: { id: model, modelId: model, name: model } },
+        }),
         nanoid: () => "request", imageModelDisplayName: (value: string) => value, modelOptionName: (value: string) => value,
         canvasImageAgentTaskSignature: async (value: unknown) => { signatures.push(value); return "signature"; },
         pendingSignaturesRef: { current: new Set() }, localSessionsRef: { current: [] }, turnIdsRef: { current: new WeakMap() },

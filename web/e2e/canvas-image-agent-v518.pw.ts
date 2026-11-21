@@ -104,6 +104,7 @@ for (const failPreview of [false, true]) {
             expect(chat.requests).toHaveLength(1);
             expect(api.submissions).toHaveLength(0);
         } else {
+            await panel.getByRole("button", { name: "批准执行", exact: true }).click();
             await expect.poll(() => api.submissions.length).toBe(1);
             await expect.poll(() => api.document(branch.project)?.nodes.length).toBe(6);
             await expect(panel.getByRole("button", { name: "发送", exact: true })).toBeVisible();
@@ -224,6 +225,47 @@ test("developer detail opt-in and extra confirmation are separate administrator 
     expect(api.submissions).toHaveLength(0);
 });
 
+test("paid image approval shows the quote and rejection never submits media", async ({ page, context, api }, info) => {
+    await fixture(context);
+    const id = await newCanvas(page);
+    await uploadImage(page, "knitwear.png");
+    await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
+    await page.getByRole("tab", { name: "对话", exact: true }).first().click();
+    const panel = page.locator(".cw-agent-panel"), input = panel.getByPlaceholder(placeholder);
+    await input.fill("仅修改领口颜色"); await input.press("Enter");
+    await expect(panel.getByText(/本轮将生成 1 张图片（模型：.+），会产生模型费用/)).toBeVisible();
+    expect(api.submissions).toHaveLength(0);
+    await page.screenshot({ path: info.outputPath("image-approval-before-submit.png"), animations: "disabled" });
+    await panel.getByRole("button", { name: "拒绝执行", exact: true }).click();
+    await expect(panel.getByRole("button", { name: "批准执行", exact: true })).toHaveCount(0);
+    expect(api.submissions).toHaveLength(0);
+    expect(api.document(id)?.nodes).toHaveLength(1);
+});
+
+test("paid video approval quotes the bound model and configured credits before submission", async ({ page, context, api }, info) => {
+    const chat = await fixture(context);
+    await context.route("**/api/deployment", route => route.fulfill({ json: { imageConversationsEnabled: false, creditsEnabled: true, authenticationEnabled: true, oaLoginEnabled: false, rolePortalsEnabled: false } }));
+    await context.route("**/api/models", async route => {
+        const models = [
+            { id: "chat", name: "对话", modelId: "test-chat", capabilities: ["chat", "vision"], creditCost: 0, rmbCost: 0 },
+            { id: "video", name: "隔离视频", modelId: "test-video", capabilities: ["video"], creditCost: 3, rmbCost: 0 },
+            { id: "image", name: "隔离图片", modelId: "gpt-image-2", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
+        ];
+        return route.fulfill({ json: { models, tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: tool.toolKey === "canvas-video" ? "video" : /chat|text|agent/.test(tool.toolKey) ? "chat" : "image", configurationVersion: 1 })),
+            prices: [{ operationType: "video_generation", credits: 4, rmbCost: 0, version: 1 }] } });
+    });
+    chat.setReply(route => route.fulfill({ json: { content: "准备视频", toolCalls: [{ id: "video-1", type: "function", function: { name: "generate_video", arguments: JSON.stringify({ prompt: "镜头缓慢推近", model: "未绑定模型" }) } }] } }));
+    await newCanvas(page);
+    await page.getByRole("tab", { name: "对话", exact: true }).first().click();
+    const panel = page.locator(".cw-agent-panel"), input = panel.getByPlaceholder(placeholder);
+    await input.fill("生成一段镜头推近的视频"); await input.press("Enter");
+    await expect(panel.getByText("本轮将生成 1 段视频（模型：隔离视频），预计消耗 7 积分。")).toBeVisible();
+    expect(api.submissions).toHaveLength(0);
+    await page.screenshot({ path: info.outputPath("video-credit-approval-before-submit.png"), animations: "disabled" });
+    await panel.getByRole("button", { name: "拒绝执行", exact: true }).click();
+    expect(api.submissions).toHaveLength(0);
+});
+
 test("current image persists through continuous edits, previous/original and selected old branches", async ({ page, context, api }, info) => {
     const chat = await fixture(context);
     const id = await newCanvas(page);
@@ -234,6 +276,9 @@ test("current image persists through continuous edits, previous/original and sel
     const panel = page.locator(".cw-agent-panel"), input = panel.getByPlaceholder(placeholder);
     const send = async (text: string, count: number) => {
         await input.fill(text); await input.press("Enter");
+        await expect(panel.getByText(/本轮将生成 1 张图片/).last()).toBeVisible();
+        expect(api.submissions).toHaveLength(count - 1);
+        await panel.getByRole("button", { name: "批准执行", exact: true }).click();
         await expect.poll(() => api.submissions.length).toBe(count);
         await expect.poll(() => api.document(id)?.nodes.filter((node: any) => node.metadata?.imageAgent).length).toBe(count);
         await expect(panel.getByRole("button", { name: "发送", exact: true })).toBeVisible();
@@ -272,6 +317,7 @@ test("clarification and image mentions stay conversational without selection can
     await page.getByRole("tab", { name: "对话", exact: true }).first().click();
     const panel = page.locator(".cw-agent-panel"), input = panel.getByPlaceholder(placeholder);
     await input.fill("改成蓝色"); await input.press("Enter");
+    await panel.getByRole("button", { name: "批准执行", exact: true }).click();
     await expect.poll(() => api.document(id)?.nodes.length).toBe(2);
     const original = api.document(id)!.nodes[0];
     const seen = panel.getByRole("group", { name: "本轮助手看到了", exact: true });
@@ -284,12 +330,14 @@ test("clarification and image mentions stay conversational without selection can
     await expect(panel.locator("[data-image-agent-focus]")).toHaveCount(0);
     chat.setReply((route, request) => route.fulfill({ json: { content: "修改图1", toolCalls: [{ id: "edit", type: "function", function: { name: "edit_image", arguments: JSON.stringify({ base: "图1", prompt: request.profileContext.currentUserText }) } }] } }));
     await input.fill("图1，把袖口改短"); await input.press("Enter");
+    await panel.getByRole("button", { name: "批准执行", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(2);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(3);
     expect(api.document(id)!.nodes.at(-1).metadata.imageAgent.parentNodeId).toBe(original.id);
     await input.fill("@图1 再把背景改浅灰");
     await expect(panel.getByRole("listbox", { name: "选择图片引用" })).toHaveCount(0);
     await input.press("Enter");
+    await panel.getByRole("button", { name: "批准执行", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(3);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(4);
     const lastPlan = chat.requests.at(-1).profileContext;
@@ -332,6 +380,7 @@ test("canvas mask UI submits paired mask and preserves original outside pixels",
     await dialog.getByRole("button", { name: "保存选区", exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await input.fill("只把选区改红"); await input.press("Enter");
+    await panel.getByRole("button", { name: "批准执行", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(2);
     expect(api.submissions[0].parameters.inputArchive.maskReferenceIndex).toBe(1);
@@ -371,6 +420,7 @@ test("pending generation does not block chat and late result cannot steal newer 
     await page.getByRole("tab", { name: "对话", exact: true }).first().click();
     const panel = page.locator(".cw-agent-panel"), input = panel.getByPlaceholder(placeholder);
     await input.fill("帽子改成浅蓝色"); await input.press("Enter");
+    await panel.getByRole("button", { name: "批准执行", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
     await expect(panel.getByRole("button", { name: "发送", exact: true })).toBeVisible();
     chat.setReply(route => route.fulfill({ json: { content: "针织帽的浅色更适合春夏，这是文字分析。", toolCalls: [] } }));
@@ -399,6 +449,7 @@ test("accepted task card stops local waiting, ignores a late response and querie
     await page.getByRole("tab", { name: "对话", exact: true }).first().click();
     const panel = page.locator(".cw-agent-panel"), input = panel.getByPlaceholder(placeholder);
     await input.fill("把帽子改为浅蓝色"); await input.press("Enter");
+    await panel.getByRole("button", { name: "批准执行", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
     const task = [...api.tasks.values()][0];
     const card = panel.getByText(`原任务：${task.id}`, { exact: true }).locator("..");
@@ -441,7 +492,9 @@ test("two accepted tasks stop only the chosen card and retain independent origin
     await page.getByRole("tab", { name: "对话", exact: true }).first().click();
     const panel = page.locator(".cw-agent-panel"), input = panel.getByPlaceholder(placeholder);
     for (const [index, text] of ["帽子改为蓝色", "帽子改为绿色"].entries()) {
-        await input.fill(text); await input.press("Enter"); await expect.poll(() => api.submissions.length).toBe(index + 1);
+        await input.fill(text); await input.press("Enter");
+        await panel.getByRole("button", { name: "批准执行", exact: true }).click();
+        await expect.poll(() => api.submissions.length).toBe(index + 1);
         await expect(panel.getByRole("button", { name: "发送", exact: true })).toBeVisible();
     }
     const [first, second] = [...api.tasks.values()];
@@ -472,6 +525,7 @@ test("stopping an accepted card does not cancel another current planning reply",
     await page.getByRole("tab", { name: "对话", exact: true }).first().click();
     const panel = page.locator(".cw-agent-panel"), input = panel.getByPlaceholder(placeholder);
     await input.fill("帽子改成蓝色"); await input.press("Enter");
+    await panel.getByRole("button", { name: "批准执行", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
     await expect(panel.getByRole("button", { name: "发送", exact: true })).toBeVisible();
     const task = [...api.tasks.values()][0], card = panel.getByText(`原任务：${task.id}`, { exact: true }).locator("..");

@@ -15,6 +15,14 @@ test("destructive calls require approval even when ordinary confirmations are di
     expect(canvasToolCallsRequireConfirmation([call("canvas_get_state", {})], true)).toBe(false);
 });
 
+test.each([false, true])("paid calls cannot bypass confirmation using write preference %p", (preference) => {
+    for (const tool of ["edit_image", "generate_video", "canvas_run_generation", "canvas_generate_image", "canvas_generate_audio", "canvas_generate_text", "canvas_generate_video"])
+        expect(canvasToolCallsRequireConfirmation([call("canvas_get_state", {}), call(tool, {})], preference)).toBe(true);
+    expect(canvasToolCallsRequireConfirmation([call("canvas_create_config_node", { autoRun: true })], preference)).toBe(true);
+    expect(canvasToolCallsRequireConfirmation([call("canvas_apply_ops", { ops: [{ type: "run_generation" }] })], preference)).toBe(true);
+    expect(canvasToolCallsRequireConfirmation([call("look_at_images", {})], preference)).toBe(false);
+});
+
 test("confirmation preview lists the real affected nodes and freezes the final prompt", () => {
     const snapshot: CanvasAgentSnapshot = { nodes: [{ id: "one", title: "原款", type: CanvasNodeType.Image, position: { x: 0, y: 0 }, width: 200, height: 200, metadata: { content: "blob:original", storageKey: "image:one" } }, { id: "two", title: "说明", type: CanvasNodeType.Text, position: { x: 0, y: 0 }, width: 200, height: 200 }], connections: [], selectedNodeIds: [], viewport: { x: 0, y: 0, k: 1 } };
     const preview = canvasToolCallPreview([call("canvas_delete_nodes", { ids: ["one", "two"] })], snapshot)[0];
