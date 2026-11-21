@@ -8,6 +8,8 @@ CI 的 PDF Worker 探针与工具包导出通过 `--docker-host` 显式绑定该
 
 ## 操作入口
 
+v0.5.114 → v0.5.115 的 056–058 仅由已验证发布包中的 `ops/release/task_repair_056_058.py` 准备。用该包执行 `preflight INSTANCE PACKAGE`；核对实例、备份和维护窗口后才执行 `migrate INSTANCE PACKAGE PREFLIGHT_AUDIT`（均为绝对路径）。它关闭入口、排空在途工作、停止原应用并单独保存数据库备份，在一笔事务里只登记这三项迁移。未知上游提交不进入自动恢复。任一步结果不明时保留维护审计，不重发迁移，也不自动还原数据库。成功后先用原容器恢复入口，再对同一发布包重新执行零数据库变更的镜像发布预检和切换。准备回执不是镜像部署回执。
+
 验收环境中，仅 Web 同时连接内部业务网络和独立入口网络，并只向宿主 `127.0.0.1` 发布端口；API、Worker、合成 Provider 和数据服务仅连接内部网络。Docker 不会为仅连接 `internal` 网络的容器建立宿主端口映射，因此必须验证实际端口和浏览器入口，而不只检查容器健康。
 
 - `ops/release/stack-smoke.sh candidate.json /new/private/evidence`：仅 GitHub 隔离测试项目；正式后端、合成 Provider、无真实付费调用。

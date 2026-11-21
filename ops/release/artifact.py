@@ -33,6 +33,7 @@ PACKAGE_FILES = [
     "ops/release/image-conversations-054-055.py", "ops/release/image-conversations-054-055-catalog.json",
     "ops/release/image-conversations-054-055-state.sql", "server/src/migrations/054_image_conversations.sql",
     "server/src/migrations/055_mai27_model_catalog.sql",
+    "ops/release/task_repair_056_058.py",
     *["server/src/migrations/" + name for name in TASK_REPAIR_MIGRATIONS],
 ]
 
