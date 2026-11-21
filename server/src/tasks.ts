@@ -23,7 +23,9 @@ import { isReviewValidationFailure } from "../../shared/task-repair";
 
 export type TaskPriority = "normal" | "priority" | "urgent";
 export type QueueTaskAction = "pause" | "resume" | "cancel";
+export const PRESET_GENERATION=Symbol("admin-model-preset");
 export type TaskInput = {
+  [PRESET_GENERATION]?:true;
   originalSizeSourceId?: string;
   [QUICK_IMAGE_SNAPSHOT]?: QuickImageSnapshot;
   creditsEnabled?: boolean;
@@ -197,6 +199,7 @@ export async function prepareTaskEnqueue(
   quickImagePreflight = preflightStoredQuickImageTask,
   layerStudioPreflight = preflightStoredSeedream55Task,
 ): Promise<PreparedTaskEnqueue> {
+  if(input.requestId.startsWith("preset-gen:")&&input[PRESET_GENERATION]!==true)throw new BillingError("RESERVED_REQUEST_ID","模特库生成编号只由管理端使用");
   if (input.requestId.startsWith("review-size:") && (!input.originalSizeSourceId || input.requestId !== `review-size:${input.originalSizeSourceId}`)) throw new BillingError("RESERVED_REQUEST_ID", "请求编号仅供原图尺寸重出使用");
   input = { ...structuredClone(input), ...(input[QUICK_IMAGE_SNAPSHOT] ? { [QUICK_IMAGE_SNAPSHOT]: structuredClone(input[QUICK_IMAGE_SNAPSHOT]) } : {}) };
   const isLayerStudio = (input.toolKey ?? input.parameters?.tool) === "layer-studio";

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import ts from "typescript";
+import {createHash} from "node:crypto";
 import {recordTryoutResult,downloadTryoutResult} from "../src/tryout-result-receipt";
 import { ApiMartImageQueryRetryable, ApiMartImageTaskPending, preflightApiMartImageRequest, stepApiMartImageTask, type ApiMartImageTaskInput } from "../src/apimart-image";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "../src/image-edit-input";
@@ -82,6 +83,9 @@ function harness(options: { origin?: string; failIssue?: boolean; realCacheFailu
     throw new Error(`Unexpected provider request: ${method} ${url}`);
   };
   const dependencies = {
+    createHash,portraitSourceOwner:async()=>"original-admin",assertPortraitSubmission:async()=>{events.push("validate-portrait-slot");},
+    withTransaction:async(_db:unknown,f:(c:typeof db)=>Promise<unknown>)=>f(db),
+    tryoutReferenceService:()=>async(input:{ownerId:string;tier:string;read:()=>Promise<{bytes:Uint8Array}>})=>{expect(input.ownerId).toBe("original-admin");expect(input.tier).toBe("hd");expect((await input.read()).bytes).toEqual(bytes);return "https://provider.invalid/portrait-original.png";},
     recordTryoutResult,downloadTryoutResult:(task:Parameters<typeof downloadTryoutResult>[0],doc:unknown,key:string)=>downloadTryoutResult(task,doc,key,async()=>{downloads++;return bytes;}),
     tryoutModels:[{modelId:"gpt-image-2.6-flare"}],
     assertTryoutModuleEnabled:async()=>{events.push("tryout-gate");},
@@ -111,6 +115,16 @@ function harness(options: { origin?: string; failIssue?: boolean; realCacheFailu
     loaded: () => loaded, downloads: () => downloads };
 }
 
+test("admin portrait crop uses the full portrait exactly once, checks the slot before a paid POST and only queries that original after resuming",async()=>{
+    const h=harness({sourceAssets:[sources[0]!],origin:""});
+    const task={...providerTask(),request_id:"preset-gen:"+newTask().user_id+":fixture:00",source_urls:["/api/assets/"+sources[0]!.assetId+"/content"],parameters:{quality:"high",resolution:"2k",complexity:"medium"}};
+    await expect(h.dispatch(task)).rejects.toBeInstanceOf(ApiMartImageTaskPending);
+    expect(h.events.indexOf("validate-portrait-slot")).toBeGreaterThan(-1);expect(h.events.indexOf("validate-portrait-slot")).toBeLessThan(h.events.indexOf("fetch"));
+    expect(h.calls[0]?.payload?.image_urls).toEqual(["https://provider.invalid/portrait-original.png"]);expect(h.grants).toHaveLength(0);
+    await h.dispatch(task);expect(h.calls.filter(c=>c.method==="POST")).toHaveLength(1);
+    const different={...task,protocol:"openai",upstream_task_id:null};await expect(h.dispatch(different)).rejects.toThrow("高清配置");
+    expect(h.calls.filter(c=>c.method==="POST")).toHaveLength(1);
+});
 test("prewarmed tryout worker sends the ordered cached references once without reading original bytes and only polls on resume",async()=>{
   const cached=sources.map(s=>"https://supplier.invalid/ref/"+s.assetId),h=harness({hotTryoutUrls:cached,origin:""});
   const task={...providerTask(),request_id:"tryout:"+newTask().user_id+":fixture",tool_key:"canvas-edit",parameters:{tryoutTier:"quick"}};

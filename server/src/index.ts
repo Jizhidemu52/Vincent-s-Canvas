@@ -201,7 +201,7 @@ app.use(
 app.use("/api/tasks/events", requireSession, requireAccountReady, createTasksEventsRouter(taskEvents));
 app.use("/api/materials",requireSession,requireAccountReady,createMaterialLibraryRouter(db));
 app.use("/api/tryout/models",requireSession,requireAccountReady,createModelLibraryRouter(db,storage));
-app.use("/api/admin/model-presets",requireAdminSession,requireAccountReady,createAdminModelPresetsRouter(db,storage));
+app.use("/api/admin/model-presets",requireAdminSession,requireAccountReady,createAdminModelPresetsRouter(db,storage,{cache,credits:readCreditsEnabled,maxInflightTasks:config.USER_MAX_INFLIGHT_TASKS,maxPausedTasks:config.PAUSED_TASK_LIMIT_PER_USER}));
 app.use("/api/admin/tryout-bindings",requireAdminSession,requireAccountReady,createTryoutBindingsAdmin(db));
 app.use("/api/admin/material-presets",requireAdminSession,requireAccountReady,createAdminMaterialPresetsRouter(db));
 app.use("/api/tryout",requireSession,requireAccountReady,protectModelIdentity,createTryoutRouter(db,cache,{credits:readCreditsEnabled,maxInflightTasks:config.USER_MAX_INFLIGHT_TASKS,maxPausedTasks:config.PAUSED_TASK_LIMIT_PER_USER,displayBeforeSave:config.TRYOUT_DISPLAY_BEFORE_SAVE==="true",productCards:config.PRODUCT_CARD_ENABLED==="true"},createTryoutPrewarm(db,storage,config)));

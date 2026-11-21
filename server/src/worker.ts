@@ -8,6 +8,7 @@ import {tryoutReferenceService,invalidateTryoutReferences,pruneTryoutReferences,
 import {publishedPortrait} from "./model-library";
 import {createTryoutPrewarm} from "./tryout-prewarm";
 import {downloadTryoutResult,recordTryoutResult,type TryoutResultReceipt} from "./tryout-result-receipt";
+import {assertPortraitSubmission,portraitSourceOwner,stageGeneratedPortrait} from "./model-preset-generation";
 import {createTryoutPreviewWriter} from "./tryout-result-preview";
 import {assertModuleEnabled as assertTryoutModuleEnabled} from "./module-flags";
 import {MARK_GPT26_IMAGE_MODELS as tryoutModels} from "../../shared/mark-image-models";
@@ -208,6 +209,7 @@ async function runTask(taskId: string) {
       await withTransaction(db, async client => {
         const owned = await client.query("SELECT id FROM tasks WHERE id=$1 AND execution_token=$2 AND status='processing' FOR UPDATE", [task.id, executionToken]);
         if (!owned.rows[0]) throw new TaskExecutionLost("任务执行权已改变，不能重复结算");
+        if(task.request_id?.startsWith("preset-gen:"))await stageGeneratedPortrait(client,task,resultUrls);
         if (isSeedream55) await settleLayerStudioReservation(db, task.request_id, task.result_document!.items.map(item => ({ width: item.width!, height: item.height! })), client);
         else await settleReservation(db, task.request_id, "capture", undefined, client, resultUrls.length);
         await client.query(
@@ -350,6 +352,7 @@ import { OPENAI_IMAGE_TIMEOUT_MS } from "./opentoken-image";
 import { validateConversationTaskBinding, validateConversationTaskSources } from "./image-conversation-task";
 
 async function executeProvider(task: WorkRow, timing: GenerationTiming) {
+  if(task.request_id?.startsWith("preset-gen:")&&(task.protocol!=="apimart"||task.workflow_config_id||!tryoutModels.some(m=>m.modelId===task.model_id)))throw new Error("管理员模特生成绑定已变化，请核对原任务和高清配置");
   if (task.original_size_source_id) {
     const receipt = task.parameters.originalSizeReplay as {modelId?: string;providerId?: string;size?: string} | undefined;
     if (!receipt || receipt.modelId !== task.model_id || receipt.providerId !== task.provider_id || receipt.size !== task.parameters.size || task.protocol !== "apimart" || task.workflow_config_id) throw new Error("重出任务的原模型或精确尺寸已变化，未进行新的供应商提交");
@@ -501,6 +504,7 @@ async function executeApiMartImage(
     }
   }
   const fresh=!task.upstream_task_id&&!task.upstream_submission_started_at;
+  const portraitOwner=fresh&&task.request_id?.startsWith("preset-gen:")?await portraitSourceOwner(db,task):undefined;
   let tryout: {tier:"quick"|"hd";provider:{providerId:string;baseUrl:string;apiKey:string}}|undefined;
   if(fresh&&task.request_id?.startsWith("tryout:"+task.user_id+":")){
     const tier=task.parameters.tryoutTier;
@@ -510,7 +514,7 @@ async function executeApiMartImage(
   }
   const presetId=tryout&&task.parameters.tryoutKind==="wear"&&typeof task.parameters.tryoutPresetId==="string"?task.parameters.tryoutPresetId:undefined;
   const hot=tryout?await lookupReadyTryoutInputs(db,config,{...tryout,ownerId:task.user_id,taskId:task.id,sourceUrls:task.source_urls,presetId}):undefined;
-  const sourceAssets = !fresh||hot ? [] : await loadSourceAssets(task.source_urls, task.user_id, isSeedream55 ? 1 : 4, isSeedream55 ? 30 * 1024 * 1024 : undefined,presetId);
+  const sourceAssets = !fresh||hot ? [] : await loadSourceAssets(task.source_urls, portraitOwner??task.user_id, isSeedream55 ? 1 : 4, isSeedream55 ? 30 * 1024 * 1024 : undefined,presetId);
   if (task.request_id?.startsWith("ic:") && !task.upstream_task_id && !task.upstream_submission_started_at) validateConversationTaskSources(task, sourceAssets);
   if (task.original_size_source_id && !task.upstream_task_id && !task.upstream_submission_started_at) {
     const { hashes } = task.parameters.originalSizeReplay as { hashes: string[] };
@@ -538,6 +542,10 @@ async function executeApiMartImage(
         uploaded.push(await reference({...tryout,...(image.publicCacheOwner?{companyPortrait:true as const}:{}),ownerId:image.publicCacheOwner??task.user_id,taskId:task.id,sha256:createHash("sha256").update(image.bytes).digest("hex"),read:async()=>image}));
       }
       sourceImages=uploaded;
+    } else if(portraitOwner){
+      const image=editInput.references[0];
+      if(editInput.references.length!==1||!image||!task.provider_id)throw new Error("模特取景须使用唯一的同身份全身参考");
+      sourceImages=[await tryoutReferenceService(db,config)({ownerId:portraitOwner,tier:"hd",provider:{providerId:task.provider_id,baseUrl:task.base_url!,apiKey:credentials.apiKey||""},sha256:createHash("sha256").update(image.bytes).digest("hex"),taskId:task.id,read:async()=>image})];
     } else {
       if (!config.PROVIDER_IMAGE_PUBLIC_ORIGIN) throw Object.assign(
         new Error("服务端未配置参考图访问域名；尚未上传到供应商或提交生成，请联系管理员配置 PROVIDER_IMAGE_PUBLIC_ORIGIN"),
@@ -569,7 +577,8 @@ async function executeApiMartImage(
     pollDeadlineAt: task.poll_deadline_at,
     inputDownloadRecheckScheduled: Boolean(task.reference_download_recheck_at),
     beforeSubmit: async () => {
-      const claimed = await db.query("UPDATE tasks SET upstream_submission_started_at=now(),updated_at=now() WHERE id=$1 AND execution_token=$2 AND lease_expires_at>now() AND status='processing' AND upstream_submission_started_at IS NULL RETURNING id", [task.id, task.execution_token]);
+      const claim=(client:Pick<typeof db,"query">)=>client.query("UPDATE tasks SET upstream_submission_started_at=now(),updated_at=now() WHERE id=$1 AND execution_token=$2 AND lease_expires_at>now() AND status='processing' AND upstream_submission_started_at IS NULL RETURNING id", [task.id, task.execution_token]);
+      const claimed=portraitOwner?await withTransaction(db,async client=>{await assertPortraitSubmission(client,task);return claim(client);}):await claim(db);
       if (!claimed.rows[0]) throw new VideoSubmissionClaimLost();
       task.upstream_submission_started_at = new Date().toISOString();
     },
@@ -1057,7 +1066,7 @@ async function saveResultAsset(task: WorkRow, index: number, result: ProviderRes
         JSON.stringify(direction.secondaryDirections),
         direction.ruleVersion,
         JSON.stringify(direction.evidence),
-        JSON.stringify(metadata),
+        JSON.stringify(task.request_id?.startsWith("preset-gen:")?{...metadata,source:"model-preset-library"}:metadata),
       ],
     );
     return { assetId: asset.rows[0]!.id, mimeType: result.mimeType, filename };

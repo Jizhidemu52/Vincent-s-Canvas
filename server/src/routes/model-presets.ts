@@ -11,6 +11,7 @@ import {withTransaction} from "../db-transaction";
 import {writeAudit} from "../audit";
 import {requireRole} from "../rbac";
 import {streamAssetContent} from "../asset-delivery";
+import {portraitOrder,submitPortraits,type PortraitPolicy} from "../model-preset-generation";
 
 const actorOf=(request:Request)=>(request as AuthenticatedRequest).auth;
 const uuid=z.string().uuid(),identity=z.enum(["white-woman","white-man","white-girl","white-boy"]);
@@ -55,9 +56,26 @@ export function createModelLibraryRouter(db:Database,storage:ObjectStorage){
     }catch(error){next(error);}});
     return router;
 }
-export function createAdminModelPresetsRouter(db:Database,storage:ObjectStorage){
+export function createAdminModelPresetsRouter(db:Database,storage:ObjectStorage,policy?:PortraitPolicy){
     const router=Router();
     router.use(requireRole("super_admin"));
+    router.get("/generation/:requestId",async(req,res,next)=>{try{
+        const actor=actorOf(req);assertCanvasOwner(req.headers["x-canvas-owner-id"],actor.id);
+        const group=uuid.parse(req.params.requestId);
+        const data=await db.query("SELECT id,status FROM tasks WHERE user_id=$1 AND request_id LIKE $2 ORDER BY request_id",[actor.id,"preset-gen:"+actor.id+":"+group+":%"]);
+        res.set("Cache-Control","private, no-store").json({jobs:data.rows});
+    }catch(error){next(error);}});
+    router.get("/generation",async(_req,res,next)=>{try{
+        const list=await db.query(`SELECT id,status,parameters->'portraitSlot'->>'identity' AS identity,parameters->'portraitSlot'->>'framing' AS framing,
+            parameters->>'portraitDisposition' AS disposition FROM tasks WHERE request_id LIKE 'preset-gen:%'
+            AND (status IN ('waiting','processing','paused') OR queued_at>now()-interval '7 days') ORDER BY (status IN ('waiting','processing','paused')) DESC,queued_at DESC LIMIT 100`);
+        res.set("Cache-Control","private, no-store").json({jobs:list.rows});
+    }catch(error){next(error);}});
+    router.post("/generation",async(req,res,next)=>{try{
+        const actor=actorOf(req);assertCanvasOwner(req.headers["x-canvas-owner-id"],actor.id);
+        if(!policy)throw new CanvasDocumentError("MODEL_GENERATION_UNAVAILABLE","高清模特生成服务未配置",503);
+        res.json({jobs:await submitPortraits(db,policy,actor,portraitOrder.parse(req.body))});
+    }catch(error){next(error);}});
     router.get("/",async(_req,res,next)=>{try{res.set("Cache-Control","private, no-store").json({presets:(await db.query("SELECT "+adminColumns+" FROM model_presets p ORDER BY p.sort_order,p.identity,p.framing")).rows});}catch(error){next(error);}});
     router.get("/:id/thumb",preview(db,storage,true));
     router.patch("/identities/:identity",async(req,res,next)=>{try{
