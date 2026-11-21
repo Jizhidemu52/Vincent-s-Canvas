@@ -36,6 +36,7 @@ const schema = z.object({
     WECOM_CALLBACK_URL: z.string().url().optional().or(z.literal("")),
     PROVIDER_ENCRYPTION_KEY: z.string().optional(),
     PROVIDER_IMAGE_PUBLIC_ORIGIN: z.string().optional(),
+    APIMART_IMAGE_WEBHOOK_ORIGIN: z.string().optional(),
     WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(40).default(10),
     USER_MAX_INFLIGHT_TASKS: z.coerce.number().int().min(1).max(1000).default(100),
     PAUSED_TASK_LIMIT_PER_USER: z.coerce.number().int().min(1).max(1000).default(20),
@@ -74,6 +75,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     }
     if (config.PROVIDER_IMAGE_PUBLIC_ORIGIN !== undefined) {
         config.PROVIDER_IMAGE_PUBLIC_ORIGIN = normalizeProviderImageOrigin(config.PROVIDER_IMAGE_PUBLIC_ORIGIN);
+    }
+    if(config.APIMART_IMAGE_WEBHOOK_ORIGIN){
+        config.APIMART_IMAGE_WEBHOOK_ORIGIN=normalizeProviderImageOrigin(config.APIMART_IMAGE_WEBHOOK_ORIGIN);
+        if(!config.APIMART_IMAGE_WEBHOOK_ORIGIN.startsWith("https://")||Buffer.from(config.PROVIDER_ENCRYPTION_KEY??"","base64").length!==32)throw Error("APIMART_IMAGE_WEBHOOK_ORIGIN 需要公开 HTTPS 域名及有效的服务端加密密钥");
     }
     if (config.OA_LOGIN_ENABLED === "true") {
         const endpoint = new URL(config.OA_USERINFO_URL);

@@ -54,11 +54,12 @@ def transaction(package, release, instance, baseline):
     require(not set(old_names).intersection(TASK_REPAIR_MIGRATIONS), "REPAIR_ALREADY_REGISTERED")
     require(baseline["identity"]["database"] == instance["database"]["name"], "REPAIR_DATABASE_MISMATCH")
     names = ",".join("'" + name + "'" for name in sorted(old_names))
-    fields = ",".join("'" + field + "'" for field in FIELDS)
+    combined = reviewed_tail(release)[-1] == TRYOUT_MIGRATIONS[-1]
+    added_fields = FIELDS + (("apimart_callback_received_at",) if combined else ())
+    fields = ",".join("'" + field + "'" for field in added_fields)
     def fingerprint(value):
         return f"SELECT sha256(convert_to(coalesce(string_agg(encode(sha256(convert_to(({value})::text,'UTF8')),'hex'),'' ORDER BY id),''),'UTF8')) AS hash FROM public.tasks t"
     identity = support.json_sql(baseline["identity"])
-    combined = reviewed_tail(release)[-1] == TRYOUT_MIGRATIONS[-1]
     exempt = {"tasks", "schema_migrations"}
     before_flags = after_flags = ""
     if combined:
@@ -77,6 +78,7 @@ CREATE TEMP TABLE prior_flags ON COMMIT DROP AS SELECT to_jsonb(f) AS row FROM p
  OR EXISTS (SELECT FROM public.material_presets WHERE status<>'published' OR thumb_asset_id IS NOT NULL)
  OR (SELECT array_agg(tier ORDER BY tier) FROM public.tryout_model_bindings) IS DISTINCT FROM ARRAY['hd','quick']::text[]
  OR EXISTS (SELECT FROM public.tryout_model_bindings WHERE model_config_id IS NOT NULL OR revision<>1)
+ OR EXISTS (SELECT FROM public.tasks WHERE apimart_callback_received_at IS NOT NULL)
  OR EXISTS (SELECT FROM public.model_presets) OR EXISTS (SELECT FROM public.user_model_defaults) OR EXISTS (SELECT FROM public.asset_fact_cards) OR EXISTS (SELECT FROM public.asset_product_card_overrides) OR EXISTS (SELECT FROM public.provider_upload_cache) OR EXISTS (SELECT FROM public.provider_upload_task_inputs)
  THEN RAISE EXCEPTION 'TRYOUT_UNSAFE_INITIAL_STATE'; END IF;"""
     exclusions = ",".join("'" + name + "'" for name in sorted(exempt))

@@ -62,7 +62,7 @@ INSERT INTO module_flags VALUES('canvas',true),('assets',false);
         with self.assertRaises(Rejected):
             repair.transaction(ROOT, COMBINED, self.instance, after)
 
-    def test_late_flag_trigger_rolls_back_all_nine_migrations(self):
+    def test_late_flag_trigger_rolls_back_the_entire_reviewed_tail(self):
         self.tryout_tables()
         self.psql("""CREATE FUNCTION unexpected_flag_update() RETURNS trigger LANGUAGE plpgsql AS $$
  BEGIN UPDATE module_flags SET enabled=false WHERE module_key='canvas'; RETURN NEW; END $$;

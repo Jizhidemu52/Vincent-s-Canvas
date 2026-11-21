@@ -4,6 +4,7 @@ import helmet from "helmet";
 import { ZodError } from "zod";
 
 import { loadConfig } from "./config";
+import {imageHookPath,imageHookRouter,wakeOriginalImage} from "./apimart-image-webhook";
 import { createCache, createDatabase } from "./db";
 import { createAccountsRouter } from "./routes/accounts";
 import { createAuditRouter } from "./routes/audit-logs";
@@ -101,6 +102,7 @@ if (config.TRUST_PROXY === "true") app.set("trust proxy", 1);
 app.disable("x-powered-by");
 app.use(helmet());
 app.use(requestLogging());
+if(config.APIMART_IMAGE_WEBHOOK_ORIGIN)app.use(imageHookPath,imageHookRouter(config,(id,remote)=>wakeOriginalImage(db,cache,id,remote)));
 app.use("/api/image-conversations", imageConversationBoundary, express.json({ limit: "128kb" }), imageConversationErrors);
 app.use(["/api/design-library", "/api/admin/design-library"], designLibraryBoundary(features.oaLoginEnabled), express.json({ limit: "128kb" }), designLibraryBodyErrors);
 app.use("/api/reference-import", express.json({ limit: "16kb" }), referenceImportBodyErrors);

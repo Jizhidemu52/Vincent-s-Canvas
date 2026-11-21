@@ -467,6 +467,7 @@ export type ApiMartImageTaskInput = ApiMartImageInput & {
   apiKey: string;
   /** Stable local task UUID; Grok requires it before a new paid submission. */
   submissionKey?: string;
+  imageHook?:{webhook:string;webhook_secret:string};
   upstreamTaskId?: string | null;
   submissionStarted?: boolean;
   /** Persisted original submission time; never the current execution/resume time. */
@@ -524,13 +525,16 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
       request.payload.image_urls = await uploadApiMartImageReferences(sources, baseUrl, input.apiKey, runtime);
     }
     pollIntervalMs = request.pollIntervalMs;
+    const hook=request.path==="/images/generations"&&kind.startsWith("gpt-image-2.")?input.imageHook:undefined;
+    if(hook)Object.assign(request.payload,hook,{language:"zh"});
     // Persist the intent immediately before the paid POST. Never retry a POST here.
     await input.beforeSubmit?.();
     const submit = await (runtime.fetch || fetchProviderSubmission)(`${baseUrl}${request.path}`, {
       method: "POST", headers, body: JSON.stringify(request.payload), redirect: "error", signal: AbortSignal.timeout(180_000),
     });
     if (!submit.ok) {
-      const message = `APIMart 图片任务提交失败：${submit.status} ${await providerMessage(submit, input.apiKey)}`;
+      const detail=await providerMessage(submit,input.apiKey);
+      const message = `APIMart 图片任务提交失败：${submit.status} ${hook?detail.replaceAll(hook.webhook_secret,"[redacted]"):detail}`;
       throw Object.assign(isDefinitiveSubmissionRejection(submit.status) ? new ApiMartImageProviderFailure(message) : new Error(message), { code: "PROVIDER_SUBMISSION_HTTP_ERROR", httpStatus: submit.status });
     }
     taskId = readTaskId(await submit.json());

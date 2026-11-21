@@ -15,6 +15,7 @@ import {MARK_GPT26_IMAGE_MODELS as tryoutModels} from "../../shared/mark-image-m
 import { settleReservation } from "./billing";
 import { withTransaction } from "./db-transaction";
 import { popReadyTask, scheduleQueuedTask } from "./task-queue";
+import {imageHookSubmission} from "./apimart-image-webhook";
 import { acquireModelLease, releaseModelLease, startTaskLeaseHeartbeat, TaskExecutionLost, type TaskLease } from "./model-concurrency";
 import { TASK_LEASE_SECONDS, canAutomaticallyRetryTask, queueScore, recalculateBatch, restoreWaitingTasksToQueue, type TaskPriority } from "./tasks";
 import { ObjectStorage } from "./object-storage";
@@ -566,6 +567,7 @@ async function executeApiMartImage(
     apiKey: credentials.apiKey || "",
     modelId: task.model_id!,
     submissionKey: task.id,
+    ...(config.APIMART_IMAGE_WEBHOOK_ORIGIN?{imageHook:imageHookSubmission(config,task.id,task.base_url!)}:{}),
     prompt: providerPrompt,
     parameters: task.parameters,
     sourceImages,
