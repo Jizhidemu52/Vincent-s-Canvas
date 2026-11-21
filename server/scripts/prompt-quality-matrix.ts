@@ -89,10 +89,9 @@ export async function loadBaselineBuilder(repoRoot = root) {
   return { build: module.buildScenePrompt as (scene: string, form: any) => string, sourceSha256: sha(source) };
 }
 export async function loadCurrentSceneAdapter(repoRoot = root): Promise<SceneAdapter> {
-  const source = await readFile(resolve(repoRoot, "web/src/pages/creative/scene-form-model.ts"), "utf8");
-  const javascript = new Bun.Transpiler({ loader: "ts" }).transformSync(source);
-  if (/^import\s/m.test(javascript)) throw new Error("CURRENT_SCENE_HAS_RUNTIME_IMPORTS");
-  return importSceneModule(javascript);
+  const module = await import(pathToFileURL(resolve(repoRoot, "web/src/pages/creative/scene-form-model.ts")).href);
+  if (typeof module.createSceneForm !== "function" || typeof module.scenePromptInput !== "function") throw new Error("CURRENT_SCENE_ADAPTER_MISSING");
+  return { createSceneForm: module.createSceneForm, scenePromptInput: module.scenePromptInput };
 }
 function selectCases(cases: QualityCase[], args: string[]) {
   const at = args.indexOf("--only"), selected = at >= 0 ? args[at + 1]?.split(",").filter(Boolean) : undefined;

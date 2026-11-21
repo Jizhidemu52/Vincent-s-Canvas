@@ -83,7 +83,7 @@ test("graceful shutdown is idempotent, stops reconciliation and enforces a bound
   let healthStops = 0;
   const worker = productionFunctions(["shutdown"], {
     stopping: false, repairWork: undefined, repairScheduler: { stop: () => cleared.push("repair-timer") }, queueReconciliationTimer: "reconcile-timer", usageRollupTimer: "usage-rollup-timer", shutdownTimer: undefined,
-    workerHealth: { stop: async () => { healthStops++; } },
+    portraitTimer: "portrait-timer", workerHealth: { stop: async () => { healthStops++; } },
     activeTaskIds: new Set(["active"]), config: { WORKER_SHUTDOWN_GRACE_SECONDS: 1200 },
     console: { log() {}, error() {} }, process: { exit: (code: number) => exits.push(code) },
     clearInterval: (timer: unknown) => cleared.push(timer),
@@ -91,7 +91,7 @@ test("graceful shutdown is idempotent, stops reconciliation and enforces a bound
   });
   worker.shutdown("SIGTERM"); worker.shutdown("SIGINT");
   expect(healthStops).toBe(1);
-  expect(cleared).toEqual(["reconcile-timer", "repair-timer", "usage-rollup-timer"]);
+  expect(cleared).toEqual(["reconcile-timer", "repair-timer", "usage-rollup-timer", "portrait-timer"]);
   expect(scheduled).toHaveLength(1);
   expect(scheduled[0]!.milliseconds).toBe(1_200_000);
   expect(exits).toEqual([]);

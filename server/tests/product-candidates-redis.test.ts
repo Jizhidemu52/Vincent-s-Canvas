@@ -24,7 +24,8 @@ redisTest("real Redis AOF confirms independent claims and finished receipts with
         expect(claims.filter(item => item.execute)).toHaveLength(1);
         expect(Number(await parent.sendCommand(["TTL", key]))).toBe(-1);
         expect(await readProductCandidatesReceipt(parent, "other-owner", requestId)).toBeNull();
-        await expect(claimProductCandidatesReceipt(parent, owner, request, "b".repeat(64), "test-model")).rejects.toMatchObject({ code: "PRODUCT_CANDIDATES_REQUEST_CHANGED" });
+        const conflict=await claimProductCandidatesReceipt(parent, owner, request, "b".repeat(64), "test-model").then(()=>null,e=>e);
+        expect(conflict).toMatchObject({ code: "PRODUCT_CANDIDATES_REQUEST_CHANGED" });
         const owned = claims.find(item => item.execute)!.stored;
         const connection = await openProductCandidatesReceiptConnection(parent);
         try {
@@ -32,9 +33,11 @@ redisTest("real Redis AOF confirms independent claims and finished receipts with
             expect(await connection.confirmPersistence()).toBe(true);
         } finally { connection.close(); }
         expect((await readProductCandidatesReceipt(parent, owner, requestId))!.receipt).toMatchObject({ status: "success", candidates: [] });
-        await expect(finishProductCandidatesReceipt(parent, owned, { status: "failed" })).rejects.toMatchObject({ status: 503 });
+        const stale=await finishProductCandidatesReceipt(parent, owned, { status: "failed" }).then(()=>null,e=>e);
+        expect(stale).toMatchObject({ status: 503 });
         await parent.set(key, "corrupt-owned-test-data");
-        await expect(readProductCandidatesReceipt(parent, owner, requestId)).rejects.toMatchObject({ status: 503 });
+        const corrupt=await readProductCandidatesReceipt(parent, owner, requestId).then(()=>null,e=>e);
+        expect(corrupt).toMatchObject({ status: 503 });
     } finally {
         // Only this test's cryptographically unique owner/request key. Never flush.
         await parent.del(key);
