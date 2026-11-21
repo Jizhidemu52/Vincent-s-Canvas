@@ -9,7 +9,7 @@ import type {DropColor,WearChip} from "./tryout-swatch";
 const path="/api/tryout/models";
 const auto:WearChip={name:"自动配模特",model:{auto:true}};
 type Catalog={mine:PersonalModel[];presets:ModelPreset[];preference:ModelDefault};
-export function TryoutModels({nodeId,writable,onDrop}:{nodeId?:string;writable:{current:boolean};onDrop:DropColor}){
+export function TryoutModels({nodeId,count,writable,onDrop}:{nodeId?:string;count:number;writable:{current:boolean};onDrop:DropColor}){
     const t=useUiText(),owner=useUserStore(s=>s.user?.id);
     const [open,setOpen]=useState(false),[catalog,setCatalog]=useState<Catalog>(),[revision,reload]=useState(0);
     const [chosen,choose]=useState<WearChip>(auto),[audience,setAudience]=useState<ModelAudience>("women"),[notice,tell]=useState(""),[busy,lock]=useState(false);
@@ -47,7 +47,7 @@ export function TryoutModels({nodeId,writable,onDrop}:{nodeId?:string;writable:{
             {!("auto" in chosen.model)?<button type="button" onClick={()=>void mutate((id,s)=>modelRequest(path+"/default",id,s,"PUT",isDefault?{}:chosen.model))}>{t(isDefault?"取消我的默认":"设为我的默认")}</button>:null}
             {mineId?<button type="button" onClick={()=>void mutate(async(id,s)=>{await modelRequest(path+"/mine/"+mineId,id,s,"DELETE");if(!s.aborted)choose(auto);})}>{t("移出我的模特库")}</button>:null}
         </fieldset>:null}
-        <button type="button" disabled={!nodeId||!writable.current} className="mt-2 min-h-9 w-full rounded border border-current/20 disabled:opacity-50" onClick={()=>{if(nodeId)void wear(nodeId,chosen);}}>{t("上身 1 张")} · {t(chosen.name)}</button>
+        <button type="button" disabled={!nodeId||!writable.current} className="mt-2 min-h-9 w-full rounded border border-current/20 disabled:opacity-50" onClick={()=>{if(nodeId)void wear(nodeId,chosen);}}>{count>1?t("全部上身")+" "+Math.min(12,count)+" "+t("张"):t("上身 1 张")} · {t(chosen.name)}</button>
         {notice?<p role="status">{notice}</p>:null}
     </section>;
 }

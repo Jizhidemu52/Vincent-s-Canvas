@@ -5,6 +5,7 @@ import { z } from "zod";
 import { taskSubmissionSchema as singleSchema, batchSubmissionSchema as batchSchema } from "../../../shared/task-contracts";
 
 import { writeAudit } from "../audit";
+import {assertCanvasOwner} from "../canvas-document";
 import { readTaskReviewOriginals } from "../task-review-originals";
 import { prepareOriginalSizeReissue } from "../task-original-size";
 import { requeueRepairs, type PausedKind } from "../task-repair";
@@ -633,6 +634,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
   router.post("/:id/:action", async (request, response, next) => {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
+      if(request.get("x-canvas-owner-id")!==undefined)assertCanvasOwner(request.get("x-canvas-owner-id"),actor.id);
       const action = actionSchema.parse(request.params.action);
       const owned = await db.query<{ id: string }>(
         "SELECT id FROM tasks WHERE id=$1 AND user_id=$2",

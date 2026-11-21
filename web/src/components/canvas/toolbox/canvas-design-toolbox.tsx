@@ -1,8 +1,8 @@
-import {isTryoutProduct} from "@/lib/tryout/product-node";
 import type {DropColor} from "./tryout-swatch";
 import { TryoutPalette } from "./tryout-palette";
 import {TryoutMaterials} from "./tryout-materials";
 import {TryoutModels} from "./tryout-models";
+import {useTryoutBatch} from "./use-tryout-batch";
 import { useState } from "react";
 import { ChevronUp, LayoutPanelLeft, LoaderCircle } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -29,7 +29,7 @@ export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onCl
     const t=useUiText();
     const discussion=tab==="discussion";
     const body=!discussion;
-    const selectedProduct=count===1&&isTryoutProduct(node)?node?.id:undefined;
+    const batch=useTryoutBatch(onColor,writable),selectedProduct=batch.products[0];
     const saved=node?.metadata?.proposalBoard;
     const board=saved?.version===2 && pending && pending.id===node?.id ? {...saved,...pending.patch} : saved;
     const run=async(options?:Partial<TryoutBoardOptions>)=>{
@@ -48,10 +48,11 @@ export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onCl
             <button type="button" aria-label={t("收起试款台")} onClick={onClose} className="ml-auto grid size-8 place-items-center"><ChevronUp size={15}/></button>
         </div>
         {body?<div className="max-h-[min(55vh,460px)] overflow-auto border-t p-3" style={{borderColor:theme.toolbar.border}}>
-            {selectedProduct?<p className="mb-2">{t("点击色块或材质，给所选产品生成 1 款；拖动可指定部位。")}</p>:null}
-            <TryoutPalette selectedId={selectedProduct} onColor={onColor} writable={writable} beforeEdit={beforeEdit}/>
-            <TryoutMaterials selectedId={selectedProduct} onColor={onColor} writable={writable} beforeEdit={beforeEdit}/>
-            <TryoutModels nodeId={selectedProduct} writable={writable} onDrop={onColor}/>
+            {selectedProduct?<p className="mb-2">{t("点击色块或材质，给所选产品生成")} {Math.min(12,batch.products.length)} {t("款；拖动可指定部位。")}</p>:null}
+            <TryoutPalette selectedId={selectedProduct} onColor={batch.apply} writable={writable} beforeEdit={beforeEdit}/>
+            {selectedProduct&&batch.colors.length>0?<button type="button" className="mb-2 min-h-9 w-full rounded border border-current/20" onClick={()=>void batch.run(batch.products.flatMap(nodeId=>batch.colors.map(chip=>({nodeId,chip}))))}>{t("试整组色板")} · {Math.min(12,batch.products.length*batch.colors.length)} {t("款")}</button>:null}
+            <TryoutMaterials selectedId={selectedProduct} onColor={batch.apply} writable={writable} beforeEdit={beforeEdit}/>
+            <TryoutModels nodeId={selectedProduct} count={batch.products.length} writable={writable} onDrop={batch.apply}/>
             {!count?<p className="mb-2" style={{color:theme.node.muted}}>{t(selectedCount?"这个工具只对图片可用":"选中图片后可用")}</p>:null}
             {board?.version===2 ? <fieldset className="grid gap-2" disabled={busy||node?.metadata?.locked}>
                 <legend className="mb-2 font-semibold">{t("提案板排版")}</legend>

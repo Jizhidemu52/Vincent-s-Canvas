@@ -28,7 +28,7 @@ type ImageActions = ReturnType<typeof createCanvasImageActionsRuntime>;
 
 export function useCanvasImageActions(options: CanvasImageActionsOptions) {
     const { projectId } = options;
-    const { message } = App.useApp();
+    const { message,notification } = App.useApp();
     const effectiveConfig = useEffectiveConfig("canvas");
     const setField = useCanvasGraphStore(state => state.setField);
     const scope = useMemo(() => ({ active: true, runner: null as ReturnType<typeof createCanvasImageOperationRunner> | null }), [projectId]);
@@ -47,8 +47,8 @@ export function useCanvasImageActions(options: CanvasImageActionsOptions) {
             return false;
         }
     }, [scope, message, projectId, options.runtime.waitForWriteAccess, options.runtime.isObservationCurrent]);
-    const latest = useRef({ ...options, message, effectiveConfig, setField, runLocalImageOperation });
-    latest.current = { ...options, message, effectiveConfig, setField, runLocalImageOperation };
+    const latest = useRef({ ...options, message,notification, effectiveConfig, setField, runLocalImageOperation });
+    latest.current = { ...options, message,notification, effectiveConfig, setField, runLocalImageOperation };
 
     const invoke = useCallback(async <K extends keyof ImageActions>(action: K, ...args: Parameters<ImageActions[K]>) => {
         const context = latest.current;

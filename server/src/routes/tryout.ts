@@ -1,14 +1,14 @@
 import { createHash } from "node:crypto";
 import { Router } from "express";
 import { MARK_GPT26_IMAGE_MODELS } from "../../../shared/mark-image-models";
-import { refineTryout,tryoutSubmission,type TryoutSubmission } from "../../../shared/tryout-submission";
+import { refineTryout,tryoutSubmission,tryoutBatch,TRYOUT_BATCH_MAX,type TryoutSubmission } from "../../../shared/tryout-submission";
 import { colorPrompt,materialPrompt,wearPrompt,tryoutImageOptions } from "../../../shared/tryout-prompts";
-import { assertCanvasOwner } from "../canvas-document";
+import { assertCanvasOwner,CanvasDocumentError } from "../canvas-document";
 import { withTransaction } from "../db-transaction";
 import type { Database,Cache } from "../db";
 import { assertModuleEnabled } from "../module-flags";
 import { resolveToolExecution } from "../tool-configuration";
-import { BillingError,prepareTaskEnqueue,enqueueTaskInTransaction,publishEnqueuedTask } from "../tasks";
+import { BillingError,prepareTaskEnqueue,enqueueTaskInTransaction,publishEnqueuedTask,lockTaskAdmission } from "../tasks";
 import type { AuthenticatedRequest } from "../types";
 import {prewarmInput,type createTryoutPrewarm} from "../tryout-prewarm";
 
@@ -54,12 +54,7 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
             res.status(status==="busy"?429:202).json({status});
         }catch(error){next(error);}
     });
-    router.post("/quick",async(req,res,next)=>{
-        try{
-            const actor=(req as AuthenticatedRequest).auth;
-            assertCanvasOwner(req.headers["x-canvas-owner-id"],actor.id);
-            await assertModuleEnabled(db,"canvas-tryout");
-            const input=req.body?.kind==="refine"?refineTryout.parse(req.body):tryoutSubmission.parse(req.body);
+    const admit=async(actor:AuthenticatedRequest["auth"],input:TryoutSubmission|ReturnType<typeof refineTryout.parse>)=>{
             const requestId="tryout:"+actor.id+":"+(input.kind==="refine"?"hd:"+input.sourceTaskId:input.requestId);
             const signature=createHash("sha256").update(JSON.stringify(input)).digest("hex");
             const read=async(query:Pick<Database,"query">)=>{
@@ -68,7 +63,7 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
                 return row;
             };
             const prior=await read(db);
-            if(prior){res.json({taskId:prior.id,prompt:prior.prompt,...(prior.model?{model:prior.model}:{})});return;}
+            if(prior)return {created:false,receipt:{taskId:prior.id,prompt:prior.prompt,...(prior.model?{model:prior.model}:{})}};
             const items=await tryoutProductItems(db,actor.id,input.kind==="refine"?[]:input.kind==="wear"?input.productAssetIds:[input.sourceAssetId],policy.productCards!==false);
             const original=async(query:Pick<Database,"query">,locked=false)=>{
                 if(input.kind!=="refine")return {...await recipe(input,query,actor.id,items,locked),kind:input.kind,tier:input.tier};
@@ -88,6 +83,11 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
                 sourceUrls:ids.map(id=>"/api/assets/"+id+"/content"),parameters:{tool:"canvas-edit",...tryoutImageOptions(spec.kind,spec.tier),tryoutKind:spec.kind,tryoutTier:spec.tier,tryoutNodeId:input.nodeId,tryoutSignature:signature,...(spec.model?{tryoutModel:spec.model}:{}),...(spec.presetId?{tryoutPresetId:spec.presetId}:{}),...(input.kind==="refine"?{tryoutQuickTaskId:input.sourceTaskId}:{})},
                 creditsEnabled:await policy.credits(),maxInflightTasks:policy.maxInflightTasks,maxPausedTasks:policy.maxPausedTasks});
             const result=await withTransaction(db,async client=>{
+                await lockTaskAdmission(client,actor.id);
+                if(spec.tier==="quick"&&!await read(client)){
+                    const inFlight=await client.query<{n:number}>("SELECT count(*)::int AS n FROM tasks WHERE user_id=$1 AND status IN ('waiting','processing') AND request_id LIKE $2 AND parameters->>'tryoutTier'='quick'",[actor.id,"tryout:"+actor.id+":%"]);
+                    if(inFlight.rows[0]!.n>=TRYOUT_BATCH_MAX)throw new BillingError("TRYOUT_QUICK_LIMIT","已有 12 款正在试款，等一款完成或取消排队后再试");
+                }
                 await client.query("SELECT module_key FROM module_flags WHERE module_key=ANY($1::text[]) ORDER BY module_key FOR SHARE",[["canvas","canvas-tryout","canvas-edit"]]);
                 await assertModuleEnabled(client,"canvas-tryout");
                 await assertModuleEnabled(client,"canvas-edit");
@@ -107,7 +107,26 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
                 return task;
             });
             await publishEnqueuedTask(cache,result);
-            res.status(201).json({taskId:result.task.id,prompt,...(spec.model?{model:spec.model}:{})});
+            return {created:true,receipt:{taskId:result.task.id,prompt,...(spec.model?{model:spec.model}:{})}};
+    };
+    for(const batch of [false,true])router.post(batch?"/quick/batch":"/quick",async(req,res,next)=>{
+        try{
+            const actor=(req as AuthenticatedRequest).auth;
+            assertCanvasOwner(req.headers["x-canvas-owner-id"],actor.id);
+            await assertModuleEnabled(db,"canvas-tryout");
+            if(!batch){
+                const result=await admit(actor,req.body?.kind==="refine"?refineTryout.parse(req.body):tryoutSubmission.parse(req.body));
+                res.status(result.created?201:200).json(result.receipt);return;
+            }
+            const {items}=tryoutBatch.parse(req.body),tasks=[];
+            for(const item of items){
+                try{tasks.push({requestId:item.requestId,...(await admit(actor,item)).receipt});}
+                catch(error){
+                    if(!(error instanceof BillingError||error instanceof CanvasDocumentError))throw error;
+                    tasks.push({requestId:item.requestId,error:{code:error.code,message:error.message}});
+                }
+            }
+            res.json({tasks});
         }catch(error){next(error);}
     });
     return router;

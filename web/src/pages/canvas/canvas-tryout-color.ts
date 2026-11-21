@@ -1,4 +1,5 @@
 import { flushSync } from "react-dom";
+import {tryoutNotice} from "@/components/canvas/toolbox/tryout-notice";
 import { createClientUuid } from "@/lib/client-uuid";
 import { canvasImageSource,hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 import { variantSlot,wearSlot } from "@/lib/tryout/placement";
@@ -14,7 +15,7 @@ import type {TryoutMeta} from "../../../../shared/tryout";
 import type { TryoutSubmissionInput } from "../../../../shared/tryout-submission";
 
 export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
-    return async(sourceId,swatch,regionHex,droppedAt)=>{
+    return async(sourceId,swatch,regionHex,droppedAt,transport)=>{
         const {nodesRef,runtime,projectId,message,setField,isCurrent}=context;
         const source=nodesRef.current.find(n=>n.id===sourceId),owner=useUserStore.getState().user?.id;
         if(!owner||!isCurrent()||source?.type!==CanvasNodeType.Image||!hasCanvasImageSource(source.metadata)||source.metadata.status==="loading"||source.metadata.status==="error"||source.metadata.proposalBoard||source.metadata.tryout?.kind==="wear")return;
@@ -37,7 +38,8 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
         context.flushPendingHistory();
         flushSync(()=>setField("nodes",prev=>[...prev,{id,type:CanvasNodeType.Image,title:source.title+" · "+swatch.name,width:source.width,height:source.height,
             position:wear?wearSlot(source,prev):variantSlot(prev.find(n=>n.id===rootNodeId)??source,prev,source),metadata:{status:"loading",prompt,tryout:trace,imageTask:binding}}]));
-        let uncertain=false;
+        let uncertain=false,finishedNotice=false;
+        const notice=transport?undefined:tryoutNotice(context.notification,owner,isCurrent,1);
         try{
             await persist();
             if(!valid())return;
@@ -50,8 +52,12 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
             const common={tier:"quick",canvasId:projectId,nodeId:id,requestId} as const;
             const region=regionHex?{fallbackHex:regionHex}:{};
             const input:TryoutSubmissionInput=wear?{...common,kind:"wear",model:wear.model,productAssetIds:[sourceAssetId]}:color?{...common,sourceAssetId,kind:"color",color,...region}:{...common,sourceAssetId,kind:"material",...region,material:material!.presetId?{presetId:material!.presetId}:{assetId:material!.assetId!}};
+            if(notice&&!notice.canSend())throw new Error("已取消，本次未提交");
             uncertain=true;
-            const res=await fetch("/api/tryout/quick",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","X-Canvas-Owner-Id":owner},body:JSON.stringify(input)});
+            const res=transport?await transport(input,owner,()=>{
+                const latest=nodesRef.current.find(n=>n.id===sourceId)?.metadata;
+                return valid()&&!!latest&&!latest.locked&&canvasImageSource(latest)===url&&latest.storageKey===metadata.storageKey;
+            }):await fetch("/api/tryout/quick",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","X-Canvas-Owner-Id":owner},body:JSON.stringify(input)});
             if(!res.ok){
                 uncertain=res.status<400||res.status>=500||res.status===408;
                 const payload=await res.json().catch(()=>({}));
@@ -59,6 +65,7 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
             }
             const result=await res.json();
             if(typeof result.taskId!=="string"||!result.taskId)throw new Error("缺少任务编号");
+            if(notice){finishedNotice=true;await notice.finish({accepted:[result.taskId],rejected:0,unknown:0});}
             if(!await runtime.waitForWriteAccess()||!valid())return;
             patch({imageTask:{...binding,taskId:result.taskId},sourceTaskId:result.taskId,prompt:result.prompt||prompt,tryout:{...trace,...(wear&&typeof result.model?.name==="string"?{model:{name:result.model.name,...(typeof result.model.presetId==="string"?{presetId:result.model.presetId}:typeof result.model.assetId==="string"?{assetId:result.model.assetId}:{})}}:{}),prompt:result.prompt||prompt,timing:{droppedAt,submittedAt:Date.now()}}});
             await persist();
@@ -67,9 +74,10 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
             if(!await runtime.waitForWriteAccess()||!valid())return;
             const reason=uncertain?"提交结果待核查，只查询原任务，不会重新提交":error instanceof Error?error.message:"未提交试款";
             patch({status:"error",errorDetails:reason,...(uncertain?{}:{imageTask:undefined})});
-            void message.warning(reason);
+            if(!transport&&!uncertain)void message.warning(reason);
+            if(notice&&!finishedNotice){finishedNotice=true;await notice.finish({accepted:[],rejected:uncertain?0:1,unknown:uncertain?1:0});}
             await persist();
             if(uncertain&&valid())void runtime.recoverPending(id);
-        }
+        }finally{if(!finishedNotice)notice?.dismiss();}
     };
 }

@@ -19,7 +19,8 @@ import {createTryoutPrewarm} from "../../src/tryout-prewarm";
     let reads=0,uploads=0;
     const storage={get:async()=>{reads++;return {Body:{transformToWebStream:()=>new Blob([png]).stream()}};}} as unknown as ObjectStorage;
     const warm=createTryoutPrewarm(sql.db,storage,config,{upload:async input=>{uploads++;expect(input.apiKey).toBe("fixture");expect(input.mimeType).toBe("image/webp");return "https://fixture.invalid/ready";}});
-    app.use("/api/tryout",createTryoutRouter(sql.db,cache,{credits:async()=>true,maxInflightTasks:4,maxPausedTasks:3},warm));
+    const policy={credits:async()=>true,maxInflightTasks:4,maxPausedTasks:3};
+    app.use("/api/tryout",createTryoutRouter(sql.db,cache,policy,warm));
     app.use(((err,_req,res,_next)=>res.status(err.status??400).json({error:err.code??err.name,message:err.message})) as ErrorRequestHandler);
     const server=app.listen(0,"127.0.0.1");
     await new Promise<void>(resolve=>server.once("listening",resolve));
@@ -27,6 +28,7 @@ import {createTryoutPrewarm} from "../../src/tryout-prewarm";
     const submit=async(body:unknown,actor=user)=>{const r=await fetch(base,{method:"POST",headers:{"content-type":"application/json","x-fixture-user":actor,"x-canvas-owner-id":actor},body:JSON.stringify(body)});return {status:r.status,...await r.json()};};
     const input={kind:"color",requestId:randomUUID(),canvasId:"winter",nodeId:"color1",tier:"quick",color:{name:"海军蓝",hex:"#173566"},sourceAssetId:product};
     const prewarm=(actor=user,header=actor)=>fetch(base.replace(/quick$/,"prewarm"),{method:"POST",headers:{"content-type":"application/json","x-fixture-user":actor,"x-canvas-owner-id":header},body:JSON.stringify({assetId:product})});
+    const batch=async(items:unknown[])=>{const res=await fetch(base+"/batch",{method:"POST",headers:{"content-type":"application/json","x-fixture-user":user,"x-canvas-owner-id":user},body:JSON.stringify({items})});return {status:res.status,...await res.json()};};
     try{
         for(const id of [user,other])await sql.db.query("INSERT INTO users(id,username,display_name,credit_balance,credit_limit,monthly_credit_limit) VALUES($1,$2,'Fixture',100,100,100)",[id,id]);
         await sql.db.query("INSERT INTO canvas_documents(owner_user_id,external_id,revision,document) VALUES($1,'winter',1,'{}'),($2,'other-design',1,'{}')",[user,other]);
@@ -119,5 +121,22 @@ import {createTryoutPrewarm} from "../../src/tryout-prewarm";
         expect((await submit(selected)).taskId).toBe(live.taskId);
         expect((await submit({...selected,requestId:randomUUID(),model:{presetId:entry}})).error).toBe("TRYOUT_PRESET_UNAVAILABLE");
         expect((await sql.db.query("SELECT count(*)::int AS n FROM credit_reservations WHERE user_id=$1",[user])).rows[0].n).toBe(6);
+        const make=(n:number)=>({...input,nodeId:"batch-"+n,requestId:randomUUID()}),one=make(1),two=make(2);
+        for(const items of [Array.from({length:13},(_,i)=>make(i)),[one,one],[one,{...two,canvasId:"other-design"}],[one,{...two,tier:"hd"}]]){
+            expect((await batch(items)).status).toBe(400);
+        }
+        const three={...make(3),sourceAssetId:foreign};
+        const receipts=await batch([one,three,two]);expect(receipts.status).toBe(200);expect(receipts.tasks.map((r:{requestId:string})=>r.requestId)).toEqual([one.requestId,three.requestId,two.requestId]);
+        expect(receipts.tasks[1].error.code).toBe("TRYOUT_ASSET_UNAVAILABLE");expect(receipts.tasks[2].taskId).not.toBe(receipts.tasks[0].taskId);
+        expect(typeof receipts.tasks[0].taskId).toBe("string");expect(typeof receipts.tasks[2].taskId).toBe("string");
+        expect((await batch([two,one])).tasks.map((r:{taskId:string})=>r.taskId)).toEqual([receipts.tasks[2].taskId,receipts.tasks[0].taskId]);
+        expect((await sql.db.query("SELECT count(*)::int AS n FROM credit_reservations WHERE user_id=$1",[user])).rows[0].n).toBe(8);
+        policy.maxInflightTasks=100;
+        await sql.db.query("UPDATE tasks SET status='success' WHERE user_id=$1",[user]);
+        await sql.db.query("INSERT INTO tasks(request_id,user_id,project_id,operation_type,status,credits,rmb_cost) SELECT 'ordinary:'||i,$1,'winter','inpaint','waiting',0,0 FROM generate_series(1,12) i",[user]);
+        const accepted=make(9);expect((await submit(accepted)).status).toBe(201);
+        await sql.db.query("INSERT INTO tasks(request_id,user_id,project_id,operation_type,status,credits,rmb_cost,parameters) SELECT $2||i,$1,'winter','inpaint','waiting',0,0,'{\"tryoutTier\":\"quick\"}' FROM generate_series(1,11) i",[user,"tryout:"+user+":fixture:"]);
+        expect((await submit(make(10))).error).toBe("TRYOUT_QUICK_LIMIT");
+        expect((await submit(accepted)).status).toBe(200);
     }finally{await new Promise<void>(done=>server.close(()=>done()));await sql.close();}
 },30000);

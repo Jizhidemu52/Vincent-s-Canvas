@@ -42,6 +42,7 @@ import { requestEdit } from "@/services/api/image";
 export type CanvasImageActionRuntimeContext = CanvasImageActionsOptions & {
     effectiveConfig: AiConfig;
     message: ReturnType<typeof App.useApp>["message"];
+    notification: ReturnType<typeof App.useApp>["notification"];
     setField: ReturnType<ReturnType<typeof createCanvasGraphStore>["getState"]>["setField"];
     runLocalImageOperation: (key: string, label: string, task: (signal: AbortSignal) => Promise<void>) => Promise<boolean>;
     isCurrent: () => boolean;
