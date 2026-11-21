@@ -5,7 +5,7 @@ import type {ObjectStorage} from "./object-storage";
 import type {AppConfig} from "./config";
 import {readSourceAssetObject} from "./asset-object-error";
 import {readBoundedImage} from "./seedream55-reference";
-import {resolveToolExecution} from "./tool-configuration";
+import {resolveTryoutBinding} from "./tryout-model-bindings";
 import {assertModuleEnabled,isModuleEnabled} from "./module-flags";
 import {MARK_GPT26_IMAGE_MODELS} from "../../shared/mark-image-models";
 import {decryptSecret} from "./security";
@@ -45,7 +45,7 @@ export function createTryoutPrewarm(db:Database,storage:ObjectStorage,config:App
             await assertModuleEnabled(db,"canvas-tryout");
             await assertModuleEnabled(db,"canvas-edit");
             const source=await owned(owner,asset,preset);
-            const execution=await resolveToolExecution(db,{operationType:"inpaint",toolKey:"canvas-edit"});
+            const {execution}=await resolveTryoutBinding(db,"quick");
             const p=(await db.query("SELECT m.model_id,p.id,p.base_url,p.encrypted_credentials FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1 AND m.enabled AND p.enabled AND p.protocol='apimart' AND m.workflow_config_id IS NULL",[execution.modelConfigId])).rows[0];
             if(!p?.encrypted_credentials||!config.PROVIDER_ENCRYPTION_KEY||!MARK_GPT26_IMAGE_MODELS.some(m=>m.modelId===p.model_id))return;
             const {apiKey}=JSON.parse(decryptSecret(p.encrypted_credentials,config.PROVIDER_ENCRYPTION_KEY));

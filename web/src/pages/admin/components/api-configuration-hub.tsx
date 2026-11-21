@@ -13,6 +13,7 @@ import { HotModelOrderPanel } from "@/pages/admin/components/hot-model-order-pan
 import { ModelPricingPanel } from "@/pages/admin/components/model-pricing-panel";
 import { WorkflowManagementPanel } from "@/pages/admin/components/workflow-management-panel";
 import { QuickImageConfigurationPanel } from "@/pages/admin/components/quick-image-configuration-panel";
+import {TryoutBindingsPanel} from "./tryout-bindings-panel";
 import { buildToolConfigurationInput, compatibleToolModels, completeToolConfigurations, toolConfigurationState } from "@/pages/admin/components/tool-configuration-state";
 import {
     exportConfigurationSnapshot, listServerModels, listServerProviders, listServerWorkflows, listToolApiConfigurations, updateToolApiConfiguration,
@@ -172,6 +173,7 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
                         </section>)}
                     </div>,
                 },
+                ...(isAdmin?[{key:"tryout-models",label:staticUiText("试款模型"),children:<TryoutBindingsPanel/>}]:[]),
                 { key: "featured", label: <span className="inline-flex items-center gap-2"><Star className="size-4" />{staticUiText("热门模型")}</span>, children: <HotModelOrderPanel isAdmin={isAdmin} /> },
                 { key: "quick-images", label: <span className="inline-flex items-center gap-2"><Settings2 className="size-4" />{staticUiText("快捷图片处理")}</span>, children: <QuickImageConfigurationPanel isAdmin={isAdmin} /> },
                 { key: "providers", label: <span className="inline-flex items-center gap-2"><KeyRound className="size-4" />{staticUiText("API 服务与密钥")}</span>, children: <div className="space-y-4"><Alert type="warning" showIcon title={staticUiText("共用服务配置")} description={staticUiText("此处的 API 服务与密钥会被所有绑定该服务的模型共用；只需调整某个板块时，请返回板块配置。")} /><InternalAiProviderConfig isAdmin={isAdmin} /><ApiProviderPanel isAdmin={isAdmin} /></div> },

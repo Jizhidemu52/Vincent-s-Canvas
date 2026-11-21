@@ -44,6 +44,7 @@ class SqlScenarios:
         self.psql("""
 CREATE TABLE assets(id uuid PRIMARY KEY);
 CREATE TABLE providers(id uuid PRIMARY KEY);
+CREATE TABLE model_configs(id uuid PRIMARY KEY);
 CREATE TABLE users(id uuid PRIMARY KEY);
 CREATE TABLE module_flags(module_key text PRIMARY KEY, enabled boolean NOT NULL,
  CONSTRAINT module_flags_module_key_check CHECK(module_key IN ('canvas','assets')));
@@ -61,7 +62,7 @@ INSERT INTO module_flags VALUES('canvas',true),('assets',false);
         with self.assertRaises(Rejected):
             repair.transaction(ROOT, COMBINED, self.instance, after)
 
-    def test_late_flag_trigger_rolls_back_all_eight_migrations(self):
+    def test_late_flag_trigger_rolls_back_all_nine_migrations(self):
         self.tryout_tables()
         self.psql("""CREATE FUNCTION unexpected_flag_update() RETURNS trigger LANGUAGE plpgsql AS $$
  BEGIN UPDATE module_flags SET enabled=false WHERE module_key='canvas'; RETURN NEW; END $$;
