@@ -76,6 +76,7 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
     const stopped: unknown[][] = [];
     let queuedSave: { patch: CanvasHistorySnapshot & { history: CanvasProject["history"] } } | null = null;
     const scope = {
+        get tryoutKit(){return live.tryoutKit;},setTryoutKit(tryoutKit:CanvasProject["tryoutKit"]){live={...live,tryoutKit};},
         uiText, nanoid, options: {}, canvasHistoryContentChanged, normalizeCanvasSelectedNodeIds, CanvasNodeType, syncCanvasSelectionReferences,
         loadQuickGenerationNode: (node: CanvasProject["nodes"][number] | null) => { if (node) editorPrompt = canvasGenerationDraft(node); },
         syncQuickGenerationNode() {},

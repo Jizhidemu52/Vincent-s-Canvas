@@ -63,6 +63,8 @@ function harness(metadata: CanvasNodeData["metadata"], options: { resolve?: () =
             optimizeImagePrompt: async (_config: unknown, draft: unknown, inputs: unknown[]) => { references.push({ kind: "reverse", draft, inputs }); return { prompt: "recognized", summaryZh: "summary" }; },
             requestEdit: async (_config: unknown, _prompt: string, inputs: unknown[]) => { references.push({ kind: "quick", inputs }); return { metadata: { content: image.url }, uploaded: image }; },
         },
+        "./canvas-tryout-color":{colorDrop:()=>()=>{throw new Error("Unexpected paid color operation");}},
+        "./canvas-tryout-tier":{changeTryoutTier:()=>()=>{throw new Error("Unexpected paid HD operation");}},
         "@/services/api/prompt-compilations": {},
         "@/components/canvas/canvas-node-mask-edit-dialog": {
             canvasMaskEditImageSettings: (_config: unknown, size: { width: number; height: number }) => ({ size: `${size.width}x${size.height}` }),

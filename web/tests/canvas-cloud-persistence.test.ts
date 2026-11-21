@@ -110,6 +110,7 @@ async function openStore(io: ReturnType<typeof harness>) {
     new Function("exports", drainCode)(drain);
     const bindings = {
         requestCanvasPersistentStorage, isCanvasStorageQuotaError, clearImportedCanvasTasks, hasCanvasContentChange, canvasDuplicateTitle,
+        readLastTryoutKit:async()=>undefined,inheritTryoutKit:()=>({}),rememberTryoutKit:()=>{},
         ...drain,
         isWorkspaceRole,
         create, persist, nanoid: () => `local-${++io.state.nextId}`, createDeferredPersistQueue: <T>(delay: number, flush: (value: T) => void) => createDeferredPersistQueue(delay, flush, { setTimeout: () => 1, clearTimeout() {} }),
@@ -125,8 +126,9 @@ async function openStore(io: ReturnType<typeof harness>) {
     const exported: any = {};
     new Function(...Object.keys(bindings), "exports", storeCode)(...Object.values(bindings), exported);
     const store = exported.useCanvasStore;
-    if (!store.persist.hasHydrated()) await new Promise<void>(resolve => {
-        const unsubscribe = store.persist.onFinishHydration(() => { unsubscribe(); resolve(); });
+    if (!store.persist.hasHydrated()) await new Promise<void>((resolve,reject) => {
+        const timeout=setTimeout(()=>{unsubscribe();reject(new Error("Fixture canvas store failed to hydrate"));},2000);
+        const unsubscribe = store.persist.onFinishHydration(() => { clearTimeout(timeout);unsubscribe(); resolve(); });
     });
     return { ...exported, store, userStore, reloads: () => reloads };
 }

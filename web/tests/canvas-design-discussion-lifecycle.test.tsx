@@ -166,6 +166,7 @@ function harness(
             useLayoutEffect: (effect: () => (() => void) | undefined, deps: unknown[]) =>
                 schedule(effect, deps, layouts),
         },
+        "@/hooks/use-canvas-entry-usage": {useCanvasEntryUsage(){}},
         "lucide-react": { ChevronDown: "icon", LocateFixed: "icon", RefreshCw: "icon", Sparkles: "icon", X: "icon" },
         "@/stores/canvas/canvas-graph-store": {
             useCanvasGraphField: (field: string) =>

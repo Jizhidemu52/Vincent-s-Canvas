@@ -26,7 +26,7 @@ import { CanvasNodeType, type CanvasNodeData, type CanvasConnection, type Canvas
 
 // Execute the page's real keyboard/copy/paste/import callbacks, without mounting its unrelated editor UI.
 // Only the image storage boundary and React state setters are supplied by this harness.
-const source = ["project.tsx", "canvas-project-utils.ts", "canvas-import-media.ts", "use-canvas-clipboard-drop.ts", "use-canvas-shortcuts.ts"]
+const source = ["project.tsx", "canvas-project-utils.ts", "canvas-import-media.ts", "canvas-file-import.ts", "use-canvas-clipboard-drop.ts", "use-canvas-shortcuts.ts"]
     .map(file => readFileSync(new URL(`../src/pages/canvas/${file}`, import.meta.url), "utf8")).join("\n");
 const ast = ts.createSourceFile("project.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const callbackNames = new Set(["loadCanvasNodeUploadRuntime", "duplicateNodes", "copySelectedNodes", "pasteCopiedNodes", "createImageFileNode", "importFiles", "createTextNodeFromClipboard", "pasteSystemClipboard", "handleDrop"]);
@@ -40,7 +40,7 @@ function collect(node: ts.Node) {
     if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "useEffect"
         && containsIdentifier(node, ["lastEditorSelectionRef"])) selectionEffect = node;
     else if (ts.isVariableStatement(node) && node.declarationList.declarations.some(item => ts.isIdentifier(item.name) && callbackNames.has(item.name.text))) declarations.push(node);
-    else if (ts.isFunctionDeclaration(node) && ["createCanvasNode", "imageMetadata", "prepareCanvasMediaNode", "useCanvasClipboardDrop", "useCanvasShortcuts", "handleCanvasShortcut"].includes(node.name?.text || "")) declarations.push(node);
+    else if (ts.isFunctionDeclaration(node) && ["createCanvasNode", "imageMetadata", "prepareCanvasMediaNode", "importCanvasFiles", "useCanvasClipboardDrop", "useCanvasShortcuts", "handleCanvasShortcut"].includes(node.name?.text || "")) declarations.push(node);
     else if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "useCanvasShortcuts") declarations.push(node);
     else if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "useEffect"
         && containsIdentifier(node, ["handleKeyDown", "bindCanvasClipboardEvents"])) declarations.push(node);
@@ -49,7 +49,7 @@ function collect(node: ts.Node) {
 collect(ast);
 const code = ts.transpileModule(declarations.map(node => node.getText(ast).replace(/^export\s+/, "")).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText
     // The lazy runtime re-exports this real preparation function; retain the storage fixture below.
-    .replace('import("./canvas-node-upload-runtime")', "Promise.resolve({ prepareCanvasMediaNode })")
+    .replace('import("./canvas-node-upload-runtime")', "Promise.resolve({ prepareCanvasMediaNode, importCanvasFiles })")
     .replace('import("@/lib/canvas/canvas-system-clipboard")', "({ then: callback => { callback(clipboardModule); return { catch: () => {} }; } })")
     .replace('import("@/lib/canvas/canvas-clipboard-media-check")', "Promise.resolve({ unavailableCanvasClipboardMedia: async () => [] })");
 const selectionCode = ts.transpileModule(selectionEffect!.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
@@ -101,6 +101,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
     const noop = () => {};
     const update = <T>(ref: { current: T }) => (value: T | ((current: T) => T)) => { ref.current = typeof value === "function" ? (value as (current: T) => T)(ref.current) : value; };
     const env = {
+        tryoutEnabled:false,tryoutPanel:{open:false},
         uiText,
         displayNotice: displayHooksHarness.displayNotice,
         CANVAS_LARGE_IMAGE_NOTICE, isLargeCanvasImage,

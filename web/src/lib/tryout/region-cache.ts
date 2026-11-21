@@ -7,7 +7,7 @@ const storage=createWorkspaceStorage("tryout_regions"),inFlight=new Map<string,P
 let maintenance=Promise.resolve(),writes=0;
 async function digest(image:ImageData){
     const bytes=new Uint8Array(image.data.buffer,image.data.byteOffset,image.data.byteLength);
-    const hash=globalThis.crypto?.subtle?new Uint8Array(await crypto.subtle.digest("SHA-256",bytes)): (await import("@noble/hashes/sha256")).sha256(bytes);
+    const hash=(await import("@noble/hashes/sha256")).sha256(bytes);
     return "v1:"+image.width+"x"+image.height+":"+Array.from(hash,b=>b.toString(16).padStart(2,"0")).join("");
 }
 async function prune(){

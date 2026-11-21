@@ -34,9 +34,10 @@ const uploadRuntimeCode = ts.transpileModule(readFileSync(new URL("../src/pages/
 }).outputText;
 function nodeUploadRuntime(scope: Record<string, unknown>) {
     const dependencies: Record<string, unknown> = {
+        nanoid:{nanoid:()=>"fixture"}, "@/lib/canvas/canvas-async-pool":{mapCanvasAsyncPool}, "@/lib/canvas/canvas-interaction-ux":{canvasImportGridPosition},
         "@/hooks/use-display-text": displayHooksHarness,
         "@/constant/canvas": { NODE_DEFAULT_SIZE }, "@/types/canvas": { CanvasNodeType }, "@/lib/i18n": { uiText },
-        "@/lib/canvas/canvas-image-upload-limit": { assertCanvasImageUploadSize, isLargeCanvasImage },
+        "@/lib/canvas/canvas-image-upload-limit": { assertCanvasImageUploadSize, isLargeCanvasImage, CANVAS_LARGE_IMAGE_NOTICE },
         "@/lib/canvas/canvas-node-size": { fitNodeSize },
         "@/services/image-storage": { uploadImage: scope.uploadImage }, "@/services/file-storage": { uploadMediaFile: scope.uploadMediaFile },
         "./canvas-project-utils": { audioMetadata, replaceCanvasNodeImage, videoMetadata },
@@ -45,6 +46,10 @@ function nodeUploadRuntime(scope: Record<string, unknown>) {
         "./canvas-import-placement": { placeCanvasImportedNodes },
     };
     const module = { exports: {} };
+    const importer={exports:{}};
+    const importerCode=ts.transpileModule(readFileSync(new URL("../src/pages/canvas/canvas-file-import.ts",import.meta.url),"utf8"),{compilerOptions:{target:ts.ScriptTarget.ESNext,module:ts.ModuleKind.CommonJS}}).outputText;
+    new Function("require","module","exports",importerCode)((name:string)=>dependencies[name],importer,importer.exports);
+    dependencies["./canvas-file-import"]=importer.exports;
     new Function("require", "module", "exports", uploadRuntimeCode)((name: string) => dependencies[name], module, module.exports);
     return module.exports;
 }

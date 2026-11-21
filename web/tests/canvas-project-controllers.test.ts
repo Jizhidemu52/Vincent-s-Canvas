@@ -277,6 +277,7 @@ describe("page-private project hydration lifecycle", () => {
             navigate: (value: unknown) => writes.push({ key: "navigate", value }),
         };
         for (const key of ["setProjectLoaded", "setQuickGeneratePosition", "setStreamedTextById", "setRunningNodeId", "setQuickGenerateRunning", "setNodes", "setQuickGenerateOpen", "setConnections", "setGroups", "setChatSessions", "setActiveChatId", "setBackgroundMode", "setShowImageInfo", "setViewport", "setSelectedNodeIds", "setHistoryState"]) scope[key] = (value: unknown) => writes.push({ key, value });
+        scope.setTryoutKit=(value:unknown)=>writes.push({key:"setTryoutKit",value});
         Object.assign(scope, overrides);
         const run = new Function(...Object.keys(scope), code)(...Object.values(scope));
         return { run, writes, historyRef, lastHistoryRef };

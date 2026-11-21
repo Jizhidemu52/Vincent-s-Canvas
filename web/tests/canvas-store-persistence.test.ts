@@ -82,6 +82,7 @@ async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | nul
     let cloudSchedules = 0;
     const bindings = {
         hasCanvasContentChange, isCanvasStorageQuotaError, requestCanvasPersistentStorage, clearImportedCanvasTasks, canvasDuplicateTitle,
+        readLastTryoutKit:async()=>undefined,inheritTryoutKit:()=>({}),rememberTryoutKit:()=>{},
         ...drain,
         isWorkspaceRole, normalizeCanvasSelectedNodeIds,
         create, persist, nanoid: () => `new-${++ids}`, collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, applyCanvasProjectPatch,
