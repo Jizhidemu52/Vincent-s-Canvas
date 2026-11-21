@@ -24,6 +24,13 @@ test("people sorting uses an explicit whitelist while export and preview scopes 
 });
 
 describe("business usage input privacy", () => {
+  test("workflow metrics only accept the declared board, operation and menu identifier", () => {
+    const valid = { ...event(), boardKey: "canvas", action: "click", controlKey: "canvas_toolbar_click.variation-strong", parameters: undefined };
+    const accepted = (value: Record<string,unknown>) => usageEventsSchema.safeParse({events:[value]}).success;
+    expect(accepted(valid)).toBe(true);
+    expect(accepted({...valid,boardKey:"layer-studio",action:"submit",controlKey:"layer_studio_submit.split"})).toBe(true);
+    for(const extra of [{controlKey:"canvas_toolbar_click.private-designer-text"},{boardKey:"image"},{action:"submit"},{parameters:{count:1}},{parameters:{prompt:"private"}}]) expect(accepted({...valid,...extra})).toBe(false);
+  });
   test("accepts only known business metadata and semantic controls", () => {
     expect(usageEventsSchema.parse({ events: [event()] }).events).toHaveLength(1);
     for (const controlKey of ["canvas-tool.maskEdit", "fallback:button:0.2.11", "undo"]) expect(usageEventsSchema.safeParse({ events: [{ ...event(), controlKey }] }).success).toBe(true);

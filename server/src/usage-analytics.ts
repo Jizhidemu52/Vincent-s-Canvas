@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { moduleDefinitions } from "../../shared/feature-catalog";
+import { isWorkflowUsageControl } from "../../shared/usage-analytics";
 import { USAGE_ACTIONS, USAGE_CONTROLS, USAGE_FALLBACK_CONTROL_PATTERN, USAGE_CANVAS_CONTROL_PATTERN, USAGE_MAX_EVENT_AGE_MS, USAGE_MAX_EVENT_FUTURE_MS, USAGE_PEOPLE_SORTS, type UsageControlKey, type UsageClientEvent, type UsageFilters, type UsageParameters, type UsageRecord, type UsageCoverage, type UsageSummary, type UsageBreakdowns, type UsagePeopleSort, type UsagePeopleSorting } from "../../shared/usage-analytics";
 import type { Database } from "./db";
 import { withTransaction } from "./db-transaction";
@@ -12,6 +13,11 @@ export const usageBoardLabels = Object.fromEntries([...moduleDefinitions.map(ite
 export const usageControlLabels: Record<string, string> = { navigation: "板块导航", model: "模型选择", size: "尺寸", resolution: "分辨率", quality: "画质", "reference-upload": "参考图上传", submit: "提交", export: "导出", tab: "页签", mask: "蒙版", settings: "参数设置", template: "模板", download: "下载", "copy-prompt": "复制提示词", favorite: "收藏", "search-filter": "筛选", "canvas-tool": "画布工具", "local-tool": "本地工具", dialog: "对话框", history: "历史记录", reset: "重置" };
 export function usageControlLabel(key: string | null) {
   if (!key) return null;
+  if (isWorkflowUsageControl(key)) {
+    if (key.startsWith("canvas_entry_open.")) return `画布入口 · ${key.split(".")[1]}`;
+    if (key.startsWith("canvas_toolbar_click.")) return `画布菜单 · ${key.split(".")[1]}`;
+    return key.endsWith(".split") ? "图层拆分 · 提交" : "豆包生成 · 提交";
+  }
   if (usageControlLabels[key]) return usageControlLabels[key]!;
   if (USAGE_CANVAS_CONTROL_PATTERN.test(key)) return `画布操作 · ${key.slice("canvas-tool.".length)}`;
   if (USAGE_FALLBACK_CONTROL_PATTERN.test(key)) { const [, tag, path] = key.split(":"); return `结构控件 · ${tag} #${path}`; }
@@ -39,8 +45,16 @@ export const usageParametersSchema = z.object({
 }).strict();
 export const usageEventsSchema = z.object({ events: z.array(z.object({
   eventId: z.string().uuid(), occurredAt: z.string().datetime({ offset: true }), boardKey: boardSchema,
-  action: z.enum(USAGE_ACTIONS), controlKey: z.union([z.enum(USAGE_CONTROLS), z.string().refine(value => USAGE_FALLBACK_CONTROL_PATTERN.test(value) || USAGE_CANVAS_CONTROL_PATTERN.test(value)).transform(value => value as UsageControlKey)]).optional(), parameters: usageParametersSchema.optional(),
+  action: z.enum(USAGE_ACTIONS), controlKey: z.union([z.enum(USAGE_CONTROLS), z.string().refine(value => USAGE_FALLBACK_CONTROL_PATTERN.test(value) || USAGE_CANVAS_CONTROL_PATTERN.test(value) || isWorkflowUsageControl(value)).transform(value => value as UsageControlKey)]).optional(), parameters: usageParametersSchema.optional(),
 }).strict().refine(event => event.action === "visit" || !!event.controlKey, "交互必须使用语义控件标识")
+  .refine(event => {
+    const key = event.controlKey;
+    if (!key || !isWorkflowUsageControl(key)) return true;
+    if (event.parameters !== undefined) return false;
+    if (key.startsWith("layer_studio_submit.")) return event.boardKey === "layer-studio" && event.action === "submit";
+    if (event.boardKey !== "canvas") return false;
+    return event.action === (key.startsWith("canvas_entry_open.") ? "open" : key === "canvas_toolbar_click.download" ? "download" : "click");
+  }, "工作流事件仅接受对应板块和操作，不附带输入内容")
   .refine(event => Date.now() - Date.parse(event.occurredAt) <= USAGE_MAX_EVENT_AGE_MS && Date.parse(event.occurredAt) - Date.now() <= USAGE_MAX_EVENT_FUTURE_MS, "离线事件必须在过去 7 天内且未来偏差不能超过 5 分钟")
   .refine(event => event.action === "gap" ? event.controlKey === "collection-gap" && !!event.parameters?.droppedEventCount : !event.parameters?.droppedEventCount && event.controlKey !== "collection-gap", "采集缺口必须使用专用事件"))
   .min(1).max(50) }).strict();
@@ -168,12 +182,12 @@ export async function usageSummary(db: Pick<Database, "query">, filters: UsageFi
 }
 export async function usageBreakdowns(db: Pick<Database, "query">, filters: UsageFilters): Promise<UsageBreakdowns> {
   const scope = usageSqlFilter(filters);
-  const group = async (column: string, extra = "") => (await db.query(`${usageRecordsCte} SELECT ${column} AS key,count(*)::int AS count FROM usage_records r ${scope.where}${extra ? `${scope.where ? " AND" : " WHERE"} ${extra}` : ""} GROUP BY ${column} ORDER BY count DESC,key`, scope.values)).rows;
+  const group = async (column: string, extra = "") => (await db.query(`${usageRecordsCte} SELECT ${column} AS key,count(*)::int AS count${column === "control_key" ? ',count(DISTINCT r.user_id)::int AS "uniqueUsers"' : ""} FROM usage_records r ${scope.where}${extra ? `${scope.where ? " AND" : " WHERE"} ${extra}` : ""} GROUP BY ${column} ORDER BY count DESC,key`, scope.values)).rows;
   const boards = await group("board_key");
   const controls = await group("control_key", "kind='interaction'");
   const models = await db.query(`${usageRecordsCte} SELECT r.model_config_id::text AS key,COALESCE(m.name,'未知模型') AS label,count(*)::int AS count FROM usage_records r LEFT JOIN model_configs m ON m.id=r.model_config_id ${scope.where}${scope.where ? " AND" : " WHERE"} r.kind IN('generation','chat') GROUP BY r.model_config_id,m.name ORDER BY count DESC,key`, scope.values);
   const daily = await db.query(`${usageRecordsCte} SELECT to_char(occurred_at AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD') AS day,${summarySelect} FROM usage_records r ${scope.where} GROUP BY day ORDER BY day`, scope.values);
-  return { boards: boards.map(row => ({ key: row.key ?? "unknown", label: usageBoardLabels[row.key] ?? "未记录板块", count: row.count })), controls: controls.map(row => ({ key: row.key ?? "unknown", label: usageControlLabel(row.key) ?? "未记录控件", count: row.count })), models: models.rows.map(row => ({ ...row, key: row.key ?? "unknown" })), daily: daily.rows };
+  return { boards: boards.map(row => ({ key: row.key ?? "unknown", label: usageBoardLabels[row.key] ?? "未记录板块", count: row.count })), controls: controls.map(row => ({ key: row.key ?? "unknown", label: usageControlLabel(row.key) ?? "未记录控件", count: row.count, uniqueUsers: row.uniqueUsers })), models: models.rows.map(row => ({ ...row, key: row.key ?? "unknown" })), daily: daily.rows };
 }
 export async function usagePeople(db: Database, filters: UsageFilters, query: { search?: string; page: number; pageSize: number } & UsagePeopleSorting) {
   const search = filters.search ?? query.search;

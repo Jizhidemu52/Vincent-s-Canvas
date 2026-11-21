@@ -1,3 +1,4 @@
+import { CanvasEntryUsage } from "@/components/canvas/canvas-entry-usage";
 import { useUiText } from "@/lib/i18n";
 import type { Dispatch, SetStateAction } from "react";
 import { Button, Input, Modal, Select, Tag, Switch, theme as antdTheme } from "antd";
@@ -48,6 +49,7 @@ export default function CanvasBatchEditDialog({
     const config = useToolConfig({ ...effectiveConfig, ...imageSettings, model: imageSettings.model || effectiveConfig.imageModel || effectiveConfig.model, count: "1" }, "canvas-batch");
     const hasOriginalRequest = items.some(item => item.requestId);
     const inputLocked = running || hasOriginalRequest;
+    const submitReason = hasOriginalRequest ? "已有原请求，请查询原任务" : !items.length ? "请先选择要修改的图片" : !prompt.trim() ? "请写一句修改要求" : "";
     return (
         <Modal
             title={t("批量一键改图")}
@@ -57,10 +59,12 @@ export default function CanvasBatchEditDialog({
             footer={
                 <>
                     <Button onClick={onClose}>{t("关闭")}</Button>
-                    <Button type="primary" loading={running} disabled={hasOriginalRequest && !running} onClick={() => void onRun()}>{optimizing ? t("正在优化提示词…") : t("一键生图")}</Button>
+                    {!running && submitReason ? <span role="status" className="mr-2 text-xs">{t(submitReason)}</span> : null}
+                    <Button type="primary" loading={running} disabled={running || Boolean(submitReason)} onClick={() => void onRun()}>{optimizing ? t("正在优化提示词…") : t("一键生图")}</Button>
                 </>
             }
         >
+            <CanvasEntryUsage entry="batch" open={open} />
             <div className="space-y-4">
                 <div className="flex items-center gap-2">
                     <Select aria-label={t("切换批次")} className="min-w-0 flex-1" value={activeBatchId} onChange={onSelectBatch}

@@ -1,3 +1,4 @@
+import { useCanvasEntryUsage } from "@/hooks/use-canvas-entry-usage";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, LocateFixed, RefreshCw, Sparkles, X } from "lucide-react";
 import { useCanvasGraphField } from "@/stores/canvas/canvas-graph-store";
@@ -128,6 +129,7 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
     const [nodes, setNodes] = useCanvasGraphField("nodes");
     const [selectedIds, setSelectedIds] = useCanvasGraphField("selectedNodeIds");
     const [visible, setVisible] = useState(false);
+    useCanvasEntryUsage("design-discussion", visible, projectId);
     const [taskView, setTaskView] = useState("closed");
     const expanded = taskView === "preview" || taskView === "pinned";
     const [session, setSession] = useState(newStudioSession);

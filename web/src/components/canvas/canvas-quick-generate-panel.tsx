@@ -1,3 +1,4 @@
+import { CanvasEntryUsage } from "@/components/canvas/canvas-entry-usage";
 import { Tooltip } from "antd";
 import { useUiText } from "@/lib/i18n";
 import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
@@ -107,6 +108,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
             onMouseDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}>
             {!embedded ? <div className="cw-tabs"><span>{t("创建")}</span><button className="cw-icon" style={{ marginLeft: "auto" }} aria-label={t("关闭画布生图")} onClick={onClose}><X size={16} /></button></div> : null}
+            <CanvasEntryUsage entry="quick-panel" open={open} />
             <div className="cw-generator-body">
                 {sourceNode ? <CanvasGenerationRecordDetails key={sourceNode.id} node={sourceNode} draftPrompt={prompt} derivatives={derivatives} disabled={running || referenceBusy} onRestorePrompt={onRestorePrompt} onContinue={onContinue} onRegenerate={onRegenerate} onRestoreGeneration={onRestoreGeneration} onLocate={onLocateDerivative} /> : null}
                 {positioned ? <div className="mb-3 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}><span>{t("下一次生成放在右键位置")}</span><button type="button" className="shrink-0 hover:underline" onClick={onClearPosition}>{t("取消定位")}</button></div> : null}

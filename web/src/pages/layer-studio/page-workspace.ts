@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { recordUsage } from "@/stores/use-usage-store";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { createClientId } from "@/lib/client-id";
 import { getQueuedTask, getQueuedTaskByRequestId, recoverQueuedTask } from "@/services/api/generation-tasks";
@@ -86,7 +87,10 @@ export function useLayerStudioWorkspace(ownerId: string, workspaceId: string) {
             const requestId = createClientId();
             const submission = layerStudioSubmission(current.current, requestId);
             const job: LayerStudioJob = { requestId, ownerId, workspaceId, createdAt: Date.now(), submission, phase: "submitting" };
-            await submitLayerStudioOnce(job, { assertCurrent, create: createLayerStudioTask,
+            await submitLayerStudioOnce(job, { assertCurrent, create: input => {
+                recordUsage({ occurredAt: new Date().toISOString(), boardKey: "layer-studio", action: "submit", controlKey: input.parameters.layer_decomposition ? "layer_studio_submit.split" : "layer_studio_submit.generate" });
+                return createLayerStudioTask(input);
+            },
                 persist: async next => { await update(previous => ({ ...previous, jobs: previous.jobs.some(item => item.requestId === next.requestId)
                     ? previous.jobs.map(item => item.requestId === next.requestId ? next : item) : [next, ...previous.jobs], selectedRequestId: next.requestId })); } });
         } catch { if (mounted.current) setError("请求记录未能安全保存或工作区已变化；未重复提交。请保留页面并核对原记录。"); }

@@ -4,9 +4,15 @@ export const USAGE_MAX_EVENT_FUTURE_MS = 5 * 60_000;
 export const USAGE_ACTIONS = ["visit", "click", "change", "submit", "export", "drop", "download", "open", "close", "gap"] as const;
 export type UsageAction = typeof USAGE_ACTIONS[number];
 export const USAGE_CONTROLS = ["navigation", "model", "size", "resolution", "quality", "reference-upload", "submit", "export", "tab", "mask", "settings", "template", "download", "copy-prompt", "favorite", "search-filter", "canvas-tool", "local-tool", "dialog", "history", "reset", "undo", "redo", "delete-selection", "paste", "zoom", "drag", "collection-gap"] as const;
-export type UsageControlKey = typeof USAGE_CONTROLS[number] | `fallback:${string}:${string}` | `canvas-tool.${string}`;
+export const CANVAS_USAGE_ENTRIES = ["config-node", "quick-panel", "node-prompt", "mask-edit", "multi-angle", "variation", "batch", "workflow", "assistant", "design-discussion", "text-node"] as const;
+export type CanvasUsageEntry = typeof CANVAS_USAGE_ENTRIES[number];
+export type UsageControlKey = typeof USAGE_CONTROLS[number] | `fallback:${string}:${string}` | `canvas-tool.${string}` | `canvas_entry_open.${CanvasUsageEntry}` | `canvas_toolbar_click.${string}` | "layer_studio_submit.split" | "layer_studio_submit.generate";
 export const USAGE_FALLBACK_CONTROL_PATTERN = /^fallback:(?:button|a|input|select|textarea|switch|checkbox|radio|tab|menuitem|slider|option|img|div|span):\d{1,4}(?:[.]\d{1,4}){0,11}$/;
-export const USAGE_CANVAS_CONTROL_PATTERN = /^canvas-tool\.(?:select|pan|upload|text|config|group|more|generate|image|video|audio|batch|background|info|delete|clear|assets|retry|saveAsset|download|edit|editText|generateImage|decreaseFont|increaseFont|uploadImage|uploadVideo|uploadAudio|manualEdit|crop|split|upscale|superResolve|angle|viewImage|copyPrompt|reversePrompt|compare|designTemplate|restoreGeneration|freeResize|maskEdit|customize|duplicate|rename)$/;
+export const USAGE_CANVAS_CONTROL_PATTERN = /^canvas-tool\.(?:select|pan|upload|text|config|group|more|generate|image|video|audio|batch|background|info|delete|clear|assets|retry|saveAsset|download|edit|editText|generateImage|decreaseFont|increaseFont|uploadImage|uploadVideo|uploadAudio|manualEdit|crop|split|upscale|superResolve|angle|viewImage|copyPrompt|reversePrompt|compare|designTemplate|restoreGeneration|freeResize|maskEdit|customize|duplicate|rename|regenerate|variation-subtle|variation-strong|imageSequence|eraser|copyImage|bringFront|sendBack|lock|undo|redo|ungroup|selectAll|commands|continueFromImage|resetView|fitSelection|zoomIn|zoomOut|zoomActual|pasteHere|minimap|export|exportImages|downloadSelectedImages|tools|guide|examples|theme|backgroundDots|backgroundLines|backgroundBlank|imageInfo|home|projects|newProject|deleteProject|renameProject|share|shortcuts|referenceImport)$/;
+export function isWorkflowUsageControl(key: string): key is Extract<UsageControlKey, `canvas_entry_open.${string}` | `canvas_toolbar_click.${string}` | `layer_studio_submit.${string}`> {
+  if (key.startsWith("canvas_entry_open.")) return CANVAS_USAGE_ENTRIES.some(entry => key === `canvas_entry_open.${entry}`);
+  return key === "layer_studio_submit.split" || key === "layer_studio_submit.generate" || (key.startsWith("canvas_toolbar_click.") && USAGE_CANVAS_CONTROL_PATTERN.test("canvas-tool." + key.slice("canvas_toolbar_click.".length)));
+}
 export type UsageParameters = {
   modelConfigId?: string;
   resolution?: "0.5K" | "1K" | "2K" | "4K" | "720P" | "1080P";
@@ -47,7 +53,7 @@ export type UsagePeopleOrder = "asc" | "desc";
 export type UsagePeopleSorting = { sort?: UsagePeopleSort; order?: UsagePeopleOrder };
 export type UsagePagination = { page: number; pageSize: number; total: number };
 export type UsageSummary = { visits: number; interactions: number; generationRequests: number; chatRequests: number; succeeded: number; failed: number; pending: number; totalRmbCost: number; generatedImages: number };
-export type UsageBucket = { key: string; label: string; count: number };
+export type UsageBucket = { key: string; label: string; count: number; uniqueUsers?: number };
 export type UsageBreakdowns = { boards: UsageBucket[]; models: UsageBucket[]; controls: UsageBucket[]; daily: Array<{ day: string } & UsageSummary> };
 export type UsageCoverage = { collectionStartedAt: string | null; historicalTasksAvailable: true; historicalClicksAvailable: false; historicalChatAvailable: false; droppedEventCount?: number; missingHistoryCount?: number; notes: string[] };
 export type UsagePerson = { userId: string; displayName: string; departmentName: string | null; summary: UsageSummary; lastActivityAt: string | null };

@@ -1,3 +1,4 @@
+import { CanvasEntryUsage } from "@/components/canvas/canvas-entry-usage";
 import { useUiText } from "@/lib/i18n";
 import { useState } from "react";
 import { Button, Input, Modal, Tag, Select } from "antd";
@@ -33,7 +34,9 @@ export function CanvasImageSequenceDialog({ controller, groups, nodes, model, on
     const completed = sequence?.steps.filter(step => step.status === "success").length || 0;
     const change = (index: number, field: 0 | 1, value: string) => setDrafts(items => items.map((item, i) => i === index ? [field === 0 ? value : item[0], field === 1 ? value : item[1], item[2]] : item));
     const cards = sequence ? sequence.steps.map(step => { const node = nodes.find(item => item.id === step.configNodeId); return { title: node?.title || "配置已移除", prompt: node ? imageSequencePrompt(node) : "", node, step }; }) : drafts.map(([title, prompt]) => ({ title, prompt, node: undefined, step: undefined }));
+    const submitReason = !source ? "请先选择工作流原图" : sequence && cards.some(card => !card.node) ? "请先恢复缺失的配置节点" : !sequence && drafts.some(([title]) => !title.trim()) ? "请填写每一步的名称" : cards.some(card => !card.prompt.trim()) ? "请填写每一步的修改要求" : "";
     return <Modal open title={sequence ? t("图片工作流 · 运行记录") : t("快速搭建图片工作流")} width={660} style={{ top: 24 }} styles={{ body: { display: "flex", flexDirection: "column", maxHeight: "calc(100dvh - 160px)" } }} onCancel={onClose} footer={null}>
+            <CanvasEntryUsage entry="workflow" open={Boolean(controller.dialog)} />
         <p className="mb-3 shrink-0 text-sm opacity-70">{t("原图：")}{source?.title || t("原图已移除")}{t("。在画布上连接配置节点来决定执行顺序；每步自动使用其上游结果。此处只用于快捷搭建或查看记录，最终以画布连线为准。")}</p>
         <div role="note" className="mb-4 shrink-0 rounded-lg border p-3 text-xs leading-relaxed" style={{ background: theme.node.fill, borderColor: theme.toolbar.border, color: theme.node.text }}><p className="mb-1 font-medium">{t("请保持此画布页面打开")}</p>{t("每一步会单独提交生成任务。关闭弹窗不会停止；刷新、关闭或离开画布后不会继续提交后续步骤。停止不保证撤销已提交的服务端任务。")}</div>
         {sequence?.error ? <p role="alert" className="mb-3 max-h-24 shrink-0 overflow-y-auto rounded-lg border p-3 text-sm" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>{t("流程已暂停：")}{sequence.error}</p> : null}
@@ -51,9 +54,10 @@ export function CanvasImageSequenceDialog({ controller, groups, nodes, model, on
         </section>)}</div>
         <div className="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-2">
             {!sequence ? <Button icon={<Plus size={14} />} disabled={drafts.length >= 10} onClick={() => setDrafts(items => [...items, ["新步骤", "", "custom"]])}>{t("添加步骤")}</Button> : <span className="text-xs opacity-60">{t("继续只执行未完成步骤；已完成图片不会重跑。")}</span>}
-            {!sequence ? <Button type="primary" disabled={!source || drafts.some(([title, prompt]) => !title.trim() || !prompt.trim())} onClick={() => onCreate(drafts)}>{t("创建并连接节点")}</Button>
+            {!running && submitReason ? <span role="status" className="text-xs">{t(submitReason)}</span> : null}
+            {!sequence ? <Button type="primary" disabled={Boolean(submitReason)} onClick={() => onCreate(drafts)}>{t("创建并连接节点")}</Button>
                 : running ? <Button danger onClick={() => controller.stop(group?.id)}>{t("停止后续步骤")}</Button>
-                    : <Button type="primary" disabled={!source || cards.some(card => !card.node || !card.prompt.trim())} onClick={onRun}>{sequence.status === "success" ? t("按连线重新运行") : sequence.status === "idle" ? t("按连线运行") : t("核查并继续")}</Button>}
+                    : <Button type="primary" disabled={Boolean(submitReason)} onClick={onRun}>{sequence.status === "success" ? t("按连线重新运行") : sequence.status === "idle" ? t("按连线运行") : t("核查并继续")}</Button>}
         </div>
     </Modal>;
 }

@@ -75,6 +75,16 @@ export function usageSummaryText(summary: UsageSummary, breakdowns: UsageBreakdo
     return `${scope}已记录 ${summary.generationRequests + summary.chatRequests} 次模型请求（生成 ${summary.generationRequests} 次、文字 ${summary.chatRequests} 次），成功 ${summary.succeeded} 次、失败 ${summary.failed} 次、未完成 ${summary.pending} 次。成功实际出图 ${summary.generatedImages} 张（不是请求次数）。${model ? `常用模型为“${model.label}”（${model.count} 次调用）` : "暂无可用模型调用分布"}；${board ? `常用板块为“${board.label}”（${board.count} 条记录）` : "暂无可用板块记录"}；${control ? `常用操作控件为“${control.label}”（${control.count} 条记录）` : "暂无可用操作控件记录"}。${(coverage.droppedEventCount || 0) > 0 ? `另有 ${coverage.droppedEventCount} 条已知采集缺口，统计可能偏低。` : ""}历史点击与聊天不能回补，记录不足不能解释为未工作或未使用。`;
 }
 
+function WorkflowUsageTable({ rows }: { rows: UsageBucket[] }) {
+    const display = useDisplayText();
+    const measured = rows.filter(row => row.key.startsWith("canvas_entry_open.") || row.key.startsWith("canvas_toolbar_click.") || row.key.startsWith("layer_studio_submit."));
+    return <section><h3 className="mb-2 font-semibold">{staticUiText("画布入口、菜单与图层工作台用量")}</h3>
+        {measured.length ? <table className="w-full text-left text-sm"><thead><tr><th>{staticUiText("操作")}</th><th className="text-right">{staticUiText("次数")}</th><th className="text-right">{staticUiText("去重人数")}</th></tr></thead>
+            <tbody>{measured.map(row => <tr key={row.key}><td>{display(row.label)}</td><td className="text-right tabular-nums">{row.count}</td><td className="text-right tabular-nums">{row.uniqueUsers ?? "—"}</td></tr>)}</tbody></table>
+            : <p className="text-sm text-[var(--muted-foreground)]">{staticUiText("当前筛选范围暂无入口或菜单记录")}</p>}
+    </section>;
+}
+
 export function UsageAnalyticsPanel() {
     useUiLocale();
     const display = useDisplayText();
@@ -247,6 +257,7 @@ export function UsageAnalyticsPanel() {
         </div>
         {data ? <p aria-label={staticUiText("统计简述")} className="text-sm leading-6 text-[var(--muted-foreground)]">{display(usageSummaryText(data.summary, data.breakdowns, data.coverage))}</p> : null}
         {data ? <UsageDailyTrend daily={data.breakdowns.daily} from={applied.from} to={applied.to} /> : null}
+        {data ? <WorkflowUsageTable rows={data.breakdowns.controls} /> : null}
         <div className="grid min-w-0 gap-4 lg:grid-cols-3"><UsageBars title={staticUiText("模型调用分布")} values={data?.breakdowns.models || []} filterKind="model" selectedKey={applied.modelConfigId} disabled={queryLocked || dirtyFilters} onSelect={key => drillDown("model", key)} /><UsageBars title={staticUiText("板块使用分布")} values={data?.breakdowns.boards || []} filterKind="board" selectedKey={applied.boardKey} disabled={queryLocked || dirtyFilters} onSelect={key => drillDown("board", key)} /><UsageBars title={staticUiText("操作控件分布")} values={data?.breakdowns.controls || []} /></div>
         <section className="wb-surface min-w-0 p-4 sm:p-5" aria-label={staticUiText("用户使用列表")}>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">{staticUiText("用户记录")}</h3><p className="mt-1 text-xs text-[var(--muted-foreground)]">{staticUiText("点击姓名查看详细记录。已选 ")}{selectedIds.length}{staticUiText(" 人；翻页与排序保留选择，修改筛选清空选择。")}</p><p className="mt-1 text-xs text-[var(--muted-foreground)]">{staticUiText("保留当前搜索内零记录员工；板块和模型只筛选记录。排序仅用于查看记录、定位问题，不表示人员排名或绩效。")}</p><p aria-label={staticUiText("使用分析人员排序")} className="mt-1 text-xs">{staticUiText("排序：")}{staticUiText(sortLabels[sorting.sort])} · {sorting.order === "asc" ? staticUiText("升序") : staticUiText("降序")}</p></div><div className="flex flex-wrap gap-2"><Button icon={<Download className="size-4" />} disabled={!selectedIds.length || !data || dirtyFilters || queryLocked} onClick={() => openExport({ userIds: selectedIds, label: `当前筛选内选中的 ${selectedIds.length} 位用户` })}>{staticUiText("导出选中（")}{selectedIds.length}）</Button><Button disabled={!data || dirtyFilters || queryLocked} onClick={() => openExport({ label: "当前筛选范围内的全部用户" })}>{staticUiText("导出筛选范围完整记录")}</Button></div></div>

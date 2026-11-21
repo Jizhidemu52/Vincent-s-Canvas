@@ -1,3 +1,4 @@
+import { CanvasEntryUsage } from "@/components/canvas/canvas-entry-usage";
 import { staticUiText } from "@/lib/static-ui-copy";
 import { useUiText } from "@/lib/i18n";
 import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
@@ -101,7 +102,7 @@ export function CanvasConfigNodePanel({ node, isRunning, templateTaskCount = 0, 
     const fixedTaskReference = inputModeCheck && (!inputModeCheck.patch || inputModeCheck.patch.composerContent !== undefined);
     const pendingOriginal = inputs.some(input => input.pendingUpload);
     const canGenerate = !pendingOriginal && !optimizing && toolEnabled && hasAvailableModel && modelIsSynced && !fixedTaskReference && (linkedTaskCount > 0 || (blend ? imageCount >= 2 && imageCount <= 4 : mode === "video" ? hasPromptInput || hasAnyInput : hasPromptInput));
-    const disabledReason = pendingOriginal ? "先设置参考款原图" : optimizing ? "正在优化提示词…" : !toolEnabled ? "当前功能已停用" : businessConfigStatus !== "ready" ? businessConfigStatus === "error" ? "模型列表加载失败，请打开模型选择器重试" : "正在加载模型…" : routingError || (!hasAvailableModel ? "当前功能没有可用模型" : !modelIsSynced ? "正在同步模型…" : fixedTaskReference ? "请改为按图片1引用当前任务主图" : blend && (imageCount < 2 || imageCount > 4) ? "融合需要 2–4 张参考图" : !hasPromptInput && !hasAnyInput ? "请先输入提示词或连接素材" : "");
+    const disabledReason = pendingOriginal ? "先设置参考款原图" : optimizing ? "正在优化提示词…" : !toolEnabled ? "当前功能已停用" : businessConfigStatus !== "ready" ? businessConfigStatus === "error" ? "模型列表加载失败，请打开模型选择器重试" : "正在加载模型…" : routingError || (!hasAvailableModel ? "当前功能没有可用模型" : !modelIsSynced ? "正在同步模型…" : fixedTaskReference ? "请改为按图片1引用当前任务主图" : blend && (imageCount < 2 || imageCount > 4) ? "融合需要 2–4 张参考图" : mode === "image" && !blend && hasImages && !hasPromptInput ? "请写一句修改要求" : !hasPromptInput && !hasAnyInput ? "请先输入提示词或连接素材" : "");
     const referencePresentation = configReferencePresentation(references, inputs, mode, separateImages);
     const mentionCatalog = useCanvasMentionImages();
     const mentionInputs = configMentionInputs(referencePresentation.inputs, references, mode === "audio" ? [] : mentionCatalog.images, referencePresentation.mentionLabels, separateImages ? 1 : 0);
@@ -129,6 +130,7 @@ export function CanvasConfigNodePanel({ node, isRunning, templateTaskCount = 0, 
 
     return (
         <div className="flex h-full min-h-0 w-full cursor-move flex-col overflow-hidden px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
+            <CanvasEntryUsage entry="config-node" open instance={node.id} />
             <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto" aria-label={t("生成配置内容")}>
             <div className="mb-2 flex items-center justify-between gap-3">
                 <Tooltip title={node.title}><div className="min-w-0 truncate text-sm font-semibold">{node.title || t("生成配置")}</div></Tooltip>

@@ -241,7 +241,7 @@ export function CanvasNodeHoverToolbar({
     });
     const toolbarTools = hasImage ? visibleImageToolIds.flatMap((id) => allToolbarTools.find((tool) => tool.id === id) || []) : allToolbarTools;
     const selectableImageToolbarTools = allToolbarTools.filter((tool) => !["retry", "info", "delete", "duplicate", "rename", "bringFront", "sendBack", "lock", "copyImage"].includes(tool.id)) as ImageToolbarSettingsTool[];
-    const menuTool = (tool: ToolbarTool) => ({ key: tool.id, label: <span data-usage-control={canvasUsageControl(tool.id)}>{tool.label}</span>, title: tool.title, icon: <span className="[&_svg]:size-[18px]">{tool.icon}</span>, danger: tool.danger });
+    const menuTool = (tool: ToolbarTool) => ({ key: tool.id, "data-usage-control": canvasUsageControl(tool.id), label: tool.label, title: tool.title, icon: <span className="[&_svg]:size-[18px]">{tool.icon}</span>, danger: tool.danger });
     const moreMenu: MenuProps = {
         style: { background: theme.toolbar.panel, color: theme.node.text, boxShadow: "none" },
         items: [
@@ -251,7 +251,7 @@ export function CanvasNodeHoverToolbar({
             }),
             { type: "divider" },
             ...allToolbarTools.filter(tool => tool.id === "delete").map(menuTool),
-            { key: "customize", label: <span className="text-xs opacity-60" data-usage-control="canvas-tool.customize">{t("自定义工具")}</span>, icon: <Settings2 className="size-[14px] opacity-60" /> },
+            { key: "customize", ...{ "data-usage-control": "canvas-tool.customize" }, label: <span className="text-xs opacity-60">{t("自定义工具")}</span>, icon: <Settings2 className="size-[14px] opacity-60" /> },
         ],
         onClick: ({ key, domEvent }) => {
             domEvent.stopPropagation();

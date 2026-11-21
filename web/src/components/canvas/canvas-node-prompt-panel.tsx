@@ -1,3 +1,4 @@
+import { CanvasEntryUsage } from "@/components/canvas/canvas-entry-usage";
 import { displayNotice } from "@/hooks/use-display-text";
 import { staticUiText } from "@/lib/static-ui-copy";
 import { useUiText } from "@/lib/i18n";
@@ -228,6 +229,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         const model = models.find(item => item.modelId === config.model || item.id === config.model);
         const modeLabel = { image: "图片", text: "文本", video: "视频", audio: "音频" }[mode];
         return <div className="rounded-xl border p-3 text-sm backdrop-blur" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
+            <CanvasEntryUsage entry={node.type === CanvasNodeType.Text ? "text-node" : "node-prompt"} open instance={node.id} />
             {mode === "image" && imageInput?.usesSnapshot ? <CanvasGenerationRecordDetails key={node.id} node={node} draftPrompt={sourcePrompt} disabled={isRunning} onRestoreGeneration={onRestoreGeneration ? () => onRestoreGeneration(node.id) : undefined} /> : null}
             <div className="font-medium">{t("继承配置：")}{sharedConfig.title || t("公共配置")}</div>
             <div className="mt-1 text-xs" style={{ color: theme.node.muted }}>{modeLabel} · {mode === "text" ? t("统一文本模型") : model?.publicName || model?.name || t("使用公共配置模型")}</div>

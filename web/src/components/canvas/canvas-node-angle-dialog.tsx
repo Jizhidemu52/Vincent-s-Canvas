@@ -1,3 +1,4 @@
+import { CanvasEntryUsage } from "@/components/canvas/canvas-entry-usage";
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useState } from "react";
 import { Button, Modal, Segmented, Slider } from "antd";
@@ -56,6 +57,7 @@ export function CanvasNodeAngleDialog({ dataUrl, open, onClose, onConfirm }: { d
 
     return (
         <Modal title={null} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={860} centered destroyOnHidden>
+            <CanvasEntryUsage entry="multi-angle" open={open && Boolean(dataUrl)} />
             <div className="space-y-5">
                 <div>
                     <h2 className="text-xl font-semibold">{t("AI 多角度")}</h2>

@@ -6,11 +6,15 @@ export function imageReferenceLabel(index: number) {
 
 export function buildImageReferencePromptText(prompt: string, references: ReferenceImage[], language: "zh" | "en" = "zh") {
     if (!references.length) return prompt;
+    if (references.length === 1) {
+        const role = references[0]?.role?.trim();
+        return role ? `${role}\n\n${prompt}` : prompt;
+    }
     const roles = references.flatMap((image, index) => image.role?.trim() ? [`${language === "en" ? `Image ${index + 1}` : imageReferenceLabel(index)}：${image.role}`] : []);
     const purpose = roles.length ? `\n${roles.join("\n")}` : "";
-    if (language === "en") return `Reference images in the supplied order: ${references.map((_, index) => `Image ${index + 1}`).join(", ")}. Interpret all image references using these numbers.${purpose}\n\n${prompt}`;
+    if (language === "en") return `Reference images in the supplied order: ${references.map((_, index) => `Image ${index + 1}`).join(", ")}.${purpose}\n\n${prompt}`;
     const labels = references.map((_, index) => imageReferenceLabel(index));
-    return `参考图片编号：${labels.join("、")}。请按这些编号理解提示词中的图片引用。${purpose}\n\n${prompt}`;
+    return `参考图片编号：${labels.join("、")}。${purpose}\n\n${prompt}`;
 }
 
 /** Shared by the send path and the read-only preview. Mask/markup are never passed here. */

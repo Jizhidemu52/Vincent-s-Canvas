@@ -1,3 +1,4 @@
+import { useCanvasEntryUsage } from "@/hooks/use-canvas-entry-usage";
 import { displayNotice } from "@/hooks/use-display-text";
 import { useUiText, uiText } from "@/lib/i18n";
 import { ChevronDown } from "lucide-react";
@@ -427,6 +428,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const [assistantClosing, setAssistantClosing] = useState(false);
     const assistantOpen = assistantMounted && !assistantCollapsed;
     const [agentMode, setAgentMode] = useState<CanvasAgentMode>("online");
+    useCanvasEntryUsage("assistant", assistantOpen && agentMode === "online", projectId);
     const agentUndoRecordsRef = useRef(new Map<string, CanvasAgentUndoRecord[]>());
     const latestAgentTurnRef = useRef<string | null>(null);
     const [canUndoAgentOps, setCanUndoAgentOps] = useState(false);

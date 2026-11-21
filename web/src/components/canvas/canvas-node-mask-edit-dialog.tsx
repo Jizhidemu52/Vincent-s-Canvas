@@ -1,3 +1,4 @@
+import { CanvasEntryUsage } from "@/components/canvas/canvas-entry-usage";
 import { staticUiText } from "@/lib/static-ui-copy";
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
@@ -281,6 +282,7 @@ export function CanvasNodeMaskEditDialog({
     return (
         <>
         <Modal title={t("局部遮罩编辑")} open={open && Boolean(dataUrl)} onCancel={requestClose} footer={null} width={980} centered destroyOnHidden styles={{ body: { maxHeight: "calc(100dvh - 128px)", overflowY: "auto" } }}>
+            <CanvasEntryUsage entry="mask-edit" open={open && Boolean(dataUrl)} />
             <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
                 <div ref={viewportRef} className="relative flex min-w-0 items-center justify-center overflow-hidden rounded-xl border bg-transparent p-0" style={{ borderColor: theme.node.stroke }}>
                     <div className="relative inline-block max-w-full rounded-lg bg-transparent select-none" style={{ transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})` }}>

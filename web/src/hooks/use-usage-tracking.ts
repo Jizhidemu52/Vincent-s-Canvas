@@ -40,7 +40,9 @@ export function useUsageTracking() {
             const classified = classifyUsageElement(source);
             const ids = new Map(useBusinessConfigStore.getState().models.flatMap(model => [[model.id, model.id], [model.modelId, model.id]] as [string, string][]));
             const effective = action === "click" && ["download", "canvas-tool.download"].includes(classified.controlKey) ? "download" : action === "click" && classified.controlKey === "export" ? "export" : action;
-            send(effective, classified.controlKey, source, usageParameters(classified.element, classified.controlKey, action, ids));
+            if (action === "click" && (source.closest("[data-usage-board]")?.getAttribute("data-usage-board") || board) === "canvas" && classified.controlKey.startsWith("canvas-tool.")) {
+                send(effective, `canvas_toolbar_click.${classified.controlKey.slice("canvas-tool.".length)}`, source);
+            } else send(effective, classified.controlKey, source, usageParameters(classified.element, classified.controlKey, action, ids));
         };
         const click = event("click"), change = event("change"), submit = event("submit"), drop = event("drop");
         const model = (native: Event) => {
