@@ -148,7 +148,18 @@ describe("Sol recipes against the real compiler without network", () => {
     expect(f.calls).toHaveLength(0);
   });
 
-  test("a smart-color fallback uses one Sol call, receives complete fields, and accepts C5", async () => {
+  test.each(["garment-colorway", "pattern-colorway"] as const)("%s uses exactly the visible preset without resolving or calling an optimizer", async scene => {
+    const f = await fixture(scene);
+    f.input.promptInput.fields = { colorMode: "smart", colorMood: "自然柔和", presetColors: "雾蓝、沙色、暖灰", colorRegion: "衣身", keepDetails: "袖口保持原色" };
+    f.input.promptInput.outputLanguage = "zh";
+    const result = await f.compiler.compile(actor, f.input);
+    expect(result).toMatchObject({ status: "success", method: "template", optimized: false, actualCost: 0 });
+    for (const text of ["雾蓝、沙色、暖灰", "衣身", "袖口保持原色"]) expect(result.prompt).toContain(text);
+    expect(f.resolves()).toBe(0);
+    expect(f.calls).toHaveLength(0);
+  });
+
+  test("a legacy smart-color request without a visible preset preserves its original planning contract", async () => {
     const f = await fixture("garment-colorway", shortResult("将衣身调整为协调的低饱和颜色，袖口保持原色。"));
     f.input.promptInput.fields = { colorMode: "smart", colorMood: "自然柔和", colorRegion: "衣身", keepDetails: "袖口保持原色" };
     const result = await f.compiler.compile(actor, f.input);

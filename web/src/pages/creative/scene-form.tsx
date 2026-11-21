@@ -1,4 +1,5 @@
-import { uiText, useUiText } from "@/lib/i18n";
+import { uiText, useUiLocale, useUiText } from "@/lib/i18n";
+import { colorMoodPalette, colorMoodPalettes } from "../../../../shared/color-moods";
 import { useDisplayText } from "@/hooks/use-display-text";
 import { Select, Tooltip } from "antd";
 import { FolderOpen, ImagePlus, Palette, Plus, Trash2, Upload } from "lucide-react";
@@ -54,6 +55,7 @@ function colorPickerValue(color: string): string {
 
 export function SceneFields({ sceneId, form, onChange, disabled = false, sourceImage, hasSecondaryImage = false, productPicker }: SceneFieldsProps) {
     useUiText();
+    const locale = useUiLocale();
     const display = useDisplayText();
     const instanceId = useId();
     const [colorSlot, setColorSlot] = useState<number | null>(null);
@@ -72,11 +74,15 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
         <summary>{uiText("补充说明（可选）")}{form.description.trim() ? <span className="cs-details-status">{uiText("已填写")}</span> : null}</summary>
         {descriptionField("具体要求", placeholder)}
     </details>;
+    const palette = colorMoodPalette(form.colorMood, form.colorVariant);
     const colorFields = <>
         {choice("colorMode", "配色方式", [{ value: "smart", label: "智能配色" }, { value: "specific", label: "指定颜色" }, { value: "reference", label: "参考图配色" }])}
         {form.colorMode === "smart" && <>
-            {choice("colorMood", "配色方向", ["自然柔和", "清爽明亮", "沉稳经典", "强烈对比"])}
-            <p className="cs-help">{uiText("根据原图的色块关系生成一套新配色。")}</p>
+            {choice("colorMood", "配色方向", Object.keys(colorMoodPalettes))}
+            {palette && <div className="cs-color-row">
+                <output aria-live="polite">{locale === "en-US" ? palette.englishColors : palette.colors}</output>
+                <button type="button" className="cs-add-color" disabled={disabled} onClick={() => update("colorVariant", palette.next)}>{uiText("换一组")}</button>
+            </div>}
         </>}
         {form.colorMode === "specific" && <div className="cs-field">
             <div className="cs-label" id={id("palette-label")}>{uiText("目标色板 ")}<span className="cs-help">{form.colors.length} {uiText(" / 6 色")}</span></div>

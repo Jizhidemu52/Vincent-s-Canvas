@@ -1,11 +1,12 @@
 import type { PromptInput } from "../../shared/prompt-contracts";
+import { findColorMoodPalette } from "../../shared/color-moods";
 import { PromptOptimizationError } from "./prompt-safety";
 
 export type SceneTemplateOutput = { prompt: string; summaryZh: string; keepText: string[]; questions: string[]; avoid: string[] };
 const commonFields = ["description", "instruction", "targetProduct", "keepDetails", "preserve", "carryoverRequirements", "keep_text", "templateId", "branchIndex", "title"];
 const sceneFields: Record<string, readonly string[]> = {
-  "garment-colorway": ["colorMode", "colors", "colorSelections", "colorRegion", "colorMood", "change", "restyleArea"],
-  "pattern-colorway": ["colorMode", "colors", "colorSelections", "colorRegion", "colorMood"],
+  "garment-colorway": ["colorMode", "colors", "colorSelections", "colorRegion", "colorMood", "presetColors", "change", "restyleArea"],
+  "pattern-colorway": ["colorMode", "colors", "colorSelections", "colorRegion", "colorMood", "presetColors"],
   "style-to-sketch": ["sketchStyle", "sketchDetail", "views"],
   "local-restyle": ["restyleArea", "change"],
   "pattern-extract": ["extractMode", "extractBackground"],
@@ -67,17 +68,19 @@ export function compileSceneTemplate(input: PromptInput, fields: Record<string, 
     case "garment-colorway":
     case "pattern-colorway": {
       const mode = text("colorMode");
-      if (mode === "smart") return;
+      const palette = mode === "smart" ? findColorMoodPalette(fields.colorMood, fields.presetColors) : undefined;
+      if (mode === "smart" && !palette) return;
       // These inputs imply extra interpretation. They are never discarded merely
       // because the selected color mode happens to have a deterministic template.
-      if (populated(fields.colorMood) || populated(fields.change)) return;
+      if ((!palette && (populated(fields.colorMood) || populated(fields.presetColors))) || populated(fields.change)) return;
       if (!mode && !instruction) return;
-      if (mode && mode !== "specific" && mode !== "reference") throw new PromptOptimizationError("PROMPT_FIELDS_INVALID", "配色方式无效，未提交生成。", 400);
+      if (mode && !palette && mode !== "specific" && mode !== "reference") throw new PromptOptimizationError("PROMPT_FIELDS_INVALID", "配色方式无效，未提交生成。", 400);
       if (mode !== "specific" && (populated(fields.colors) || populated(fields.colorSelections))) return;
       const colorRegion = text("colorRegion"), restyleArea = text("restyleArea");
       if (colorRegion && restyleArea && colorRegion !== restyleArea) return;
       const region = colorRegion || restyleArea || targetLabel;
-      let colors = "";
+      let colors = palette ? t(palette.colors, palette.englishColors) : "";
+      if (palette) { consumed.add("colorMood"); consumed.add("presetColors"); }
       if (mode === "specific") {
         if (!Array.isArray(fields.colors) || !fields.colors.length || fields.colors.length > 6 || fields.colors.some(value => typeof value !== "string" || !value.trim() || value.length > 100 || /[\r\n]/.test(value) || (value.trim().startsWith("#") && !/^#[\da-f]{3}(?:[\da-f]{3})?$/i.test(value.trim())))) throw new PromptOptimizationError("PROMPT_FIELDS_INVALID", "指定配色需要1至6个颜色名称或有效HEX色值，未提交生成。", 400);
         colors = (fields.colors as string[]).join("、");

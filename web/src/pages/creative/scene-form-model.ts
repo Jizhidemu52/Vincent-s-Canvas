@@ -1,4 +1,5 @@
 import type { ReferenceImage } from "@/types/image";
+import { colorMoodPalette } from "../../../../shared/color-moods";
 import type { StandardColorSelection } from "@/lib/standard-colors";
 
 export type SceneSlotId = "primary" | "secondary";
@@ -24,6 +25,7 @@ export type SceneForm = {
     colorSelections?: Array<StandardColorSelection | null>;
     colorRegion: string;
     colorMood: string;
+    colorVariant: string;
     backStructure: string;
     backMotif: string;
     extractMode: string;
@@ -54,6 +56,7 @@ export function createSceneForm(_sceneId: string): SceneForm {
         colors: ["#789282", "#E8DCC8", "#424A55"],
         colorRegion: "",
         colorMood: "自然柔和",
+        colorVariant: "0",
         backStructure: "简洁",
         backMotif: "不延续",
         extractMode: "单独图案",
@@ -257,7 +260,7 @@ export function scenePromptInput(sceneId: string, form: SceneForm, images: Parti
     const keys: Record<string, Array<keyof SceneForm>> = {
         "text-to-style": ["category", "silhouette", "fabric", "presentation"],
         "style-to-sketch": ["sketchStyle", "sketchDetail"],
-        "local-restyle": [...(form.restyleArea ? ["restyleArea"] : []), "change", "preserve"],
+        "local-restyle": [...(form.restyleArea ? ["restyleArea"] as const : []), "change", "preserve"],
         "garment-colorway": ["colorMode", "colorRegion", ...(form.colorMode === "specific" ? ["colors", "colorSelections"] as const : form.colorMode === "smart" ? ["colorMood"] as const : [])],
         "pattern-colorway": ["colorMode", "colorRegion", ...(form.colorMode === "specific" ? ["colors", "colorSelections"] as const : form.colorMode === "smart" ? ["colorMood"] as const : [])],
         "back-design": ["backStructure", "backMotif"],
@@ -270,6 +273,8 @@ export function scenePromptInput(sceneId: string, form: SceneForm, images: Parti
     const frozen = cloneSceneForm(form);
     frozen.carryoverRequirements = frozen.carryoverRequirements.map(value => value.trim()).filter(Boolean);
     const fields = Object.fromEntries(["description", ...(frozen.carryoverRequirements.length ? ["carryoverRequirements"] : []), ...(supportsSceneProductTarget(sceneId) ? ["targetProduct"] : []), ...(supportsSceneKeepDetails(sceneId) ? ["keepDetails"] : []), ...keys[sceneId]!].map(key => [key, frozen[key as keyof SceneForm]]));
+    const palette = fields.colorMode === "smart" && colorMoodPalette(frozen.colorMood, frozen.colorVariant);
+    if (palette) fields.presetColors = palette.colors;
     return { scene: sceneId as import("../../../../shared/prompt-contracts").PromptScene, fields,
         userText: [form.description.trim(), sceneId === "local-restyle" ? form.change.trim() : ""].filter(Boolean).join("\n"),
         referenceRoles: getSceneSlots(sceneId, form).filter(slot => slot.required || images[slot.id]).map(slot => slot.label), mode: sceneId === "text-to-style" ? "generate" : "edit" };
