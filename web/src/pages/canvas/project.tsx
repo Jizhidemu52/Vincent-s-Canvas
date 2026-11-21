@@ -3114,7 +3114,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                     onToggleAgent={toggleAgentFromTopBar}
                 />
                 {!isCanvasDesktopLayout ? quickGeneratePanel : null}
-                {projectLoaded && tryoutEnabled && <Suspense fallback={null}><TryoutPromptDock owner={editorOwner} onRun={runQuickCanvasGeneration} busy={quickGenerateRunning || !writable.current} hidden={!isCanvasDesktopLayout && (assistantOpen || quickGenerateOpen || tryoutPanel.open)} /></Suspense>}
+                {projectLoaded && tryoutEnabled && <Suspense fallback={null}><TryoutPromptDock owner={editorOwner} onRun={runQuickCanvasGeneration} onFocus={dialogNodeId ? () => { flushEditorDrafts(); setDialogNodeId(null); } : undefined} busy={quickGenerateRunning || !writable.current} hidden={!isCanvasDesktopLayout && (assistantOpen || quickGenerateOpen || tryoutPanel.open)} /></Suspense>}
                 {projectLoaded ? <Suspense fallback={null}><CanvasDesignDiscussion key={projectId} projectId={projectId} writable={writable} getCanvasCenter={getCanvasCenter} onBeforeChange={flushPendingHistory} onLocate={locateNodes} toolboxOpen={tryoutPanel.open} /></Suspense> : null}
 
                 <WirelessCanvas

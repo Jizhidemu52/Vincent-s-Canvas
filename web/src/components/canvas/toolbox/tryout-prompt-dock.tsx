@@ -14,7 +14,7 @@ import { CanvasNodeType } from "@/types/canvas";
 import type { CanvasDockInput } from "@/pages/canvas/use-canvas-quick-generation";
 import "./tryout-prompt-dock.css";
 
-export default function TryoutPromptDock({ owner, onRun, busy, hidden }: { owner: string; onRun: (i: CanvasDockInput) => Promise<void>; busy: boolean; hidden: boolean }) {
+export default function TryoutPromptDock({ owner, onRun, onFocus, busy, hidden }: { owner: string; onRun: (i: CanvasDockInput) => Promise<void>; onFocus?: () => void; busy: boolean; hidden: boolean }) {
     const t = useUiText(),
         base = useEffectiveConfig("canvas"),
         key = "canvas:prompt-dock:v1:" + owner;
@@ -86,7 +86,7 @@ export default function TryoutPromptDock({ owner, onRun, busy, hidden }: { owner
     };
     if (hidden) return null;
     return (
-        <section className="tryout-prompt-dock" aria-label={t("试款输入条")}>
+        <section className="tryout-prompt-dock" aria-label={t("试款输入条")} onFocusCapture={onFocus}>
             <div className="tpd-main">
                 <span className="tpd-target" title={target?.title}>
                     {source ? t("改这件") + "：" + source.title : t(selected.size > 1 ? "已选多项" : selected.size ? "当前节点不可编辑" : "生成新产品")}
