@@ -1,9 +1,17 @@
 import type { AdminPromptCompilation, PromptInput } from "../../shared/prompt-contracts";
 import { requiredPromptScene } from "../../shared/prompt-contracts";
+import {getToolDefinition} from "../../shared/feature-catalog";
 import type { AppConfig } from "./config";
 import { PromptOptimizationError } from "./prompt-safety";
 
 export type PromptFallbackPolicy = Pick<AppConfig, "PROMPT_OPTIMIZATION_TIMEOUT_MS" | "PROMPT_OPTIMIZATION_FALLBACK" | "PROMPT_FALLBACK_TOOL_KEYS">;
+
+export function directCreativePrompt(input:PromptInput,tool:string|undefined,fields:Record<string,unknown>,roles:readonly string[]){
+  if(!tool?.startsWith("creative-")||requiredPromptScene(tool)!==input.scene)throw new PromptOptimizationError("PROMPT_RECIPE_MISMATCH","此入口不能使用创意场景的原始设计输入",400);
+  const text=input.userText.trim();
+  const selected=Object.fromEntries(Object.entries(fields).filter(([k,v])=>v!=null&&v!==""&&!(Array.isArray(v)&&!v.length)&&!(["change","description"].includes(k)&&v===text)));
+  return {prompt:[getToolDefinition(tool)?.label,text,Object.keys(selected).length?`按以下设计设置执行：${JSON.stringify(selected)}`:"",roles.length>1?roles.map((role,i)=>`图片${i+1}：${role}`).join("；"):"",input.hasMask?"仅修改蒙版选区，保留其余部分。":""].filter(Boolean).join("\n"),summaryZh:"已使用本次设计输入，未调用改写模型。"};
+}
 
 export function allowsOriginalPrompt(policy: PromptFallbackPolicy | undefined, tool: string | undefined, input: PromptInput) {
   return !!tool && policy?.PROMPT_OPTIMIZATION_FALLBACK === "original" && tool.startsWith("creative-") && requiredPromptScene(tool) === input.scene

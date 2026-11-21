@@ -190,7 +190,7 @@ test("creative bulk selection excludes unresolved tasks and confirms a stable re
     expect(button(output, "批量删除").props.disabled).toBe(true);
     button(output, "批量删除").props.onClick();
     expect(app.calls.confirms).toHaveLength(0);
-    const checks = elements(output).filter(item => item.type === "input");
+    const checks = elements(output).filter(item => item.type === "input" && /^(全选已加载|选择任务)/.test(item.props["aria-label"]));
     expect(checks).toHaveLength(4);
     expect(checks[3]!.props.disabled).toBe(true);
     checks[0]!.props.onChange();
@@ -219,7 +219,8 @@ test("creative failed deletions remain selected and running disables destructive
     let output = app.render();
     expect(app.ws.logs.map(log => log.id)).toEqual(["b"]);
     expect(text(output)).toContain("已选 1 条");
-    expect(elements(output).filter(item => item.type === "input").every(item => item.props.checked)).toBe(true);
+    const selections=elements(output).filter(item => item.type === "input" && /^(全选已加载|选择任务)/.test(item.props["aria-label"]));
+    expect(selections).toHaveLength(2);expect(selections.every(item => item.props.checked)).toBe(true);
     app.ws.running = true;
     output = app.render();
     expect(button(output, "批量删除").props.disabled).toBe(true);

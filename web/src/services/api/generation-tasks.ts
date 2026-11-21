@@ -237,7 +237,7 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
             assertOwner();
             input.signal?.throwIfAborted();
             try {
-                if (input.promptInput) input.onOptimizing?.();
+                if (input.promptInput && input.promptInput.preparation!=="original") input.onOptimizing?.();
                 const result = await request<{ task: QueuedTask }>("/api/tasks", {
                 method: "POST",
                 body: JSON.stringify(task),
@@ -321,7 +321,7 @@ export async function requestQueuedImageBatch(input: { modelId: string; resolved
     assertOwner();
     await input.onSubmissionStarted?.(requestId, uploadedItems);
     assertOwner();
-    if (input.promptInput) input.onOptimizing?.();
+    if (input.promptInput && input.promptInput.preparation!=="original") input.onOptimizing?.();
     const result = await request<{
         prompt?: string; optimized?: boolean;
         batchId: string;

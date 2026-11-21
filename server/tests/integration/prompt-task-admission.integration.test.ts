@@ -614,6 +614,20 @@ integration(
       }
     });
 
+    test("direct creative preview and duplicate SQL admission retain one reservation without rewriting",async()=>{
+      const actor=await user(),before=calls.length;
+      const value=input("保留原纹理",{promptInput:{...promptInput("保留原纹理","text-to-style",{keepDetails:"五颗扣子"}),preparation:"original"}});
+      const preview=await request(actor,"/api/tasks/preview","POST",value);
+      expect(preview.status).toBe(200);
+      const {preview:shown}=await preview.json();
+      expect(shown.prompt).toContain("五颗扣子");expect(shown.prompt).not.toContain("forged browser");expect(shown.optimized).toBe(false);
+      expect(await count("tasks",actor)).toBe(0);
+      const body={...value,promptInput:shown.promptInput};
+      const first=await request(actor,"/api/tasks","POST",body);expect(first.status).toBe(201);
+      const second=await request(actor,"/api/tasks","POST",body);expect(second.status).toBe(200);
+      expect((await first.json()).task.id).toBe((await second.json()).task.id);
+      expect(await count("credit_reservations",actor)).toBe(1);expect(calls).toHaveLength(before);
+    });
     test("original fallback survives preview and SQL admission once, without trusting a forged effective prompt", async () => {
       const actor = await user(), before = calls.length;
       const value = input("blue shirt", { promptInput: promptInput("blue shirt", "text-to-style", { fixtureOutcome: "throw", keepDetails: "five buttons" }) });

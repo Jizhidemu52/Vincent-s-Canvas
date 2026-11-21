@@ -32,6 +32,17 @@ async function fixture(invoke: PromptOptimizer["invoke"] = async () => ({ conten
 }
 
 describe("prompt compiler lifecycle", () => {
+  test("direct creative inputs retain design constraints and original receipt without resolving any rewriting model",async()=>{
+    const f=await fixture();
+    f.runtime.resolveOptimizer=async()=>{throw Error("unexpected paid optimizer")};
+    const data=request({toolKey:"creative-garment-colorway",sourceUrls:["asset:one"],promptInput:{scene:"garment-colorway",mode:"edit",preparation:"original",fields:{description:"只改帽体",keepDetails:"保留翻边",colors:["#173F72"]},userText:"只改帽体",referenceRoles:["产品图"],hasMask:false}});
+    const first=await f.compiler.compile(actor,data);
+    expect(first).toMatchObject({status:"success",optimized:false,actualCost:0,inputTokens:0,outputTokens:0});
+    expect(first.prompt).toContain("只改帽体");expect(first.prompt).toContain("#173F72");expect(first.prompt).toContain("保留翻边");expect(first.prompt).not.toContain("图片1");
+    expect((await f.compiler.compile(actor,data)).id).toBe(first.id);
+    const failed=await f.compiler.compile(actor,{...data,requestId:randomUUID(),toolKey:"image"}).then(()=>null,e=>e);
+    expect(failed).toMatchObject({code:"PROMPT_RECIPE_MISMATCH"});expect(f.calls).toHaveLength(0);
+  });
   test("async acceptance is durable before provider completion and duplicate requests never invoke again", async () => {
     const release = Promise.withResolvers<{ content: string }>();
     const f = await fixture(() => release.promise);

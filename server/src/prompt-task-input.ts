@@ -19,7 +19,7 @@ export async function preparePromptTaskInput<T extends PromptTaskInput>(compiler
   const imageAgentProfile = readImageAgentGenerationProfile(input.parameters, input.operationType);
   if (imageAgentProfile && input.promptInput) throw new PromptOptimizationError("IMAGE_AGENT_PROMPT_ALREADY_PLANNED", "图片助手已完成本轮规划，不应再次提交提示词扩写。", 400);
   const expectedScene = requiredPromptScene(input.toolKey);
-  if (expectedScene && !input.promptInput) throw new PromptOptimizationError("PROMPT_INPUT_REQUIRED", "此场景必须提交表单设置并经过提示词优化，未提交生成");
+  if (expectedScene && !input.promptInput) throw new PromptOptimizationError("PROMPT_INPUT_REQUIRED", "此场景必须提交设计表单设置，未提交生成");
   if (expectedScene && input.promptInput?.scene !== expectedScene) throw new PromptOptimizationError("PROMPT_RECIPE_MISMATCH", "优化场景与功能板块不一致，未提交生成");
   let parameters = { ...input.parameters };
   delete parameters.promptOptimization;

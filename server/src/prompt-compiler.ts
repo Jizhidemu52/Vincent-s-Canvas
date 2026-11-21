@@ -13,7 +13,7 @@ import { chatUpstreamFailureReasons } from "./chat-upstream-failure";
 import { promptImageReferenceLimit } from "./image-task-policy";
 import { newCreativeFields, validateNewCreativeReferences } from "./new-creative-scenes";
 import { imagePromptOutputContract } from "./prompt-output-contract";
-import { withOptimizerDeadline, type PromptFallbackPolicy } from "./prompt-original-fallback";
+import { directCreativePrompt, withOptimizerDeadline, type PromptFallbackPolicy } from "./prompt-original-fallback";
 import { compileSceneTemplate } from "./prompt-scene-templates";
 import { assertMinimalPromptFidelity, minimalPromptPolicy, promptChainRevision, promptOutputMetrics } from "./prompt-minimal-policy";
 
@@ -108,7 +108,7 @@ export class PromptCompiler {
     const userText = request.promptInput.userText || (typeof fields.instruction === "string" ? fields.instruction : "");
     const requiredText = specifiedPromptText(userText, fields);
     const language = isVideo ? "zh" : request.promptInput.outputLanguage ?? active.version.outputLanguage;
-    const template = strategy === "template-first" && minimal
+    const template = request.promptInput.preparation === "original" ? directCreativePrompt(request.promptInput,request.toolKey,fields,roles) : strategy === "template-first" && minimal
       ? compileSceneTemplate(request.promptInput, fields, references.length, roles, language, requiredText) : undefined;
     const method = template ? "template" : minimal ? "minimal" : "llm";
     const optimizerId = options.optimizerModelConfigId ?? prior?.modelConfigId ?? active.recipe.modelConfigId;
@@ -137,7 +137,7 @@ export class PromptCompiler {
     }
     const claim = await this.store.claim({ userId: actor.id, requestId: request.requestId, inputHash, recipeKey: active.recipe.key, recipeVersionId: active.version.id,
       details: { adminTest, modelConfigId: optimizer?.id ?? `server-template:${promptChainRevision}`, targetModelConfigId: target.id, inputSnapshot: { promptInput: request.promptInput, sourceUrls: request.sourceUrls },
-        ...(minimal ? { method } : {}),
+        ...(minimal || request.promptInput.preparation==="original" ? { method } : {}),
         optimized: false, rawResponse: null, latencyMs: null, inputTokens: null, outputTokens: null, actualCost: null, estimatedCost: null, currency: "CNY", completedAt: null },
     });
     if (!claim.execute) return checkedResult(options.onAccepted ? (await this.store.getCompilation(claim.id, actor.id))! : await this.waitForResult(claim.id, actor.id));

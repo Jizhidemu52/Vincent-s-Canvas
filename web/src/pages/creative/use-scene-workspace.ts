@@ -583,13 +583,14 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     };
 
     const [optimizing, setOptimizing] = useState(false);
-    const generate = async () => {
+    const generate = async (optimize = false) => {
         if (validation || !user || !scope) { setError(uiText(validation || "当前账号不可用")); return; }
         if (activeLog?.results.some(canQuerySceneResult) && sceneInputMatchesLog(activeLog, form, images, config, selection)) {
             setError(uiText("相同输入已有未结束的原请求，请先查询原请求。修改设计输入后才会创建新任务。")); setRecoveredRequestId(activeLog.id); return;
         }
         let prompt = form.description.trim() || form.change.trim();
         const promptInput = scenePromptInput(sceneId, form, images);
+        if(!optimize)promptInput.preparation="original";
         let optimized = false;
         const release = workbenchSubmissions.acquire(`creative:${scope}`);
         if (!release) { setError(uiText("图片任务正在处理，请勿重复提交")); return; }
@@ -870,7 +871,9 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                 return;
             }
             if (compilation?.status === "optimizing") {
-                await commit(sceneObservation(currentResult, { status: "pending", progress: "preparing", error: "正在准备提示词，请稍候。" }));
+                await commit(sceneObservation(currentResult, log.userInput?.preparation==="original"
+                    ? {status:"pending",progress:"submitting",error:"正在核对设计输入，尚未确认出图。"}
+                    : {status:"pending",progress:"preparing",error:"正在准备提示词，请稍候。"}));
                 return;
             }
             if (compilation?.status !== "success" || !compilation.prompt?.trim()) {

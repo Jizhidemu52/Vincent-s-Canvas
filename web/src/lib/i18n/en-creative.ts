@@ -1,4 +1,6 @@
 const english: Record<string, string> = {
+    "本次先优化提示词": "Optimize the prompt for this run",
+    "正在核对设计输入，尚未确认出图。": "Checking the design inputs. Image generation has not been confirmed.",
     "在画布里试款": "Try it on the canvas",
     "选择或新建画布，打开试款台。此操作不会生成图片。": "Choose or create a canvas to open the tryout panel. This will not generate any images.",
     "请先完成原任务记录核对，再提交生成。": "Finish checking the original task records before submitting.",

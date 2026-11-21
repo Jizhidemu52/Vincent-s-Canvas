@@ -14,6 +14,7 @@ test("try-on validates a product and adult model description, persists draft, an
     await page.getByRole("textbox", { name: "成人模特与试穿要求", exact: true }).fill("短发成年女性，全身站姿，简洁黑裤");
     await page.getByRole("textbox", { name: /关键特征保持/ }).fill("保留圆领、六列绞花与罗纹");
     await expect(submit).toBeEnabled();
+    await expect(page.getByRole("checkbox",{name:"本次先优化提示词"})).not.toBeChecked();
     expect(api.submissions).toHaveLength(0); expect(api.tasks.size).toBe(0); expect(api.assets.size).toBe(1);
     expect([...api.assetBytes.values()]).toEqual([IMAGE]);
     await page.reload();
@@ -23,6 +24,7 @@ test("try-on validates a product and adult model description, persists draft, an
     await submit.click();
     await expect(page.getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
     expect(api.submissions).toHaveLength(1);
+    expect(api.submissions[0].promptInput.preparation).toBe("original");
     expect(api.submissions[0]).toMatchObject({ toolKey: "creative-virtual-try-on", operationType: "inpaint", promptInput: { scene: "virtual-try-on", mode: "edit", referenceRoles: ["产品图"], fields: { description: "短发成年女性，全身站姿，简洁黑裤", keepDetails: "保留圆领、六列绞花与罗纹" } } });
     expect(api.submissions[0].sourceUrls).toHaveLength(1);
     const sourceId = api.submissions[0].sourceUrls[0].split("/")[3];
@@ -40,10 +42,14 @@ test("an optional model never replaces the required product and uploaded role by
     await expect(submit).toBeDisabled();
     await upload(page, "产品图", "garment.png");
     await expect(submit).toBeEnabled();
+    const optimize=page.getByRole("checkbox",{name:"本次先优化提示词"});
+    await optimize.check();
     expect(api.submissions).toHaveLength(0);
     await submit.click();
     await expect(page.getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
     const submitted = api.submissions[0];
+    expect(submitted.promptInput.preparation).toBeUndefined();
+    await expect(optimize).not.toBeChecked();
     expect(submitted.promptInput.referenceRoles).toEqual(["产品图", "模特图"]);
     expect(submitted.sourceUrls).toHaveLength(2);
     expect(submitted.sourceUrls.map((url: string) => api.assetBytes.get(url.split("/")[3]))).toEqual([IMAGE, optionalImage]);

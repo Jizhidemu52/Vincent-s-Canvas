@@ -19,6 +19,7 @@ export const promptInputSchema = z.object({
   hasMask: z.boolean().default(false),
   maskReferenceIndex: z.number().int().min(1).max(49).optional(),
   compilationId: z.string().uuid().optional(),
+  preparation: z.literal("original").optional(),
 }).strict().superRefine((input, context) => {
   if (JSON.stringify(input.fields).length > 30_000) context.addIssue({ code: "custom", message: "场景设置超过 30 KB" });
   if ((input.scene === "video-motion") !== (input.mode === "video")) context.addIssue({ code: "custom", message: "视频动效场景必须使用视频模式" });

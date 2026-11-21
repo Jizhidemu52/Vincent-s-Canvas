@@ -90,7 +90,8 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
     const slots = getSceneSlots(preset.id, ws.form);
     const standalone = isStandaloneCreativePreset(preset.id);
     const available = creativeCatalogPresets.filter(item => isModuleAvailable(flags, tools, `creative-${item.id}` as ModuleKey));
-    const submit = () => { setView("results"); void ws.generate(); };
+    const [optimizeNext,setOptimizeNext]=useState(false);
+    const submit = () => { setView("results"); void ws.generate(optimizeNext);setOptimizeNext(false); };
     const historyBusy = ws.loading || ws.historyLoading;
     const selectableLogs = ws.logs.filter(log => !log.unresolvedCount);
     const selectedLogs = selectableLogs.filter(log => selectedLogIds.includes(log.id));
@@ -153,7 +154,7 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
                     <p className="cs-help">{uiText("Ctrl / ⌘ + Enter 提交")}</p>
                     {ws.running ? <Button block icon={<Plus size={16} />} disabled={!task.ready || task.creating} loading={task.creating} onClick={() => void task.createNewTask()}>{uiText("新建任务，继续创作")}</Button> : null}
                     <button type="button" className="cs-generate" disabled={ws.loading || ws.running || Boolean(ws.validation) || ws.quotaBlocked} onClick={submit}>{ws.running ? <><LoaderCircle size={16} className="animate-spin" />{ws.optimizing ? uiText("正在优化提示词…") : uiText("正在生成")}<GenerationElapsed startedAt={ws.startedAt} /></> : <><Sparkles size={16} />{uiText("生成{kind}", { kind: preset.title === "以文生款" ? uiText("款式") : preset.title === "款生线稿" ? uiText("线稿") : preset.title === "花型提取" ? uiText("图案") : preset.id === "item-extract" ? uiText("完整单品") : preset.id === "virtual-try-on" ? uiText("试穿效果") : preset.id === "sketch-to-photo" ? uiText("实拍效果") : uiText("设计") })}<span>{ws.count} {uiText(" 张")}</span></>}</button>
-                    <p className="cs-submit-note">{uiText(ws.running ? "任务在后台继续，可切换工作区或查看历史。" : "点击后先优化提示词，再提交图片任务")}</p>
+                    {ws.running ? <p className="cs-submit-note">{uiText("任务在后台继续，可切换工作区或查看历史。")}</p> : <label className="cs-submit-note"><input type="checkbox" checked={optimizeNext} onChange={e=>setOptimizeNext(e.target.checked)} /> {uiText("本次先优化提示词")}</label>}
                     {(ws.running || ws.autoObserving) && <button type="button" className="cs-tool-entry" onClick={ws.stopObserving}>{uiText("暂停获取进度")}</button>}
                 </div>
             </aside>
