@@ -17,7 +17,7 @@ const options: ImageConversationContextOptions = { readAsset: async () => image 
 
 integration("owned, frozen and bounded conversation visual context", () => {
   let fixture: Awaited<ReturnType<typeof createIsolatedPostgres>>;
-  beforeAll(async () => { fixture = await createIsolatedPostgres(); }, 30_000);
+  beforeAll(async () => { fixture = await createIsolatedPostgres({ planner: true }); }, 30_000);
   afterAll(async () => { await fixture?.close(); });
   const row = async (sql: string, values: unknown[] = []) => (await fixture.db.query(sql, values)).rows[0];
   async function asset(ownerId: string) {
@@ -106,11 +106,12 @@ integration("owned, frozen and bounded conversation visual context", () => {
     expect(result.manifest.attachments[0]?.purpose).toBe("new_base");
   });
 
-  test("more than five mandatory images fails before I/O instead of silently omitting explicit references", async () => {
-    const current = await context(), references = await Promise.all(Array.from({ length: 5 }, () => asset(current.ownerId)));
+  test("a history lookup adding a sixth mandatory image fails before I/O without dropping explicit references", async () => {
+    const current = await context(), history = await root(current);
+    const references = await Promise.all(Array.from({ length: 4 }, () => asset(current.ownerId)));
     const execution = await stage(current, references.map(assetId => ({ assetId, purpose: "reference" as const })));
     let reads = 0;
-    expect(await expectedRejection(buildImageConversationContext(fixture.db, execution, { readAsset: async () => { reads++; return image; } }))).toMatchObject({ code: "PLANNER_CONTEXT_INVALID" });
+    expect(await expectedRejection(buildImageConversationContext(fixture.db, execution, { lookup: { versionIds: [history.id], imageNos: [] }, readAsset: async () => { reads++; return image; } }))).toMatchObject({ code: "PLANNER_CONTEXT_INVALID" });
     expect(reads).toBe(0);
   });
 

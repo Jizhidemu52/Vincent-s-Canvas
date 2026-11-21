@@ -24,7 +24,7 @@ integration("idempotent conversation task result projection", () => {
   let fixture: Awaited<ReturnType<typeof createIsolatedPostgres>>;
   const modelId = randomUUID();
   beforeAll(async () => {
-    fixture = await createIsolatedPostgres();
+    fixture = await createIsolatedPostgres({ planner: true });
     const providerId = randomUUID();
     await fixture.db.query("INSERT INTO providers(id,name,protocol,base_url) VALUES($1,'Projector fixture','apimart','https://no-network.invalid')", [providerId]);
     await fixture.db.query("INSERT INTO model_configs(id,provider_id,name,model_id,capabilities) VALUES($1,$2,'Projector fixture','gpt-image-2.6-flare',ARRAY['generate','edit'])", [modelId, providerId]);

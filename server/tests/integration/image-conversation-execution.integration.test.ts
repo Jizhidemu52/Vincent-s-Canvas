@@ -50,7 +50,7 @@ integration("conversation image execution uses frozen owned originals and config
         providerId = MARK_IMAGE_PROVIDER_ID;
     const options = { creditsEnabled: async () => false, readAsset: async () => bytes };
     beforeAll(async () => {
-        fixture = await createIsolatedPostgres();
+        fixture = await createIsolatedPostgres({ planner: true });
         await fixture.db.query(
             "INSERT INTO providers(id,name,protocol,base_url) VALUES($1,'Execution fixture','apimart','https://no-network.invalid')",
             [providerId],

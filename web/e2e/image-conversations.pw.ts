@@ -124,6 +124,62 @@ class ConversationFixture {
     }
 }
 
+test("planner preflight rejection keeps the unsent draft without receipt recovery or automatic retry", async ({ page, api }, info) => {
+    const fixture = new ConversationFixture();
+    fixture.exists = true;
+    await fixture.attach(page);
+    let rejects = 0;
+    await page.route(`**/api/image-conversations/${ids.conversation}/turns`, route => {
+        if (route.request().method() !== "POST" || rejects) return route.fallback();
+        rejects++;
+        return route.fulfill({ status: 503, json: { code: "PLANNER_BINDING_UNAVAILABLE", data: null,
+            msg: "管理员尚未配置对话模型，或该模型已停用；本轮未创建，不会产生费用" } });
+    });
+    await page.goto("/chat");
+    await page.getByRole("navigation", { name: "会话列表" }).getByRole("button", { name: /针织衫改款/ }).click();
+    const editor = page.getByRole("textbox", { name: "对话内容", exact: true });
+    await editor.fill("只讨论领口修改");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("本轮未创建，不会产生费用");
+    await expect(editor).toHaveValue("只讨论领口修改");
+    await expect(page.getByRole("group", { name: "待确认的发送回执" })).toHaveCount(0);
+    await page.screenshot({ path: info.outputPath("planner-unavailable-draft.png") });
+    await page.reload();
+    await expect(editor).toHaveValue("只讨论领口修改");
+    expect(fixture.lookups).toBe(0);
+    expect(fixture.submissions).toEqual([]);
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await expect.poll(() => fixture.submissions.length).toBe(1);
+    expect(rejects).toBe(1);
+    expect(api.submissions).toEqual([]);
+});
+
+test("admin planner warning identifies the missing shared binding without changing configuration", async ({ page, api }, info) => {
+    api.role = "super_admin";
+    const fixture = new ConversationFixture();
+    await fixture.attach(page);
+    await page.route("**/api/auth/methods", route => route.fulfill({ json: { password: true, wecom: false } }));
+    const reads: Record<string, unknown> = {
+        "accounts": { users: [], totalUsedCredits: 0 }, "departments": { departments: [] }, "audit-logs": { auditLogs: [] },
+        "history": { history: [], total: 0, totalRmbCost: 0, nextCursor: null }, "workflows": { workflows: [] },
+        "model-configuration/providers": { providers: [] }, "model-configuration/models": { models: [] }, "model-configuration/tool-configurations": { tools: [] },
+    };
+    const writes: string[] = [];
+    await page.route("**/api/admin/**", route => {
+        const key = new URL(route.request().url()).pathname.slice("/api/admin/".length);
+        if (route.request().method() !== "GET") { writes.push(key); return route.abort(); }
+        return key in reads ? route.fulfill({ json: reads[key] }) : route.fallback();
+    });
+    await page.goto("/admin?tab=api");
+    const panel = page.locator('[data-tool-key="gpt-chat"]');
+    await expect(panel).toContainText("规划模型不可用");
+    const warning = panel.getByText(/管理员尚未配置统一对话模型/);
+    await expect(warning).toBeVisible();
+    await expect(warning).toHaveClass(/text-red-/);
+    await panel.screenshot({ path: info.outputPath("admin-planner-binding.png") });
+    expect(writes).toEqual([]);
+});
+
 for (const action of ["重新生成", "编辑后重发"] as const) test(`reuse original turn: ${action}`, async ({ page, api }, info) => {
     const fixture = new ConversationFixture();
     const sourceId = "81000000-0000-4000-8000-000000000012";

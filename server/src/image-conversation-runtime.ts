@@ -18,7 +18,8 @@ import type { ObjectStorage } from "./object-storage";
 import { PromptOptimizationError } from "./prompt-safety";
 import type { ProviderChatImageAccess } from "./provider-chat-images";
 import { publishEnqueuedTask } from "./tasks";
-import { resolveToolExecution, ToolConfigurationError } from "./tool-configuration";
+import { ToolConfigurationError } from "./tool-configuration";
+import { resolveConversationPlannerBinding } from "./image-conversation-planner-model";
 
 export function classifyImageConversationError(error: unknown): TurnError | undefined {
   if (error instanceof CanvasImagePromptLanguageError || error instanceof ImageAgentPlanningError) return {
@@ -61,8 +62,7 @@ export function createImageConversationRuntime(db: Database, cache: Cache, confi
       await refreshImageConversationSummary(db, execution);
       const context = await buildImageConversationContext(db, execution, { storage: options.storage });
       const validate = async (prepared: typeof context) => { await prepared.validate(); await readConversationActor(db, actor.id); };
-      const toolKey = execution.conversation.entrypoint === "canvas" ? "canvas-chat" : "gpt-chat";
-      const binding = await resolveToolExecution(db, { operationType: "chat", toolKey });
+      const binding = await resolveConversationPlannerBinding(db, execution.conversation.entrypoint);
       const planner = await prepareImageConversationPlanner(db, config, { actor, requestId: `ic:${execution.turn.id}:planner:1`,
         execution: binding, input: context.input, context: context.context, providerImages: options.providerImages, validateContext: () => validate(context),
         lookupHistory: async lookup => {

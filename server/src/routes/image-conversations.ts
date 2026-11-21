@@ -84,8 +84,10 @@ export function createImageConversationsRouter(db: Database, options: {
     const accepted = await submitImageConversationTurn(db, userId, id, request.body);
     response.status(accepted.replayed ? 200 : 202);
     response.json({ code: "OK", data: accepted.result, msg: "" });
-    options.events.wake(id);
-    options.wakeWorker();
+    if (!accepted.replayed) {
+      options.events.wake(id);
+      options.wakeWorker();
+    }
   }));
   router.get("/:conversationId/turns/by-request/:clientRequestId", action((request, _response, userId) => getImageConversationTurn(db, userId, conversationId(request), { clientRequestId: requestKeySchema.parse(request.params.clientRequestId) })));
   router.get("/:conversationId/turns/:turnId", action((request, _response, userId) => getImageConversationTurn(db, userId, conversationId(request), { turnId: turnId(request) })));

@@ -28,7 +28,7 @@ integration("image conversation HTTP contract with existing real sessions", () =
   const secret = Buffer.alloc(32, 13).toString("base64");
   const config = loadConfig({ DATABASE_URL: "postgres://unused", REDIS_URL: "redis://unused", AUTH_ENABLED: "true", PROVIDER_ENCRYPTION_KEY: secret });
   beforeAll(async () => {
-    fixture = await createIsolatedPostgres();
+    fixture = await createIsolatedPostgres({ planner: true });
     const app = express();
     app.use(imageConversationBoundary, express.json({ limit: "64kb" }), imageConversationErrors, cookieParser());
     app.use(sessionMiddleware(fixture.db, cache, config, { allowGuest: false }), requireAccountReady);
@@ -78,6 +78,46 @@ integration("image conversation HTTP contract with existing real sessions", () =
     expect((await request(user.cookie, path, valid)).status).toBe(202);
     expect((await request(user.cookie, path, valid)).status).toBe(200);
     expect((await fixture.db.query("SELECT count(*)::int AS n FROM image_conversation_turns WHERE conversation_id=$1", [data.id])).rows[0].n).toBe(1);
+  });
+
+  test("planner preflight rejects before admission or billing and preserves accepted receipts across an outage", async () => {
+    const user = await account();
+    const created = (await (await request(user.cookie, "", { clientRequestId: randomUUID(), entrypoint: "standalone" })).json()).data;
+    const path = `/${created.id}/turns`, input = { clientRequestId: randomUUID(), expectedStateRevision: 0, text: "讨论领口" };
+    const binding = (await fixture.db.query("SELECT m.id, m.provider_id FROM tool_api_configurations t JOIN model_configs m ON m.id=t.model_config_id WHERE tool_key='gpt-chat'")).rows[0];
+    const unchanged = async () => (await fixture.db.query(`SELECT state_revision,last_event_seq,
+      (SELECT count(*) FROM image_conversation_turns WHERE conversation_id=c.id) turns,
+      (SELECT count(*) FROM image_conversation_messages WHERE conversation_id=c.id) messages,
+      (SELECT count(*) FROM credit_reservations) reservations,
+      (SELECT count(*) FROM tasks) tasks FROM image_conversations c WHERE id=$1`, [created.id])).rows[0];
+    const original = await unchanged(), wakeCount = wakes;
+    for (const [disable, enable, values] of [
+      ["UPDATE tool_api_configurations SET model_config_id=NULL WHERE tool_key='gpt-chat'", "UPDATE tool_api_configurations SET model_config_id=$1 WHERE tool_key='gpt-chat'", [binding.id]],
+      ["UPDATE model_configs SET enabled=false WHERE id=$1", "UPDATE model_configs SET enabled=true WHERE id=$1", [binding.id]],
+      ["UPDATE providers SET enabled=false WHERE id=$1", "UPDATE providers SET enabled=true WHERE id=$1", [binding.provider_id]],
+      ["UPDATE model_configs SET capabilities=ARRAY['chat'] WHERE id=$1", "UPDATE model_configs SET capabilities=ARRAY['chat','vision'] WHERE id=$1", [binding.id]],
+    ] as const) {
+      await fixture.db.query(disable, disable.includes("$1") ? [...values] : []);
+      try {
+        const response = await request(user.cookie, path, input);
+        expect(response.status).toBe(503);
+        expect(await response.json()).toEqual({ code: "PLANNER_BINDING_UNAVAILABLE", data: null, msg: "管理员尚未配置对话模型，或该模型已停用；本轮未创建，不会产生费用" });
+        expect(await unchanged()).toEqual(original);
+        expect(wakes).toBe(wakeCount);
+      } finally { await fixture.db.query(enable, [...values]); }
+    }
+    const accepted = await request(user.cookie, path, input);
+    expect(accepted.status).toBe(202);
+    const receipt = await accepted.json(), acceptedState = await unchanged(), acceptedWakes = wakes;
+    await fixture.db.query("UPDATE providers SET enabled=false WHERE id=$1", [binding.provider_id]);
+    try {
+      const replay = await request(user.cookie, path, input);
+      expect(replay.status).toBe(200);
+      expect(await replay.json()).toEqual(receipt);
+      expect((await request(user.cookie, `${path}/by-request/${input.clientRequestId}`)).status).toBe(200);
+      expect(await unchanged()).toEqual(acceptedState);
+      expect(wakes).toBe(acceptedWakes);
+    } finally { await fixture.db.query("UPDATE providers SET enabled=true WHERE id=$1", [binding.provider_id]); }
   });
 
   test("original input is owner-scoped: regenerate and edit create independent immutable turns on the original base", async () => {

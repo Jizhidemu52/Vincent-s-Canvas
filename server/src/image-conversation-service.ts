@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { conversationImageLimitError } from "../../shared/image-agent/focus";
 import { turnResultUnconfirmed } from "../../shared/image-conversation-turn-state";
+import { unavailablePlannerMessage } from "../../shared/image-conversation-planner-policy";
+import { resolveConversationPlannerBinding, readPlannerModel } from "./image-conversation-planner-model";
+import { PromptOptimizationError } from "./prompt-safety";
+import { ToolConfigurationError } from "./tool-configuration";
+import { ModuleDisabledError } from "./module-flags";
 import type { PoolClient } from "pg";
 import type {
   AcceptedTurnInput, CancellationResult, ConversationPage, ConversationSnapshot, MessagePage, PaginationQuery, TurnDetails, TurnPage,
@@ -124,6 +129,16 @@ export async function submitImageConversationTurn(db: Database, ownerId: string,
     }
     const limitError = conversationImageLimitError(input.attachments.length, Boolean(inputActiveVersionId));
     if (limitError) throw new ImageConversationError(400, "TURN_ATTACHMENT_LIMIT", limitError);
+    try {
+      const binding = await resolveConversationPlannerBinding(client, conversation.entrypoint);
+      const model = await readPlannerModel(client, binding.modelConfigId);
+      if (!model.encrypted_credentials) throw new ImageConversationError(503, "PLANNER_BINDING_UNAVAILABLE", unavailablePlannerMessage);
+    } catch (error) {
+      if (error instanceof ModuleDisabledError) throw new ImageConversationError(403, "SERVICE_UNAVAILABLE", error.message);
+      if (error instanceof ToolConfigurationError || error instanceof PromptOptimizationError)
+        throw new ImageConversationError(503, "PLANNER_BINDING_UNAVAILABLE", unavailablePlannerMessage);
+      throw error;
+    }
     const previousImageNo = safeCounter(conversation.last_image_no);
     const versions: VersionRow[] = [];
     for (const attachment of input.attachments) versions.push(await registerUploadedVersion(client, conversation, attachment.assetId));

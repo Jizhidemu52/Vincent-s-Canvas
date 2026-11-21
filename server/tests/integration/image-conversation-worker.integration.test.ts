@@ -42,7 +42,7 @@ integration("durable conversation planner and atomic image admission", () => {
     let fixture: Awaited<ReturnType<typeof createIsolatedPostgres>>;
     const modelId = randomUUID();
     beforeAll(async () => {
-        fixture = await createIsolatedPostgres();
+        fixture = await createIsolatedPostgres({ planner: true });
         const providerId = randomUUID();
         await fixture.db.query(
             "INSERT INTO providers(id,name,protocol,base_url) VALUES($1,'Conversation worker fixture','custom','https://no-network.invalid')",

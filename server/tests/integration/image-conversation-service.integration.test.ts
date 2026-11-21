@@ -14,7 +14,7 @@ const secret = Buffer.alloc(32, 7).toString("base64");
 
 integration("image conversation persistence and admission", () => {
   let fixture: Awaited<ReturnType<typeof createIsolatedPostgres>>;
-  beforeAll(async () => { fixture = await createIsolatedPostgres(); }, 30_000);
+  beforeAll(async () => { fixture = await createIsolatedPostgres({ planner: true }); }, 30_000);
   afterAll(async () => { await fixture?.close(); });
   const row = async (sql: string, values: unknown[] = []) => (await fixture.db.query(sql, values)).rows[0];
   const owner = async () => {

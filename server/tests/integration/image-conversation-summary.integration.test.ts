@@ -11,7 +11,7 @@ import { expectedRejection } from "../helpers/expected-rejection";
 const integration = conversationDatabaseMode() ? describe : describe.skip;
 integration("bounded attributed conversation summaries with real transaction fences", () => {
   let fixture: Awaited<ReturnType<typeof createConversationPostgres>>;
-  beforeAll(async () => { fixture = await createConversationPostgres(); }, 30_000);
+  beforeAll(async () => { fixture = await createConversationPostgres({ planner: true }); }, 30_000);
   afterAll(async () => { await fixture?.close(); });
   const row = async (sql: string, values: unknown[] = []) => (await fixture.db.query(sql, values)).rows[0];
   async function execution(conversationId: string): Promise<ConversationExecution> {

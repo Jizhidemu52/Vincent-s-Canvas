@@ -1,17 +1,14 @@
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import type { Database } from "./db";
+import { CANVAS_DESIGN_CHAT_TOOL_KEY } from "../../shared/chat-model-binding";
+export { CANVAS_DESIGN_CHAT_TOOL_KEY, missingChatModelMessage } from "../../shared/chat-model-binding";
 
 export const DEFAULT_CHAT_MODEL_TOOL_KEY = "gpt-chat";
 export const INITIAL_CHAT_MODEL_ID = "gpt-6.2-sol";
-export const CANVAS_DESIGN_CHAT_TOOL_KEY = "canvas-design-chat";
 export const INITIAL_CANVAS_DESIGN_CHAT_MODEL_ID = "gpt-6.2-sol";
 
 export function chatModelBindingKey(toolKey: string) {
   return toolKey === CANVAS_DESIGN_CHAT_TOOL_KEY ? CANVAS_DESIGN_CHAT_TOOL_KEY : DEFAULT_CHAT_MODEL_TOOL_KEY;
-}
-
-export function missingChatModelMessage(toolKey: string) {
-  return toolKey === CANVAS_DESIGN_CHAT_TOOL_KEY ? "管理员尚未配置自由画布设计讨论模型" : "管理员尚未配置统一对话模型";
 }
 
 const inheritedModelFields = [

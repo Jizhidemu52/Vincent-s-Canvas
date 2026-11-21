@@ -63,7 +63,8 @@ const confirmedRejection = (error: unknown) =>
     error instanceof ImageConversationApiError &&
     error.code !== "INVALID_RESPONSE" &&
     !["IDEMPOTENCY_CONFLICT", "UPSTREAM_OUTCOME_UNKNOWN"].includes(error.code) &&
-    [400, 401, 403, 404, 409, 422, 429].includes(error.status);
+    ([400, 401, 403, 404, 409, 422, 429].includes(error.status) ||
+        (error.status === 503 && error.code === "PLANNER_BINDING_UNAVAILABLE"));
 const retryableRead = (error: unknown) =>
     error instanceof TypeError ||
     (error instanceof DOMException && error.name === "TimeoutError") ||

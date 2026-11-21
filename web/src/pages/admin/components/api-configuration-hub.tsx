@@ -1,5 +1,6 @@
 import { displayNotice, useDisplayUiValue, useDisplayConfig  } from "@/hooks/use-display-text";
 import { staticUiText } from "@/lib/static-ui-copy";
+import { deploymentFeatures } from "@/lib/deployment-features";
 import { useUiLocale } from "@/lib/i18n";
 import { Alert, App, Button, Empty, Form, Input, Modal, Select, Switch, Tabs, Tag } from "antd";
 import { Boxes, Download, KeyRound, Search, Settings2, Star, Workflow } from "lucide-react";
@@ -150,7 +151,7 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
                             <h3 className="text-sm font-semibold text-[var(--foreground)]">{staticUiText(name)}</h3>
                             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                                 {filteredTools.filter((tool) => tool.group === name).map((tool) => {
-                                    const state = toolConfigurationState(tool, compatibleToolModels(tool, models, providers, workflows));
+                                    const state = toolConfigurationState(tool, compatibleToolModels(tool, models, providers, workflows), deploymentFeatures.imageConversationsEnabled);
                                     const moduleEnabled = moduleIsEnabled(flags, tool.toolKey);
                                     return <section key={tool.toolKey} className="wb-surface flex flex-col p-5" data-tool-key={tool.toolKey}>
                                         <div className="flex items-start justify-between gap-3">
@@ -159,7 +160,7 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
                                         </div>
                                         <p className="mt-2 break-words text-xs text-[var(--muted-foreground)]">{tool.providerName || (tool.toolKey === "layer-studio" || tool.toolKey === "canvas-design-chat" ? staticUiText("专用 API 服务待配置") : tool.operationType === "chat" ? staticUiText("统一对话服务待配置") : staticUiText("继承可用 API 服务"))} · {displayUi(tool.modelName || (tool.toolKey === "layer-studio" || tool.toolKey === "canvas-design-chat" ? staticUiText("未绑定专属模型") : tool.operationType === "chat" ? staticUiText("未指定统一模型") : staticUiText("未固定模型")))}</p>
                                         <div className="mt-3 flex-1 space-y-2 text-sm text-[var(--muted-foreground)]">
-                                            <p>{staticUiText(state.reason)}</p>
+                                            <p className={tool.enabled && !state.ready ? "text-red-600 dark:text-red-400" : undefined}>{staticUiText(state.reason)}</p>
                                             {!moduleEnabled ? <Tag color="orange">{staticUiText("模块入口或所属总入口已关闭")}</Tag> : null}
                                             {tool.workflowName ? <p className="text-xs">{staticUiText("工作流：")}{tool.workflowName}</p> : null}
                                             <p className="text-xs">{staticUiText("配置版本：")}{tool.configurationVersion}</p>

@@ -21,7 +21,7 @@ integration("PostgreSQL 17 native multi-connection conversation locking", () => 
   let fixture: Awaited<ReturnType<typeof createConversationPostgres>>;
   const modelId = randomUUID();
   beforeAll(async () => {
-    fixture = await createConversationPostgres();
+    fixture = await createConversationPostgres({ planner: true });
     expect(fixture.backend).toBe("postgres");
     const provider = randomUUID();
     await fixture.db.query("INSERT INTO providers(id,name,protocol,base_url) VALUES($1,'Native PG lock fixture','custom','https://never-called.invalid')", [provider]);

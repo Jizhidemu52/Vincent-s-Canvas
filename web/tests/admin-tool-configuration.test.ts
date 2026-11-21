@@ -11,6 +11,21 @@ const model: ServerModel = { id: "model", name: "图片模型", modelId: "image-
 const tool = () => completeToolConfigurations([]).find((item) => item.toolKey === "image")!;
 
 describe("formal admin catalog and isolated board saves", () => {
+    test("server conversation planner readiness follows the actual binding; legacy and design chat retain their own rules", () => {
+        const tools = completeToolConfigurations([]);
+        const compatible: ServerModel = { ...model, modelId: "gpt-6.2-sol", capabilities: ["chat","vision"] };
+        for (const toolKey of ["gpt-chat", "canvas-chat"]) {
+            const chat = { ...tools.find(tool => tool.toolKey === toolKey)!, modelConfigId: compatible.id, protocol: provider.protocol, hasCredentials: true };
+            expect(toolConfigurationState(chat, [compatible], true).ready).toBe(true);
+            for (const candidate of [[], [{ ...compatible, capabilities: ["chat"] as ServerModel["capabilities"] }], [{ ...compatible, modelId: "different" }], [{ ...compatible, workflowConfigId: "workflow" }]])
+                expect(toolConfigurationState(chat, candidate, true)).toMatchObject({ ready: false, label: "规划模型不可用" });
+            expect(toolConfigurationState({ ...chat, modelConfigId: null }, [], true).reason).toContain("管理员尚未配置统一对话模型");
+            expect(toolConfigurationState({ ...chat, hasCredentials: false }, [compatible], true).ready).toBe(false);
+            expect(toolConfigurationState(chat, [{ ...compatible, modelId: "different" }], false).ready).toBe(true);
+        }
+        const independent = { ...tools.find(tool => tool.toolKey === "canvas-design-chat")!, modelConfigId: compatible.id };
+        expect(toolConfigurationState(independent, [{ ...compatible, modelId: "different" }], true).ready).toBe(true);
+    });
     test("uses every authoritative AI and non-AI definition without invented entries", () => {
         expect(completeToolConfigurations([]).map((item) => item.toolKey)).toEqual(toolDefinitions.map((item) => item.toolKey));
         expect(moduleKeys.length).toBe(toolDefinitions.length + nonAiDefinitions.length);

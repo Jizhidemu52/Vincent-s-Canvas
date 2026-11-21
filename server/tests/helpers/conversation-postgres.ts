@@ -60,7 +60,22 @@ function recordConversationQueries(db: Database, statements: string[], alreadyRe
   return { db: recorded, statements, transactions };
 }
 
-export async function createConversationPostgres(): Promise<ConversationPostgres> {
+export async function createConversationPostgres(options: { planner?: boolean } = {}): Promise<ConversationPostgres> {
+  const fixture = await openConversationPostgres();
+  if (!options.planner) return fixture;
+  try {
+    const provider = randomUUID(), model = randomUUID();
+    await fixture.db.query("INSERT INTO providers(id,name,protocol,base_url,encrypted_credentials) VALUES($1,'Admission fixture','apimart','https://no-network.invalid','fixture-not-a-secret')", [provider]);
+    await fixture.db.query("INSERT INTO model_configs(id,provider_id,name,model_id,capabilities) VALUES($1,$2,'Admission planner','gpt-6.2-sol',ARRAY['chat','vision'])", [model, provider]);
+    await fixture.db.query("INSERT INTO tool_api_configurations(tool_key,model_config_id,enabled) VALUES('gpt-chat',$1,true) ON CONFLICT(tool_key) DO UPDATE SET model_config_id=$1,enabled=true", [model]);
+    return fixture;
+  } catch (error) {
+    await fixture.close();
+    throw error;
+  }
+}
+
+async function openConversationPostgres(): Promise<ConversationPostgres> {
   const mode = conversationDatabaseMode();
   if (mode === "pglite") {
     const fixture = await createIsolatedPostgres();

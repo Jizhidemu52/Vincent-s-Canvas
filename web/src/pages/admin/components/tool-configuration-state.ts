@@ -1,4 +1,6 @@
 import { toolDefinitions } from "@/services/api/modules";
+import { IMAGE_CONVERSATION_PLANNER_MODEL_ID, plannerProtocols } from "../../../../../shared/image-conversation-planner-policy";
+import { missingChatModelMessage } from "../../../../../shared/chat-model-binding";
 import { isLayerStudioPricingModel, type ServerModel, type ServerProvider, type ServerWorkflow, type ToolApiConfiguration, type ToolApiConfigurationInput } from "@/services/api/model-configuration";
 
 export function completeToolConfigurations(configurations: ToolApiConfiguration[]): ToolApiConfiguration[] {
@@ -32,9 +34,14 @@ export function buildToolConfigurationInput(tool: ToolApiConfiguration, values: 
     };
 }
 
-export function toolConfigurationState(tool: ToolApiConfiguration, compatibleModels: ServerModel[]) {
+export function toolConfigurationState(tool: ToolApiConfiguration, compatibleModels: ServerModel[], imageConversationsEnabled = false) {
     const unavailable = (label: string, reason: string) => ({ ready: false, label, reason });
     if (!tool.enabled) return unavailable("已停用", "本板块 API 已停用，不会回退到其他模型。");
+    if (imageConversationsEnabled && (tool.toolKey === "gpt-chat" || tool.toolKey === "canvas-chat")) {
+        const model = compatibleModels.find(candidate => candidate.id === tool.modelConfigId);
+        if (!model || model.modelId !== IMAGE_CONVERSATION_PLANNER_MODEL_ID || model.workflowConfigId || !model.capabilities.includes("vision") || !plannerProtocols.includes(tool.protocol ?? "") || !tool.hasCredentials)
+            return unavailable("规划模型不可用", `${tool.modelConfigId ? "对话规划绑定不可用" : missingChatModelMessage(tool.toolKey)}。请在“对话改图”绑定启用且支持图文理解的 ${IMAGE_CONVERSATION_PLANNER_MODEL_ID} 直连模型，并启用对应 API；配置前不会创建新轮次或扣费。`);
+    }
     if (tool.toolKey === "layer-studio" && !tool.modelConfigId) return unavailable("待配置", "须由管理员绑定专属模型后才能启用；前台没有模型选择器，也不会自动使用其他模型。");
     if (tool.toolKey === "canvas-design-chat" && !tool.modelConfigId) return unavailable("待配置", "请在本板块独立指定设计讨论模型；不继承其他聊天，也不会使用前端传入的模型。");
     if (tool.operationType === "chat" && !tool.modelConfigId) return unavailable("待配置", "请在“对话改图”中指定统一对话模型；设计师不能自行选择，也不会自动使用其他模型。");

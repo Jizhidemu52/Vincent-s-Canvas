@@ -12,7 +12,7 @@ integration("server design execution discovery", () => {
   let fixture: Awaited<ReturnType<typeof createConversationPostgres>>;
   const modelId = randomUUID();
   beforeAll(async () => {
-    fixture = await createConversationPostgres();
+    fixture = await createConversationPostgres({ planner: true });
     const providerId = randomUUID();
     await fixture.db.query("INSERT INTO providers(id,name,protocol,base_url) VALUES($1,'Discovery fixture','apimart','https://no-network.invalid')", [providerId]);
     await fixture.db.query("INSERT INTO model_configs(id,provider_id,name,model_id,capabilities) VALUES($1,$2,'Discovery fixture','gpt-image-2.6-flare',ARRAY['generate','edit'])", [modelId, providerId]);
