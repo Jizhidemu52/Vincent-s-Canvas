@@ -4,6 +4,7 @@ import helmet from "helmet";
 import { ZodError } from "zod";
 
 import { loadConfig } from "./config";
+import {canvasHttpErrors} from "./canvas-http-errors";
 import {imageHookPath,imageHookRouter,wakeOriginalImage} from "./apimart-image-webhook";
 import { createCache, createDatabase } from "./db";
 import { createAccountsRouter } from "./routes/accounts";
@@ -440,7 +441,7 @@ const errorHandler: ErrorRequestHandler = (
       : {}),
   });
 };
-app.use(errorHandler);
+app.use(canvasHttpErrors,errorHandler);
 
 const thumbnailMaintenance = startAssetThumbnailMaintenance(db, storage);
 const server = app.listen({ port: config.PORT, host: config.HOST }, () =>

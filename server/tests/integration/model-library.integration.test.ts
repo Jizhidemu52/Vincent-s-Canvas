@@ -4,6 +4,7 @@ import {randomUUID} from "node:crypto";
 import {createIsolatedPostgres} from "../helpers/isolated-postgres";
 import {createAdminModelPresetsRouter,createModelLibraryRouter} from "../../src/routes/model-presets";
 import {resolvePortrait,lockPreset} from "../../src/model-library";
+import {canvasHttpErrors} from "../../src/canvas-http-errors";
 import {modelIdentities,modelFramings,pickModel} from "../../../shared/model-match";
 import type {ObjectStorage} from "../../src/object-storage";
 import type {ProductCardItem} from "../../../shared/product-card";
@@ -24,7 +25,7 @@ test("matching uses actual wearing position, compatible defaults and last child,
     const app=express(),storage={} as ObjectStorage;
     app.use(express.json(),(req,_res,next)=>{const id=req.get("x-fixture-user");Object.assign(req,{auth:{id,role:id===admin?"super_admin":"designer",departmentId:null}});next();});
     app.use("/models",createModelLibraryRouter(sql.db,storage));app.use("/admin",createAdminModelPresetsRouter(sql.db,storage));
-    app.use(((err,_req,res,_next)=>res.status(err.status??400).json({message:err.message})) as ErrorRequestHandler);
+    app.use(canvasHttpErrors,((err,_req,res,_next)=>res.status(err.status??500).json({message:err.message})) as ErrorRequestHandler);
     const server=app.listen(0,"127.0.0.1");await new Promise<void>(done=>server.once("listening",done));
     const http=(id:string,path:string,method="GET",data?:unknown)=>fetch("http://127.0.0.1:"+(server.address() as {port:number}).port+path,{method,headers:{"content-type":"application/json","x-fixture-user":id,"x-canvas-owner-id":id},body:data===undefined?undefined:JSON.stringify(data)});
     try{
@@ -44,7 +45,9 @@ test("matching uses actual wearing position, compatible defaults and last child,
         expect((await http(admin,draft,"PUT",{assetId:personal})).status).toBe(404);
         const id=(await (await http(admin,draft,"PUT",{assetId:a})).json()).id;
         expect(typeof id).toBe("string");expect((await catalog()).presets).toHaveLength(0);
-        expect((await http(user,"/models/presets/"+id+"/thumb")).status).toBe(404);
+        const hiddenPreview=await http(user,"/models/presets/"+id+"/thumb");
+        expect(hiddenPreview.status).toBe(404);
+        expect(await hiddenPreview.json()).toMatchObject({error:"MODEL_UNAVAILABLE"});
         const publish=(expectedAssetId:string)=>http(admin,"/admin/"+id+"/publish","POST",{expectedAssetId});
         expect((await publish(a)).status).toBe(204);expect((await catalog()).presets[0].assetId).toBe(a);
         expect((await http(admin,"/admin/identities/white-boy","PATCH",{name:"小远",sortOrder:7})).status).toBe(204);
