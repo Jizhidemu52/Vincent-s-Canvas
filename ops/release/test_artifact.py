@@ -35,7 +35,7 @@ class ArtifactContracts(unittest.TestCase):
         self.assertIn("ops/release/deploy.py", artifact.PACKAGE_FILES)
         self.assertIn("ops/baota/gate.py", artifact.PACKAGE_FILES)
         self.assertFalse(any(".env" in path or "output" in path or "recipe" in path for path in artifact.PACKAGE_FILES))
-        self.assertEqual([path for path in artifact.PACKAGE_FILES if path.startswith("server/src/migrations/")], ["server/src/migrations/048_usage_daily_facts.sql", "server/src/migrations/049_quick_image_configurations.sql", "server/src/migrations/050_quick_image_item_extract.sql", "server/src/migrations/051_new_creative_scenes.sql", "server/src/migrations/052_layer_studio.sql", "server/src/migrations/053_canvas_design_chat.sql", "server/src/migrations/054_image_conversations.sql", "server/src/migrations/055_mai27_model_catalog.sql"])
+        self.assertEqual([path for path in artifact.PACKAGE_FILES if path.startswith("server/src/migrations/")], ["server/src/migrations/048_usage_daily_facts.sql", "server/src/migrations/049_quick_image_configurations.sql", "server/src/migrations/050_quick_image_item_extract.sql", "server/src/migrations/051_new_creative_scenes.sql", "server/src/migrations/052_layer_studio.sql", "server/src/migrations/053_canvas_design_chat.sql", "server/src/migrations/054_image_conversations.sql", "server/src/migrations/055_mai27_model_catalog.sql", "server/src/migrations/056_task_repair.sql", "server/src/migrations/057_task_original_size_reissue.sql", "server/src/migrations/058_reference_download_recheck.sql"])
         self.assertNotIn(creative_seed.SOURCE_PATH, artifact.PACKAGE_FILES)
         self.assertNotIn(creative_seed.SEED_PATH, artifact.PACKAGE_FILES)  # generated, not copied from a mutable seed file
         for name in ["usage-048.py", "usage-048-state.sql", "usage-048-catalog.json"]:
@@ -82,8 +82,19 @@ class ArtifactContracts(unittest.TestCase):
             with self.assertRaisesRegex(Rejected, "FIXED_048_MIGRATION_REQUIRED"):
                 artifact.verify_048_payload(root, later)
 
-    def test_tail_support_is_exactly_reviewed_048_through_055_not_an_open_ended_relaxation(self):
+    def test_repair_payload_requires_all_three_ordered_unchanged_files(self):
+        root = Path(__file__).resolve().parents[2]
+        rows = [row for row in artifact.migrations(root) if row["name"] >= "056"]
+        artifact.verify_repair_payload(root, {"migrations": rows})
+        for changed in [rows[:-1], rows[::-1], rows + [{"name": "059_future.sql"}]]:
+            with self.assertRaisesRegex(Rejected, "FIXED_056_058_MIGRATIONS_REQUIRED"):
+                artifact.verify_repair_payload(root, {"migrations": changed})
+        with self.assertRaisesRegex(Rejected, "056_058_SQL_MIGRATION_HASH_MISMATCH"):
+            artifact.verify_repair_payload(root, {"migrations": [*rows[:-1], dict(rows[-1], sha256="0" * 64)]})
+
+    def test_tail_support_is_exactly_reviewed_048_through_058_not_an_open_ended_relaxation(self):
         names = ["048_usage_daily_facts.sql", "049_quick_image_configurations.sql", *creative_seed.MIGRATIONS, "052_layer_studio.sql", "053_canvas_design_chat.sql", "054_image_conversations.sql", "055_mai27_model_catalog.sql"]
+        names.extend(artifact.TASK_REPAIR_MIGRATIONS)
         self.assertTrue(artifact.fixed_migration_tail({"migrations": [{"name": name} for name in names]}, names[0]))
         for changed in [names + ["056_future.sql"], [names[0], *names[2:]], names[:-1] + ["055_other.sql"], names + [names[-1]]]:
             with self.subTest(changed=changed):
@@ -157,9 +168,10 @@ class ArtifactContracts(unittest.TestCase):
             self.assertFalse(result["imagesRebuilt"])
             release = verify_package(destination)
             from test_image_conversations_054_055 import operator as conversation_operator
-            verified_release, catalog = conversation_operator.verify_package_054_055(destination)
-            self.assertEqual(verified_release, release)
-            conversation_operator.validate_catalog(catalog)
+            with self.assertRaisesRegex(Rejected, "054_055_RELEASE_MUST_END_IN_053_054_055"):
+                conversation_operator.verify_package_054_055(destination)
+            conversation_operator.validate_catalog(artifact.read_json(destination / conversation_operator.CATALOG_PATH))
+            artifact.verify_repair_payload(destination, release)
             seed = creative_seed.verify_payload(destination, release)
             self.assertEqual([row["key"] for row in seed["recipes"]], list(creative_seed.RECIPE_NAMES))
             self.assertEqual({row["path"] for row in release["files"]}, set(artifact.PACKAGE_FILES) | {"images.tar.gz", creative_seed.SEED_PATH})

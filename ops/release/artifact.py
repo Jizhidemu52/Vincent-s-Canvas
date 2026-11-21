@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tarfile
 
-from contract import Rejected, assert_image, digest, digest_file, read_json, require, validate_manifest, verify_package, write_new_json
+from contract import TASK_REPAIR_MIGRATIONS, Rejected, assert_image, digest, digest_file, read_json, require, validate_manifest, verify_package, write_new_json
 from creative_seed import MIGRATIONS as CREATIVE_MIGRATIONS, SEED_PATH, build_source_seed, verify_payload as verify_creative_payload
 
 
@@ -33,12 +33,14 @@ PACKAGE_FILES = [
     "ops/release/image-conversations-054-055.py", "ops/release/image-conversations-054-055-catalog.json",
     "ops/release/image-conversations-054-055-state.sql", "server/src/migrations/054_image_conversations.sql",
     "server/src/migrations/055_mai27_model_catalog.sql",
+    "ops/release/task_repair_056_058.py",
+    *["server/src/migrations/" + name for name in TASK_REPAIR_MIGRATIONS],
 ]
 
 
 def fixed_migration_tail(manifest, first):
     allowed = ["048_usage_daily_facts.sql", "049_quick_image_configurations.sql", *CREATIVE_MIGRATIONS, "052_layer_studio.sql", "053_canvas_design_chat.sql",
-               "054_image_conversations.sql", "055_mai27_model_catalog.sql"]
+               "054_image_conversations.sql", "055_mai27_model_catalog.sql", *TASK_REPAIR_MIGRATIONS]
     expected = allowed[allowed.index(first):]
     actual = [row["name"] for row in manifest["migrations"] if row["name"] >= first[:3]]
     return bool(actual) and actual == expected[:len(actual)]
@@ -79,11 +81,19 @@ def verify_053_payload(root, manifest):
 
 def verify_054_055_payload(root, manifest):
     names = ["054_image_conversations.sql", "055_mai27_model_catalog.sql"]
-    rows = [row for row in manifest["migrations"] if row["name"] >= "054"]
-    require([row["name"] for row in rows] == names, "FIXED_054_055_MIGRATIONS_REQUIRED")
+    rows = [row for row in manifest["migrations"] if "054" <= row["name"] < "056"]
+    require([row["name"] for row in rows] == names and fixed_migration_tail(manifest, names[0]), "FIXED_054_055_MIGRATIONS_REQUIRED")
     for row in rows:
         sql = root / "server/src/migrations" / row["name"]
         require(sql.is_file() and not sql.is_symlink() and digest_file(sql) == row["sha256"], "PACKAGED_054_055_SQL_MIGRATION_HASH_MISMATCH")
+
+
+def verify_repair_payload(root, manifest):
+    rows = [row for row in manifest["migrations"] if row["name"] >= "056"]
+    require(tuple(row["name"] for row in rows) == TASK_REPAIR_MIGRATIONS, "FIXED_056_058_MIGRATIONS_REQUIRED")
+    for row in rows:
+        sql = root / "server/src/migrations" / row["name"]
+        require(sql.is_file() and not sql.is_symlink() and digest_file(sql) == row["sha256"], "PACKAGED_056_058_SQL_MIGRATION_HASH_MISMATCH")
 
 
 def repository_commit(root):
@@ -137,6 +147,7 @@ def package(root, candidate, verification, image_archive, destination):
     verify_052_payload(root, candidate)
     verify_053_payload(root, candidate)
     verify_054_055_payload(root, candidate)
+    verify_repair_payload(root, candidate)
     seed = build_source_seed(root)
     manifest = copy.deepcopy(candidate); manifest["verification"] = verification
     validate_manifest(manifest)
@@ -166,6 +177,7 @@ def package(root, candidate, verification, image_archive, destination):
     verify_052_payload(destination, manifest)
     verify_053_payload(destination, manifest)
     verify_054_055_payload(destination, manifest)
+    verify_repair_payload(destination, manifest)
     verify_creative_payload(destination, manifest)
     archive = destination.with_suffix(destination.suffix + ".tar")
     require(not archive.exists(), "PACKAGE_ARCHIVE_ALREADY_EXISTS")

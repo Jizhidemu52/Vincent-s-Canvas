@@ -85,7 +85,7 @@ test('asset library filters, sort and deleted restore work through the visible U
     expect(fixture.unexpected).toEqual([]); expect(fixture.pageErrors).toEqual([]);
 });
 
-test('failed uploads retain per-file errors and retry references while download and share refresh the right state', async ({ page, context, baseURL }) => {
+test('failed uploads retain per-file errors and retry references', async ({ page, context, baseURL }) => {
     const fixture = await setup(context, baseURL!);
     await page.goto('/assets');
     await expect(page.getByText('首张参考', { exact: true }).first()).toBeVisible();
@@ -99,6 +99,13 @@ test('failed uploads retain per-file errors and retry references while download 
     await page.getByRole('button', { name: '重试失败项' }).click();
     await expect(page.getByText('1 张图片上传失败')).not.toBeVisible();
     expect(fixture.uploads.filter(input => input.filename === 'failed.png').map(input => input.clientReferenceId)).toEqual([fixture.uploads.find(input => input.filename === 'failed.png')!.clientReferenceId, fixture.uploads.find(input => input.filename === 'failed.png')!.clientReferenceId]);
+    await expect(page.getByText('已上传 1 张图片', { exact: true })).toBeVisible();
+    expect(fixture.unexpected).toEqual([]); expect(fixture.pageErrors).toEqual([]);
+});
+
+test('download patches the receipt locally and share refreshes the asset list', async ({ page, context, baseURL }) => {
+    const fixture = await setup(context, baseURL!);
+    await page.goto('/assets');
     await page.getByText('首张参考', { exact: true }).first().click();
     const drawer = page.getByRole('dialog');
     await expect(drawer).toBeVisible();
