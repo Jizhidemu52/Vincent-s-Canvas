@@ -2,7 +2,7 @@
 import json
 import subprocess
 
-from contract import TASK_REPAIR_MIGRATIONS, digest, digest_file, read_json, require
+from contract import TASK_REPAIR_MIGRATIONS, TRYOUT_MIGRATIONS, digest, digest_file, read_json, require
 
 MIGRATIONS = ("050_quick_image_item_extract.sql", "051_new_creative_scenes.sql")
 SOURCE_PATH = "server/src/new-creative-recipes.ts"
@@ -56,7 +56,7 @@ def build_source_seed(root):
 def verify_payload(root, manifest):
     names = [row["name"] for row in manifest["migrations"]]
     tail = [name for name in names if name >= "050"]
-    allowed = [*MIGRATIONS, "052_layer_studio.sql", "053_canvas_design_chat.sql", "054_image_conversations.sql", "055_mai27_model_catalog.sql", *TASK_REPAIR_MIGRATIONS]
+    allowed = [*MIGRATIONS, "052_layer_studio.sql", "053_canvas_design_chat.sql", "054_image_conversations.sql", "055_mai27_model_catalog.sql", *TASK_REPAIR_MIGRATIONS, *TRYOUT_MIGRATIONS]
     require(len(tail) >= len(MIGRATIONS) and tail == allowed[:len(tail)]
             and all(names.count(name) == 1 for name in MIGRATIONS), "FIXED_050_051_MIGRATIONS_REQUIRED")
     for name in MIGRATIONS:

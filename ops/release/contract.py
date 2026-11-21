@@ -16,6 +16,7 @@ import sys
 from urllib.parse import urlsplit
 
 TASK_REPAIR_MIGRATIONS = ("056_task_repair.sql", "057_task_original_size_reissue.sql", "058_reference_download_recheck.sql")
+TRYOUT_MIGRATIONS = ("059_canvas_tryout.sql", "060_material_presets.sql", "061_provider_upload_cache.sql")
 
 
 class Rejected(ValueError):

@@ -11,7 +11,8 @@ from contract import Rejected
 import test_usage_048_docker as docker_fixture
 
 ROOT = Path(__file__).resolve().parents[2]
-RELEASE = {"migrations": artifact.migrations(ROOT)}
+COMBINED = {"migrations": artifact.migrations(ROOT)}
+RELEASE = {"migrations": [r for r in COMBINED["migrations"] if r["name"] < "059"]}
 LEDGER = repair.before_release(RELEASE)["migrations"]
 STATE = (ROOT / "ops/release/database-state.sql").read_text(encoding="utf8")
 FIXTURE = """
@@ -39,6 +40,38 @@ class RepairContracts(unittest.TestCase):
 
 
 class SqlScenarios:
+    def tryout_tables(self):
+        self.psql("""
+CREATE TABLE assets(id uuid PRIMARY KEY);
+CREATE TABLE providers(id uuid PRIMARY KEY);
+CREATE TABLE users(id uuid PRIMARY KEY);
+CREATE TABLE module_flags(module_key text PRIMARY KEY, enabled boolean NOT NULL,
+ CONSTRAINT module_flags_module_key_check CHECK(module_key IN ('canvas','assets')));
+INSERT INTO module_flags VALUES('canvas',true),('assets',false);
+""", self.database)
+
+    def test_combined_tail_from_055_adds_only_reviewed_rows_and_rejects_rerun(self):
+        self.tryout_tables()
+        before = self.snapshot()
+        self.psql(repair.transaction(ROOT, COMBINED, self.instance, before), self.database)
+        after = self.snapshot()
+        repair.verify_after(before, after, COMBINED, self.instance)
+        self.assertEqual(self.psql("SELECT module_key,enabled FROM module_flags ORDER BY module_key", self.database).stdout.strip(),
+                         "assets|f\ncanvas|t\ncanvas-tryout|f")
+        with self.assertRaises(Rejected):
+            repair.transaction(ROOT, COMBINED, self.instance, after)
+
+    def test_late_flag_trigger_rolls_back_all_six_migrations(self):
+        self.tryout_tables()
+        self.psql("""CREATE FUNCTION unexpected_flag_update() RETURNS trigger LANGUAGE plpgsql AS $$
+ BEGIN UPDATE module_flags SET enabled=false WHERE module_key='canvas'; RETURN NEW; END $$;
+ CREATE TRIGGER flag_side_effect AFTER INSERT ON module_flags FOR EACH ROW EXECUTE FUNCTION unexpected_flag_update();""", self.database)
+        before = self.snapshot()
+        outcome = self.psql(repair.transaction(ROOT, COMBINED, self.instance, before), self.database, check=False)
+        self.assertNotEqual(outcome.returncode, 0)
+        self.assertIn("TRYOUT_FLAGS_CHANGED", outcome.stderr)
+        self.assertEqual(before, self.snapshot())
+
     def snapshot(self):
         return json.loads(self.psql(STATE, self.database).stdout)
 

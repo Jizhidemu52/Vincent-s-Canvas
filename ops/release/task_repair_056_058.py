@@ -1,4 +1,4 @@
-"""Prepare only the reviewed 056–058 task-repair schema before an image switch."""
+"""Prepare the exact reviewed schema tail from 055 before an image switch."""
 import argparse
 import importlib.util
 import json
@@ -8,7 +8,7 @@ import shutil
 import sys
 import time
 
-from contract import (Rejected, TASK_REPAIR_MIGRATIONS, assert_database_layout, assert_migrations,
+from contract import (Rejected, TASK_REPAIR_MIGRATIONS, TRYOUT_MIGRATIONS, assert_database_layout, assert_migrations,
                       assert_protected, digest, digest_file, read_json, require, verify_package, write_new_json)
 from deploy import Deployment, assert_rollback_source, compose_literals, private_directory, require_unchanged
 
@@ -20,16 +20,25 @@ PREVIOUS = "055_mai27_model_catalog.sql"
 FIELDS = ("paused_kind", "repair_attempts", "next_repair_at", "repair_error_code", "original_size_source_id", "reference_download_recheck_at")
 
 
+TRYOUT_TABLES = {"material_presets", "provider_upload_cache", "provider_upload_task_inputs"}
+
+
+def reviewed_tail(release):
+    names = tuple(row["name"] for row in release["migrations"] if row["name"] >= "055")
+    for tail in (TASK_REPAIR_MIGRATIONS, TASK_REPAIR_MIGRATIONS + TRYOUT_MIGRATIONS):
+        if names == (PREVIOUS, *tail):
+            return tail
+    raise Rejected("EXPECTED_REVIEWED_TAIL_FROM_055")
+
+
 def before_release(release):
-    rows = release["migrations"]
-    require([row["name"] for row in rows[-4:]] == [PREVIOUS, *TASK_REPAIR_MIGRATIONS], "EXPECTED_055_TO_058_ONLY")
-    return {**release, "migrations": rows[:-3]}
+    return {**release, "migrations": release["migrations"][:-len(reviewed_tail(release))]}
 
 
 def sql_payload(package, release):
     before_release(release)
     statements = []
-    for row in release["migrations"][-3:]:
+    for row in release["migrations"][-len(reviewed_tail(release)):]:
         path = package / "server/src/migrations" / row["name"]
         require(path.is_file() and not path.is_symlink(), "REPAIR_REGULAR_SQL_REQUIRED")
         raw = path.read_bytes()
@@ -49,7 +58,27 @@ def transaction(package, release, instance, baseline):
     def fingerprint(value):
         return f"SELECT sha256(convert_to(coalesce(string_agg(encode(sha256(convert_to(({value})::text,'UTF8')),'hex'),'' ORDER BY id),''),'UTF8')) AS hash FROM public.tasks t"
     identity = support.json_sql(baseline["identity"])
-    protected = support.json_sql([row for row in baseline["tables"] if row["name"] not in ("tasks", "schema_migrations")])
+    combined = reviewed_tail(release)[-1] == TRYOUT_MIGRATIONS[-1]
+    exempt = {"tasks", "schema_migrations"}
+    before_flags = after_flags = ""
+    if combined:
+        require(not TRYOUT_TABLES.intersection(row["name"] for row in baseline["tables"]), "TRYOUT_TABLE_ALREADY_EXISTS")
+        exempt.update({"module_flags", *TRYOUT_TABLES})
+        before_flags = """LOCK TABLE public.module_flags IN ACCESS EXCLUSIVE MODE;
+DO $$ BEGIN
+ IF EXISTS (SELECT FROM public.module_flags WHERE module_key='canvas-tryout') THEN RAISE EXCEPTION 'TRYOUT_FLAG_ALREADY_EXISTS'; END IF;
+END $$;
+CREATE TEMP TABLE prior_flags ON COMMIT DROP AS SELECT to_jsonb(f) AS row FROM public.module_flags f;"""
+        after_flags = """IF NOT EXISTS (SELECT FROM public.module_flags WHERE module_key='canvas-tryout' AND enabled IS FALSE)
+ OR EXISTS ((SELECT row FROM pg_temp.prior_flags EXCEPT ALL SELECT to_jsonb(f) FROM public.module_flags f WHERE module_key<>'canvas-tryout')
+ UNION ALL (SELECT to_jsonb(f) FROM public.module_flags f WHERE module_key<>'canvas-tryout' EXCEPT ALL SELECT row FROM pg_temp.prior_flags))
+ THEN RAISE EXCEPTION 'TRYOUT_FLAGS_CHANGED'; END IF;
+ IF (SELECT array_agg(name ORDER BY sort_order) FROM public.material_presets) IS DISTINCT FROM ARRAY['粗针','罗纹','绞花','马海毛','摇粒绒','灯芯绒']::text[]
+ OR EXISTS (SELECT FROM public.material_presets WHERE status<>'published' OR thumb_asset_id IS NOT NULL)
+ OR EXISTS (SELECT FROM public.provider_upload_cache) OR EXISTS (SELECT FROM public.provider_upload_task_inputs)
+ THEN RAISE EXCEPTION 'TRYOUT_UNSAFE_INITIAL_STATE'; END IF;"""
+    exclusions = ",".join("'" + name + "'" for name in sorted(exempt))
+    protected = support.json_sql([row for row in baseline["tables"] if row["name"] not in exempt])
     state_query = (package / "ops/release/database-state.sql").read_text(encoding="utf-8").strip().rstrip(";")
     return f"""BEGIN;
 SET LOCAL search_path=public,pg_catalog;
@@ -63,15 +92,17 @@ DO $$ BEGIN
  THEN RAISE EXCEPTION 'REPAIR_LEDGER_DRIFT'; END IF;
 END $$;
 CREATE TEMP TABLE repair_before ON COMMIT DROP AS {fingerprint('to_jsonb(t)')};
+{before_flags}
 {sql_payload(package, release)}
 DO $$ BEGIN
+ {after_flags}
  IF ({fingerprint('to_jsonb(t) - ARRAY[' + fields + ']::text[]')}) IS DISTINCT FROM (SELECT hash FROM pg_temp.repair_before)
  THEN RAISE EXCEPTION 'REPAIR_OLD_TASK_ROWS_CHANGED'; END IF;
  IF EXISTS (SELECT FROM public.tasks WHERE repair_attempts<>0 OR original_size_source_id IS NOT NULL OR reference_download_recheck_at IS NOT NULL
    OR (next_repair_at IS NOT NULL AND (status<>'paused' OR paused_kind IS NULL OR paused_kind NOT IN ('result_repair','awaiting_query') OR nullif(btrim(upstream_task_id),'') IS NULL)))
  THEN RAISE EXCEPTION 'REPAIR_UNSAFE_INITIAL_STATE'; END IF;
  IF (SELECT coalesce(jsonb_agg(r ORDER BY r->>'name'),'[]'::jsonb)
-     FROM jsonb_array_elements(({state_query})->'tables') r WHERE r->>'name' NOT IN ('tasks','schema_migrations'))
+     FROM jsonb_array_elements(({state_query})->'tables') r WHERE r->>'name' NOT IN ({exclusions}))
      IS DISTINCT FROM {protected} THEN RAISE EXCEPTION 'REPAIR_UNRELATED_ROWS_CHANGED'; END IF;
 END $$;
 COMMIT;"""
@@ -81,14 +112,21 @@ def verify_after(before, after, release, instance):
     assert_migrations([row["name"] for row in after["migrations"]], release, instance)
     require_unchanged(before["identity"], after["identity"], "REPAIR_DATABASE_CHANGED")
     require_unchanged(before["sequences"], after["sequences"], "REPAIR_SEQUENCES_CHANGED")
-    require_unchanged(before["migrations"], [row for row in after["migrations"] if row["name"] not in TASK_REPAIR_MIGRATIONS], "REPAIR_OLD_LEDGER_CHANGED")
+    tail = reviewed_tail(release)
+    require_unchanged(before["migrations"], [row for row in after["migrations"] if row["name"] not in tail], "REPAIR_OLD_LEDGER_CHANGED")
     old = {row["name"]: row for row in before["tables"]}
     new = {row["name"]: row for row in after["tables"]}
-    require(set(old) == set(new), "REPAIR_TABLES_CHANGED")
+    combined = tail[-1] == TRYOUT_MIGRATIONS[-1]
+    require(set(new) == set(old) | (TRYOUT_TABLES if combined else set()), "REPAIR_TABLES_CHANGED")
     for name in old:
+        if combined and name == "module_flags":
+            require(new[name]["count"] == old[name]["count"] + 1, "TRYOUT_FLAGS_CHANGED")
+            continue
         if name not in ("tasks", "schema_migrations"):
             require_unchanged(old[name], new[name], "REPAIR_UNRELATED_ROWS_CHANGED")
-    require(new["tasks"]["count"] == old["tasks"]["count"] and new["schema_migrations"]["count"] == old["schema_migrations"]["count"] + 3, "REPAIR_ROW_COUNT_CHANGED")
+    require(new["tasks"]["count"] == old["tasks"]["count"] and new["schema_migrations"]["count"] == old["schema_migrations"]["count"] + len(tail), "REPAIR_ROW_COUNT_CHANGED")
+    if combined:
+        require([new[name]["count"] for name in sorted(TRYOUT_TABLES)] == [6, 0, 0], "TRYOUT_UNSAFE_INITIAL_STATE")
 
 
 class Preparation(support.Usage048):
@@ -96,12 +134,13 @@ class Preparation(support.Usage048):
 
     def preflight(self, package):
         release = verify_package(package)
-        self.new_audit("repair-056-058-preflight")
+        kind = "repair-056-" + reviewed_tail(release)[-1][:3]
+        self.new_audit(kind + "-preflight")
         self.assert_platform(release)
         baseline = self.capture("repair-preflight")
         transaction(package, release, self.instance, baseline["database"])
         self.gate("verify-open")
-        record = {"kind": "repair-056-058", "createdAt": time.time(), "package": str(package),
+        record = {"kind": kind, "createdAt": time.time(), "package": str(package),
                   "instance": digest_file(self.instance_path), "manifest": digest_file(package / "release-manifest.json"), "baseline": baseline}
         write_new_json(self.audit / "preflight.json", record)
         return {"status": "preflight-passed", "audit": str(self.audit), "mutations": False}
@@ -109,12 +148,13 @@ class Preparation(support.Usage048):
     def migrate(self, package, prior_dir):
         release = verify_package(package)
         prior = read_json(private_directory(prior_dir) / "preflight.json")
+        kind = "repair-056-" + reviewed_tail(release)[-1][:3]
         def fresh():
-            require(prior["kind"] == "repair-056-058" and prior["package"] == str(package)
+            require(prior["kind"] == kind and prior["package"] == str(package)
                     and prior["instance"] == digest_file(self.instance_path) and prior["manifest"] == digest_file(package / "release-manifest.json")
                     and 0 <= time.time()-prior["createdAt"] <= 900, "REPAIR_FRESH_SAME_TARGET_PREFLIGHT_REQUIRED")
         fresh()
-        self.new_audit("repair-056-058-migrate")
+        self.new_audit(kind + "-migrate")
         phase = "preparation"
         try:
             current = self.capture("repair-prepare")
@@ -152,7 +192,7 @@ class Preparation(support.Usage048):
             self.protected_and_database({**baseline, "database": after}, "repair-original-ready")
             self.gate("open"); self.gate("verify-open")
             self.wait_health(self.instance["publicBaseUrl"])
-            result = {"status":"056-058-prepared", "audit":str(self.audit), "manifest":prior["manifest"], "originalApplicationRestored":True}
+            result = {"status":kind.removeprefix("repair-") + "-prepared", "audit":str(self.audit), "manifest":prior["manifest"], "originalApplicationRestored":True}
             write_new_json(self.audit / "receipt.json", result)
             return result
         except Exception:
