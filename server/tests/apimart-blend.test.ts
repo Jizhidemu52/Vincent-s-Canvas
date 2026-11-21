@@ -88,7 +88,7 @@ describe("MJ Blend fixed-provider request contract", () => {
         expect(JSON.parse(String(init?.body))).toEqual({ image_urls: [urls[0], urls[1], urls[2]], size: "13:7", speed: "fast" });
         return json({ code: 200, data: [{ status: "submitted", task_id: "blend_saved" }] });
       }
-      expect(url).toBe("https://provider.example/v1/tasks/blend_saved"); expect(init?.method).not.toBe("POST");
+      expect(url).toBe("https://provider.example/v1/tasks/blend_saved?language=zh"); expect(init?.method).not.toBe("POST");
       events.push("poll"); expect(events).toEqual(["upload", "upload", "intent", "submit", "persist", "poll"]);
       return json(completed);
     } });
@@ -107,7 +107,7 @@ describe("MJ Blend fixed-provider request contract", () => {
     const methods: string[] = [];
     const result = await runApiMartImageTask({ ...base, sourceDataUrls: ["gone"], parameters: { size: "invalid" }, upstreamTaskId: "blend_saved", submissionStarted: true,
       beforeSubmit: () => { throw new Error("must not claim"); }, onSubmitted: () => { throw new Error("must not persist again"); },
-    }, { sleep, fetch: async (url, init) => { expect(url).toEndWith("/tasks/blend_saved"); methods.push(init?.method || "GET"); return json(completed); } });
+    }, { sleep, fetch: async (url, init) => { expect(url).toEndWith("/tasks/blend_saved?language=zh"); methods.push(init?.method || "GET"); return json(completed); } });
     expect(methods).toEqual(["GET"]); expect(result).toEqual(["https://images.example/result.png"]);
   });
 

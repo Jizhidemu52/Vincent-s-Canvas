@@ -163,7 +163,7 @@ integration("reference download failures recheck the original ID after three sec
           cases.get(id)!.posts++;
           return Response.json({ data: [{ task_id: id }] });
         }
-        const c = cases.get(String(url).split("/tasks/")[1]!)!;
+        const c = cases.get(new URL(url).pathname.split("/tasks/")[1]!)!;
         c.polls.push(Date.now());
         if (c.polls.length === 1 || c.outcome === "failed") return Response.json(failed);
         if (c.outcome === "paused") return new Response(null, { status: 410 });
@@ -204,7 +204,7 @@ for (const kind of ["video", "image"] as const) integration(`30 mock ${kind}s re
       return Response.json({ data: [{ task_id: prompt }] });
     }
     if (url.includes("/tasks/")) {
-      const id = decodeURIComponent(url.split("/tasks/")[1]!);
+      const id = decodeURIComponent(new URL(url).pathname.split("/tasks/")[1]!);
       const remote = submitted.get(id)!;
       if (++remote.polls < 2) return Response.json({ data: { status: "processing" } });
       if (!remote.complete) { remote.complete = true; inflight--; }
@@ -300,7 +300,7 @@ integration("two inconclusive original image queries retain their slots, then se
       return Response.json({ data: [{ task_id: id }] });
     }
     expect(init?.method).toBe("GET");
-    const id = decodeURIComponent(url.split("/tasks/")[1]!);
+    const id = decodeURIComponent(new URL(url).pathname.split("/tasks/")[1]!);
     requests.push({ method: "GET", id });
     const task = remote.get(id)!;
     if (++task.polls === 1 && originalIds.includes(id)) return Response.json({ code: 200, data: { status: "unknown" } });
@@ -431,7 +431,7 @@ for (const [kind, minutes] of [["image", 15], ["video", 20]] as const) integrati
   const fakeFetch = async (url: string, init?: RequestInit) => {
     requests.push({ method: init?.method || "GET", url });
     expect(init?.method).toBe("GET");
-    expect(url).toBe("https://provider.invalid/v1/tasks/original-upstream");
+    expect(url).toBe("https://provider.invalid/v1/tasks/original-upstream" + (kind === "image" ? "?language=zh" : ""));
     return Response.json({ data: { status: "processing" } });
   };
   const worker = await productionWorker({
@@ -477,7 +477,7 @@ for (const [kind, minutes] of [["image", 15], ["video", 20]] as const) integrati
     // a fresh execution may only GET the original ID, then yield again.
     expect(await popReadyTask(redis.cache)).toBe(id);
     await worker.runTask(id);
-    expect(requests).toEqual([{ method: "GET", url: "https://provider.invalid/v1/tasks/original-upstream" }]);
+    expect(requests).toEqual([{ method: "GET", url: "https://provider.invalid/v1/tasks/original-upstream" + (kind === "image" ? "?language=zh" : "") }]);
     expect((await identity()).rows[0]).toEqual(original);
     expect((await reservation()).rows[0]).toEqual(held);
     const deferred = (await db.query("SELECT status,execution_token,lease_expires_at,poll_deadline_at FROM tasks WHERE id=$1", [id])).rows[0];

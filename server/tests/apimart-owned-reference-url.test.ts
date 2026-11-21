@@ -84,7 +84,7 @@ describe.each(modelCases)("owned-reference adapter: %s", (modelId, kind, wireMod
       expect(init?.body).toBeUndefined();
       return Response.json({ data: { status: "completed", result: { images: [{ url: [resultUrl] }] } } });
     } });
-    expect(calls).toEqual([`GET ${base.baseUrl}/tasks/saved%2Ftask%20%2B%20id`]);
+    expect(calls).toEqual([`GET ${base.baseUrl}/tasks/saved%2Ftask%20%2B%20id?language=zh`]);
     expect(result).toMatchObject({ status: "completed", upstreamTaskId: input.upstreamTaskId, urls: [resultUrl] });
   });
 });

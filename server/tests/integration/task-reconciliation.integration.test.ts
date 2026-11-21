@@ -323,7 +323,7 @@ integration("auditable administrator reconciliation using isolated PostgreSQL an
         };
         const execute = new Function(...Object.keys(dependencies), `${code};return executeApiMartImage`)(...Object.values(dependencies));
         expect(await execute({ ...attached, model_id: "gpt-image-2.6-flare", base_url: "https://never-called.invalid/v1" }, { apiKey: "isolated-test-key" }, "existing prompt")).toHaveLength(1);
-        expect(requests).toEqual(["GET:https://never-called.invalid/v1/tasks/original-image-job"]);
+        expect(requests).toEqual(["GET:https://never-called.invalid/v1/tasks/original-image-job?language=zh"]);
         expect(await row("SELECT queued_at,upstream_submission_started_at,attempts,credits FROM tasks WHERE id=$1", [item.id])).toEqual(original);
         expect((await row("SELECT count(*)::int AS count FROM credit_ledger WHERE reference_id=$1", [item.requestId])).count).toBe(1);
         expect((await row("SELECT status FROM credit_reservations WHERE request_id=$1", [item.requestId])).status).toBe("held");

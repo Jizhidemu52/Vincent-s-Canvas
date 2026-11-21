@@ -178,7 +178,7 @@ integration("production Worker exact image-agent prompt boundary over isolated P
             expect(result).toHaveLength(1);
             expect(result[0]!.bytes).toEqual(bytes);
             expect(h.requests.map(request => request.method)).toEqual(["POST", "GET"]);
-            expect(h.requests[1]!.url).toBe("https://provider.invalid/v1/tasks/fixture-upstream-1");
+            expect(h.requests[1]!.url).toBe("https://provider.invalid/v1/tasks/fixture-upstream-1?language=zh");
             expect(h.loadedSources).toHaveLength(loadedBeforeResume);
             expect(h.grants).toHaveLength(grantsBeforeResume);
             expect(fixture.statements.slice(statementStart).some(sql => /prompt_recipes|prompt_recipe_versions/.test(sql))).toBe(false);

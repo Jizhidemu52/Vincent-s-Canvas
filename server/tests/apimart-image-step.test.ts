@@ -7,6 +7,20 @@ const input = {
 };
 const completed = { data: { status: "completed", result: { images: [{ url: ["https://images.example/one.png", "https://images.example/two.png"] }] } } };
 
+test("an inaccessible reference is rechecked in Chinese by original ID and never resubmitted", async () => {
+  const calls: string[] = [];
+  const get = async (url: string, init?: RequestInit) => {
+    calls.push(`${init?.method} ${url}`);
+    return Response.json({ data: { status: "failed", message: "参考图地址无法访问" } });
+  };
+  const saved = { ...input, upstreamTaskId: "saved/id", submissionStarted: true };
+  const first = await stepApiMartImageTask(saved, { fetch: get });
+  expect(first).toMatchObject({ status: "pending", upstreamTaskId: "saved/id", confirmInputDownloadFailure: true });
+  await expect(stepApiMartImageTask({ ...saved, inputDownloadRecheckScheduled: true }, { fetch: get }))
+    .rejects.toThrow("供应商未能读取参考图，复查原任务后仍为失败；未重新提交生成。");
+  expect(calls).toEqual(Array(2).fill("GET https://provider.example/v1/tasks/saved%2Fid?language=zh"));
+});
+
 for (const exhausted of [true,false]) test(`upload 429 uses 2/5/15 second backoff only before generation; exhausted=${exhausted}`, async () => {
   const waits:number[] = [], sent:string[]=[]; let uploads=0, cancelled=0, claims=0;
   const original=Buffer.from([1,2,3]);
@@ -33,7 +47,7 @@ for (const final of ["failed","completed","unavailable"] as const) test(`410 in 
   const error={data:{status:"failed",error:{code:"input_image_download",message:"HTTP 410 reading input image"}}};
   const operation=runApiMartImageTask({...input,upstreamTaskId:"original-id",submissionStarted:true},{
     sleep:async ms=>{waits.push(ms);},fetch:async(url,init)=>{
-      expect(init?.method).toBe("GET"); expect(url.endsWith("/tasks/original-id")).toBe(true); requests.push(url);
+      expect(init?.method).toBe("GET"); expect(url.endsWith("/tasks/original-id?language=zh")).toBe(true); requests.push(url);
       if(requests.length===2 && final==="unavailable") return new Response(null,{status:410});
       return Response.json(requests.length===2 && final==="completed"?completed:error);
     }
@@ -70,7 +84,7 @@ test("image polling step queries only the original ID and ignores unavailable ol
     return Response.json(completed);
   } });
   expect(result).toEqual({ status: "completed", upstreamTaskId: "saved/id", urls: ["https://images.example/one.png", "https://images.example/two.png"] });
-  expect(requests).toEqual(["GET:https://provider.example/v1/tasks/saved%2Fid"]);
+  expect(requests).toEqual(["GET:https://provider.example/v1/tasks/saved%2Fid?language=zh"]);
 });
 
 test.each(["pending", "submitted", "processing", "queued", "running"])("image status %s returns one delayed step without leaking unfinished outputs", async status => {
@@ -119,7 +133,7 @@ test.each(["unknown", "missing-status", "invalid-json", "missing-results"])("inc
   expect(error).toBeInstanceOf(ApiMartImageQueryRetryable);
   expect(error.nextPollMs).toBe(30_000);
   expect(await stepApiMartImageTask(original, runtime)).toMatchObject({ status: "completed", upstreamTaskId: "original" });
-  expect(requests).toEqual(["GET:https://provider.example/v1/tasks/original", "GET:https://provider.example/v1/tasks/original"]);
+  expect(requests).toEqual(["GET:https://provider.example/v1/tasks/original?language=zh", "GET:https://provider.example/v1/tasks/original?language=zh"]);
 });
 
 test.each(["network", 408, 429, 500, 503])("durable image query %s yields after one GET and uses bounded retry cadence", async failure => {

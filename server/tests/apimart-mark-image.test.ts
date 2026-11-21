@@ -163,7 +163,7 @@ describe("Mark APIMart image contracts", () => {
       }
       events.push("poll");
       expect(events).toEqual(["upload", "claim", "submit", "persist", "poll"]);
-      expect(url).toBe("https://provider.example/v1/tasks/task_saved");
+      expect(url).toBe("https://provider.example/v1/tasks/task_saved?language=zh");
       return json(completed);
     } });
     expect(output).toEqual(["https://images.example/one.png", "https://images.example/two.jpg", "https://images.example/three.png"]);
@@ -187,7 +187,7 @@ describe("Mark APIMart image contracts", () => {
     let calls = 0;
     await runApiMartImageTask({ ...base, upstreamTaskId: "task_saved", submissionStarted: true, sourceDataUrls: ["unavailable-source"], parameters: { quality: "old-invalid-value" },
       beforeSubmit: async () => { throw new Error("Must not reclaim"); }, onSubmitted: async () => { throw new Error("Must not resubmit"); },
-    }, { sleep: async () => {}, fetch: async (url, init) => { calls++; expect(url).toEndWith("/tasks/task_saved"); expect(init?.method).not.toBe("POST"); return json(completed); } });
+    }, { sleep: async () => {}, fetch: async (url, init) => { calls++; expect(url).toEndWith("/tasks/task_saved?language=zh"); expect(init?.method).not.toBe("POST"); return json(completed); } });
     expect(calls).toBe(1);
   });
 
@@ -272,7 +272,7 @@ describe("Mark APIMart image contracts", () => {
       expect(error).toBeInstanceOf(ApiMartImageQueryRetryable);
       expect(error).not.toBeInstanceOf(ApiMartImageProviderFailure);
       expect(error).toMatchObject({ code, httpStatus, nextPollMs: 10_000 });
-      expect(requests).toEqual(Array.from({ length: calls }, () => ({ url: "https://provider.example/v1/tasks/task_saved", method: "GET" })));
+      expect(requests).toEqual(Array.from({ length: calls }, () => ({ url: "https://provider.example/v1/tasks/task_saved?language=zh", method: "GET" })));
     }
   });
 

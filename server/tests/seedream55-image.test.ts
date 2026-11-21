@@ -75,7 +75,7 @@ test("single submit intent precedes POST; subsequent polls keep original ID and 
   const submitted = await stepApiMartImageTask(base, { fetch: async (_url, init) => { events.push(init!.method!); return Response.json({ data: [{ task_id: "original" }] }); } });
   expect(events).toEqual(["claim", "POST", "original"]); expect(submitted).toMatchObject({ nextPollMs: 3000 });
   for (const [elapsed, interval] of [[10_000, 3000], [45_000, 5000], [130_000, 10000]]) {
-    const pending = await stepApiMartImageTask({ ...base, sourceImages: [], upstreamTaskId: "original", submissionStartedAt: new Date(start).toISOString() }, { now: () => start + elapsed!, fetch: async (url, init) => { expect(init?.method).toBe("GET"); expect(url).toEndWith("/tasks/original"); return Response.json({ data: { status: "processing" } }); } });
+    const pending = await stepApiMartImageTask({ ...base, sourceImages: [], upstreamTaskId: "original", submissionStartedAt: new Date(start).toISOString() }, { now: () => start + elapsed!, fetch: async (url, init) => { expect(init?.method).toBe("GET"); expect(url).toEndWith("/tasks/original?language=zh"); return Response.json({ data: { status: "processing" } }); } });
     expect(pending).toMatchObject({ nextPollMs: interval });
   }
   let replay = 0;

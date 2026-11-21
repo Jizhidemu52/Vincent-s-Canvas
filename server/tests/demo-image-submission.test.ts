@@ -75,7 +75,7 @@ function createHarness(failurePhase?: FailurePhase) {
       const request = { url: String(url), method: init?.method || "GET", init };
       reads.push(request);
       if (request.method !== "GET") throw new Error("A paid submission bypassed fetchProviderSubmission");
-      if (request.url === "https://apimart.invalid/v1/tasks/original-task") {
+      if (request.url === "https://apimart.invalid/v1/tasks/original-task?language=zh") {
         if (failurePhase === "polling") throw failure;
         return Response.json({ data: { status: "completed", result: { images: [{ url: ["https://images.invalid/original.png"] }] } } });
       }
@@ -107,7 +107,7 @@ describe("demo image paid-submission boundaries", () => {
     }
     expect(harness.paid).toHaveLength(1);
     expect(harness.paid[0]).toMatchObject({ url: "https://apimart.invalid/v1/images/generations", method: "POST" });
-    expect(harness.reads.map(({ url, method }) => ({ url, method }))).toEqual(Array.from({ length: 3 }, () => ({ url: "https://apimart.invalid/v1/tasks/original-task", method: "GET" })));
+    expect(harness.reads.map(({ url, method }) => ({ url, method }))).toEqual(Array.from({ length: 3 }, () => ({ url: "https://apimart.invalid/v1/tasks/original-task?language=zh", method: "GET" })));
   });
 
   test("GPT Image2 submits through the helper once and keeps polling/download on ordinary GET", async () => {
@@ -119,7 +119,7 @@ describe("demo image paid-submission boundaries", () => {
     expect(new Headers(harness.paid[0]!.init?.headers).get("authorization")).toBe("Bearer mock-model-key");
     expect(JSON.parse(String(harness.paid[0]!.init?.body))).toEqual({ model: "gpt-image-2", prompt: "reference prompt", n: 1, size: "16:9", resolution: "2k", image_urls: ["data:image/png;base64,AP8="] });
     expect(harness.reads.map(({ url, method }) => ({ url, method }))).toEqual([
-      { url: "https://apimart.invalid/v1/tasks/original-task", method: "GET" },
+      { url: "https://apimart.invalid/v1/tasks/original-task?language=zh", method: "GET" },
       { url: "https://images.invalid/original.png", method: "GET" },
     ]);
   });

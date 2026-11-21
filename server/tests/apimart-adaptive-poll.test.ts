@@ -20,7 +20,7 @@ for (const [ageMs, expectedMs] of boundaries) test(`pending image/video age ${ag
       ? await stepApiMartVideoTask({ ...video, submissionStartedAt: started }, runtime)
       : await stepApiMartImageTask({ ...image, modelId, submissionStartedAt: started }, runtime);
     expect(result).toEqual({ status: "pending", upstreamTaskId: "original", nextPollMs: modelId === "gemini-nano-banana-2.1" && ageMs < 30_000 ? 3_000 : expectedMs });
-    expect(calls).toEqual(["GET:https://provider.example/v1/tasks/original"]);
+    expect(calls).toEqual(["GET:https://provider.example/v1/tasks/original" + (modelId === "wan2.7" ? "" : "?language=zh")]);
   }
 });
 
@@ -86,5 +86,5 @@ test.each(["image", "video"])("%s worker forwards persisted age on recovery with
   const executeLegacy = new Function(...Object.keys(dependencies), `${workerCode}; return executeApiMart${kind === "image" ? "Image" : "Video"};`)(...Object.values(dependencies));
   await expect(executeLegacy({ ...task, upstream_submission_started_at: null, started_at: task.upstream_submission_started_at }, { apiKey: "fixture-only" })).rejects.toMatchObject({ nextPollMs: 30_000 });
   expect(task).toEqual(snapshot);
-  expect(requests).toEqual(["GET:https://provider.example/v1/tasks/original", "GET:https://provider.example/v1/tasks/original", "GET:https://provider.example/v1/tasks/original"]);
+  expect(requests).toEqual(Array(3).fill("GET:https://provider.example/v1/tasks/original" + (kind === "image" ? "?language=zh" : "")));
 });

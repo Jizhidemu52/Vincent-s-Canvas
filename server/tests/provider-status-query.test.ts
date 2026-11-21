@@ -52,7 +52,7 @@ test("recovered image status queries only GET the original ID, never repeat a pa
   let calls = 0;
   const result = await runApiMartImageTask({ baseUrl: "https://provider.invalid/v1", apiKey: "test", modelId: "gpt-image-2", prompt: "test", parameters: {}, upstreamTaskId: "original", submissionStarted: true }, {
     sleep: async () => {}, fetch: async (url, init) => {
-      expect(url).toEndWith("/tasks/original"); expect(init?.method).toBe("GET");
+      expect(url).toEndWith("/tasks/original?language=zh"); expect(init?.method).toBe("GET");
       if (++calls < 3) return Response.json({}, { status: 502 });
       return Response.json({ data: { status: "completed", result: { images: [{ url: "https://image.invalid/result.png" }] } } });
     },

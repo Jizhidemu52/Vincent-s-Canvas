@@ -42,6 +42,6 @@ test("known upstream IDs do not read raw references or submit another paid job",
   const result = await stepApiMartImageTask(input, { fetch: async (url, init) => {
     calls.push(`${init?.method || 'GET'} ${url}`); return Response.json({ data: { status: 'completed', result: { images: [{ url: 'https://images.example/result.png' }] } } });
   } });
-  expect(calls).toEqual(['GET https://provider.example/v1/tasks/saved-job']);
+  expect(calls).toEqual(['GET https://provider.example/v1/tasks/saved-job?language=zh']);
   expect(result.status).toBe('completed');
 });

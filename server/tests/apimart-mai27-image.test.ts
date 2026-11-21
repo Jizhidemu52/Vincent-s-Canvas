@@ -116,7 +116,7 @@ describe("MAI Image 2.7 Flash contract", () => {
     expect(calls).toBe(0);
     const input = { ...base, upstreamTaskId: "saved-mai27-task", submissionStarted: true };
     const result = await stepApiMartImageTask(input, { fetch: async (url, init) => {
-      expect(url).toEndWith("/tasks/saved-mai27-task"); expect(init?.method ?? "GET").toBe("GET");
+      expect(url).toEndWith("/tasks/saved-mai27-task?language=zh"); expect(init?.method ?? "GET").toBe("GET");
       return json({ data: { status: "completed", result: { images: [{ url: [reference] }] } } });
     } });
     expect(result).toMatchObject({ status: "completed", urls: [reference] });

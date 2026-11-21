@@ -57,7 +57,7 @@ describe.each(models.map(modelId => [modelId] as const))("APIMart %s static imag
           expect(JSON.parse(String(init?.body))).toMatchObject({ model: modelId, image_urls: [reference], mask_url: mask, n: 1 });
           return json({ data: [{ task_id: "gpt26-task" }] });
         }
-        expect(url).toBe("https://provider.example/v1/tasks/gpt26-task");
+        expect(url).toBe("https://provider.example/v1/tasks/gpt26-task?language=zh");
         return json({ data: { status: "completed", result: { images: [{ url: ["https://images.example/result.png"] }] } } });
       },
     });

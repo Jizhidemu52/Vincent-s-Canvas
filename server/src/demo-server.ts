@@ -2716,7 +2716,7 @@ async function callGptImage2WithBun(
   while (Date.now() < deadline) {
     await Bun.sleep(2_000);
     const statusResponse = await fetch(
-      `${apiMartBaseUrl}/tasks/${encodeURIComponent(taskId)}`,
+      `${apiMartBaseUrl}/tasks/${encodeURIComponent(taskId)}?language=zh`,
       {
         headers: { authorization: `Bearer ${apiMartApiKey}` },
         signal: AbortSignal.timeout(60_000),

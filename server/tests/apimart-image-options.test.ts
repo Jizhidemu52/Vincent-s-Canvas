@@ -58,5 +58,5 @@ test("MJ existing task recovery ignores legacy repeat controls, preserves result
     },
   });
   expect(results).toEqual(urls);
-  expect(calls).toEqual(["GET https://fixture.invalid/v1/tasks/existing"]);
+  expect(calls).toEqual(["GET https://fixture.invalid/v1/tasks/existing?language=zh"]);
 });

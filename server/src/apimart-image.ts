@@ -548,7 +548,7 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
   }
   let statusResponse: Response;
   try {
-    statusResponse = await queryProviderTaskStatus(`${baseUrl}/tasks/${encodeURIComponent(taskId)}`, queryHeaders, {
+    statusResponse = await queryProviderTaskStatus(`${baseUrl}/tasks/${encodeURIComponent(taskId)}?language=zh`, queryHeaders, {
       fetch: poll, sleep: wait,
       // Durable workers retry through their delayed queue, not a second inner
       // loop that could continue issuing GETs beyond the original deadline.
@@ -707,7 +707,7 @@ function readOutputUrls(value: unknown): string[] {
 function isReferenceDownloadFailure(value: unknown) {
   const root=object(value), data=object(root.data);
   const code=string(object(data.error).code) || string(object(root.error).code) || string(data.error_code);
-  return code?.toLowerCase() === "input_image_download" || /\binput_image_download\b|(?:failed|unable) to (?:download|fetch) (?:the |an? )?(?:first |\d+\w* )?input image\b|输入媒体地址读取失败|未能下载第.{0,4}张输入图/i.test(readFailureMessage(value) || "");
+  return code?.toLowerCase() === "input_image_download" || /\binput_image_download\b|(?:failed|unable) to (?:download|fetch) (?:the |an? )?(?:first |\d+\w* )?input image\b|输入媒体地址读取失败|(?:输入图(?:片)?|参考图(?:片)?)(?:地址)?(?:无法访问|下载失败|读取失败)|未能下载第.{0,4}张输入图/i.test(readFailureMessage(value) || "");
 }
 
 function readFailureMessage(value: unknown) {

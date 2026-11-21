@@ -252,7 +252,7 @@ for (const kind of ["image", "video"] as const) isolated(`96 ${kind} tasks / 192
       return Response.json({ data: [{ task_id: id }] });
     }
     if (url.includes("/tasks/")) {
-      const id = decodeURIComponent(url.split("/tasks/")[1]!); const task = remote.get(id)!;
+      const id = decodeURIComponent(new URL(url).pathname.split("/tasks/")[1]!); const task = remote.get(id)!;
       expect(task).toBeDefined();
       if (++task.polls < 2) return Response.json({ data: { status: "processing" } });
       if (!task.complete) { task.complete = true; inflight--; }

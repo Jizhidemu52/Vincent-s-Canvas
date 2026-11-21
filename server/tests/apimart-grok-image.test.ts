@@ -74,7 +74,7 @@ describe("APIMart Grok Imagine Image 2.0 official", () => {
         expect(JSON.parse(String(init?.body))).toEqual({ model: modelId, prompt: base.prompt, n: 1, aspect_ratio: "4:3", resolution: "2k", image_urls: [publicSource, "http://images.example/second.jpg"] });
         return json({ code: 202, data: { id: "grok_task", object: "generation.task", type: "image", status: "pending", progress: 0, poll_url: "/v1/tasks/grok_task" } }, 202);
       }
-      expect(url).toBe("https://mark.example/v1/tasks/grok_task"); expect(init?.method).not.toBe("POST");
+      expect(url).toBe("https://mark.example/v1/tasks/grok_task?language=zh"); expect(init?.method).not.toBe("POST");
       events.push("poll"); expect(events).toEqual(["upload", "intent", "submit", "persist", "poll"]);
       return json(completed);
     } });
@@ -107,7 +107,7 @@ describe("APIMart Grok Imagine Image 2.0 official", () => {
   test("known task recovery requires no key and cannot upload or submit again", async () => {
     const methods: string[] = [];
     await runApiMartImageTask({ ...base, submissionKey: undefined, upstreamTaskId: "grok_saved", submissionStarted: true, sourceDataUrls: ["expired"], parameters: { resolution: "old" } }, {
-      sleep, fetch: async (url, init) => { expect(url).toEndWith("/tasks/grok_saved"); methods.push(init?.method || "GET"); return json(completed); },
+      sleep, fetch: async (url, init) => { expect(url).toEndWith("/tasks/grok_saved?language=zh"); methods.push(init?.method || "GET"); return json(completed); },
     });
     expect(methods).toEqual(["GET"]);
   });
@@ -141,7 +141,7 @@ describe("ordinary GPT2 stays on its existing distinct contract", () => {
           expect(JSON.parse(String(init?.body))).toEqual({ model: "gpt-image-2", prompt: base.prompt, n: 1, size: "1881x836", resolution: "4k", image_urls: [source, publicSource] });
           return json({ code: 200, data: [{ status: "submitted", task_id: "gpt2_saved" }] });
         }
-        expect(url).toEndWith("/tasks/gpt2_saved"); return json(completed);
+        expect(url).toEndWith("/tasks/gpt2_saved?language=zh"); return json(completed);
       },
     });
     expect(requests).toHaveLength(2);

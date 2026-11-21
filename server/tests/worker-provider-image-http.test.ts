@@ -74,7 +74,7 @@ function harness(options: { origin?: string; failIssue?: boolean; realCacheFailu
     if (url.endsWith("/uploads/images")) return Response.json({ url: `https://provider.invalid/upload-${calls.length}.png` });
     if (method === "POST" && url.endsWith("/images/generations")) return Response.json({ data: [{ task_id: "upstream-owned" }] });
     if (method === "POST" && url.endsWith("/midjourney/generations/blend")) return Response.json({ data: [{ task_id: "upstream-owned" }] });
-    if (method === "GET" && url.endsWith("/tasks/upstream-owned")) return Response.json({ data: { status: "completed", result: { images: [{ url: calls.some(call => call.payload?.model === "seedream-5-5") ? ["http://provider.invalid/result.png"] : "http://provider.invalid/result.png" }] } } });
+    if (method === "GET" && url.endsWith("/tasks/upstream-owned?language=zh")) return Response.json({ data: { status: "completed", result: { images: [{ url: calls.some(call => call.payload?.model === "seedream-5-5") ? ["http://provider.invalid/result.png"] : "http://provider.invalid/result.png" }] } } });
     if (method === "POST" && url.endsWith("/workflow/run")) return Response.json({ outputs: ["https://provider.invalid/workflow-result.png"] });
     if (method === "POST" && url.endsWith("/images/edits")) return Response.json({ data: [{ url: "https://provider.invalid/openai-result.png" }] });
     if (method === "POST" && url.endsWith("/custom/image")) return Response.json({ resultUrls: ["https://provider.invalid/custom-result.png"] });
@@ -206,7 +206,7 @@ test.each(["mask", "markup"] as const)("invalid %s bytes fail before publishing 
 test("the original upstream task resumes without reading assets, issuing grants, or resubmitting", async () => {
   const h = harness(), task = { ...newTask(), upstream_task_id: "upstream-owned", upstream_submission_started_at: "already-started", poll_deadline_at: new Date(Date.now() + 60_000).toISOString() };
   expect(await h.execute(task)).toHaveLength(1);
-  expect(h.calls).toEqual([{ url: "https://provider.invalid/v1/tasks/upstream-owned", method: "GET", payload: undefined }]);
+  expect(h.calls).toEqual([{ url: "https://provider.invalid/v1/tasks/upstream-owned?language=zh", method: "GET", payload: undefined }]);
   expect(h.grants).toHaveLength(0); expect(h.loaded()).toBe(0); expect(h.queries).toHaveLength(0);
 });
 
