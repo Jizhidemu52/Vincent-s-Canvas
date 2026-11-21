@@ -1750,7 +1750,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         if (group && firstId) handleNodeMouseDown(event, firstId, group.nodeIds);
     }, [groupIndex, handleNodeMouseDown]);
 
-    const tryDropOutfit=useRef<(id:string,x:number,y:number)=>boolean>(()=>false);
+    const tryDropOutfit=useRef<(id:string,x:number,y:number,preview?:boolean)=>boolean>(()=>false);
     const finishNodeDrag = useCallback((clientX?: number, clientY?: number) => {
         if (rafRef.current) {
             cancelAnimationFrame(rafRef.current);
@@ -1758,6 +1758,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         }
         pendingDragPreviewRef.current = null;
         if (!dragRef.current.isDraggingNode) return;
+        document.getElementById("tryout-outfit-hint")?.remove();
 
         const wasClick = clientX != null && !draggingGroupRef.current && !dragRef.current.hasMoved && !dragRef.current.modifiedSelection;
         const clickedNodeId = dragRef.current.clickedNodeId;
@@ -1834,6 +1835,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                 const rawDelta = { x: pointerWorld.x - dragRef.current.startWorld.x, y: pointerWorld.y - dragRef.current.startWorld.y };
                 const movingIds = new Set(dragRef.current.initialSelectedNodes.map(item => item.id));
                 const moving = nodesRef.current.filter(node => movingIds.has(node.id));
+                if(tryoutEnabled&&tryoutPanel.open&&moving.length===1&&!draggingGroupRef.current&&!dragRef.current.altCopy)tryDropOutfit.current(moving[0].id,event.clientX,event.clientY,true);
                 const snapped = snapCanvasDrag(moving, nodesRef.current.filter(node => !movingIds.has(node.id)), rawDelta, viewportRef.current.k, { disabled: event.altKey || dragRef.current.altCopy, axis: event.shiftKey });
                 const { x: dx, y: dy } = snapped;
                 if (!draggingGroupRef.current && !dragRef.current.altCopy) {
@@ -1871,7 +1873,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
 
             moveConnection(event.clientX, event.clientY);
         },
-        [applyLiveDragPreview, canvasConnectionFallback, finishNodeDrag, groupIndex.groups, handleCanvasInteractionChange, materializeDragCopy, moveConnection, screenToCanvas],
+        [applyLiveDragPreview, canvasConnectionFallback, finishNodeDrag, groupIndex.groups, handleCanvasInteractionChange, materializeDragCopy, moveConnection, screenToCanvas,tryoutEnabled,tryoutPanel.open],
     );
 
     const handleGlobalPointerMove = useCallback(
