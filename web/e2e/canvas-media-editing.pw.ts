@@ -24,7 +24,7 @@ async function openMask(page: Page, node: Locator) {
         await page.getByRole("menuitem", { name: "涂抹局部", exact: true }).click();
     }
     const dialog = page.getByRole("dialog", { name: "局部遮罩编辑", exact: true });
-    await expect(dialog.getByRole("button", { name: "AI 修改", exact: true })).toBeEnabled();
+    await expect(dialog.getByRole("button", { name: "完成涂抹", exact: true })).toBeEnabled();
     await dialog.locator('[aria-label="蒙版绘制区"]').hover();
     await expect(dialog).not.toHaveClass(/ant-zoom-(?:enter|appear)/);
     await expect(dialog).toHaveCSS("transform", "none");
@@ -62,13 +62,11 @@ test("大图蒙版笔刷按显示像素绘制，小预览不扫描原图，关�
     });
     expect(stroke.width * box.width / 3840).toBeCloseTo(40, 0);
     expect(stroke.center).toBeCloseTo(1920, 0);
-    await dialog.getByPlaceholder("例如：把选中区域改成金属材质，保持原图光影").fill("仅修改涂抹区域");
     await page.keyboard.press("Escape");
     const discard = page.getByRole("dialog", { name: "放弃本次蒙版编辑？", exact: true });
     await expect(discard).toBeVisible();
     await discard.getByRole("button", { name: "继续编辑", exact: true }).click();
     await expect(discard).toBeHidden();
-    await expect(dialog.getByRole("textbox")).toHaveValue("仅修改涂抹区域");
     await page.mouse.click(10, 10);
     await expect(discard).toBeVisible();
     await discard.getByRole("button", { name: "继续编辑", exact: true }).click();
@@ -77,16 +75,23 @@ test("大图蒙版笔刷按显示像素绘制，小预览不扫描原图，关�
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     await dialog.screenshot({ path: testInfo.outputPath("mask-390.png") });
-    await dialog.getByRole("button", { name: "AI 修改", exact: true }).scrollIntoViewIfNeeded();
-    await expect(dialog.getByRole("button", { name: "AI 修改", exact: true })).toBeInViewport();
+    await dialog.getByRole("button", { name: "完成涂抹", exact: true }).scrollIntoViewIfNeeded();
+    await expect(dialog.getByRole("button", { name: "完成涂抹", exact: true })).toBeInViewport();
     await dialog.screenshot({ path: testInfo.outputPath("mask-390-actions.png") });
     await dialog.getByRole("button", { name: /^取\s*消$/ }).click();
     await expect(discard).toBeVisible();
     await discard.getByRole("button", { name: "继续编辑", exact: true }).click();
     await expect(discard).toBeHidden();
     await page.setViewportSize({ width: 1800, height: 1200 });
-    await dialog.getByRole("button", { name: "AI 修改", exact: true }).click();
+    await dialog.getByRole("button", { name: "完成涂抹", exact: true }).click();
     await expect(dialog).toBeHidden();
+    const composer = page.getByTestId("canvas-quick-generate-panel");
+    await expect(composer.getByText("已附加局部蒙版", { exact: true })).toBeVisible();
+    await expect(composer.getByRole("button", { name: /生成局部修改图/ })).toBeDisabled();
+    expect(api.submissions).toHaveLength(0);
+    await composer.getByRole("textbox", { name: "描述图像" }).fill("仅修改涂抹区域");
+    await composer.screenshot({ path: testInfo.outputPath("mask-ready-in-editor.png") });
+    await composer.getByRole("button", { name: /生成局部修改图/ }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
     const task = api.submissions[0];
     expect(task.parameters.size).toBe("3840x2160");
@@ -101,6 +106,29 @@ test("大图蒙版笔刷按显示像素绘制，小预览不扫描原图，关�
         return { width: canvas.width, height: canvas.height, center: context.getImageData(1920, 1080, 1, 1).data[3], corner: context.getImageData(0, 0, 1, 1).data[3] };
     }, `data:image/png;base64,${bytes.toString("base64")}`);
     expect(exported).toEqual({ width: 3840, height: 2160, center: 0, corner: 255 });
+});
+
+test("完成涂抹后可在窄屏移除蒙版，不遗留局部指令或生成任务", async ({ page, api }, info) => {
+    const id = await newCanvas(page);
+    await uploadSizedImage(page, 1024, 1024);
+    await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
+    const nodeId = api.document(id)!.nodes[0].id;
+    const dialog = await openMask(page, page.locator(`[data-node-id="${nodeId}"]`));
+    const box = (await dialog.locator('[aria-label="蒙版绘制区"]').boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await dialog.getByRole("button", { name: "完成涂抹", exact: true }).click();
+    const panel = page.getByTestId("canvas-quick-generate-panel");
+    const input = panel.getByRole("textbox", { name: "描述图像" });
+    await input.fill("只改蒙版内的衣领");
+    await input.press("Shift+Enter");
+    await expect(panel.getByText("已附加局部蒙版", { exact: true })).toBeVisible();
+    expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+    await panel.screenshot({ path: info.outputPath("mask-mobile-ready.png") });
+    await panel.getByRole("button", { name: "移除蒙版", exact: true }).click();
+    await expect(panel.getByText("已附加局部蒙版", { exact: true })).toHaveCount(0);
+    await expect(input).not.toHaveValue(/只改蒙版内/);
+    expect(api.submissions).toHaveLength(0);
 });
 
 test("云端缩略图失败不隐式下载原图，主动放大后原图可重试且不改动节点", async ({ page, browser, api }) => {

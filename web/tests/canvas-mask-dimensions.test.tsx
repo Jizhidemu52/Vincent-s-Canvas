@@ -82,7 +82,7 @@ function dialog(image: { width: number; height: number }) {
     const source = readFileSync(new URL("../src/components/canvas/canvas-node-mask-edit-dialog.tsx", import.meta.url), "utf8");
     const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
     let state = 0;
-    const values = [{}, image, "edit the material", 100, "paint", ""];
+    const values = [{}, image, 100, "paint", ""];
     const dependencies: Record<string, unknown> = {
         react: { ...React, useEffect: () => {}, useRef: (current: unknown) => ({ current }), useState: (initial: unknown) => [values[state++] ?? initial, () => {}] },
         "@/hooks/use-tool-config": { useToolConfig: (config: unknown) => config, useToolEnabled: () => true },
@@ -100,12 +100,12 @@ test("mask dialog exposes quality/output only and announces automatic size adapt
     expect(labels).toContain("图片质量"); expect(labels).toContain("输出格式");
     expect(labels).not.toContain("宽高比"); expect(labels).not.toContain("清晰度 / 分辨率");
     expect(labels).not.toContain("宽度"); expect(labels).not.toContain("高度");
-    expect(legal.find(element => element.props.children === "AI 修改")?.props.disabled).toBe(false);
+    expect(legal.find(element => element.props.children === "完成涂抹")?.props.disabled).toBe(false);
     const adapted = dialog({ width: 512, height: 512 });
-    expect(adapted.find(element => element.props.children === "AI 修改")?.props.disabled).toBe(false);
+    expect(adapted.find(element => element.props.children === "完成涂抹")?.props.disabled).toBe(false);
     expect(adapted.some(element => typeof element.props.children === "string" && element.props.children.includes("自动适配至 1024 × 1024px"))).toBe(true);
     const invalid = dialog({ width: 0, height: 512 });
-    expect(invalid.find(element => element.props.children === "AI 修改")?.props.disabled).toBe(true);
+    expect(invalid.find(element => element.props.children === "完成涂抹")?.props.disabled).toBe(true);
 });
 
 async function submitFromProject(sourceSize: { width: number; height: number }, maskSize = sourceSize) {

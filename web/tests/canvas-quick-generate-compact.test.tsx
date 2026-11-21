@@ -7,6 +7,7 @@ import { Tooltip } from "antd";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import { CanvasQuickGeneratePanel } from "@/components/canvas/canvas-quick-generate-panel";
+import { CanvasPromptField } from "@/components/canvas/canvas-prompt-field";
 import { CanvasQuickSettingsPopovers } from "@/components/canvas/canvas-quick-settings-popovers";
 import { CanvasQuickReferenceTray } from "@/components/canvas/canvas-quick-reference-tray";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -114,6 +115,7 @@ function elements(value: unknown): ReactElement<any>[] {
     if (Array.isArray(value)) return value.flatMap(elements);
     if (!React.isValidElement(value)) return [];
     const element = value as ReactElement<any>;
+    if (element.type === CanvasPromptField) return elements(CanvasPromptField(element.props));
     return [element, ...elements(element.props.children)];
 }
 

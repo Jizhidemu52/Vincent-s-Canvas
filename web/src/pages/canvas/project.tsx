@@ -32,6 +32,8 @@ import type { CanvasOnboardingHandle } from "@/components/canvas/canvas-onboardi
 import type { CanvasOverviewLayerHandle } from "@/components/canvas/canvas-overview-layer";
 import { CanvasSelectionOverlay, type CanvasSelectionOverlayHandle } from "@/components/canvas/canvas-selection-overlay";
 import { CanvasTopBar } from "@/components/canvas/canvas-top-bar";
+import type { PreparedCanvasMask } from "@/components/canvas/canvas-mask-composer";
+import { hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 import { WirelessCanvas, type WirelessCanvasHandle } from "@/components/canvas/wireless-canvas";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
@@ -525,6 +527,8 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         runQuickCanvasGeneration,
     } = quickGeneration;
     const quickPanelPresence = useCanvasPanelPresence(quickGenerateOpen && !assistantOpen);
+    const [maskDraft, setMaskDraft] = useState<PreparedCanvasMask | null>(null);
+    const discardMaskDraft = useCallback(() => setMaskDraft(null), []);
     const assistantWasOpen = useRef(assistantOpen);
     useLayoutEffect(() => {
         const justClosed = assistantWasOpen.current && !assistantOpen;
@@ -1070,6 +1074,9 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         performanceCountsRef.current = { totalNodes: nodes.length, visibleNodes: visibleNodes.length, totalConnections: connections.length, visibleConnections: visibleConnections.length };
     }, [connections.length, nodes.length, visibleConnections.length, visibleNodes.length]);
     const singleSelectedNodeId = selectedNodeIds.size === 1 ? selectedNodeIds.values().next().value! : null;
+    useEffect(() => {
+        if (maskDraft && singleSelectedNodeId !== maskDraft.node.id) discardMaskDraft();
+    }, [singleSelectedNodeId, maskDraft, discardMaskDraft]);
     const singleSelectedNode = singleSelectedNodeId && !hiddenGroupNodeIds.has(singleSelectedNodeId) ? nodeById.get(singleSelectedNodeId) || null : null;
 
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
@@ -2897,7 +2904,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const deleteSelectedNodesFromToolbar = useCallback(() => deleteNodes(new Set(selectedNodeIdsRef.current)), [deleteNodes]);
     const openClearCanvasFromToolbar = useCallback(() => setClearConfirmOpen(true), []);
     const openAssetsFromToolbar = useCallback(() => setAssetPickerOpen(true), []);
-    const closeQuickGeneratePanel = useCallback(() => { setQuickGeneratePosition(null); setQuickGenerateOpen(false); }, []);
+    const closeQuickGeneratePanel = useCallback(() => { setQuickGeneratePosition(null); setQuickGenerateOpen(false); discardMaskDraft(); }, [discardMaskDraft]);
     const clearQuickGeneratePosition = useCallback(() => setQuickGeneratePosition(null), []);
     const pickQuickGenerateReferences = useCallback(() => quickReferenceInputRef.current?.click(), []);
     const removeQuickGenerateReference = useCallback((id: string) => {
@@ -2914,13 +2921,18 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         setQuickGenerateReferences((current) => moveImageReference(current, current.findIndex((reference) => reference.id === id), current.findIndex((reference) => reference.id === targetId)));
     }, []);
     const editNodeFromToolbar = useCallback((node: CanvasNodeData) => {
-        if (node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey)) {
+        if (node.type === CanvasNodeType.Image && hasCanvasImageSource(node.metadata)) {
             lastEditorSelectionRef.current = `${projectId}:${editorOwner}:${node.id}`;
             loadQuickGenerationNode(node);
             commitSelectedNodeIds(new Set([node.id])); setDialogNodeId(null); openQuickGenerateFromToolbar();
             requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-testid="canvas-quick-generate-panel"] textarea')?.focus());
         } else setDialogNodeId((current) => current === node.id ? null : node.id);
     }, [commitSelectedNodeIds, editorOwner, loadQuickGenerationNode, openQuickGenerateFromToolbar, projectId]);
+    const prepareMaskEdit = useCallback((node: CanvasNodeData, selection: PreparedCanvasMask["selection"]) => {
+        setMaskEditNodeId(null);
+        setMaskDraft({ node, selection });
+        editNodeFromToolbar(node);
+    }, [editNodeFromToolbar, setMaskEditNodeId]);
     const restoreQuickPrompt = useCallback(() => {
         const node = nodesRef.current.find(item => item.id === quickGenerateNodeId);
         if (!node) return;
@@ -3020,6 +3032,9 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const quickGeneratePanel = (
 <Suspense fallback={isCanvasDesktopLayout ? <div className="cw-panel-loading">{t("正在加载编辑区…")}</div> : null}>
                     <CanvasQuickGeneratePanel
+                        maskDraft={maskDraft}
+                        onDiscardMask={discardMaskDraft}
+                        onSubmitMask={maskEditImageNode}
                         onOptimizedPrompt={onQuickOptimizedPrompt}
                         embedded={isCanvasDesktopLayout}
                         open={quickGenerateOpen && !assistantOpen}
@@ -3353,7 +3368,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                     onPromptChange={(id, prompt) => handleConfigNodeChange(id, { prompt, composerContent: prompt })}
                 /></Suspense> : null}
                 {canvasDialogs.isOpen ? <Suspense fallback={null}><CanvasDialogsHost projectId={projectId} state={canvasDialogs} actions={{
-                    applyDesignTemplate, saveGroupName, saveNodeName, saveManualImageEdit, cropImageNode, maskEditImageNode,
+                    applyDesignTemplate, saveGroupName, saveNodeName, saveManualImageEdit, cropImageNode, prepareMaskEdit,
                     splitImageNode, upscaleImageNode, generateAngleNode, clearCanvas, handleAssetInsert,
                 }} /></Suspense> : null}
             {batchEditOpen ? <Suspense fallback={null}><CanvasBatchEditDialog key={batchEdit.activeBatchEditId} open={batchEditOpen} batches={batchEdit.batchEditBatches} activeBatchId={batchEdit.activeBatchEditId} onNewBatch={batchEdit.createBatchEdit} onSelectBatch={batchEdit.selectBatchEdit} running={batchEditRunning} prompt={batchEditPrompt} optimizePrompt={batchOptimizePrompt} optimizing={batchOptimizing} onOptimizePromptChange={setBatchOptimizePrompt} items={batchEditItems} imageSettings={batchImageSettings} serverId={batchEditServerId} action={batchEditAction} onClose={() => setBatchEditOpen(false)} onPromptChange={setBatchEditPrompt} onImageSettingsChange={setBatchImageSettings} onSelectFiles={() => batchFilesInputRef.current?.click()} onClearItems={() => setBatchEditItems([])} onRun={runBatchImageEdit} onControlBatch={controlActiveBatchEdit} /></Suspense> : null}

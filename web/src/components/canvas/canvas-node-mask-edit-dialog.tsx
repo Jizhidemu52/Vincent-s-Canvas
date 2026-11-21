@@ -2,8 +2,8 @@ import { CanvasEntryUsage } from "@/components/canvas/canvas-entry-usage";
 import { staticUiText } from "@/lib/static-ui-copy";
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Button, Input, Modal, Select, Slider } from "antd";
-import { Brush, Eraser, RotateCcw, WandSparkles, X } from "lucide-react";
+import { Button, Modal, Select, Slider } from "antd";
+import { Brush, Check, Eraser, RotateCcw, X } from "lucide-react";
 
 import { ModelPicker } from "@/components/model-picker";
 import type { AiConfig } from "@/stores/use-config-store";
@@ -69,10 +69,9 @@ export function CanvasNodeMaskEditDialog({
     open: boolean;
     config: AiConfig;
     model: string;
-    estimatedCredits?: number;
     onModelChange: (model: string) => void;
     onClose: () => void;
-    onConfirm: (payload: CanvasImageMaskEditPayload) => void;
+    onConfirm: (payload: Omit<CanvasImageMaskEditPayload, "prompt">) => void;
 }) {
     const t = useUiText();
     const [imageSettings, setImageSettings] = useState<Partial<AiConfig>>({});
@@ -86,7 +85,6 @@ export function CanvasNodeMaskEditDialog({
     const paintedRef = useRef(false);
     const drawingRef = useRef<{ active: boolean; last: { x: number; y: number } | null }>({ active: false, last: null });
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
-    const [prompt, setPrompt] = useState("");
     const [brushSize, setBrushSize] = useState(defaultBrushSize);
     const [mode, setMode] = useState<DrawMode>("paint");
     const [error, setError] = useState("");
@@ -121,7 +119,6 @@ export function CanvasNodeMaskEditDialog({
 
     useEffect(() => {
         if (!open) return;
-        setPrompt("");
         setBrushSize(defaultBrushSize);
         setMode("paint");
         setError("");
@@ -241,22 +238,20 @@ export function CanvasNodeMaskEditDialog({
     };
 
     const requestClose = () => {
-        if (paintedRef.current || prompt.trim()) setConfirmDiscard(true);
+        if (paintedRef.current) setConfirmDiscard(true);
         else onClose();
     };
 
     const submit = () => {
         if (!toolEnabled || !profile.supportsMask || restoringRef.current || confirmDiscard) return;
-        const nextPrompt = prompt.trim();
         const canvas = maskCanvasRef.current;
-        if (!nextPrompt) return setError("请输入修改要求");
         if (!canvas) return;
         if (!effectiveConfig.model) return setError("请选择用于局部编辑的模型");
         if (!image || !lockedSettings) return setError(settingsError || "尚未确认原图像素尺寸，请稍后重试");
         let maskDataUrl: string;
         try { maskDataUrl = buildCanvasEditMask(canvas); }
         catch (reason) { return setError(reason instanceof Error ? reason.message : "蒙版读取失败"); }
-        onConfirm({ prompt: nextPrompt, maskDataUrl, model: effectiveConfig.model, imageSettings: { quality: lockedSettings.quality, imageOptions: lockedSettings.imageOptions } });
+        onConfirm({ maskDataUrl, model: effectiveConfig.model, imageSettings: { quality: lockedSettings.quality, imageOptions: lockedSettings.imageOptions } });
     };
 
     useEffect(() => {
@@ -356,17 +351,7 @@ export function CanvasNodeMaskEditDialog({
                     </div>
 
                     <div className="space-y-2">
-                        <div className="text-sm font-medium opacity-75">{t("修改要求")}</div>
-                        <Input.TextArea
-                            rows={6}
-                            value={prompt}
-                            status={error && !prompt.trim() ? "error" : undefined}
-                            placeholder={t("例如：把选中区域改成金属材质，保持原图光影")}
-                            onChange={(event) => {
-                                setPrompt(event.target.value);
-                                setError("");
-                            }}
-                        />
+                        <p className="text-xs" style={{ color: theme.node.muted }}>{t("完成涂抹后，在改图输入框中描述修改要求。此步不会生成图片。")}</p>
                         {error || settingsError ? <div role="alert" className="text-xs font-medium text-destructive">{error || settingsError}</div> : null}
                     </div>
 
@@ -376,8 +361,8 @@ export function CanvasNodeMaskEditDialog({
                         <div className="flex items-center gap-2">
                             <Button icon={<X className="size-4" />} onClick={requestClose}>
                                 {t("取消")}</Button>
-                            <Button type="primary" disabled={!toolEnabled || !effectiveConfig.model || !profile.supportsMask || !lockedSettings} icon={<WandSparkles className="size-4" />} onClick={submit}>
-                                {t("AI 修改")}</Button>
+                            <Button type="primary" disabled={!toolEnabled || !effectiveConfig.model || !profile.supportsMask || !lockedSettings} icon={<Check className="size-4" />} onClick={submit}>
+                                {t("完成涂抹")}</Button>
                         </div>
                     </div>
                 </div>

@@ -495,10 +495,10 @@ export const canvasDetailControlGuides: CanvasControlGuide[] = [
     },
     {
         id: "detail-mask-submit", lessonId: "local", title: "局部重绘：提交与退出", scenario: "确认只改翻边颜色后再调用模型",
-        location: "局部重绘窗口 → 修改要求 / 底部按钮", prepare: "翻边选区和酒红色修改要求。",
+        location: "局部重绘窗口 → 改图输入框", prepare: "翻边选区和酒红色修改要求。",
         steps: [
-            { control: "修改要求", action: "输入“翻边改酒红，宽度、罗纹方向和质感不变”。", result: "形成此次局部编辑要求。" },
-            { control: "AI 修改", action: "选好模型、写好要求后点击。", result: "生成翻边改为酒红的新图。" },
+            { control: "完成涂抹", action: "涂好翻边后点击。", result: "回到改图输入框，附上蒙版，不会自动生成。" },
+            { control: "生成局部修改图", action: "输入“翻边改酒红，宽度、罗纹方向和质感不变”，再点击生成。", result: "提交一张局部修改图。" },
             { control: "取消", action: "不想提交时取消或关闭。", result: "有未保存蒙版会提示是否放弃。" },
             { control: "放弃编辑", action: "确认不再保留当前蒙版时选择。", result: "退出并丢弃本次未提交编辑。" },
             { control: "继续编辑", action: "还需修边时选择。", result: "保留当前选区返回编辑。" },

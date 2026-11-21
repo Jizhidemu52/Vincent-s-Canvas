@@ -1,13 +1,12 @@
 import { useUiText } from "@/lib/i18n";
-import { lazy, memo, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useState } from "react";
 import { Alert, Button, Input, Modal, Spin } from "antd";
 import { canvasImageSource, hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
 import { useCanvasGraphStore } from "@/stores/canvas/canvas-graph-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useModuleEnabled } from "@/stores/use-module-store";
-import { useBusinessConfigStore } from "@/stores/use-business-config-store";
-import { useEffectiveConfig, modelOptionName } from "@/stores/use-config-store";
+import { useEffectiveConfig } from "@/stores/use-config-store";
 import { useToolConfig } from "@/hooks/use-tool-config";
 import { canvasThemes } from "@/lib/canvas-theme";
 import type { useCanvasDialogs } from "@/pages/canvas/use-canvas-dialogs";
@@ -43,7 +42,7 @@ type DialogActions = {
     saveGroupName: (name: string) => void; saveNodeName: () => void; clearCanvas: () => void;
     saveManualImageEdit: (image: UploadedImage) => Promise<void>;
     cropImageNode: (node: CanvasNodeData, crop: CanvasImageCropRect) => Promise<void>;
-    maskEditImageNode: (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => Promise<void>;
+    prepareMaskEdit: (node: CanvasNodeData, payload: Omit<CanvasImageMaskEditPayload, "prompt">) => void;
     splitImageNode: (node: CanvasNodeData, params: CanvasImageSplitParams) => Promise<void>;
     upscaleImageNode: (node: CanvasNodeData, params: CanvasImageUpscaleParams) => Promise<void>;
     generateAngleNode: (node: CanvasNodeData, params: CanvasImageAngleParams) => Promise<void>;
@@ -54,7 +53,7 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
 }) {
     const t = useUiText();
     const { compareImageIds, setCompareImageIds, templateSourceId, setTemplateSourceId, clearConfirmOpen, setClearConfirmOpen, assetPickerOpen, setAssetPickerOpen, infoNodeId, setInfoNodeId, cropNodeId, setCropNodeId, manualEditNode, setManualEditNode, imageExport, setImageExport, imageDownload, setImageDownload, renameNode, setRenameNode, renameGroup, setRenameGroup, maskEditNodeId, setMaskEditNodeId, maskEditModel, setMaskEditModel, splitNodeId, setSplitNodeId, upscaleNodeId, setUpscaleNodeId, superResolveNodeId, setSuperResolveNodeId, angleNodeId, setAngleNodeId, previewNodeId, setPreviewNodeId } = state;
-    const { applyDesignTemplate, saveGroupName, saveNodeName, saveManualImageEdit, cropImageNode, maskEditImageNode,
+    const { applyDesignTemplate, saveGroupName, saveNodeName, saveManualImageEdit, cropImageNode, prepareMaskEdit,
         splitImageNode, upscaleImageNode, generateAngleNode, clearCanvas, handleAssetInsert } = actions;
     const nodes = useCanvasGraphStore(graph => graph.nodes);
     const nodeById = useCanvasGraphStore(graph => graph.nodeById);
@@ -64,9 +63,7 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
     const maskEditEnabled = useModuleEnabled("canvas-mask-edit");
     const angleEditEnabled = useModuleEnabled("canvas-angle");
     const effectiveConfig = useEffectiveConfig("canvas");
-    const estimateUsage = useBusinessConfigStore(store => store.estimate);
     const selectedMaskEditModel = useToolConfig({ ...effectiveConfig, model: maskEditModel || effectiveConfig.imageModel || effectiveConfig.model }, "canvas-mask-edit").model;
-    const maskEditEstimate = useMemo(() => estimateUsage({ operationType: "inpaint", toolKey: "canvas-mask-edit", modelId: modelOptionName(selectedMaskEditModel), quantity: 1 }), [estimateUsage, selectedMaskEditModel]);
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
     const maskEditNode = maskEditNodeId ? nodeById.get(maskEditNodeId) || null : null;
@@ -135,10 +132,9 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
                             open={Boolean(maskEditNode)}
                             config={effectiveConfig}
                             model={selectedMaskEditModel}
-                            estimatedCredits={maskEditEstimate.configured ? maskEditEstimate.credits : undefined}
                             onModelChange={setMaskEditModel}
                             onClose={() => setMaskEditNodeId(null)}
-                            onConfirm={(payload) => void maskEditImageNode(maskEditNode!, payload)}
+                            onConfirm={(payload) => prepareMaskEdit(maskEditNode, payload)}
                         />
                     </Suspense>
                 ) : null}

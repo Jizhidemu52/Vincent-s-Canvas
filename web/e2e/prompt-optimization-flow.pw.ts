@@ -301,14 +301,17 @@ test("native mask editing keeps its explicit instruction and mask, without borro
     if (await mask.isVisible()) await mask.click();
     else { await page.getByRole("button", { name: "更多图片工具", exact: true }).click(); await page.getByRole("menuitem", { name: "涂抹局部", exact: true }).click(); }
     const dialog = page.getByRole("dialog", { name: "局部遮罩编辑", exact: true });
-    await expect(dialog.getByRole("button", { name: "AI 修改", exact: true })).toBeEnabled();
+    await expect(dialog.getByRole("button", { name: "完成涂抹", exact: true })).toBeEnabled();
     await expect(dialog).not.toHaveClass(/ant-zoom-(?:enter|appear)/);
     const box = (await dialog.locator('[aria-label="蒙版绘制区"]').boundingBox())!;
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 3);
     const instruction = "仅将涂选区域改为浅绿色，保留所有字样";
-    await dialog.getByRole("textbox").fill(instruction);
-    await dialog.getByRole("button", { name: "AI 修改", exact: true }).click();
+    await dialog.getByRole("button", { name: "完成涂抹", exact: true }).click();
     await expect(dialog).toBeHidden();
+    const maskComposer = page.getByTestId("canvas-quick-generate-panel");
+    expect(api.submissions).toHaveLength(0);
+    await maskComposer.getByRole("textbox", { name: "描述图像" }).fill(instruction);
+    await maskComposer.getByRole("textbox", { name: "描述图像" }).press("Enter");
     await expect.poll(() => api.submissions.length).toBe(1);
     const task = api.submissions[0];
     expect(task).toMatchObject({ toolKey: "canvas-mask-edit", operationType: "inpaint" });

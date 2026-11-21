@@ -7,6 +7,10 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "rea
 import { ImageIcon, Info, LoaderCircle, Plus, X } from "lucide-react";
 import { Popover } from "radix-ui";
 import { CanvasQuickReferenceTray } from "@/components/canvas/canvas-quick-reference-tray";
+import { CanvasPromptField } from "./canvas-prompt-field";
+import { CanvasMaskComposer, type PreparedCanvasMask } from "./canvas-mask-composer";
+import type { CanvasImageMaskEditPayload } from "./canvas-node-mask-edit-dialog";
+import type { CanvasNodeData } from "@/types/canvas";
 import { CanvasQuickSettingsPopovers } from "@/components/canvas/canvas-quick-settings-popovers";
 import { ModelPicker } from "@/components/model-picker";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -30,11 +34,14 @@ type CanvasQuickGeneratePanelProps = Omit<CanvasQuickGeneratePanelRenderState, "
     closing?: boolean;
     config: AiConfig;
     references: ReferenceImage[];
+    maskDraft?: PreparedCanvasMask | null;
+    onDiscardMask?: () => void;
+    onSubmitMask?: (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => Promise<void>;
 };
 
 export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     embedded = false, open, closing = false, promptRef, promptRevision, model, size, quality, count, imageOptions, references, running,
-    config, onClose,
+    config, onClose, maskDraft, onDiscardMask, onSubmitMask,
     onModelChange, onSizeChange, onQualityChange, onCountChange, onImageOptionsChange, onSettingsNormalize, onPickReferences, onRemoveReference,
     onClearReferences, onMoveReference, onMissingConfig, onGenerate, onOptimizedPrompt, positioned, onClearPosition,
     referenceScopeKey = "", referencesLoading = false, onAddReferenceFiles,
@@ -72,7 +79,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     const profile = imageModelProfile(model || availableModel, models, role);
     const settings = normalizeImageModelSettings({ size, quality, count: String(count) }, profile);
     const activeQuality = settings.quality;
-    const imageDrop = useImageDrop({ scopeKey: referenceScopeKey, disabled: !open || running || referencesLoading || !onAddReferenceFiles, onFiles: files => onAddReferenceFiles?.(files) });
+    const imageDrop = useImageDrop({ scopeKey: referenceScopeKey, disabled: Boolean(maskDraft) || !open || running || referencesLoading || !onAddReferenceFiles, onFiles: files => onAddReferenceFiles?.(files) });
     const referenceBusy = referencesLoading || imageDrop.reading;
     const referenceValidation = validateImageReferences(modelOptionName(availableModel || model), references, profile);
     const sizeError = imageReferenceSizeIsAutomatic(profile, references.length) ? "" : imageModelSettingsError(settings.size, profile, imageOptions);
@@ -110,6 +117,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
             onWheel={(event) => event.stopPropagation()}>
             {!embedded ? <div className="cw-tabs"><span>{t("创建")}</span><button className="cw-icon" style={{ marginLeft: "auto" }} aria-label={t("关闭画布生图")} onClick={onClose}><X size={16} /></button></div> : null}
             <CanvasEntryUsage entry="quick-panel" open={open} />
+            {maskDraft ? onDiscardMask && onSubmitMask && <CanvasMaskComposer draft={maskDraft} config={config} current={sourceNode} onDiscard={onDiscardMask} onSubmit={onSubmitMask} /> : <>
             <div className="cw-generator-body">
                 {sourceNode ? <CanvasGenerationRecordDetails key={sourceNode.id} node={sourceNode} draftPrompt={prompt} derivatives={derivatives} disabled={running || referenceBusy} onRestorePrompt={onRestorePrompt} onContinue={onContinue} onRegenerate={onRegenerate} onRestoreGeneration={onRestoreGeneration} onLocate={onLocateDerivative} /> : null}
                 {positioned ? <div className="mb-3 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}><span>{t("下一次生成放在右键位置")}</span><button type="button" className="shrink-0 hover:underline" onClick={onClearPosition}>{t("取消定位")}</button></div> : null}
@@ -122,16 +130,10 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                 }}
                     onMissingConfig={onMissingConfig} className="cw-model-picker" />
                 </div>
-                {profile.requiresPrompt ? <div className="relative">{mentions.menu}<Tooltip title={t("Enter 生成，Shift+Enter 换行")}><textarea {...mentions.inputProps} className="cw-prompt" data-canvas-image-paste aria-label={t("描述图像")} placeholder={references.length ? t("描述想如何修改，输入 @ 引用图片…") : t("描述你想创作的图像，输入 @ 引用图片…")}
+                {profile.requiresPrompt ? <div className="relative">{mentions.menu}<Tooltip title={t("Enter 生成，Shift+Enter 换行")}><CanvasPromptField {...mentions.inputProps} data-canvas-image-paste aria-label={t("描述图像")} placeholder={references.length ? t("描述想如何修改，输入 @ 引用图片…") : t("描述你想创作的图像，输入 @ 引用图片…")}
                     value={prompt} maxLength={profile.kind === "grok-image" ? 8000 : 2000} disabled={!open || running}
                     onChange={mentions.handleChange} onSelect={mentions.handleSelect}
-                    onKeyDown={(event) => {
-                        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-                        if (mentions.handleKeyDown(event)) return;
-                        if (event.key !== "Enter" || event.shiftKey) return;
-                        event.preventDefault();
-                        if (!disabled && !event.repeat) onGenerate();
-                    }} /></Tooltip></div> : <p className="my-3 text-xs leading-5" role="status">{t("添加 2–4 张参考图，直接融合，不使用提示词。原有描述会保留，切换模型后可继续编辑。")}</p>}
+                    onKeyDown={mentions.handleKeyDown} canGenerate={!disabled} onGenerate={onGenerate} /></Tooltip></div> : <p className="my-3 text-xs leading-5" role="status">{t("添加 2–4 张参考图，直接融合，不使用提示词。原有描述会保留，切换模型后可继续编辑。")}</p>}
                 {mentionError ? <p role="alert" className="my-2 text-xs" style={{ color: theme.node.danger }}>{mentionError}</p> : null}
                 {profile.requiresPrompt && prompt.trim() ? <PromptOptimizeButton scopeKey={referenceScopeKey} config={boundConfig} prompt={prompt} references={references} operationType={toolKey === "canvas-image" ? "image_generation" : "inpaint"} toolKey={toolKey} disabled={running} onBusyChange={setOptimizing} onApply={(value, _compilation, input) => { promptRef.current = value; setPrompt(value); onPromptChange?.(value); onOptimizedPrompt?.(value, input, references); }} /> : null}
                 {imageDrop.dragging || referenceBusy ? <p role="status" className="my-2 text-xs" style={{ color: theme.node.text }}>{t(referenceBusy ? "正在读取拖入图片，请稍候。" : "松开以添加参考图，不会自动生成")}</p> : null}
@@ -177,6 +179,8 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                 {disabledReason ? <p role="status" className="mt-2 text-xs" style={{ color: theme.node.muted }}>{disabledReason}</p> : null}
                 {availableModel && model !== availableModel && hasDraftInput ? <button type="button" className="mt-1 text-xs underline" disabled={running || referenceBusy} onClick={() => onModelChange(availableModel)}>{t("使用当前可用模型")}</button> : null}
             </div>
+            </>}
         </div>
     );
-}, (previous, next) => previous.closing === next.closing && canvasQuickGeneratePanelPropsEqual({ ...previous, embedded: Boolean(previous.embedded) }, { ...next, embedded: Boolean(next.embedded) }));
+}, (previous, next) => previous.maskDraft === next.maskDraft && previous.onDiscardMask === next.onDiscardMask &&
+    previous.onSubmitMask === next.onSubmitMask && previous.closing === next.closing && canvasQuickGeneratePanelPropsEqual({ ...previous, embedded: Boolean(previous.embedded) }, { ...next, embedded: Boolean(next.embedded) }));
