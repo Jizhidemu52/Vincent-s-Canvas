@@ -7,7 +7,7 @@ export type ProposalBoardSpec = {
     title: string;
     fields: { styleNo: string; fabric: string; craft: string; note: string };
     footer: { designer: string; date: string };
-    items: Array<{ nodeId: string; storageKey?: string; serverAssetId?: string; content?: string; caption: string }>;
+    items: Array<{ nodeId: string; storageKey?: string; serverAssetId?: string; content?: string; caption: string; dominantHex?: string }>;
     palette: Array<{ hex: string; label?: string }>;
     showPalette: boolean;
 };
