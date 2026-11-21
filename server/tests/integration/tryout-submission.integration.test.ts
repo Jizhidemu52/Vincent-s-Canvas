@@ -37,7 +37,7 @@ import {createTryoutPrewarm} from "../../src/tryout-prewarm";
     const prewarm=(actor=user,header=actor)=>fetch(base.replace(/quick$/,"prewarm"),{method:"POST",headers:{"content-type":"application/json","x-fixture-user":actor,"x-canvas-owner-id":header},body:JSON.stringify({assetId:product})});
     const batch=async(items:unknown[])=>{const res=await fetch(base+"/batch",{method:"POST",headers:{"content-type":"application/json","x-fixture-user":user,"x-canvas-owner-id":user},body:JSON.stringify({items})});return {status:res.status,...await res.json()};};
     try{
-        for(const id of [user,other])await sql.db.query("INSERT INTO users(id,username,display_name,credit_balance,credit_limit,monthly_credit_limit) VALUES($1,$2,'Fixture',100,100,100)",[id,id]);
+        for(const id of [user,other])await sql.db.query("INSERT INTO users(id,username,display_name,credit_balance,credit_limit,monthly_credit_limit) VALUES($1,$2,'Fixture',250,250,250)",[id,id]);
         await sql.db.query("INSERT INTO canvas_documents(owner_user_id,external_id,revision,document) VALUES($1,'winter',1,'{}'),($2,'other-design',1,'{}')",[user,other]);
         await sql.db.query("INSERT INTO providers(id,name,protocol,base_url,encrypted_credentials) VALUES($1,'Tryout test','apimart','https://no-network.invalid',$2)",[provider,encryptSecret(JSON.stringify({apiKey:"fixture"}),key)]);
         await sql.db.query("INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,credit_cost,rmb_cost) VALUES($1,$2,'Quick image','gpt-image-2.6-flare',ARRAY['generate','edit'],1,0.1)",[model,provider]);
@@ -167,5 +167,27 @@ import {createTryoutPrewarm} from "../../src/tryout-prewarm";
         policy.credits=async()=>{await bindings("/quick",{modelConfigId:hdModel,revision:3});return true;};
         expect((await submit(make(12))).error).toBe("TRYOUT_MODEL_CHANGED");
         expect((await sql.db.query("SELECT 1 FROM credit_reservations")).rows).toHaveLength(before+1);
+        policy.credits=async()=>true;
+        const added=randomUUID(),third=randomUUID(),last=randomUUID();
+        for(const id of [added,third,last])await sql.db.query("INSERT INTO assets(id,owner_user_id,object_key,filename,mime_type,kind,status) VALUES($1,$2,$3,'outfit.png','image/png','image','ready')",[id,user,id]);
+        const outfit={kind:"outfit",canvasId:"winter",nodeId:"two-items",requestId:randomUUID(),originNodeId:"w1",originTaskId:wear.taskId,sourceAssetId:added};
+        expect((await submit({...outfit,originNodeId:"not-the-origin"})).error).toBe("TRYOUT_OUTFIT_ORIGIN");
+        expect((await submit(outfit,other)).error).toBe("TRYOUT_OUTFIT_ORIGIN");
+        expect((await submit({...outfit,sourceAssetId:foreign})).error).toBe("TRYOUT_ASSET_UNAVAILABLE");
+        expect((await submit({...outfit,sourceAssetId:product})).error).toBe("TRYOUT_OUTFIT_DUPLICATE");
+        expect((await submit({...outfit,model:{auto:true}})).status).toBe(400);
+        const combined=await submit(outfit);expect(combined.status).toBe(201);
+        expect((await submit(outfit)).taskId).toBe(combined.taskId);
+        expect(combined.prompt).toContain("图片3");expect(combined.prompt).toContain("不互相混合");
+        expect((await sql.db.query("SELECT source_urls FROM tasks WHERE id=$1",[combined.taskId])).rows[0].source_urls).toEqual([person,product,added].map(id=>"/api/assets/"+id+"/content"));
+        expect((await sql.db.query("SELECT 1 FROM credit_reservations")).rows).toHaveLength(before+2);
+        let previousTask=combined.taskId,previousNode=outfit.nodeId;
+        for(const id of [third,last]){
+            await sql.db.query("UPDATE tasks SET status='success' WHERE id=$1",[previousTask]);
+            const item={...outfit,requestId:randomUUID(),nodeId:randomUUID(),originTaskId:previousTask,originNodeId:previousNode,sourceAssetId:id},next=await submit(item);
+            expect(next.error).toBeUndefined();expect(next.status).toBe(201);previousTask=next.taskId;previousNode=item.nodeId;
+        }
+        await sql.db.query("UPDATE tasks SET status='success' WHERE id=$1",[previousTask]);
+        expect((await submit({...outfit,requestId:randomUUID(),originTaskId:previousTask,originNodeId:previousNode,sourceAssetId:randomUUID()})).error).toBe("TRYOUT_OUTFIT_LIMIT");
     }finally{await new Promise<void>(done=>server.close(()=>done()));await sql.close();}
 },30000);

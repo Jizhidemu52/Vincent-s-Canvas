@@ -1750,6 +1750,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         if (group && firstId) handleNodeMouseDown(event, firstId, group.nodeIds);
     }, [groupIndex, handleNodeMouseDown]);
 
+    const tryDropOutfit=useRef<(id:string,x:number,y:number)=>boolean>(()=>false);
     const finishNodeDrag = useCallback((clientX?: number, clientY?: number) => {
         if (rafRef.current) {
             cancelAnimationFrame(rafRef.current);
@@ -1768,7 +1769,8 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         nodeDraggingRef.current = false;
         setIsNodeDragging(false);
         handleCanvasInteractionChange(false);
-        if (dragRef.current.hasMoved && clientX != null && clientY != null) {
+        const outfit=tryoutEnabled&&tryoutPanel.open&&dragRef.current.hasMoved&&clientX!=null&&clientY!=null&&initialPositions.length===1&&!draggingGroupRef.current&&!dragCopyRef.current&&tryDropOutfit.current(initialPositions[0].id,clientX,clientY);
+        if (dragRef.current.hasMoved && clientX != null && clientY != null && !outfit) {
             const preview = createDragPreview(initialPositions, dx, dy);
             const before = nodesRef.current;
             const after = before.map(node => { const position = preview.get(node.id); return position ? { ...node, position } : node; });
@@ -1822,7 +1824,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                 setDialogNodeId(clickedNodeId);
             }
         }
-    }, [applyLiveDragPreview, commitSelectedNodeIds, flushPendingHistory, handleCanvasInteractionChange, screenToCanvas]);
+    }, [applyLiveDragPreview, commitSelectedNodeIds, flushPendingHistory, handleCanvasInteractionChange, screenToCanvas,tryoutEnabled,tryoutPanel.open]);
 
     const handleGlobalMouseMove = useCallback(
         (event: Pick<MouseEvent, "clientX" | "clientY" | "buttons" | "altKey" | "shiftKey">) => {
@@ -3208,7 +3210,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                 <Suspense fallback={null}><CanvasConflictNotice projectId={projectId} /></Suspense>
                 {commandsOpen ? <Suspense fallback={null}><CanvasCommandPalette nodes={nodes} bindings={commandBindings} onLocate={locateNodes} onAsset={handleAssetInsert} onClose={() => setCommandsOpen(false)} /></Suspense> : null}
                 {performanceModeEnabled ? <Suspense fallback={null}><CanvasPerformancePanel metrics={performanceMetrics} /></Suspense> : null}
-                {!isNodeDragging && !nodeImageSettingsOpen ? <Suspense fallback={null}>{projectLoaded && tryoutPanel.open ? <CanvasDesignToolbox node={singleSelectedNode?.type === CanvasNodeType.Image ? singleSelectedNode : undefined} count={selectedExportImageCount} selectedCount={selectedNodeIds.size} onRun={quickImageNode} onColor={tryoutColorNode} onBoard={makeSelectionBoard} onClose={tryoutPanel.toggle} writable={writable} beforeEdit={flushPendingHistory}/> : singleSelectedNode?.type===CanvasNodeType.Image ? <CanvasImageQuickActions key={singleSelectedNode.id} node={singleSelectedNode} onRun={quickImageNode}/> : null}</Suspense>:null}
+                {!isNodeDragging && !nodeImageSettingsOpen ? <Suspense fallback={null}>{projectLoaded && tryoutPanel.open ? <CanvasDesignToolbox nodesRef={nodesRef} outfitRef={tryDropOutfit} node={singleSelectedNode?.type === CanvasNodeType.Image ? singleSelectedNode : undefined} count={selectedExportImageCount} selectedCount={selectedNodeIds.size} onRun={quickImageNode} onColor={tryoutColorNode} onBoard={makeSelectionBoard} onClose={tryoutPanel.toggle} writable={writable} beforeEdit={flushPendingHistory}/> : singleSelectedNode?.type===CanvasNodeType.Image ? <CanvasImageQuickActions key={singleSelectedNode.id} node={singleSelectedNode} onRun={quickImageNode}/> : null}</Suspense>:null}
 
                 {!isNodeDragging && !nodeImageSettingsOpen && !(quickGenerateOpen && !isCanvasDesktopLayout && !assistantOpen) ? (
                     <CanvasHoverToolbarHost selectedNode={singleSelectedNode} multipleSelected={hasMultipleSelectedNodes}>{toolbarNode => renderNodeTools(toolbarNode)}</CanvasHoverToolbarHost>

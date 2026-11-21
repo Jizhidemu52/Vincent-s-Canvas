@@ -3,7 +3,9 @@ import { TryoutPalette } from "./tryout-palette";
 import {TryoutMaterials} from "./tryout-materials";
 import {TryoutModels} from "./tryout-models";
 import {useTryoutBatch} from "./use-tryout-batch";
-import { useState } from "react";
+import {useLayoutEffect,useState,type RefObject} from "react";
+import {App} from "antd";
+import {outfitDrop} from "./tryout-outfit-drop";
 import { ChevronUp, LayoutPanelLeft, LoaderCircle } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -14,7 +16,8 @@ import type { CanvasNodeData } from "@/types/canvas";
 import type { QuickImageAction } from "@/lib/quick-image-tools";
 import type { TryoutBoardOptions } from "../../../../../shared/tryout";
 
-export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onClose,writable,beforeEdit,onColor}: {
+export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onClose,writable,beforeEdit,onColor,nodesRef,outfitRef}: {
+    nodesRef:RefObject<CanvasNodeData[]>;outfitRef:RefObject<ReturnType<typeof outfitDrop>>;
     node?:CanvasNodeData;count:number;selectedCount:number;
     onRun:(node:CanvasNodeData,action:QuickImageAction)=>Promise<void>;
     onBoard:(options?:Partial<TryoutBoardOptions>)=>Promise<void>;
@@ -23,6 +26,8 @@ export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onCl
     writable:{current:boolean};beforeEdit:()=>void;
 }) {
     const theme=canvasThemes[useThemeStore(s=>s.theme)];
+    const ui=App.useApp();
+    useLayoutEffect(()=>{outfitRef.current=outfitDrop(nodesRef,writable,ui,onColor);},[nodesRef,writable,ui,onColor,outfitRef]);
     const [tab,setTab]=useCanvasGraphField("toolboxTab");
     const [busy,setBusy]=useState(false);
     const [groupNotice,setGroupNotice]=useState("");

@@ -19,13 +19,17 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
         const {nodesRef,runtime,projectId,message,setField,isCurrent}=context;
         const source=nodesRef.current.find(n=>n.id===sourceId),owner=useUserStore.getState().user?.id;
         if(!owner||!isCurrent()||source?.type!==CanvasNodeType.Image||!hasCanvasImageSource(source.metadata)||source.metadata.status==="loading"||source.metadata.status==="error"||source.metadata.proposalBoard||source.metadata.tryout?.kind==="wear")return;
-        const metadata=source.metadata,url=canvasImageSource(metadata),rootNodeId=metadata.tryout?.rootNodeId||source.id;
+        const metadata=source.metadata,url=canvasImageSource(metadata);
         const color="hex" in swatch?{name:swatch.name,hex:swatch.hex,...(swatch.library?{library:swatch.library}:{}),...(swatch.code?{code:swatch.code}:{})}:null;
         const wear="model" in swatch?swatch:null;
+        const origin=wear?.outfit,prior=origin?nodesRef.current.find(n=>n.id===origin.nodeId):undefined,priorMeta=prior?.metadata,previous=priorMeta?.tryout;
+        if(origin&&(previous?.kind!=="wear"||priorMeta?.status!=="success"||priorMeta.sourceTaskId!==origin.taskId||priorMeta.imageTask||priorMeta.locked))return;
+        const rootNodeId=previous?.rootNodeId||metadata.tryout?.rootNodeId||source.id,products=[...(previous?.products??[]),source.id];
+        if(origin&&(products.length>4||new Set(products).size!==products.length)){void message.warning("一套最多四件不同产品，本次未提交");return;}
         const material="hex" in swatch||"model" in swatch?null:{name:swatch.name,presetId:swatch.presetId,assetId:swatch.assetId};
         if(!wear&&!color&&!material?.assetId&&!material?.presetId)return;
-        const prompt=wear?wearPrompt([null]):color?colorPrompt(null,null,color,regionHex):"试材质："+swatch.name,id=createClientUuid(),requestId=createClientUuid();
-        const trace:TryoutMeta={version:1,rootNodeId,sourceNodeId:source.id,tier:"quick",prompt,timing:{droppedAt},...(wear?{kind:"wear",model:{name:wear.name,...("auto" in wear.model?{}:wear.model)},products:[source.id]} as const:color?{kind:"color",color} as const:{kind:"material",material:material!} as const)};
+        const prompt=wear?wearPrompt(products.map(()=>null)):color?colorPrompt(null,null,color,regionHex):"试材质："+swatch.name,id=createClientUuid(),requestId=createClientUuid();
+        const trace:TryoutMeta={version:1,rootNodeId,sourceNodeId:previous?.sourceNodeId??source.id,tier:"quick",prompt,timing:{droppedAt},...(wear?{kind:"wear",model:previous?.model??{name:wear.name,...("auto" in wear.model?{}:wear.model)},products} as const:color?{kind:"color",color} as const:{kind:"material",material:material!} as const)};
         const binding={projectId,ownerId:owner,requestId:"tryout:"+owner+":"+requestId,resultIndex:0};
         const output=()=>nodesRef.current.find(n=>n.id===id);
         const valid=()=>isCurrent()&&output()?.metadata?.imageTask?.requestId===binding.requestId;
@@ -36,8 +40,8 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
             await flushCanvasPersistence();
         };
         context.flushPendingHistory();
-        flushSync(()=>setField("nodes",prev=>[...prev,{id,type:CanvasNodeType.Image,title:source.title+" · "+swatch.name,width:source.width,height:source.height,
-            position:wear?wearSlot(source,prev):variantSlot(prev.find(n=>n.id===rootNodeId)??source,prev,source),metadata:{status:"loading",prompt,tryout:trace,imageTask:binding}}]));
+        flushSync(()=>setField("nodes",prev=>[...prev,{id,type:CanvasNodeType.Image,title:source.title+" · "+swatch.name,width:(prior??source).width,height:(prior??source).height,
+            position:prior?variantSlot(prior,prev):wear?wearSlot(source,prev):variantSlot(prev.find(n=>n.id===rootNodeId)??source,prev,source),metadata:{status:"loading",prompt,tryout:trace,imageTask:binding}}]));
         let uncertain=false,finishedNotice=false;
         const notice=transport?undefined:tryoutNotice(context.notification,owner,isCurrent,1);
         try{
@@ -51,7 +55,8 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
             if(!original||canvasImageSource(original)!==url||original.storageKey!==metadata.storageKey)throw new Error("原图已变更，未提交试款");
             const common={tier:"quick",canvasId:projectId,nodeId:id,requestId} as const;
             const region=regionHex?{fallbackHex:regionHex}:{};
-            const input:TryoutSubmissionInput=wear?{...common,kind:"wear",model:wear.model,productAssetIds:[sourceAssetId]}:color?{...common,sourceAssetId,kind:"color",color,...region}:{...common,sourceAssetId,kind:"material",...region,material:material!.presetId?{presetId:material!.presetId}:{assetId:material!.assetId!}};
+            if(origin){const m=nodesRef.current.find(n=>n.id===origin.nodeId)?.metadata;if(m?.sourceTaskId!==origin.taskId||m?.imageTask||m.locked||m.status!=="success")throw new Error("原上身图已变化，未提交搭配");}
+            const input:TryoutSubmissionInput=origin?{kind:"outfit",canvasId:projectId,nodeId:id,requestId,originTaskId:origin.taskId,originNodeId:origin.nodeId,sourceAssetId}:wear?{...common,kind:"wear",model:wear.model,productAssetIds:[sourceAssetId]}:color?{...common,sourceAssetId,kind:"color",color,...region}:{...common,sourceAssetId,kind:"material",...region,material:material!.presetId?{presetId:material!.presetId}:{assetId:material!.assetId!}};
             if(notice&&!notice.canSend())throw new Error("已取消，本次未提交");
             uncertain=true;
             const res=transport?await transport(input,owner,()=>{

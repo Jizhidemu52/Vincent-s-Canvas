@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Router } from "express";
-import { refineTryout,tryoutSubmission,tryoutBatch,TRYOUT_BATCH_MAX,type TryoutSubmission } from "../../../shared/tryout-submission";
+import { outfitTryout,refineTryout,tryoutSubmission,tryoutBatch,TRYOUT_BATCH_MAX,type TryoutSubmission } from "../../../shared/tryout-submission";
+import {outfitRecipe} from "../tryout-outfit";
 import { colorPrompt,materialPrompt,wearPrompt,tryoutImageOptions } from "../../../shared/tryout-prompts";
 import { assertCanvasOwner,CanvasDocumentError } from "../canvas-document";
 import { withTransaction } from "../db-transaction";
@@ -50,7 +51,7 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
             res.status(status==="busy"?429:202).json({status});
         }catch(error){next(error);}
     });
-    const admit=async(actor:AuthenticatedRequest["auth"],input:TryoutSubmission|ReturnType<typeof refineTryout.parse>)=>{
+    const admit=async(actor:AuthenticatedRequest["auth"],input:TryoutSubmission|ReturnType<typeof refineTryout.parse>|ReturnType<typeof outfitTryout.parse>)=>{
             const requestId="tryout:"+actor.id+":"+(input.kind==="refine"?"hd:"+input.sourceTaskId:input.requestId);
             const signature=createHash("sha256").update(JSON.stringify(input)).digest("hex");
             const read=async(query:Pick<Database,"query">)=>{
@@ -60,8 +61,9 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
             };
             const prior=await read(db);
             if(prior)return {created:false,receipt:{taskId:prior.id,prompt:prior.prompt,...(prior.model?{model:prior.model}:{})}};
-            const items=await tryoutProductItems(db,actor.id,input.kind==="refine"?[]:input.kind==="wear"?input.productAssetIds:[input.sourceAssetId],policy.productCards!==false);
+            const items=await tryoutProductItems(db,actor.id,input.kind==="refine"||input.kind==="outfit"?[]:input.kind==="wear"?input.productAssetIds:[input.sourceAssetId],policy.productCards!==false);
             const original=async(query:Pick<Database,"query">,locked=false)=>{
+                if(input.kind==="outfit")return outfitRecipe(query,actor.id,input,policy.productCards!==false,locked);
                 if(input.kind!=="refine")return {...await recipe(input,query,actor.id,items,locked),kind:input.kind,tier:input.tier};
                 const row=(await query.query(`SELECT prompt,source_urls,parameters->>'tryoutKind' AS kind,parameters->'tryoutModel' AS model,parameters->>'tryoutPresetId' AS preset FROM tasks
                     WHERE id=$1 AND user_id=$2 AND project_id=$3 AND parameters->>'tryoutNodeId'=$4 AND status='success'
@@ -90,7 +92,7 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
                 const latest=await resolveTryoutBinding(client,spec.tier,true);
                 if(latest.binding.revision!==selected.binding.revision||latest.execution.modelConfigId!==execution.modelConfigId||latest.execution.configurationVersion!==execution.configurationVersion)throw new BillingError("TRYOUT_MODEL_CHANGED","试款模型或价格已变更，本次未扣费");
                 if(input.kind==="material"&&(await recipe(input,client,actor.id,items,true)).prompt!==prompt)throw new BillingError("TRYOUT_MATERIAL_CHANGED","材质描述已变更，请重新选择后再提交");
-                if(input.kind==="refine"&&JSON.stringify(await original(client,true))!==JSON.stringify(spec))throw new BillingError("TRYOUT_ORIGIN_CHANGED","快速档原始记录已变化，未提交高清任务");
+                if((input.kind==="refine"||input.kind==="outfit")&&JSON.stringify(await original(client,true))!==JSON.stringify(spec))throw new BillingError("TRYOUT_ORIGIN_CHANGED","原始参考记录已变化，未提交新任务");
                 const canvas=await client.query("SELECT 1 FROM canvas_documents WHERE owner_user_id=$1 AND external_id=$2 AND NOT deleted FOR SHARE",[actor.id,input.canvasId]);
                 if(!canvas.rows.length)throw new BillingError("TRYOUT_CANVAS_UNAVAILABLE","请先保存到自己的画布");
                 if(spec.presetId)await lockPreset(client,spec.presetId,ids[0]!);
@@ -111,7 +113,8 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
             assertCanvasOwner(req.headers["x-canvas-owner-id"],actor.id);
             await assertModuleEnabled(db,"canvas-tryout");
             if(!batch){
-                const result=await admit(actor,req.body?.kind==="refine"?refineTryout.parse(req.body):tryoutSubmission.parse(req.body));
+                const schema=req.body?.kind==="refine"?refineTryout:req.body?.kind==="outfit"?outfitTryout:tryoutSubmission;
+                const result=await admit(actor,schema.parse(req.body));
                 res.status(result.created?201:200).json(result.receipt);return;
             }
             const {items}=tryoutBatch.parse(req.body),tasks=[];
