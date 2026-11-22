@@ -203,8 +203,8 @@ export function CanvasOnboarding({ ref, empty, onImportImage, onUseTemplate, onO
     const actionStyle = { background: theme.toolbar.itemHover, color: theme.node.text, borderColor: theme.toolbar.border };
     const compactEntries = availableArea.width < 580;
     return <div ref={host} data-canvas-onboarding-host>
-        {empty && !open && availableArea.width > 0 ? <div className="pointer-events-none absolute inset-y-0 z-20 flex items-center justify-center px-4 pb-20 pt-28" style={{ left: availableArea.left, width: availableArea.width }}>
-            <div className={`pointer-events-auto w-full max-w-[620px] rounded-xl border ${compactEntries ? "p-4" : "p-6"}`} style={{ background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
+        {empty && !open && availableArea.width > 0 ? <div className="pointer-events-none absolute top-28 z-20 flex items-center justify-center px-4" style={{ left: availableArea.left, width: availableArea.width, bottom: "max(5rem, var(--cw-prompt-dock-space, 0px))" }}>
+            <div className={`pointer-events-auto max-h-full w-full max-w-[620px] overflow-y-auto rounded-xl border ${compactEntries ? "p-4" : "p-6"}`} style={{ background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
                 data-testid="canvas-empty-start" onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
                 onDragOver={event => { if (onDrop) event.preventDefault(); }} onDrop={onDrop}>
                 <h2 className="text-xl font-semibold">{t("从一张参考图开始")}</h2>

@@ -6,7 +6,8 @@ const moved = [
     { id: "back-design", title: "背面设计" },
 ];
 
-test("only requested boards disappear; creation tools retain their fixed desktop and narrow navigation", async ({ page, context, api }, info) => {
+test("with tryout disabled only requested boards disappear; creation tools retain their fixed desktop and narrow navigation", async ({ page, context, api }, info) => {
+    api.disabledModules.add("canvas-tryout");
     await context.route("**/api/prompt-templates?*", route => route.fulfill({ json: { templates: [], total: 0, page: 1, pageSize: 4 } }));
     await page.goto("/");
     const nav = page.getByRole("navigation", { name: "主导航" });

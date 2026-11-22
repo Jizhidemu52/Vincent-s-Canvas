@@ -5,7 +5,7 @@ test("command search opens the tryout panel using its product-language aliases",
     await page.keyboard.press("Control+k");
     const query=page.getByRole("combobox",{name:"搜索命令、节点和素材"});
     await query.fill("试材质");
-    await page.getByRole("option",{name:/试款台/}).click();
+    await page.getByRole("option",{name:"试色",exact:true}).click();
     await expect(page.getByTestId("canvas-design-toolbox")).toBeVisible();
     expect(api.submissions).toHaveLength(0);
 });

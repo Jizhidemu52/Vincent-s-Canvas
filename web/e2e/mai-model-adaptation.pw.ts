@@ -192,7 +192,20 @@ test("canvas switches profiles without truncating references and restores text-o
     await preview.getByRole("button", { name: "确认应用", exact: true }).click();
     await expect(preview).toBeHidden();
     await expect(prompt).toHaveValue(optimized);
-    await panel.getByRole("button", { name: /^生成(?:\s|$)/ }).click();
+    const generate=panel.getByRole("button", { name: /^生成(?:\s|$)/ });
+    await expect(generate).toBeEnabled();
+    await expect(page.locator(".ant-modal-mask:visible")).toHaveCount(0);
+    await expect.poll(()=>generate.evaluate(async button=>{
+        const box=button.getBoundingClientRect();
+        for(let frame=0;frame<3;frame++){
+            await new Promise<void>(done=>requestAnimationFrame(()=>done()));
+            const current=button.getBoundingClientRect();
+            if(current.x!==box.x||current.y!==box.y||current.width!==box.width||current.height!==box.height
+                ||!button.contains(document.elementFromPoint(current.x+current.width/2,current.y+current.height/2)))return false;
+        }
+        return true;
+    })).toBe(true);
+    await generate.click();
     await expect.poll(() => api.submissions.length).toBe(1);
     expect(api.submissions[0]).toMatchObject({ modelConfigId: mai.id, promptInput: { compilationId }, parameters: { resolution: "2k" } });
     expect(api.submissions[0].parameters).not.toHaveProperty("quality");

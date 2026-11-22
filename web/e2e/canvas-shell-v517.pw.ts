@@ -110,7 +110,8 @@ test("体验数据按Esc或外部点击关闭，普通员工不显示入口", as
         await expect(details).not.toHaveAttribute("open");
         await connections.click();
         await expect(connections).toHaveAttribute("aria-pressed", "true");
-        await trigger.click(); await page.mouse.click(viewport.width / 2, 280);
+        await trigger.click();
+        await page.getByTestId("canvas-top-tool-rail").click({ position: { x: 1, y: 1 } });
         await expect(details).not.toHaveAttribute("open");
     }
     api.role = "designer";

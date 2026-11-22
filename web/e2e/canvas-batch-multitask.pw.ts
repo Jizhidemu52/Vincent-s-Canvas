@@ -69,7 +69,10 @@ async function batchApi(page: Page, api: MockCanvasApi, deliveryPending = false)
 
 async function open(page: Page) {
     await page.getByRole("button", { name: "更多工具", exact: true }).click();
-    await page.getByRole("menuitem", { name: "批量改图", exact: true }).click();
+    const item=page.getByRole("menuitem", { name: "批量改图", exact: true });
+    await expect(item).toBeVisible();
+    await expect.poll(()=>item.evaluate(el=>el.closest(".ant-dropdown")?.getAnimations({subtree:true}).filter(a=>a.playState==="running").length)).toBe(0);
+    await item.click();
     await expect(dialog(page)).toBeVisible();
 }
 

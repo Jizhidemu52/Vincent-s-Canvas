@@ -41,7 +41,7 @@ function ConnectionFixture() {
 
 function Fixture() {
     const [open, setOpen] = useState(true);
-    const [submission, setSubmission] = useState<CanvasImageMaskEditPayload | null>(null);
+    const [submission, setSubmission] = useState<Omit<CanvasImageMaskEditPayload,"prompt"> | null>(null);
     const [crop, setCrop] = useState("");
     const [selected, setSelected] = useState("one");
     const [configuration, setConfiguration] = useState<CanvasNodeData>({ id: "config", type: CanvasNodeType.Config, title: "可复用生成配置", width: 380, height: 300, position: { x: 0, y: 0 }, metadata: { model: "mask-test", generationMode: "image", prompt: "保留样衣结构与面料纹理，制作商务蓝色款。", count: 4, configImageInputMode: "combined" } });
@@ -60,7 +60,7 @@ function Fixture() {
     if (tool === "upscale") return <CanvasNodeUpscaleDialog dataUrl={dataUrl} open onClose={() => {}} onConfirm={() => {}} />;
     return <>
         <button onClick={() => setOpen(true)}>重新打开</button>
-        <output data-testid="submitted" data-prompt={submission?.prompt} data-mask={submission?.maskDataUrl}>{submission ? "已提交到测试接收器" : "未提交"}</output>
+        <output data-testid="submitted" data-model={submission?.model} data-mask={submission?.maskDataUrl}>{submission ? "已附加蒙版" : "未附加"}</output>
         <CanvasNodeMaskEditDialog dataUrl={dataUrl} open={open} config={{ ...defaultConfig, model: "mask-test", imageModel: "mask-test" }} model="mask-test" onModelChange={() => {}} onClose={() => setOpen(false)} onConfirm={setSubmission} />
     </>;
 }

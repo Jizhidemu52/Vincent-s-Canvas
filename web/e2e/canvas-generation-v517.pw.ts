@@ -291,9 +291,10 @@ test("mask UI paints, undoes/redoes, zooms locally, uses shortcuts and confirms 
     await page.getByRole("button", { name: "适应窗口", exact: true }).click();
     await page.keyboard.press("]"); await expect(page.getByText("44", { exact: false }).filter({ hasText: "显示像素" })).toBeVisible();
     await page.keyboard.press("e"); await expect(page.getByRole("button", { name: "擦除", exact: true })).toHaveClass(/ant-btn-primary/);
-    await page.getByPlaceholder("例如：把选中区域改成金属材质，保持原图光影").fill("只修改涂抹区域");
+    await expect(page.getByRole("button",{name:"完成涂抹",exact:true})).toBeEnabled();
     await page.keyboard.press("Control+Enter");
-    await expect(page.getByTestId("submitted")).toHaveAttribute("data-prompt", "只修改涂抹区域");
+    await expect(page.getByTestId("submitted")).toHaveAttribute("data-model", "mask-test");
+    await expect(page.getByTestId("submitted")).toHaveAttribute("data-mask", /^data:image\/png;base64,/);
     await page.setViewportSize({ width: 720, height: 900 });
     await page.screenshot({ path: info.outputPath("mask-editor-narrow.png") });
     await page.getByRole("button", { name: "取消", exact: true }).click();

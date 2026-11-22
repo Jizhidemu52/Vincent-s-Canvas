@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { ArrowUp } from "lucide-react";
 import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 import { useUiText } from "@/lib/i18n";
@@ -85,9 +85,21 @@ export default function TryoutPromptDock({ owner, onRun, onFocus, busy, hidden }
             setPending(false);
         }
     };
-    if (hidden) return null;
+    const dock = useRef<HTMLElement>(null);
+    const visible = !hidden && !(onFocus && selected.size === 1 && !source);
+    useLayoutEffect(() => {
+        const bar = dock.current, area = bar?.parentElement;
+        if (!bar || !area) return;
+        const measure = () => area.style.setProperty("--cw-prompt-dock-space", Math.ceil(area.getBoundingClientRect().bottom - bar.getBoundingClientRect().top + 8) + "px");
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(bar);
+        observer.observe(area);
+        return () => { observer.disconnect(); area.style.removeProperty("--cw-prompt-dock-space"); };
+    }, [visible]);
+    if (!visible) return null;
     return (
-        <section className="tryout-prompt-dock" aria-label={t("试款输入条")} onFocusCapture={e=>{
+        <section ref={dock} className="tryout-prompt-dock" aria-label={t("试款输入条")} onFocusCapture={e=>{
             if(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))return;
             recordUsage({boardKey:"canvas",action:"open",controlKey:"canvas_entry_open.prompt-dock",occurredAt:new Date().toISOString()});
             onFocus?.();

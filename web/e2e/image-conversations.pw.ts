@@ -392,6 +392,7 @@ for (const destination of ["workbench", "signout"] as const) test(`${destination
     await page.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: "离开会话原图.png", mimeType: "image/png", buffer: IMAGE });
     await expect(page.getByText("连接暂时中断，只读重连中", { exact: true })).toBeVisible();
     if (destination === "workbench") {
+        await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "更多工具", exact: true }).click();
         await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "工作台", exact: true }).click();
         await expect(page).not.toHaveURL(/\/chat(?:$|\?)/);
     } else {

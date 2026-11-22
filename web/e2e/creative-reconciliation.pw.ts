@@ -2,7 +2,7 @@ import { test, expect, IMAGE } from "./fixtures";
 import { activeWorkbench, readWorkspaceRecords } from "./headless-workbench";
 import type { SceneLog } from "../src/pages/creative/use-scene-workspace";
 
-test("garment colorway restores one coherent observation on visibility and retrieves the original image on reload", async ({ page, api }, info) => {
+for (const optimize of [false, true]) test(`garment colorway restores one coherent observation on visibility and retrieves the original image on reload (optimize=${optimize})`, async ({ page, api }, info) => {
     const taskId = "cd14d28a-f862-40cd-9977-5ef320218941";
     let phase: "uncertain" | "optimizing" | "processing" | "success" = "uncertain", posts = 0, requestId = "";
     await page.route("**/api/tasks", route => {
@@ -21,14 +21,17 @@ test("garment colorway restores one coherent observation on visibility and retri
     await page.goto("/creative/garment-colorway");
     const pane = activeWorkbench(page);
     await pane.getByLabel("上传服装参考图", { exact: true }).setInputFiles({ name: "original-garment.png", mimeType: "image/png", buffer: IMAGE });
+    const optimization = pane.getByRole("checkbox", { name: "本次先优化提示词" });
+    await expect(optimization).not.toBeChecked();
+    if (optimize) await optimization.check();
     await pane.locator("button.cs-generate").click();
     const stored = async () => (await readWorkspaceRecords<SceneLog>(page, "creative_scene_workspaces"))
         .find(row => row.key.startsWith("history-record:"))?.value.results[0];
     await expect.poll(async () => (await stored())?.failureKind).toBe("uncertain");
     const wake = () => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
     phase = "optimizing"; await wake();
-    await expect(pane.getByText("正在准备提示词 · 方案 1", { exact: true })).toBeVisible();
-    await expect(pane.getByText("正在准备提示词，请稍候。", { exact: true })).toBeVisible();
+    await expect(pane.getByText(optimize ? "正在准备提示词 · 方案 1" : "正在提交图片任务 · 方案 1", { exact: true })).toBeVisible();
+    await expect(pane.getByText(optimize ? "正在准备提示词，请稍候。" : "正在核对设计输入，尚未确认出图。", { exact: true })).toBeVisible();
     await expect(pane.getByText(/方案 1 暂时无法获取进度/)).toHaveCount(0);
     expect((await stored())?.failureKind).toBeUndefined();
     await page.screenshot({ path: info.outputPath("garment-preparing.png") });
@@ -127,6 +130,7 @@ for (const [code, message] of [
     await page.goto("/creative/text-to-style");
     const pane = activeWorkbench(page);
     await pane.getByRole("textbox", { name: "款式描述", exact: true }).fill("蓝色圆领针织衫");
+    await pane.getByRole("checkbox", { name: "本次先优化提示词" }).check();
     await pane.locator("button.cs-generate").click();
     const result = async () => (await readWorkspaceRecords<SceneLog>(page, "creative_scene_workspaces"))
         .filter(record => record.key.startsWith("history-record:"))[0]?.value.results[0];
