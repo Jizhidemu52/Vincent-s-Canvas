@@ -167,6 +167,8 @@ test("390px thumbnail strip scrolls without viewport overflow and single results
     await expect(visibleSlot(page)).toHaveAttribute("data-result-slot", "latest-7");
     await active(page).getByRole("tab", { name: /^历史记录/ }).click();
     await active(page).locator(".image-history-panel").getByRole("button", { name: "新建", exact: true }).click();
+    await expect(workbenchPanes(page).first()).toBeHidden();
+    await expect(workbenchPanes(page)).toHaveCount(2);
     const upload = page.waitForEvent("filechooser");
     await active(page).getByRole("button", { name: "上传图片", exact: true }).click();
     await (await upload).setFiles({ name: "single-result-source.png", mimeType: "image/png", buffer: fixturePng(48) });

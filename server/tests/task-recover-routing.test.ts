@@ -26,8 +26,11 @@ import type { TaskPausedKind } from "../../shared/task-repair";
     await new Promise<void>(resolve => server.once("listening", resolve));
     const address = server.address(); if (!address || typeof address === "string") throw Error("expected isolated TCP listener");
     base = `http://127.0.0.1:${address.port}/tasks`;
+  }, 30_000);
+  afterAll(async () => {
+    if (server) await new Promise<void>(resolve => server.close(() => resolve()));
+    await pg?.close();
   });
-  afterAll(async () => { await new Promise<void>(resolve => server.close(() => resolve())); await pg.close(); });
   test("verified original size, quote expiry and lost-response replay never charge or enqueue twice",async () => {
     const original=randomUUID(),asset=randomUUID(),model=randomUUID(),provider=randomUUID();
     const query=pg.db.query.bind(pg.db);

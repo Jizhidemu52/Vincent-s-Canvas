@@ -11,14 +11,19 @@ test("multi-selected product nodes each get a separate wear placeholder, not a s
         expect(items.map((i:{productAssetIds:string[]})=>i.productAssetIds)).toEqual(assets.map(a=>[a]));
         const tasks=items.map((item:{requestId:string;model:unknown},i:number)=>{expect(item.model).toEqual({auto:true});
             const taskId="e0000000-0000-4000-8000-00000000002"+i;api.tasks.set(taskId,{id:taskId,requestId:"tryout:"+owner+":"+item.requestId,userId:owner,status:"waiting",createdAt:now,resultUrls:[],failureReason:null});
-            return {requestId:item.requestId,taskId,prompt:"模拟上身"};});return r.fulfill({json:{tasks}});
+            return {requestId:item.requestId,taskId,prompt:"模拟上身"};});return r.fulfill({json:{tasks:tasks.reverse()}});
     });
     await page.goto("/canvas/"+project);await page.locator('[data-node-id="style0"]').first().click({position:{x:28,y:28}});
     await page.keyboard.press("Control+a");await page.getByRole("button",{name:"试款台",exact:true}).click();
     await page.getByRole("button",{name:"全部上身 2 张 · 自动配模特"}).click();
     const outputs=()=>(api.document(project)?.nodes??[]).filter((n:any)=>n.metadata.tryout?.kind==="wear"&&n.metadata.imageTask?.taskId);
     await expect.poll(()=>outputs().length).toBe(2);
-    expect(outputs().map((n:any)=>[n.metadata.tryout.sourceNodeId,n.position.x,n.position.y])).toEqual([["style0",140,316],["style1",370,316]]);
+    const placements=outputs().map((n:any)=>({source:n.metadata.tryout.sourceNodeId,x:n.position.x,y:n.position.y,task:n.metadata.imageTask.taskId}));
+    expect(placements).toHaveLength(2);
+    expect(placements).toEqual(expect.arrayContaining([
+        {source:"style0",x:140,y:316,task:"e0000000-0000-4000-8000-000000000020"},
+        {source:"style1",x:370,y:316,task:"e0000000-0000-4000-8000-000000000021"},
+    ]));
     expect(singles).toBe(0);expect(batches).toBe(1);
 });
 

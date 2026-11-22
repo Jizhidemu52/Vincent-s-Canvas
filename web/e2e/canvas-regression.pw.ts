@@ -196,7 +196,7 @@ for (const type of ["config", "text"] as const) for (const scale of [.5, 1, 2]) 
         for (const side of ["left", "right"]) for (const control of ["connection", "resize"]) {
             const handle = node.locator(`[data-canvas-${control}-handle="${side}"]`);
             await handle.hover();
-            expect(await handle.evaluate(element => { const rect = element.getBoundingClientRect(); return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)); })).toBe(true);
+            await expect.poll(() => handle.evaluate(element => { const rect = element.getBoundingClientRect(); return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)); })).toBe(true);
         }
         const resize = node.locator('[data-canvas-resize-handle="right"]');
         const box = (await resize.boundingBox())!;
