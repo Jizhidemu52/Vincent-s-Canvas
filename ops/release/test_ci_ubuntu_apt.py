@@ -215,7 +215,7 @@ class UbuntuMirrorFixtures(unittest.TestCase):
                     return subprocess.CompletedProcess(argv, 0, EFFECTIVE_CONFIG, "")
                 self.assertEqual(argv, ["apt-get", "update", "--error-on=any"])
                 self.assertEqual(kwargs, {"check": True, "timeout": 240})
-                self.assertIn("https://mirrors.mit.edu/ubuntu/", ubuntu.read_text())
+                self.assertIn("https://archive.ubuntu.com/ubuntu/", ubuntu.read_text())
                 self.assertIn("Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg", ubuntu.read_text())
                 self.assertEqual(config.read_bytes(), apt.APT_CONFIG.encode())
                 if update_error:

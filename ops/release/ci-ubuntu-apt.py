@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 
 MIRRORS = {
-    "ubuntu": "https://mirrors.mit.edu/ubuntu/",
+    "ubuntu": "https://archive.ubuntu.com/ubuntu/",
     "ubuntu-ports": "https://mirrors.mit.edu/ubuntu-ports/",
 }
 ORIGINS = {
