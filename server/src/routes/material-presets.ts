@@ -1,4 +1,4 @@
-import {Router} from "express";
+import {Router,type RequestHandler} from "express";
 import {z} from "zod";
 import type {Database} from "../db";
 import type {AuthenticatedRequest} from "../types";
@@ -7,13 +7,26 @@ import {withTransaction} from "../db-transaction";
 import {requireRole} from "../rbac";
 import {assertModuleEnabled} from "../module-flags";
 import {assertCanvasOwner} from "../canvas-document";
+import {ordinaryAsset} from "../tryout-private-assets";
+import type {ObjectStorage} from "../object-storage";
+import {streamAssetContent} from "../asset-delivery";
 
 const columns='id,name,description,thumb_asset_id AS "thumbAssetId",status,sort_order AS "sortOrder"';
 const fields=z.object({name:z.string().trim().min(1).max(80),description:z.string().trim().min(1).max(600),thumbAssetId:z.string().uuid().nullable(),status:z.enum(["published","hidden"]),sortOrder:z.number().int().min(-10000).max(10000)}).strict();
 const create=fields.extend({thumbAssetId:fields.shape.thumbAssetId.default(null),status:fields.shape.status.default("published"),sortOrder:fields.shape.sortOrder.default(0)});
 const edit=fields.partial().strict().refine(v=>Object.keys(v).length>0);
-export function createMaterialLibraryRouter(db:Database){
+function samplePreview(db:Database,storage:ObjectStorage,admin=false):RequestHandler{
+    return async(req,res,next)=>{try{
+        if(!admin)await assertModuleEnabled(db,"canvas-tryout");
+        const id=z.string().uuid().parse(req.params.id);
+        const asset=(await db.query("SELECT a.object_key,a.filename,a.mime_type,a.thumbnail_256_key FROM material_presets p JOIN assets a ON a.id=p.thumb_asset_id WHERE p.id=$1 "+(admin?"":"AND p.status='published'")+" AND a.status='ready' AND a.kind='image' AND a.deleted_at IS NULL AND (a.metadata->>'source'='material-preset-library' OR (a.visibility_scope='company' AND "+ordinaryAsset("a")+"))",[id])).rows[0];
+        if(!asset){res.sendStatus(404);return;}
+        await streamAssetContent(req,res,storage,asset.thumbnail_256_key?{filename:"fabric.webp",mime_type:"image/webp",object_key:asset.thumbnail_256_key}:asset,{cacheControl:"no-store"});
+    }catch(error){next(error);}};
+}
+export function createMaterialLibraryRouter(db:Database,storage:ObjectStorage){
     const router=Router();
+    router.get("/presets/:id/thumb",samplePreview(db,storage));
     router.get("/",async(req,res,next)=>{
         try{
             await assertModuleEnabled(db,"canvas-tryout");
@@ -41,9 +54,10 @@ export function createMaterialLibraryRouter(db:Database){
     });
     return router;
 }
-export function createAdminMaterialPresetsRouter(db:Database){
+export function createAdminMaterialPresetsRouter(db:Database,storage:ObjectStorage){
     const router=Router();
     router.use(requireRole("super_admin"));
+    router.get("/:id/thumb",samplePreview(db,storage,true));
     router.get("/",async(_req,res,next)=>{try{res.json({presets:(await db.query("SELECT "+columns+" FROM material_presets ORDER BY sort_order,id")).rows});}catch(error){next(error);}});
     for(const method of ["post","patch"] as const)router[method](method==="post"?"/":"/:id",async(req,res,next)=>{
         try{
@@ -55,7 +69,7 @@ export function createAdminMaterialPresetsRouter(db:Database){
                 if(id&&!previous)return null;
                 const entry=fields.parse({...previous&&{name:previous.name,description:previous.description,status:previous.status,sortOrder:previous.sortOrder,thumbAssetId:previous.thumbAssetId},...change});
                 if(entry.thumbAssetId){
-                    const ok=await client.query("SELECT 1 FROM assets WHERE id=$1 AND kind='image' AND status='ready' AND deleted_at IS NULL AND visibility_scope='company' AND COALESCE(metadata->>'source','') NOT IN ('material-library','model-library','model-preset-library') FOR SHARE",[entry.thumbAssetId]);
+                    const ok=await client.query("SELECT 1 FROM assets a WHERE id=$1 AND kind='image' AND status='ready' AND deleted_at IS NULL AND ((visibility_scope='company' AND "+ordinaryAsset("a")+") OR (metadata->>'source'='material-preset-library' AND (owner_user_id=$2 OR id=$3::uuid))) FOR SHARE",[entry.thumbAssetId,actor.id,previous?.thumbAssetId??null]);
                     if(!ok.rows.length)throw Object.assign(new Error("示意图必须是可供员工查看的公司图片"),{status:400});
                 }
                 const values=[entry.name,entry.description,entry.thumbAssetId,entry.status,entry.sortOrder];

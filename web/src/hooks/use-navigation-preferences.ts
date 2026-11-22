@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import { useUserStore } from "@/stores/use-user-store";
 
 type Preferences = { pinned: string[]; collapsed: string[]; recent: string[] };
-const empty: Preferences = { pinned: [], collapsed: ["image-tools"], recent: [] };
+const empty: Preferences = { pinned: [], collapsed: [], recent: [] };
 const preferenceLimit = 64;
 const cache = new Map<string, Preferences>();
 const listeners = new Set<() => void>();
@@ -14,7 +14,7 @@ function read(key: string): Preferences {
         const parsed = JSON.parse(localStorage.getItem(key) || "null");
         if (parsed && Array.isArray(parsed.pinned) && Array.isArray(parsed.collapsed)) value = {
             pinned: [...new Set<string>(parsed.pinned.filter((item: unknown) => typeof item === "string"))].slice(0, preferenceLimit),
-            collapsed: parsed.collapsed.filter((item: unknown) => typeof item === "string"),
+            collapsed: parsed.explicitGroupLayout===true?parsed.collapsed.filter((item: unknown) => typeof item === "string"):[],
             recent: Array.isArray(parsed.recent) ? [...new Set<string>(parsed.recent.filter((item: unknown) => typeof item === "string"))].slice(0, 12) : [],
         };
     } catch { /* A blocked setting store must not block navigation. */ }
@@ -27,7 +27,7 @@ export function useNavigationPreferences() {
     const value = useSyncExternalStore(subscribe, () => read(key), () => empty);
     const save = (next: Preferences) => {
         cache.set(key, next);
-        try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* Keep the current tab preference. */ }
+        try { localStorage.setItem(key, JSON.stringify({...next,explicitGroupLayout:true})); } catch { /* Keep the current tab preference. */ }
         listeners.forEach(listener => listener());
     };
     const toggle = (field: "pinned" | "collapsed", item: string) => {

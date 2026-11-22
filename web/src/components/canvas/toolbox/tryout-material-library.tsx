@@ -9,6 +9,7 @@ import {useUserStore} from "@/stores/use-user-store";
 import {useThemeStore} from "@/stores/use-theme-store";
 import type {KitMaterial} from "./tryout-swatch";
 import {KIT_MAX} from "../../../../../shared/tryout-kit";
+import {FabricSample} from "./tryout-fabric-sample";
 
 type Preset={id:string;name:string;description:string;thumbAssetId:string|null};
 type Mine={id:string;name:string;useColor:boolean};
@@ -17,6 +18,7 @@ export default function TryoutMaterialLibrary({materials,onEdit,onClose,notice}:
     const t=useUiText(),theme=canvasThemes[useThemeStore(s=>s.theme)],owner=useUserStore(s=>s.user?.id);
     const ref=useRef<HTMLDialogElement>(null),file=useRef<HTMLInputElement>(null),session=useRef<AbortController|null>(null);
     const [catalog,setCatalog]=useState<Catalog>(),[chosen,select]=useState<KitMaterial>(),[error,setError]=useState(""),[busy,setBusy]=useState(false),[revision,refresh]=useState(0);
+    const [query,search]=useState("");
     const mine=catalog?.mine.find(m=>m.id===chosen?.assetId),preset=catalog?.presets.find(p=>p.id===chosen?.presetId);
     const load=()=>refresh(i=>i+1);
     useEffect(()=>{ref.current?.showModal();},[]);
@@ -40,9 +42,9 @@ export default function TryoutMaterialLibrary({materials,onEdit,onClose,notice}:
         if(!res.ok)throw new Error(t("材质变更失败，请刷新核对"));
     };
     return createPortal(<dialog ref={ref} aria-label={t("材质库")} onCancel={e=>{e.preventDefault();onClose();}} onPointerDown={e=>e.stopPropagation()} onWheel={e=>e.stopPropagation()}
-        className="fixed inset-0 m-auto max-h-[85dvh] w-[min(500px,94vw)] overflow-y-auto rounded-xl border p-4 backdrop:bg-black/35" style={{background:theme.toolbar.panel,color:theme.node.text,borderColor:theme.toolbar.border}}>
-        <header className="mb-4 flex justify-between"><strong>{t("材质库")}</strong><button type="button" onClick={onClose}>{t("关闭")}</button></header>
-        <fieldset disabled={busy}><legend>{t("预设材质")}</legend><div className="my-2 grid grid-cols-3 gap-2">{catalog?.presets.map(p=><button type="button" key={p.id} aria-pressed={chosen?.id===p.id} onClick={()=>select({id:p.id,presetId:p.id,name:p.name})} className="min-h-10 rounded border border-current/20 aria-pressed:outline">{p.thumbAssetId?<img className="mx-auto size-10 object-cover" alt="" src={"/api/assets/"+p.thumbAssetId+"/thumb?w=256"}/>:null}{p.name}</button>)}</div>
+        className="fixed inset-0 m-auto max-h-[min(660px,calc(100dvh-48px))] w-[min(760px,calc(100vw-32px))] overflow-y-auto rounded-[18px] border p-[18px] backdrop:bg-black/30" style={{background:theme.toolbar.panel,color:theme.node.text,borderColor:theme.toolbar.border}}>
+        <header className="mb-4 flex flex-wrap items-center justify-between gap-3"><strong>{t("材质库")}</strong><input aria-label={t("搜材质名")} placeholder={t("搜材质名")} value={query} onChange={e=>search(e.target.value)} className="h-8 rounded-[9px] border px-2"/><button type="button" onClick={onClose}>{t("关闭")}</button></header>
+        <fieldset disabled={busy}><legend>{t("预设材质")}</legend><div className="my-2 grid grid-cols-[repeat(auto-fill,minmax(76px,1fr))] gap-[10px]">{catalog?.presets.filter(p=>p.name.includes(query.trim())).map(p=><button type="button" key={p.id} aria-label={p.name} aria-pressed={chosen?.id===p.id} onClick={()=>select({id:p.id,presetId:p.id,name:p.name})} className="overflow-hidden rounded-[10px] border text-left text-xs aria-pressed:outline"><div className="h-[60px]"><FabricSample presetId={p.id} photo={p.thumbAssetId?"/api/materials/presets/"+p.id+"/thumb?v="+p.thumbAssetId:undefined}/></div><span className="block px-1.5 pt-1">{p.name}</span><small className="block px-1.5 pb-1">{t("预设")}</small></button>)}<button type="button" className="min-h-[104px] rounded-[10px] border border-dashed text-xs" onClick={()=>file.current?.click()}><span className="block text-xl">＋</span>{t("上传我的面料图")}</button></div>
             {preset?<p className="mb-3 text-sm">{preset.description}</p>:null}
             <h3>{t("我的材质")}</h3>
             <div className="my-2 grid grid-cols-3 gap-2">{catalog?.mine.map(m=><button type="button" key={m.id} aria-pressed={chosen?.id===m.id} className="truncate rounded border border-current/20 p-1 aria-pressed:outline" onClick={()=>select({id:m.id,assetId:m.id,name:m.name})}><img className="mx-auto size-10 object-cover" alt="" src={"/api/assets/"+m.id+"/thumb?w=256"}/>{m.name}</button>)}</div>
@@ -56,7 +58,6 @@ export default function TryoutMaterialLibrary({materials,onEdit,onClose,notice}:
                     if(!signal.aborted){select({id:assetId,assetId,name});void prewarmTryoutSource(assetId,id,()=>!signal.aborted);}
                 });
             }}/>
-            <button type="button" onClick={()=>file.current?.click()} className="my-2 min-h-9">{t("上传我的面料图")}</button>
         </fieldset>
         {!catalog&&!error?<p role="status">{t("正在读取材质库")}</p>:null}
         {error||notice?<p role="status">{error||notice} <button type="button" onClick={load}>{t("刷新")}</button></p>:null}

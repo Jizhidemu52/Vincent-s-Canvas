@@ -28,7 +28,7 @@ import { AssetObjectError, isMissingAssetObject } from "../asset-object-error";
 import { VideoPreviewError, type AssetVideoPreviewService, type VideoPlaybackAsset } from "../asset-video-preview";
 import { archiveLocalProcessing, assertLocalProcessingUploadInput, listLocalProcessing, LocalProcessingError, reserveLocalProcessingUpload } from "../local-processing";
 
-import { isTryoutLibrarySource,ordinaryAsset,personalAssetAccess } from "../tryout-private-assets";
+import { isCompanyLibrarySource,isTryoutLibrarySource,ordinaryAsset,personalAssetAccess } from "../tryout-private-assets";
 
 const createSchema = z.object({
   filename: z.string().trim().min(1).max(255),
@@ -264,7 +264,8 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage, playbac
       if (request.get("X-Canvas-Owner-Id") !== undefined) assertCanvasOwner(request.get("X-Canvas-Owner-Id"), actor.id);
       assertLocalProcessingUploadInput(input);
       if(isTryoutLibrarySource(input.metadata.source)){
-        if(input.metadata.source==="model-preset-library"&&actor.role!=="super_admin"){response.sendStatus(403);return;}
+        if(isCompanyLibrarySource(input.metadata.source)&&actor.role!=="super_admin"){response.sendStatus(403);return;}
+        if("curatorAnalysis" in input.metadata||"companyPreset" in input.metadata){response.sendStatus(400);return;}
         assertCanvasOwner(request.get("X-Canvas-Owner-Id"),actor.id);
         if(input.kind!=="image"||!input.mimeType.startsWith("image/")||input.projectId||input.localProcessingOperationId){response.status(400).json({message:"个人样图必须是独立的图片素材"});return;}
       }

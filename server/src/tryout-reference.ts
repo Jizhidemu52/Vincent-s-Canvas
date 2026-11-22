@@ -1,7 +1,7 @@
 import {createHash,randomUUID} from "node:crypto";
 import {setTimeout as wait} from "node:timers/promises";
 import type {Database} from "./db";
-import {publishedPortrait} from "./model-library";
+import {allowedPreset} from "./model-library";
 import type {AppConfig} from "./config";
 import {createTryoutReferenceBytes} from "./asset-thumbnails";
 import {uploadApiMartImage,isPublicHttpsUrl,validateApiMartGenerationImage} from "./apimart-upload";
@@ -21,7 +21,7 @@ export async function lookupReadyTryoutInputs(db:Pick<Database,"query">,settings
     const ids=input.sourceUrls.map(url=>/^\/api\/assets\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/content$/i.exec(url)?.[1]);
     if(ids.some(id=>!id))throw new Error("试款参考图必须来自当前员工素材");
     const {scope,spec}=cachePartition(input.provider,input.tier,settings.TRYOUT_REFERENCE_MAX_EDGE);
-    const access=input.presetId?`(CASE WHEN a.id=($1::uuid[])[1] THEN EXISTS(SELECT 1 FROM model_presets p WHERE p.id=$6 AND ${publishedPortrait}) ELSE a.owner_user_id=$2 END)`:"a.owner_user_id=$2";
+    const access=input.presetId?`(CASE WHEN a.id=($1::uuid[])[1] THEN ${allowedPreset("$6")} ELSE a.owner_user_id=$2 END)`:"a.owner_user_id=$2";
     const matched=await db.query<{id:string;url:string;generation_id:string}>(`SELECT a.id,c.url,c.generation_id FROM assets a JOIN provider_upload_cache c ON c.owner_user_id=a.owner_user_id AND c.content_sha256=a.content_sha256
         WHERE a.id=ANY($1::uuid[]) AND ${access} AND a.status='ready' AND a.kind='image' AND a.deleted_at IS NULL AND c.provider_id=$3 AND c.credential_scope=$4 AND c.reference_spec=${input.presetId?"CASE WHEN a.id=($1::uuid[])[1] THEN $5 || ':published' ELSE $5 END":"$5"} AND c.url IS NOT NULL AND c.expires_at>now()+interval '2 minutes'`,[ids,input.ownerId,input.provider.providerId,scope,spec,...(input.presetId?[input.presetId]:[])]);
     const byId=new Map(matched.rows.map(row=>[row.id,row]));

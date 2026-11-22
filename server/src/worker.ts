@@ -5,7 +5,7 @@ import { createCache, createDatabase, type Cache, type Database } from "./db";
 import { classifyResultFailure, pauseOwnedTask, startTaskRepairScheduler, type PausedKind } from "./task-repair";
 import { decryptSecret } from "./security";
 import {tryoutReferenceService,invalidateTryoutReferences,pruneTryoutReferences,lookupReadyTryoutInputs} from "./tryout-reference";
-import {publishedPortrait} from "./model-library";
+import {allowedPreset} from "./model-library";
 import {createTryoutPrewarm} from "./tryout-prewarm";
 import {downloadSingleImageOriginal,downloadTryoutResult,recordTryoutResult,type TryoutResultReceipt} from "./tryout-result-receipt";
 import {assertPortraitSubmission,portraitSourceOwner,stageGeneratedPortrait} from "./model-preset-generation";
@@ -915,7 +915,7 @@ async function loadSourceAsset(url: string, userId: string, maxBytes?: number,pr
     byte_size: number;
     metadata?: Record<string, unknown>;
   }>(
-    presetId?`SELECT a.owner_user_id,a.object_key,a.mime_type,a.filename,a.byte_size::int,a.metadata FROM model_presets p JOIN assets a ON ${publishedPortrait} WHERE a.id=$1 AND p.id=$2`:"SELECT object_key,mime_type,filename,byte_size::int,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL",
+    presetId?`SELECT a.owner_user_id,a.object_key,a.mime_type,a.filename,a.byte_size::int,a.metadata FROM assets a WHERE a.id=$1 AND ${allowedPreset("$2")}`:"SELECT object_key,mime_type,filename,byte_size::int,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL",
     [match[1], presetId??userId],
   );
   const asset = result.rows[0];
@@ -1186,7 +1186,7 @@ async function runUsageRollups() {
 if (!stopping) {
   const warm=createTryoutPrewarm(db,storage,config);
   const refresh=()=>{if(!portraitWork&&!stopping)portraitWork=warm.maintain(()=>stopping).catch(()=>console.warn(JSON.stringify({event:"tryout.preset_prewarm_unavailable"}))).finally(()=>{portraitWork=undefined;});};
-  refresh();portraitTimer=setInterval(refresh,48*3600_000);
+  portraitTimer=setTimeout(()=>{if(!stopping){refresh();portraitTimer=setInterval(refresh,48*3600_000);}},5*60_000);
   void runUsageRollups();
   usageRollupTimer = setInterval(() => void runUsageRollups(), 60_000);
 }

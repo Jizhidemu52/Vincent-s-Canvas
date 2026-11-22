@@ -4,11 +4,14 @@ import {randomUUID} from "node:crypto";
 import {createIsolatedPostgres} from "../helpers/isolated-postgres";
 import {createAdminMaterialPresetsRouter,createMaterialLibraryRouter} from "../../src/routes/material-presets";
 import {accessClause} from "../../src/routes/assets";
+import {ObjectStorage} from "../../src/object-storage";
+import {loadConfig} from "../../src/config";
 
 (process.env.PGLITE_RUNTIME_PATH?test:test.skip)("material presets are curated, audited, hideable and never publish a personal thumbnail",async()=>{
     const sql=await createIsolatedPostgres(),admin=randomUUID(),employee=randomUUID(),asset=randomUUID(),app=express();
     app.use(express.json(),(req,_res,next)=>{const elevated=req.get("x-fixture-role")==="super_admin";Object.assign(req,{auth:{id:elevated?admin:employee,role:elevated?"super_admin":"designer",departmentId:null}});next();});
-    app.use("/api/materials",createMaterialLibraryRouter(sql.db));app.use("/api/admin/material-presets",createAdminMaterialPresetsRouter(sql.db));
+    const storage=new ObjectStorage(loadConfig({DATABASE_URL:"postgres://localhost/fixture",REDIS_URL:"redis://localhost"}));
+    app.use("/api/materials",createMaterialLibraryRouter(sql.db,storage));app.use("/api/admin/material-presets",createAdminMaterialPresetsRouter(sql.db,storage));
     app.use(((err,_req,res,_next)=>res.status(err.status??400).json({message:err.message})) as ErrorRequestHandler);
     const server=app.listen(0,"127.0.0.1");await new Promise<void>(resolve=>server.once("listening",resolve));
     const base="http://127.0.0.1:"+(server.address() as {port:number}).port;
@@ -37,5 +40,11 @@ import {accessClause} from "../../src/routes/assets";
         expect((await request("/api/materials")).presets).toHaveLength(6);
         expect((await request(path,"GET",undefined,true)).presets).toHaveLength(7);
         expect((await sql.db.query("SELECT count(*)::int n FROM audit_logs WHERE target_id=$1",[created.preset.id])).rows[0].n).toBe(2);
+        const sample=randomUUID();
+        await sql.db.query("INSERT INTO assets(id,owner_user_id,object_key,filename,mime_type,kind,status,metadata) VALUES($1,$2,$3,'sample.png','image/png','image','ready',$4)",[sample,admin,sample,JSON.stringify({source:"material-preset-library"})]);
+        expect((await request(path+"/"+created.preset.id,"PATCH",{thumbAssetId:sample,status:"published"},true)).status).toBe(200);
+        expect((await request("/api/materials")).presets.find((p:{id:string})=>p.id===created.preset.id).thumbAssetId).toBe(sample);
+        expect((await request(path+"/"+created.preset.id,"PATCH",{status:"hidden"},true)).status).toBe(200);
+        expect((await fetch(base+"/api/materials/presets/"+created.preset.id+"/thumb")).status).toBe(404);
     }finally{await new Promise<void>(resolve=>server.close(()=>resolve()));await sql.close();}
 },30000);

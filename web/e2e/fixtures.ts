@@ -109,6 +109,8 @@ export class MockCanvasApi {
         if (url.origin !== this.origin) { this.blocked.push(request.url()); return route.abort("blockedbyclient"); }
         if (!path.startsWith("/api/")) return route.continue();
         const json = (value: unknown, status = 200) => this.json(route, value, status);
+        if(path==="/api/materials"&&method==="GET")return json({presets:["粗针","罗纹","绞花","马海毛","摇粒绒","灯芯绒"].map((name,i)=>({name,id:"60000000-0000-4000-8000-00000000000"+(i+1),description:name,thumbAssetId:null})),mine:[]});
+        if(path==="/api/tryout/models"&&method==="GET")return json({presets:[],mine:[],preference:{}});
         if(/^\/api\/assets\/[^/]+\/product-card$/.test(path))return json({status:"unavailable"});
         if (path === "/api/deployment") return json({ authenticationEnabled: true, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false,productCardsEnabled:this.productCardsEnabled });
         if (path === "/api/auth/session") {

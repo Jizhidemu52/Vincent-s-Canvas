@@ -10,7 +10,7 @@ for(const mode of ["acknowledged color","lost submission response","preset mater
     });
     api.assetBytes.set(asset,Buffer.from(png,"base64"));
     const now=new Date().toISOString(),nodes=[{id:"sample",type:"image",title:"隔离色块样品",width:220,height:220,position:{x:250,y:180},metadata:{serverAssetId:asset,status:"success"}}];
-    api.documents.set(project,{id:project,revision:1,deleted:false,updatedAt:now,document:{id:project,title:"拖色恢复验证",createdAt:now,updatedAt:now,nodes,connections:[],groups:[],viewport:{x:0,y:0,k:1},backgroundMode:"dots",showImageInfo:false,chatSessions:[],activeChatId:null,history:{past:[],future:[]}}});
+    api.documents.set(project,{id:project,revision:1,deleted:false,updatedAt:now,document:{id:project,title:"拖色恢复验证",createdAt:now,updatedAt:now,nodes,connections:[],groups:[],...(material?{tryoutKit:{version:1,colors:[],materials:[]}}:{}),viewport:{x:0,y:0,k:1},backgroundMode:"dots",showImageInfo:false,chatSessions:[],activeChatId:null,history:{past:[],future:[]}}});
     const calls:Array<{requestId:string;nodeId:string;sourceAssetId:string;fallbackHex:string}>=[];
     const inspect=mode==="acknowledged color";
     const live=mode==="live first display",displays:Array<{source:string;droppedAt:number;submittedAt:number;shownAt:number}>=[];

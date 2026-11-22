@@ -97,7 +97,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
                     <Tooltip title={uiText("复制链接；不会公开画布。本机试用跨设备请导出")}><button type="button" className="cw-share" aria-live="polite" onClick={() => void copyLink()}>{copied ? <><Check size={14} />{uiText("已复制")}</> : (locale === "en-US" ? "Copy link" : staticUiText("复制链接"))}</button></Tooltip>
                 </div>
                 <div className="cw-account-card">
-                    {onToggleTryout ? <button type="button" className="cw-share" aria-expanded={tryoutOpen} onClick={onToggleTryout}>{uiText("试款台")}</button> : null}
+                    {onToggleTryout ? <button type="button" className="cw-share cw-tryout-toggle" aria-expanded={tryoutOpen} onClick={onToggleTryout}>{uiText("试款台")} <kbd aria-hidden="true">T</kbd></button> : null}
                     <LanguageSwitch compact />
                     <span className="cw-account-avatar" aria-hidden="true">{userName.slice(0, 1)}</span>
                     <Tooltip title={userName}><span className="cw-account-name">{userName}</span></Tooltip>

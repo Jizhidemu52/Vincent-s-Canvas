@@ -6,12 +6,10 @@ import {tryoutNotice} from "./tryout-notice";
 import {isTryoutProduct} from "@/lib/tryout/product-node";
 import {batchTryout,type BatchJob} from "@/lib/tryout/batch";
 import type {DropColor,TryoutChip} from "./tryout-swatch";
-import {initialKit} from "./tryout-palette";
 
 export function useTryoutBatch(drop:DropColor,writable:{current:boolean}){
     const {notification}=App.useApp(),preparing=useRef(false);
     const selection=useCanvasGraphStore(s=>s.selectedNodeIds),nodes=useCanvasGraphStore(s=>s.nodes);
-    const kit=useCanvasGraphStore(s=>s.tryoutKit)??initialKit;
     const products=nodes.filter(n=>selection.has(n.id)&&isTryoutProduct(n)).map(n=>n.id);
     const run=async(jobs:BatchJob[])=>{
         const owner=useUserStore.getState().user?.id,route=location.pathname;
@@ -31,5 +29,5 @@ export function useTryoutBatch(drop:DropColor,writable:{current:boolean}){
         const targets=products.includes(id)?products:[id];
         return run(targets.flatMap(nodeId=>chips.map(chip=>({nodeId,chip,region:nodeId===id?region:""}))));
     };
-    return {products,apply,kit,group};
+    return {products,apply,group};
 }

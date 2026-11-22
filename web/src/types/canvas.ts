@@ -69,6 +69,7 @@ export type CanvasGenerationRecord = {
 };
 
 export type CanvasNodeMetadata = {
+    tryoutTone?: Partial<Record<"brightness"|"contrast"|"saturate",number>>;
     tryout?: import("../../../shared/tryout").TryoutMeta;
     proposalBoard?: import("@/lib/canvas/proposal-board").AnyProposalBoard;
     imageConversation?: { conversationId: string; versionId: string; assetId: string; turnId: string | null };

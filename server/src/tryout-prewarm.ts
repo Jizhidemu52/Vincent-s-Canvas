@@ -11,7 +11,7 @@ import {MARK_GPT26_IMAGE_MODELS} from "../../shared/mark-image-models";
 import {decryptSecret} from "./security";
 import {CanvasDocumentError} from "./canvas-document";
 import {tryoutReferenceService} from "./tryout-reference";
-import {publishedPortrait} from "./model-library";
+import {allowedPreset,publishedPortrait} from "./model-library";
 
 export const prewarmInput=z.object({assetId:z.string().uuid(),presetId:z.string().uuid().optional()}).strict();
 type StartOutcome="accepted"|"active"|"busy"|"disabled";
@@ -35,7 +35,7 @@ export function createTryoutPrewarm(db:Database,storage:ObjectStorage,config:App
     const offer=prewarmQueue(()=>console.warn(JSON.stringify({event:"tryout.prewarm_unavailable"})));
     const ref=tryoutReferenceService(db,config,io);
     const owned=async(owner:string,asset:string,preset?:string)=>{
-        const result=await db.query<{owner_user_id?:string;object_key:string;mime_type:string;byte_size:number;content_sha256:string|null}>(preset?"SELECT a.owner_user_id,a.object_key,a.mime_type,a.byte_size::int,a.content_sha256 FROM model_presets p JOIN assets a ON "+publishedPortrait+" WHERE a.id=$1 AND p.id=$2":"SELECT object_key,mime_type,byte_size::int,content_sha256 FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND kind='image' AND deleted_at IS NULL AND COALESCE(metadata->>'tryoutArchived','false')<>'true'",[asset,preset??owner]);
+        const result=await db.query<{owner_user_id?:string;object_key:string;mime_type:string;byte_size:number;content_sha256:string|null}>(preset?"SELECT a.owner_user_id,a.object_key,a.mime_type,a.byte_size::int,a.content_sha256 FROM assets a WHERE a.id=$1 AND "+allowedPreset("$2"):"SELECT object_key,mime_type,byte_size::int,content_sha256 FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND kind='image' AND deleted_at IS NULL AND COALESCE(metadata->>'tryoutArchived','false')<>'true'",[asset,preset??owner]);
         const source=result.rows[0];
         if(!source)throw new CanvasDocumentError("TRYOUT_ASSET_UNAVAILABLE","参考图不存在或不属于当前员工",404);
         if(source.byte_size<1||source.byte_size>20*1024*1024)throw new CanvasDocumentError("TRYOUT_REFERENCE_SIZE","试款原图应为 20 MiB 以内的图片");

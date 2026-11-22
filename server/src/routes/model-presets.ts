@@ -1,7 +1,7 @@
 import {Router,type Request,type RequestHandler} from "express";
 import {z} from "zod";
 import {modelIdentities,modelFramings} from "../../../shared/model-match";
-import {modelCatalog,personalPortrait,publishedPortrait,presetColumns} from "../model-library";
+import {modelCatalog,personalPortrait,publishedPortrait,presetColumns,customModelFields,allowedPreset} from "../model-library";
 import type {Database} from "../db";
 import type {ObjectStorage} from "../object-storage";
 import type {AuthenticatedRequest} from "../types";
@@ -23,7 +23,8 @@ function preview(db:Database,storage:ObjectStorage,admin:boolean):RequestHandler
     return async(req,res,next)=>{try{
         const id=uuid.parse(req.params.id);
         const join=admin?"a.id=COALESCE(p.draft_asset_id,p.asset_id) AND a.metadata->>'source'='model-preset-library' AND a.kind='image' AND a.status='ready' AND a.deleted_at IS NULL":publishedPortrait;
-        const found=(await db.query("SELECT a.filename,a.object_key,a.mime_type,a.thumbnail_256_key FROM model_presets p JOIN assets a ON "+join+" WHERE p.id=$1",[id])).rows[0];
+        const cols="SELECT a.filename,a.object_key,a.mime_type,a.thumbnail_256_key ";
+        const found=(await db.query(admin?cols+"FROM model_presets p JOIN assets a ON "+join+" WHERE p.id=$1 UNION ALL "+cols+"FROM assets a WHERE a.id=$1 AND a.metadata->>'source'='company-model-library' AND a.status='ready' AND a.deleted_at IS NULL AND a.kind='image'":cols+"FROM assets a WHERE "+allowedPreset("$1"),[id])).rows[0];
         if(!found)throw unavailable();
         await streamAssetContent(req,res,storage,found.thumbnail_256_key?{filename:"portrait.webp",mime_type:"image/webp",object_key:found.thumbnail_256_key}:{filename:found.filename,mime_type:found.mime_type,object_key:found.object_key},{cacheControl:"no-store"});
     }catch(error){next(error);}};
@@ -59,6 +60,15 @@ export function createModelLibraryRouter(db:Database,storage:ObjectStorage){
 export function createAdminModelPresetsRouter(db:Database,storage:ObjectStorage,policy?:PortraitPolicy){
     const router=Router();
     router.use(requireRole("super_admin"));
+    router.get("/company",async(_req,res,next)=>{try{res.json({models:(await db.query("SELECT "+customModelFields+" FROM assets a WHERE a.metadata->>'source'='company-model-library' AND a.metadata ? 'companyPreset' AND a.kind='image' AND a.status='ready' AND a.deleted_at IS NULL ORDER BY a.created_at,a.id")).rows});}catch(e){next(e);}});
+    router.put("/company/:id",async(req,res,next)=>{try{
+        const actor=actorOf(req);assertCanvasOwner(req.headers["x-canvas-owner-id"],actor.id);
+        const id=uuid.parse(req.params.id),entry=z.object({name:z.string().trim().min(1).max(80),description:z.string().trim().min(1).max(600),status:z.enum(["published","hidden"])}).strict().parse(req.body);
+        await withTransaction(db,async client=>{
+            if(!(await client.query("UPDATE assets SET metadata=jsonb_set(metadata,'{companyPreset}',$3::jsonb),updated_at=now() WHERE id=$1 AND (owner_user_id=$2 OR metadata ? 'companyPreset') AND metadata->>'source'='company-model-library' AND kind='image' AND status='ready' AND deleted_at IS NULL RETURNING id",[id,actor.id,JSON.stringify(entry)])).rows.length)throw unavailable();
+            await writeAudit(client,{actor,action:"model-preset.company-updated",targetType:"model-preset",targetId:id,result:"success",detail:{status:entry.status}});
+        });res.json({id,...entry});
+    }catch(e){next(e);}});
     router.get("/generation/:requestId",async(req,res,next)=>{try{
         const actor=actorOf(req);assertCanvasOwner(req.headers["x-canvas-owner-id"],actor.id);
         const group=uuid.parse(req.params.requestId);

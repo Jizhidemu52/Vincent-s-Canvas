@@ -1,4 +1,4 @@
-import { ChevronDown, Menu } from "lucide-react";
+import { ChevronDown, Menu, Layers } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { navigationTools, navigationModuleKey, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { useNavigationPreferences } from "@/hooks/use-navigation-preferences";
@@ -7,19 +7,18 @@ import { uiText, useUiLocale } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { usageBoardForLocation } from "@/lib/usage-navigation";
 import { isQuickImageTool } from "@/lib/quick-image-tools";
-import { isStandaloneCreativePreset } from "@/lib/creative-presets";
+import { buildCreativePresetHref, creativePresets, isStandaloneCreativePreset } from "@/lib/creative-presets";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 import type { ModuleKey } from "@/services/api/modules";
 import { useEffect } from "react";
-import { TryoutNavigation } from "./tryout-navigation";
 
 const sections: { key: string; label: string; slugs: NavigationToolSlug[] }[] = [
     { key: "workspace", label: "工作空间", slugs: ["canvas", "gpt-chat"] },
     { key: "create", label: "创作工具", slugs: ["creative", "local-restyle", "garment-colorway", "back-design", "video"] },
     { key: "image-tools", label: "图像工具", slugs: ["layer-studio", "remove-background", "hd-upscale", "item-extract", "image-edit", "seamless-stitch", "midjourney-blend"] },
-    { key: "resources", label: "资源库", slugs: ["assets", "prompts", "design-library"] },
+    { key: "resources", label: "资源库", slugs: ["assets", "prompts", "my-prompts", "design-library"] },
     { key: "collaborate", label: "协作", slugs: ["team"] },
     { key: "manage", label: "管理", slugs: ["admin"] },
 ];
@@ -43,7 +42,7 @@ export function NavigationMenu({ onNavigate }: { onNavigate?: () => void }) {
     }, [pathname, search, user?.id]);
     const available = (slug: NavigationToolSlug) => slug === "admin" ? isAdminRole(user?.role)
         : (slug !== "team" || (deploymentFeatures.rolePortalsEnabled && Boolean(user?.groupId))) && isModuleAvailable(flags, bindings, navigationModuleKey(slug) as ModuleKey);
-    if(isModuleAvailable(flags,bindings,"canvas-tryout"))return <TryoutNavigation available={available} module={key=>isModuleAvailable(flags,bindings,key)} onNavigate={onNavigate}/>;
+    const scenes=isModuleAvailable(flags,bindings,"canvas-tryout")?creativePresets.filter(p=>!isStandaloneCreativePreset(p.id)&&isModuleAvailable(flags,bindings,("creative-"+p.id) as ModuleKey)):[];
     return <div className="space-y-4">
         {sections.map(section => {
             const tools = section.slugs.map(slug => navigationTools.find(tool => tool.slug === slug)!).filter(tool => available(tool.slug));
@@ -60,5 +59,6 @@ export function NavigationMenu({ onNavigate }: { onNavigate?: () => void }) {
                 {section.key === "workspace" && <Link to="/" onClick={onNavigate} aria-current={pathname === "/" ? "page" : undefined} className="wb-nav-link flex h-9 items-center gap-3 rounded-lg px-3"><Menu className="size-4" />{uiText("工作台")}</Link>}
             </section>;
         })}
+        {scenes.length>0&&<section className="space-y-2"><h3 className="px-2 text-xs font-semibold text-muted-foreground">{uiText("创意场景")}</h3>{scenes.map(p=><Link key={p.id} to={buildCreativePresetHref(p)} onClick={onNavigate} aria-current={pathname===buildCreativePresetHref(p)?"page":undefined} className="wb-nav-link flex h-9 items-center gap-2 rounded-lg px-3"><Layers className="size-4 shrink-0"/>{uiText(p.title)}</Link>)}</section>}
     </div>;
 }

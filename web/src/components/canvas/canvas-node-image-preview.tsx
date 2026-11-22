@@ -26,13 +26,14 @@ export default function CanvasNodeImagePreview({ node, edge, placeholderColor, r
     const tryout=useModuleEnabled("canvas-tryout");
     const productSource=tryout&&deploymentFeatures.productCardsEnabled&&!node.metadata?.proposalBoard&&node.metadata?.tryout?.kind!=="wear"&&(node.metadata?.serverAssetId||node.metadata?.storageKey||node.metadata?.content);
     const fit = node.metadata?.freeResize ? "object-fill" : "object-contain";
+    const tone=node.metadata?.tryoutTone,filter=tone?`brightness(${tone.brightness??100}%) contrast(${tone.contrast??100}%) saturate(${tone.saturate??100}%)`:undefined;
     return <div className="relative h-full w-full overflow-hidden" style={{ background: placeholderColor }}>
-        {preview.placeholderUrl ? <img src={preview.placeholderUrl} alt="" aria-hidden draggable={false} className={`pointer-events-none absolute inset-0 h-full w-full ${fit}`} /> : null}
+        {preview.placeholderUrl ? <img src={preview.placeholderUrl} alt="" aria-hidden draggable={false} style={{filter}} className={`pointer-events-none absolute inset-0 h-full w-full ${fit}`} /> : null}
         {preview.failed ? <div className="relative flex h-full w-full flex-col items-center justify-center gap-3" role="status">{renderError(preview.retry)}</div>
             : preview.url ? <img key={preview.key} src={preview.url} data-canvas-image-resolution={preview.edge || "original"} alt={node.title} draggable={false}
                 data-tryout-source={!node.metadata?.proposalBoard&&node.metadata?.tryout?.kind!=="wear"?(node.metadata?.serverAssetId||node.metadata?.storageKey||(node.metadata?.content?.startsWith("/api/assets/")?node.metadata.content:undefined)):undefined}
                 {...canvasImageRenderProps()} onError={preview.onError} onLoad={event=>{preview.onLoad();if(node.metadata?.tryout?.tier==="quick")observeQuickDisplay(event.currentTarget,node.metadata.sourceTaskId,"original");}} onDragStart={event => event.preventDefault()}
-                style={{ opacity: preview.loaded ? 1 : 0 }}
+                style={{ opacity: preview.loaded ? 1 : 0,filter }}
                 className={`cw-image-progressive pointer-events-none relative block h-full w-full select-none ${fit} ${preview.loaded && node.metadata?.sourceTaskId ? "cw-image-result-reveal" : ""}`} />
                 : <div className="h-full w-full animate-pulse" style={{ background: placeholderColor }} aria-label={t("正在恢复图片预览")} />}
         {productSource?<Suspense fallback={null}><ProductCardChips key={productSource} source={productSource}/></Suspense>:null}
