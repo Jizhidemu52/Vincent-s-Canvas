@@ -43,6 +43,26 @@ async function canvasSelect(page: Page, panel: Locator, model: typeof mai) {
     await page.getByTestId("canvas-model-picker-menu").locator(`[role="option"][data-usage-value="${model.id}"]`).first().click();
 }
 
+test("canvas prompt tooltip keeps the generate button at its original position", async ({ page, api }, info) => {
+    await setup(page);
+    await newCanvas(page);
+    await page.getByRole("button", { name: "展开创建面板", exact: true }).click();
+    const panel = page.getByTestId("canvas-quick-generate-panel");
+    const prompt = panel.getByRole("textbox", { name: "描述图像", exact: true });
+    await prompt.fill("蓝色亚麻连衣裙");
+    const submit = panel.getByRole("button", { name: /^生成(?:\s|$)/ });
+    await expect(submit).toBeEnabled();
+    const box = await submit.boundingBox();
+    if (!box) throw new Error("Generate button is not visible");
+    const target = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await prompt.hover();
+    await expect(page.getByRole("tooltip").filter({ hasText: "Enter 生成，Shift+Enter 换行" })).toBeVisible();
+    expect(await submit.evaluate((button, point) => button.contains(document.elementFromPoint(point.x, point.y)), target)).toBe(true);
+    await page.screenshot({ path: info.outputPath("prompt-tooltip-layout.png") });
+    await page.mouse.click(target.x, target.y);
+    await expect.poll(() => api.submissions.length).toBe(1);
+});
+
 for (const model of [flare, sunburst, mai]) {
     for (const editing of [false, true]) {
         test(`${model.name} ${editing ? "reference edit" : "canvas text image"}: optimized text submits once with the selected model and supported settings`, async ({ page, api }, info) => {
@@ -192,20 +212,7 @@ test("canvas switches profiles without truncating references and restores text-o
     await preview.getByRole("button", { name: "确认应用", exact: true }).click();
     await expect(preview).toBeHidden();
     await expect(prompt).toHaveValue(optimized);
-    const generate=panel.getByRole("button", { name: /^生成(?:\s|$)/ });
-    await expect(generate).toBeEnabled();
-    await expect(page.locator(".ant-modal-mask:visible")).toHaveCount(0);
-    await expect.poll(()=>generate.evaluate(async button=>{
-        const box=button.getBoundingClientRect();
-        for(let frame=0;frame<3;frame++){
-            await new Promise<void>(done=>requestAnimationFrame(()=>done()));
-            const current=button.getBoundingClientRect();
-            if(current.x!==box.x||current.y!==box.y||current.width!==box.width||current.height!==box.height
-                ||!button.contains(document.elementFromPoint(current.x+current.width/2,current.y+current.height/2)))return false;
-        }
-        return true;
-    })).toBe(true);
-    await generate.click();
+    await panel.getByRole("button", { name: /^生成(?:\s|$)/ }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
     expect(api.submissions[0]).toMatchObject({ modelConfigId: mai.id, promptInput: { compilationId }, parameters: { resolution: "2k" } });
     expect(api.submissions[0].parameters).not.toHaveProperty("quality");

@@ -1,9 +1,9 @@
 import type { ComponentProps } from "react";
 
-export function CanvasPromptField({ canGenerate, onGenerate, onKeyDown, ...props }: ComponentProps<"textarea"> & {
+export function CanvasPromptField({ canGenerate, onGenerate, onKeyDown, className, ...props }: ComponentProps<"textarea"> & {
     canGenerate: boolean; onGenerate: () => void;
 }) {
-    return <textarea className="cw-prompt" {...props} onKeyDown={event => {
+    return <textarea {...props} className={className ? `cw-prompt ${className}` : "cw-prompt"} onKeyDown={event => {
         if (event.nativeEvent.isComposing || event.keyCode === 229) return;
         onKeyDown?.(event);
         if (event.defaultPrevented || event.key !== "Enter" || event.shiftKey) return;
