@@ -50,6 +50,10 @@
 .canvas-design-proposal figure { margin: 0; width: 40px; }
 .canvas-design-proposal img { width: 36px; height: 36px; object-fit: contain; background: var(--cw-soft); }
 .canvas-design-proposal figcaption { font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--cw-muted); }
+@media (min-width: 761px) and (max-width: 1280px) {
+    .dd-island { top: 64px; left: 50%; width: 246px; }
+    .dd-notice { top: 116px; }
+}
 @media (max-width: 760px) { .canvas-design-discussion .studio-panel { width: calc(100% - 16px); max-width: none; top: 108px; right: 8px; bottom: 8px; } .dd-island { top: 57px; left: 50%; width: 246px; } .dd-pill { height: 40px; } .dd-notice { top: 107px; } .dd-connect { top: 119px; } .canvas-design-discussion .studio-panel-heading { padding: 10px 15px; } .canvas-design-discussion .studio-modes { margin-bottom: 9px; } .canvas-design-discussion .studio-context-heading { padding-inline: 15px; } .canvas-design-discussion .studio-composer-tools { gap: 6px 8px; } .canvas-design-discussion .studio-composer-tools select { max-width: 160px; } }
 @media (prefers-reduced-motion: reduce) { .canvas-design-discussion * { scroll-behavior: auto !important; } }
 @media (max-width: 760px) {

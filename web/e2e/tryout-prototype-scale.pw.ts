@@ -10,7 +10,9 @@ for(const [width,height] of [[1440,1000],[900,873],[390,844]])test("tryout workb
         const p=presets.find(p=>r.request().url().includes("/"+p.id+"/"))!;
         return photos?r.fulfill({path:join(photos,p.identity+"-full.png"),contentType:"image/png"}):r.fulfill({body:fixturePng(90),contentType:"image/png"});
     });
-    await page.setViewportSize({width,height});await newCanvas(page);await page.keyboard.press("t");
+    await page.setViewportSize({width,height});await newCanvas(page);
+    await page.getByTestId("language-switch").filter({visible:true}).first().click({trial:true});
+    await page.getByRole("button",{name:"试款台",exact:true}).click();
     const panel=page.getByTestId("canvas-design-toolbox");
     await expect(panel.locator(".tb-pat")).toHaveCount(4);await expect(panel.locator(".tb-model")).toHaveCount(5);
     await expect.poll(()=>panel.locator(".tb-model img").evaluateAll(els=>els.every(e=>(e as HTMLImageElement).naturalWidth>0))).toBe(true);

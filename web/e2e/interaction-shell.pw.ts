@@ -95,14 +95,13 @@ test("recent destinations stay on home, core navigation stays visible, and mobil
     await expect(nav.getByRole("button", { name: /^固定/ })).toHaveCount(0);
     await expect(nav.getByRole("link", { name: "自由画布", exact: true })).toBeInViewport();
     await expect(nav.getByRole("link", { name: "图像生成", exact: true })).toHaveCount(0);
-    await nav.getByRole("button", { name: "改局部", exact: true }).click();
+    await expect(nav.getByRole("button", { name: "图像工具", exact: true })).toHaveAttribute("aria-expanded", "true");
     await nav.getByRole("link", { name: "图片编辑", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "图像提示词" })).toBeVisible();
     await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
-    await nav.getByRole("button", { name: "资源库", exact: true }).click();
+    await expect(nav.getByRole("button", { name: "资源库", exact: true })).toHaveAttribute("aria-expanded", "true");
     await nav.getByRole("link", { name: "素材库", exact: true }).click();
     await expect(page.getByRole("heading", { name: "素材库", exact: true })).toBeVisible();
-    await nav.getByRole("button", { name: "更多工具", exact: true }).click();
     await nav.getByRole("link", { name: "工作台", exact: true }).click();
     const recent = page.getByRole("region", { name: "最近使用", exact: true });
     await expect(recent.getByRole("link").first()).toHaveText("素材库");

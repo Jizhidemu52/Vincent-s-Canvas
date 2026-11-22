@@ -83,15 +83,16 @@ test("English navigation and mobile drawer remain operable", async ({ page, api 
     await page.goto("/canvas");
     await expect(page.getByRole("button", { name: "新建画布", exact: true }).first()).toBeEnabled();
     await changeLanguage(page);
-    await page.getByRole("button", { name: "More tools", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Creative tools", exact: true })).toHaveAttribute("aria-expanded", "true");
     await expect(page.getByRole("link", { name: "Creative design", exact: true }).first()).toBeVisible();
-    await page.getByRole("button", { name: "Resources", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Resources", exact: true })).toHaveAttribute("aria-expanded", "true");
     await expect(page.getByRole("link", { name: "Asset library", exact: true }).first()).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "Open navigation", exact: true }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await expect(page.getByRole("dialog").getByTestId("language-switch")).toBeEnabled();
-    await page.getByRole("dialog").getByRole("button", { name: "Resources", exact: true }).click();
+    await expect(page.getByRole("dialog").getByRole("button", { name: "Resources", exact: true })).toHaveAttribute("aria-expanded", "true");
+    await page.getByRole("dialog").getByRole("link", { name: "Asset library", exact: true }).scrollIntoViewIfNeeded();
     await expect(page.getByRole("dialog").getByRole("link", { name: "Asset library", exact: true })).toBeInViewport();
     await settleTransitions(page);
     await page.screenshot({ path: info.outputPath("mobile-English.png"), animations: "disabled" });
@@ -208,7 +209,7 @@ test("English includes administration and switching preserves unsaved original a
     await page.goto("/canvas");
     await changeLanguage(page);
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await page.getByRole("button", { name: "More tools", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Manage", exact: true })).toHaveAttribute("aria-expanded", "true");
     await page.getByRole("link", { name: "Administration", exact: true }).first().click();
     await expect(page).toHaveURL(/\/admin$/);
     await expect(page.locator("html")).toHaveAttribute("lang", "en");

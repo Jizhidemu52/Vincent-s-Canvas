@@ -17,7 +17,7 @@ test("with tryout disabled only requested boards disappear; creation tools retai
     for (const [index, path] of creationPaths.entries()) await expect(create.getByRole("link").nth(index)).toHaveAttribute("href", path);
     for (const item of moved) await expect(create.getByRole("link", { name: item.title, exact: true })).toHaveAttribute("href", `/${item.id}`);
     await expect(nav.getByRole("link", { name: "图像生成", exact: true })).toHaveCount(0);
-    await nav.getByRole("button", { name: "图像工具", exact: true }).click();
+    await expect(nav.getByRole("button", { name: "图像工具", exact: true })).toHaveAttribute("aria-expanded", "true");
     await expect(nav.getByRole("link", { name: "高清放大", exact: true })).toHaveAttribute("href", "/hd-upscale");
     await expect(nav.getByRole("link", { name: "图片编辑", exact: true })).toHaveAttribute("href", "/image?tool=image-edit");
     for (const title of ["细节增强", "角度控制", "系列配方"]) await expect(page.getByRole("link", { name: title, exact: true })).toHaveCount(0);

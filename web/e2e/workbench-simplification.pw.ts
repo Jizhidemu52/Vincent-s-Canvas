@@ -76,15 +76,14 @@ test("home and desktop/mobile navigation retire image generation and use the Dou
     await expect(page.locator('a[href="/image"], a[href="/image?tool=image-generation"]')).toHaveCount(0);
     await expect(page.getByRole("link", { name: "图像生成", exact: true })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "图片编辑", exact: true })).toBeVisible();
-    await expect(nav.getByRole("button", { name: "更多工具", exact: true })).toHaveAttribute("aria-expanded", "true");
+    await expect(nav.getByRole("button", { name: "图像工具", exact: true })).toHaveAttribute("aria-expanded", "true");
     await expect(nav.getByRole("link", { name: "豆包生图", exact: true })).toHaveAttribute("href", "/layer-studio");
     await expect(nav.getByRole("link", { name: "图层拆分与图片生成", exact: true })).toHaveCount(0);
     await page.screenshot({ path: resolve(output, "navigation-desktop.png"), fullPage: true, animations: "disabled" });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "打开导航菜单", exact: true }).click();
     const drawer = page.getByRole("dialog", { name: "功能模块", exact: true });
-    const toggle = drawer.getByRole("button", { name: "更多工具", exact: true });
-    if (await toggle.getAttribute("aria-expanded") === "false") await toggle.click();
+    await expect(drawer.getByRole("button", { name: "图像工具", exact: true })).toHaveAttribute("aria-expanded", "true");
     await expect(drawer.getByRole("link", { name: "豆包生图", exact: true })).toBeVisible();
     await expect(drawer.getByRole("link", { name: "图像生成", exact: true })).toHaveCount(0);
     await drawer.screenshot({ path: resolve(output, "navigation-mobile.png"), animations: "disabled" });
