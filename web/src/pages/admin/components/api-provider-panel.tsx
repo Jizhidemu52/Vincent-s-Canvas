@@ -65,6 +65,7 @@ export function ApiProviderPanel({ isAdmin }: { isAdmin: boolean }) {
                 Object.keys(credentials).length ? "替换服务端凭据" : "",
             ].filter(Boolean) : [];
             if (changes.length && !await modal.confirm({
+                transitionName: "",
                 title: staticUiText("确认修改共用 API 服务「{p0}」？", { p0: `${selected!.name}` }),
                 content: staticUiText("本次将{p0}。影响所有绑定此服务的模型及使用这些模型的板块；停用或配置错误会阻止新调用，已提交上游的任务不保证停止，既有历史结果保留。请确认这是共用服务的预期调整。", { p0: `${changes.join("、")}` }),
                 okText: staticUiText("确认修改共用服务"), cancelText: staticUiText("返回核对"), okButtonProps: { danger: true },

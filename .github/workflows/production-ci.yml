@@ -129,7 +129,18 @@ jobs:
           redis_aof_reply=$(docker exec "${{ job.services.redis.id }}" redis-cli --raw CONFIG SET appendonly yes)
           test "$redis_aof_reply" = "OK"
       - name: Test backend, SQL migrations and 30 image plus 30 video tasks
-        run: bun --no-env-file test
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t tracked < <(git ls-files -z)
+          tests=()
+          for file in "${tracked[@]}"; do
+            if [[ "$file" =~ [._](test|spec)\.[cm]?[jt]sx?$ ]]; then tests+=("./$file"); fi
+          done
+          ((${#tests[@]} > 0))
+          for ((offset=0; offset<${#tests[@]}; offset+=24)); do
+            bun --no-env-file test "${tests[@]:offset:24}"
+          done
         env:
           PGLITE_RUNTIME_PATH: ${{ runner.temp }}/canvas-pglite
           QUEUE_TEST_REDIS_URL: redis://127.0.0.1:6379

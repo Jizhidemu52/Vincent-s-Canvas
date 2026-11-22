@@ -83,9 +83,24 @@ test("shared provider changes require confirmation and cancellation sends no wri
     const form = page.locator("form").filter({ has: page.getByRole("textbox", { name: baseUrlName }) });
     await expect(form.getByRole("textbox", { name: baseUrlName })).toHaveValue(provider.baseUrl);
     await form.getByRole("textbox", { name: baseUrlName }).fill("https://changed.example.test/v1");
-    await form.getByRole("button", { name: "保存到服务端", exact: true }).click();
+    const [drift] = await Promise.all([
+        page.evaluate(() => new Promise<number>(resolve => {
+            const points: Array<[number, number]> = [];
+            const measure = () => {
+                const button = Array.from(document.querySelectorAll('[role="dialog"] button')).find(el => el.textContent === "确认修改共用服务");
+                const rect = button?.getBoundingClientRect();
+                if (rect && rect.width > 0 && rect.height > 0) points.push([rect.x + rect.width / 2, rect.y + rect.height / 2]);
+                if (points.length < 18) requestAnimationFrame(measure);
+                else resolve(Math.max(...points.map(([x, y]) => Math.hypot(x - points[0][0], y - points[0][1]))));
+            };
+            measure();
+        })),
+        form.getByRole("button", { name: "保存到服务端", exact: true }).click(),
+    ]);
+    expect(drift, "共用服务确认按钮从显示起就应保持在同一点击位置").toBeLessThanOrEqual(1);
     await expect(page.getByRole("dialog")).toContainText("确认修改共用 API 服务「隔离服务」");
     await expect(page.getByRole("dialog")).toContainText("所有绑定此服务的模型及使用这些模型的板块");
+    await page.getByRole("dialog").screenshot({ path: test.info().outputPath("shared-provider-confirmation.png") });
     expect(writes).toEqual([]);
     await page.getByRole("button", { name: "返回核对", exact: true }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
