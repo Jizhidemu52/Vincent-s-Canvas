@@ -196,6 +196,16 @@ for (const type of ["config", "text"] as const) for (const scale of [.5, 1, 2]) 
         for (const side of ["left", "right"]) for (const control of ["connection", "resize"]) {
             const handle = node.locator(`[data-canvas-${control}-handle="${side}"]`);
             await handle.hover();
+            if (control === "connection" && scale === .5) {
+                const label = await handle.getAttribute("aria-label");
+                if (!label) throw new Error("Connection handle needs a label");
+                await expect(page.getByRole("tooltip").filter({ hasText: label })).toBeVisible();
+                const adjacent = node.locator(`[data-canvas-resize-handle="${side}"]`);
+                expect(await adjacent.evaluate(element => {
+                    const { x, y, width, height } = element.getBoundingClientRect();
+                    return element.contains(document.elementFromPoint(x + width / 2, y + height / 2));
+                })).toBe(true);
+            }
             await expect.poll(() => handle.evaluate(element => { const rect = element.getBoundingClientRect(); return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)); })).toBe(true);
         }
         const resize = node.locator('[data-canvas-resize-handle="right"]');

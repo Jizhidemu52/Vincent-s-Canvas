@@ -967,7 +967,7 @@ function ResizeHandle({ corner, theme, onMouseDown }: { corner: ResizeCorner; th
 function ConnectionHandleDot({ side, theme, label, visible, active, onMouseDown }: { side: "left" | "right"; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; label: string; visible: boolean; active: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
 
     return (
-        <Tooltip title={label}><div
+        <Tooltip title={label} placement={side} styles={{ root: { pointerEvents: "none" } }}><div
             data-canvas-connection-handle={side}
             aria-label={label}
             className={`absolute top-1/2 z-30 flex size-10 cursor-crosshair items-center justify-center transition-opacity duration-150 ${
