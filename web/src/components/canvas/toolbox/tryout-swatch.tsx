@@ -1,4 +1,6 @@
-import { useEffect, useRef,type ReactNode } from "react";
+import { useEffect, useRef,useState,type ReactNode } from "react";
+import {FabricBoundaryDialog} from "./tryout-fabric-boundary";
+import type {FabricVertex} from "../../../../../shared/tryout-fabric-area";
 import { cachedRegions } from "@/lib/tryout/region-cache";
 import { regionAtPoint, type ProductRegions } from "@/lib/tryout/product-regions";
 import type { KitColor } from "./tryout-palette";
@@ -10,7 +12,7 @@ import {useUserStore} from "@/stores/use-user-store";
 export type KitMaterial=TryoutKit["materials"][number];
 export type TryoutChip=KitColor|KitMaterial;
 export type WearChip={name:string;model:import("../../../../../shared/model-match").ModelSelection;outfit?:{nodeId:string;taskId:string}};
-export type DropRegion=string|{hex:string;point:FabricDropPoint};
+export type DropRegion=string|{hex:string;point:FabricDropPoint;boundary:FabricVertex[]};
 export type DropColor=(nodeId:string,chip:TryoutChip|WearChip,region:DropRegion,droppedAt:number,transport?:import("@/lib/tryout/batch").TryoutTransport)=>Promise<void>;
 const maps=new WeakMap<HTMLImageElement,{url:string;map:Promise<ProductRegions>}>();
 function regionMap(img:HTMLImageElement) {
@@ -65,9 +67,10 @@ type Drag={pointer:number;x:number;y:number;active:boolean;frame:number;seq:numb
 export function TryoutSwatch({color,onDrop,notice,writable,selectedId,groupLabel,children,onChoose,chosen}:{chosen?:boolean;onChoose?:()=>void;children?:ReactNode;color:TryoutChip;onDrop:DropColor;notice:(s:string)=>void;writable:{current:boolean};selectedId?:string;groupLabel?:string}){
     const material=!("hex" in color),hex="hex" in color?color.hex:"#908374";
     const drag=useRef<Drag|null>(null),mounted=useRef(false),suppressClick=useRef(false),submitting=useRef(false);
+    const [pending,setPending]=useState<{id:string;img:HTMLImageElement;url:string;hex:string;point:FabricDropPoint;owner:string|undefined;route:string}|null>(null);
     const clear=()=>{const d=drag.current;if(d){cancelAnimationFrame(d.frame);d.overlay.remove();drag.current=null;}};
     useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false;clear();};},[]);
-    return <button type="button" aria-label={groupLabel??((material?"拖动换材质：":"拖动换色：")+color.name)} title={groupLabel??color.name} aria-pressed={chosen} className={groupLabel?"tb-grip":material?"tb-pat":"tb-sw"} style={{background:groupLabel||material?undefined:hex}}
+    return <><button type="button" aria-label={groupLabel??((material?"拖动换材质：":"拖动换色：")+color.name)} title={groupLabel??color.name} aria-pressed={chosen} className={groupLabel?"tb-grip":material?"tb-pat":"tb-sw"} style={{background:groupLabel||material?undefined:hex}}
         onClick={async e=>{
             if(e.detail&&suppressClick.current){suppressClick.current=false;return;}
             if(!writable.current||submitting.current)return;
@@ -120,7 +123,17 @@ export function TryoutSwatch({color,onDrop,notice,writable,selectedId,groupLabel
                 if(!mounted.current||!writable.current||!hit.img.isConnected||hit.img.currentSrc!==url)return;
                 const id=regionAtPoint(map,hit.u*map.width,hit.v*map.height),region=map.regions.find(r=>r.id===id);
                 if(!region){notice("这里是背景，未提交试款");return;}
-                notice("");await onDrop(hit.id,color,material?{hex:region.color,point:{xPct:Math.round(hit.u*100),yPct:Math.round(hit.v*100)}}:region.color,at);
+                notice("");
+                if(material)setPending({id:hit.id,img:hit.img,url:hit.img.currentSrc,hex:region.color,point:{xPct:Math.round(hit.u*100),yPct:Math.round(hit.v*100)},owner:useUserStore.getState().user?.id,route:location.pathname});
+                else await onDrop(hit.id,color,region.color,at);
             }catch{if(mounted.current)notice("未能读取本次操作的结果，请查看画布任务");}
-        }} onLostPointerCapture={clear} onPointerCancel={()=>{suppressClick.current=true;clear();}}>{groupLabel?"整组拖动":children??(material?color.name:null)}</button>;
+        }} onLostPointerCapture={clear} onPointerCancel={()=>{suppressClick.current=true;clear();}}>{groupLabel?"整组拖动":children??(material?color.name:null)}</button>
+        {pending&&<FabricBoundaryDialog url={pending.url} point={pending.point} name={groupLabel??color.name} onCancel={()=>setPending(null)} onConfirm={async boundary=>{
+            setPending(null);
+            if(submitting.current||!writable.current||pending.owner!==useUserStore.getState().user?.id||pending.route!==location.pathname||!pending.img.isConnected||pending.img.currentSrc!==pending.url){notice("产品或画布已变化，本次未提交");return;}
+            submitting.current=true;
+            try{await onDrop(pending.id,color,{hex:pending.hex,point:pending.point,boundary},Date.now());}
+            catch{if(mounted.current)notice("请核对画布中本次任务的状态，不要重复提交");}
+            finally{submitting.current=false;}
+        }}/>}</>;
 }

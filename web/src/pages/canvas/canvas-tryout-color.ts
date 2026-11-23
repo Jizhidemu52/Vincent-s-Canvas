@@ -56,7 +56,7 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
             const original=nodesRef.current.find(n=>n.id===sourceId)?.metadata;
             if(!original||canvasImageSource(original)!==url||original.storageKey!==metadata.storageKey)throw new Error("原图已变更，未提交试款");
             const common={tier:"quick",canvasId:projectId,nodeId:id,requestId} as const;
-            const region={...(regionHex?{fallbackHex:regionHex}:{}),...(material&&typeof dropRegion!=="string"?{targetPoint:dropRegion.point}:{})};
+            const region={...(regionHex?{fallbackHex:regionHex}:{}),...(material&&typeof dropRegion!=="string"?{targetPoint:dropRegion.point,boundary:dropRegion.boundary}:{})};
             if(origin){const m=nodesRef.current.find(n=>n.id===origin.nodeId)?.metadata;if(m?.sourceTaskId!==origin.taskId||m?.imageTask||m.locked||m.status!=="success")throw new Error("原上身图已变化，未提交搭配");}
             const input:TryoutSubmissionInput=origin?{kind:"outfit",canvasId:projectId,nodeId:id,requestId,originTaskId:origin.taskId,originNodeId:origin.nodeId,sourceAssetId}:wear?{...common,kind:"wear",model:wear.model,productAssetIds:[sourceAssetId]}:color?{...common,sourceAssetId,kind:"color",color,...region}:{...common,sourceAssetId,kind:"material",...region,material:material!.presetId?{presetId:material!.presetId}:{assetId:material!.assetId!}};
             if(notice&&!notice.canSend())throw new Error("已取消，本次未提交");

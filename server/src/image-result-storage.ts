@@ -28,7 +28,7 @@ export class ImageResultPersistenceError extends Error {
 
 export function hasImageResultProcessing(parameters: Record<string, unknown>) {
   const archive = parameters.inputArchive as Record<string, unknown> | undefined;
-  return Boolean(quickImageResultAction(parameters)) || parameters.background === "transparent" || archive?.maskReferenceIndex !== undefined || ["png", "jpeg", "webp", "gif"].includes(String(parameters.output_format));
+  return parameters.tryoutFabricRegion!==undefined || Boolean(quickImageResultAction(parameters)) || parameters.background === "transparent" || archive?.maskReferenceIndex !== undefined || ["png", "jpeg", "webp", "gif"].includes(String(parameters.output_format));
 }
 
 /** Persist upstream bytes before any fallible local decoding, mask loading or conversion. */
@@ -61,7 +61,7 @@ export async function storeImageResult(input: StoredResultInput): Promise<AssetR
     const compression = Number(input.parameters.output_compression);
     const common = {
       version: 1, resultIndex: input.resultIndex, original,
-      maskComposited: processed.operations.includes("strict_mask_composite"),
+      maskComposited: processed.operations.includes("strict_mask_composite")||processed.operations.includes("tryout_fabric_region_composite"),
       ...(["png", "jpeg", "webp"].includes(format) ? { requestedOutputFormat: format } : {}),
       ...(["jpeg", "webp"].includes(format) && input.parameters.output_compression !== undefined && input.parameters.output_compression !== "" && Number.isInteger(compression) ? { outputCompression: compression } : {}),
       operations: processed.operations,

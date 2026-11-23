@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { providerImageMimeType } from "./provider-image-result";
 import { hasNonIdentityImageOrientation, type ImageOrientationProbe } from "./image-edit-input";
 import { quickImageRecipeVersion, quickImageResultAction } from "./quick-image-tools";
+import {fabricArea} from "../../shared/tryout-fabric-area";
+import {compositeFabricArea} from "./tryout-fabric-composite";
 
 export type ProcessedResultImage = { bytes: Uint8Array; mimeType: string };
 export type ImageResultProcessingInput = {
@@ -178,7 +180,7 @@ export async function hasImageTransparency(image: ProcessedResultImage): Promise
 /** Validate original bytes and local codecs before submitting the single paid model request. */
 export async function validateQuickImageSource(image: ProcessedResultImage | undefined, parameters: Record<string, unknown>) {
   const action = quickImageResultAction(parameters);
-  if (!action) return;
+  if (!action && parameters.tryoutFabricRegion===undefined) return;
   assertActiveQuickImageRecipe(parameters);
   if (!image) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "请上传或选择一张需要处理的图片；尚未提交生成");
   const { load, cleanup } = await createImageProcessingFiles();
@@ -227,16 +229,19 @@ export async function processImageResult({ result, parameters, editInput }: Imag
     throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_PARAMETERS", "透明背景仅支持 PNG 或 WebP，不能导出为 JPEG；原始结果未被替换");
   }
   const mask = editInput?.mask;
+  const region=parameters.tryoutFabricRegion===undefined?undefined:fabricArea.safeParse(parameters.tryoutFabricRegion);
+  if(region&&(!region.success||parameters.tryoutKind!=="material"||mask||quickAction||format&&format!=="png"))throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_PARAMETERS","局部换料的轮廓或输出参数无效，未替换原图");
   const archive = parameters.inputArchive;
   if (archive && typeof archive === "object" && "maskReferenceIndex" in archive && archive.maskReferenceIndex !== undefined && !mask) {
     throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "任务包含蒙版编辑标记，但后处理缺少独立蒙版；不能将渠道原件当作严格合成结果");
   }
-  if (!quickAction && !mask && !format && !requireTransparency) return { display: result, operations: [] };
+  if (!region && !quickAction && !mask && !format && !requireTransparency) return { display: result, operations: [] };
   const actualMimeType = providerImageMimeType(result.bytes, "");
-  if (!quickAction && !mask && !requireTransparency && compression === undefined && actualMimeType === `image/${format}`) {
+  if (!region && !quickAction && !mask && !requireTransparency && compression === undefined && actualMimeType === `image/${format}`) {
     return { display: { bytes: result.bytes, mimeType: actualMimeType }, operations: [] };
   }
   const original = editInput?.references[0];
+  if(region&&!original)throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT","局部换料缺少产品原图，不能展示未保护的渠道结果");
   if (quickAction && quickAction !== "remove-background" && !original) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "一键图片处理缺少原图；渠道原件已保留，未输出处理结果");
   if (mask && !original) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "严格蒙版合成缺少第一张编辑原图；原始生成结果未被替换");
 
@@ -270,6 +275,15 @@ export async function processImageResult({ result, parameters, editInput }: Imag
   };
   try {
     const generated = await load("generated", result, quickAction === "hd-upscale" ? MAX_HD_RESULT_PIXELS : MAX_PIXELS);
+    if(region?.success && original) {
+      const source=await load("original",original);
+      const s=source.metadata,g=generated.metadata;
+      if(Math.abs((g.width*s.height)/(g.height*s.width)-1)>0.025)throw new ImageResultProcessingError("IMAGE_RESULT_DIMENSION_MISMATCH","局部换料结果的画幅与原图不符；已保留渠道原件，不自动重出");
+      if(HIGH_BIT_DEPTH.test(s.pixelFormat)||HIGH_BIT_DEPTH.test(g.pixelFormat))throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT","局部换料仅支持 8 位图片，不降低原图精度");
+      const {result:pixels,changed}=compositeFabricArea(await decode(source.file,s),s,await decode(generated.file,g),g,region.data.vertices,region.data.useColor);
+      if(!changed)throw new ImageResultProcessingError("IMAGE_RESULT_PROCESSING_FAILED","圈选部位内未获得可见的材质变化，未标记为成功");
+      return {display:await encode(pixels,s,"png"),operations:["tryout_fabric_region_composite"]};
+    }
     if (quickAction === "remove-background") {
       // The model's full-color cutout is the result. Never derive a mask, align it
       // to the source, or replace its RGB with original pixels on any entry point.

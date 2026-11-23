@@ -196,7 +196,7 @@ async function runTask(taskId: string) {
     await assertTaskExecution(task);
     let saved=false;
     const first=providerResults[0];
-    if(config.TRYOUT_DISPLAY_BEFORE_SAVE==="true"&&task.upstream_result_document&&"kind" in task.upstream_result_document&&task.upstream_result_document.kind==="tryout-image"&&first&&"bytes" in first)
+    if(config.TRYOUT_DISPLAY_BEFORE_SAVE==="true"&&task.parameters.tryoutFabricRegion===undefined&&task.upstream_result_document&&"kind" in task.upstream_result_document&&task.upstream_result_document.kind==="tryout-image"&&first&&"bytes" in first)
       void writeTryoutPreview(task,first.bytes,()=>saved).catch(()=>console.warn(JSON.stringify({event:"tryout.preview_unavailable",taskId:task.id})));
     const resultUrls = await timing.measure("result_store", async () => {
       if (!isSeedream55) return storeResults(task, providerResults);
@@ -518,6 +518,7 @@ async function executeApiMartImage(
   const presetId=tryout&&(task.parameters.tryoutKind==="wear"||fabric)&&typeof task.parameters.tryoutPresetId==="string"?task.parameters.tryoutPresetId:undefined;
   const hot=tryout?await lookupReadyTryoutInputs(db,config,{...tryout,ownerId:task.user_id,taskId:task.id,sourceUrls:task.source_urls,presetId,fabric}):undefined;
   const sourceAssets = !fresh||hot ? [] : await loadSourceAssets(task.source_urls, portraitOwner??task.user_id, isSeedream55 ? 1 : 4, isSeedream55 ? 30 * 1024 * 1024 : undefined,presetId,fabric);
+  if(fresh&&task.parameters.tryoutFabricRegion!==undefined)await validateQuickImageSource(sourceAssets[0]??(await loadSourceAssets(task.source_urls.slice(0,1),task.user_id))[0],task.parameters);
   if (task.request_id?.startsWith("ic:") && !task.upstream_task_id && !task.upstream_submission_started_at) validateConversationTaskSources(task, sourceAssets);
   if (task.original_size_source_id && !task.upstream_task_id && !task.upstream_submission_started_at) {
     const { hashes } = task.parameters.originalSizeReplay as { hashes: string[] };
@@ -977,11 +978,13 @@ async function storeResults(
   if (task.original_size_source_id && (results.length !== 1 || !results[0] || !("bytes" in results[0]) || !["image/png","image/jpeg","image/webp"].includes(results[0].mimeType))) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT","未返回已确认的一张静态图片，无法验证原尺寸");
   const urls: string[] = [];
   for (const [index, result] of results.entries()) {
+    if(task.parameters.tryoutFabricRegion!==undefined&&(!("bytes" in result)||!["image/png","image/jpeg","image/webp"].includes(result.mimeType)))throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT","局部换料未返回可处理的单帧图片，不会展示为成功结果");
     if ("bytes" in result && ["image/png", "image/jpeg", "image/webp", "image/gif"].includes(result.mimeType)) {
       const primary = await storeImageResult({
         expectedOriginalSize: task.original_size_source_id ? String(task.parameters.size) : undefined,
         result, parameters: task.parameters, resultIndex: index,
         prepareEditInput: async () => {
+          if(task.parameters.tryoutFabricRegion!==undefined)return {references:await loadSourceAssets(task.source_urls.slice(0,1),task.user_id)};
           const archive = task.parameters.inputArchive as Record<string, unknown> | undefined;
           if (archive?.maskReferenceIndex === undefined && !task.parameters.quickImageAction) return { references: [] };
           return prepareImageEditInput(await loadSourceAssets(task.source_urls, task.user_id), task.parameters,

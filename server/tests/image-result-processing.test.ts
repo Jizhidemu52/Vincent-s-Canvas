@@ -32,6 +32,20 @@ const generated = { mimeType: "image/png", bytes: Buffer.from("iVBORw0KGgoAAAANS
 const mask = { mimeType: "image/png", bytes: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAQAAAABCAYAAAD5PA/NAAAACXBIWXMAAAAAAAAAAQCEeRdzAAAAGklEQVR4nGNkYGD4////f4bUlGTGOXPnNQAAPDIHgiSEJS4AAAAASUVORK5CYII=", "base64") };
 const editInput = { references: [original], mask };
 const expectedComposite = [10, 20, 30, 255, 77, 88, 99, 0, 90, 80, 70, 200, 100, 100, 100, 128];
+const regionParameters={tryoutKind:"material",tryoutFabricRegion:{vertices:[{x:490,y:0},{x:1000,y:0},{x:1000,y:1000},{x:490,y:1000}],useColor:true}};
+test("fabric panel uses the original canvas, preserves exterior RGBA and never adopts generated alpha",async()=>{
+  const result=await processImageResult({result:generated,parameters:regionParameters,editInput:{references:[original]}});
+  const a=rgba(original),b=rgba(result.display),g=rgba(generated);
+  expect(result.operations).toEqual(["tryout_fabric_region_composite"]);
+  expect(b.subarray(0,8)).toEqual(a.subarray(0,8));
+  expect(b.subarray(8,11)).toEqual(g.subarray(8,11));
+  expect(b[11]).toBe(a[11]);expect(b[15]).toBe(a[15]);
+});
+test("fabric panel refuses missing source, invalid boundaries and differently framed output",async()=>{
+  await expect(processImageResult({result:generated,parameters:regionParameters})).rejects.toMatchObject({code:"INVALID_IMAGE_RESULT_INPUT"});
+  await expect(processImageResult({result:generated,parameters:{...regionParameters,tryoutFabricRegion:null}})).rejects.toMatchObject({code:"INVALID_IMAGE_RESULT_PARAMETERS"});
+  await expect(processImageResult({result:generated,parameters:regionParameters,editInput:{references:[png([9,6,3,255],1,1)]}})).rejects.toMatchObject({code:"IMAGE_RESULT_DIMENSION_MISMATCH"});
+});
 
 describe("quick image local result verification", () => {
   const parameters = (action: QuickImageAction) => prepareQuickImageTask({ ...quickImageTaskTarget(action), sourceUrls: ["owned"], parameters: { quickImageAction: action } }).parameters;

@@ -58,6 +58,16 @@ for(const mode of ["acknowledged color","lost submission response","preset mater
         const apply=page.getByRole("button",{name:/换材质 · 粗针 · 1 款/});await expect(apply).toBeEnabled();expect(calls).toHaveLength(0);
         await apply.click();
     }else await drop(.5);
+    if(mode==="preset material"){
+        const dialog=page.getByRole("dialog",{name:/圈选换料部位/}),confirm=dialog.getByRole("button",{name:"确认局部换料"});
+        await expect(confirm).toBeDisabled();
+        await dialog.getByRole("button",{name:"取消"}).click();expect(calls).toHaveLength(0);
+        await drop(.5);
+        const frame=(await dialog.getByRole("img",{name:"换料部位轮廓"}).boundingBox())!;
+        for(const [x,y] of [[.31,.24],[.67,.24],[.66,.81],[.34,.81]]) await page.mouse.click(frame.x+frame.width*x,frame.y+frame.height*y);
+        await expect(confirm).toBeEnabled();expect(calls).toHaveLength(0);
+        await page.screenshot({path:info.outputPath("confirmed-area-before-submit.png")});await confirm.click();
+    }
     await expect.poll(()=>calls.length).toBe(1);
     if(inspect){
         expect(observations).toBeGreaterThan(0);await expect(page.getByRole("button",{name:"修改产品标签"})).toHaveCount(0);

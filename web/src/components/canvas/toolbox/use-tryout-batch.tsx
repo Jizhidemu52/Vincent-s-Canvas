@@ -22,11 +22,11 @@ export function useTryoutBatch(drop:DropColor,writable:{current:boolean}){
         finally{preparing.current=false;}
     };
     const apply:DropColor=async(id,chip,region,at)=>{
-        if(products.length>1&&products.includes(id))await run(products.map(nodeId=>({nodeId,chip,region:nodeId===id?region:""})));
+        if(typeof region==="string"&&products.length>1&&products.includes(id))await run(products.map(nodeId=>({nodeId,chip,region:nodeId===id?region:""})));
         else await drop(id,chip,region,at);
     };
     const group=(id:string,chips:TryoutChip[],region:DropRegion)=>{
-        const targets=products.includes(id)?products:[id];
+        const targets=typeof region==="string"&&products.includes(id)?products:[id];
         return run(targets.flatMap(nodeId=>chips.map(chip=>({nodeId,chip,region:nodeId===id?region:""}))));
     };
     return {products,apply,group};
