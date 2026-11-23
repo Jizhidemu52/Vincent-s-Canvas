@@ -71,7 +71,7 @@ export function CanvasInlineImageCompare({ node, nodes, scale, showImageInfo, vi
     }, [pairKey, requestedPair]);
 
     if (node.type !== CanvasNodeType.Image || node.metadata?.status === "loading" || node.metadata?.status === "error" || !(node.metadata?.content || node.metadata?.storageKey) || (!source && !sources.length)) return null;
-    const placeInside = viewport && viewportHeight ? viewport.y + (node.position.y + node.height) * scale + 160 > viewportHeight - 90 : false;
+    const placeInside = footerHeight === 0 && viewport && viewportHeight && viewport.y + (node.position.y + node.height) * scale + 160 > viewportHeight - 90;
     const changeFromPointer = (event: PointerEvent) => {
         if (box.current) setPercent(inlineComparePercentFromClientX(event.clientX, box.current.getBoundingClientRect()));
     };

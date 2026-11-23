@@ -1,7 +1,8 @@
 import {readFileSync} from "node:fs";
 import {expect,test} from "./fixtures";
 
-test("改款结果仅在试款台打开时于图片和对比控件之间显示产品标签",async({page,api},info)=>{
+for (const height of [1000, 760]) test(`改款结果仅在试款台打开时于图片和对比控件之间显示产品标签，窗口高度 ${height}`,async({page,api},info)=>{
+    await page.setViewportSize({ width: 1440, height });
     const id="tryout-footer-compare",now=new Date().toISOString(),before="33333333-3333-4333-8333-333333333333",after="44444444-4444-4444-8444-444444444444";
     const url=(id:string)=>"/api/assets/"+id+"/content";
     api.productCardsEnabled=true;
