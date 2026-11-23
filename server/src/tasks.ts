@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { visibleHistory } from "./account-history-visibility";
 import type { PoolClient } from "pg";
 import { IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX } from "../../shared/generation-error";
 import { singleImageTaskParameters } from "./image-task-policy";
@@ -249,6 +250,11 @@ export async function enqueueTaskInTransaction(client: PoolClient, prepared: Pre
   if (existing) {
     if (input.originalSizeSourceId && !(await client.query("SELECT 1 FROM tasks WHERE id=$1 AND original_size_source_id=$2",[existing.task.id,input.originalSizeSourceId])).rows.length) throw new BillingError("DUPLICATE_REQUEST","请求编号与原任务不匹配");
     return input.originalSizeSourceId ? {...existing,shouldQueue:false} : existing;
+  }
+  if (input.operationType === "video_generation" && input.requestId.startsWith("chat-video:")) {
+    const hidden = await client.query(`SELECT 1 FROM image_conversation_turns v JOIN image_conversations c ON c.id=v.conversation_id
+      WHERE v.owner_user_id=$1 AND v.id::text=$2 AND NOT (${visibleHistory("conversation","c")})`,[input.userId,input.requestId.slice("chat-video:".length)]);
+    if (hidden.rows.length) throw new BillingError("TASK_PREPARATION_STALE","该会话已从历史移除，未提交视频");
   }
   if (input.originalSizeSourceId) {
     const source = await client.query("SELECT repair_error_code FROM tasks WHERE id=$1 AND user_id=$2 AND status='paused' AND paused_kind='needs_review' FOR UPDATE",[input.originalSizeSourceId,input.userId]);

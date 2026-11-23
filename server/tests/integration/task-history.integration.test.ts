@@ -6,6 +6,7 @@ import { isQuickImageAction, quickImageTaskTarget } from "../../../shared/quick-
 import type { Cache } from "../../src/db";
 import { createTasksRouter } from "../../src/routes/tasks";
 import { taskHistoryBoards } from "../../src/task-history";
+import { createImageConversation, getImageConversation, listImageConversations, submitImageConversationTurn } from "../../src/image-conversation-service";
 import { createIsolatedPostgres } from "../helpers/isolated-postgres";
 
 const sqlSuite = process.env.PGLITE_RUNTIME_PATH ? describe : describe.skip;
@@ -175,5 +176,33 @@ sqlSuite("owner-bound, read-only board history across browsers", () => {
       expect(sql).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|providers|encrypted_credentials|credit_reservations|wallets)\b/i);
     }
     expect((await fixture.db.query("SELECT row_to_json(t) AS row FROM tasks t ORDER BY id")).rows).toEqual(before.rows);
+  });
+  test("removal is owner-scoped, atomic, retry-safe and leaves tasks and assets available", async()=>{
+    const ok = await seedTask({ toolKey:"video",operationType:"video_generation",status:"success" });
+    const pending = await seedTask({toolKey:"video",operationType:"video_generation",status:"paused"});
+    const partial=await seedTask({toolKey:"layer-studio",status:"failed"});
+    await fixture.db.query(`UPDATE tasks SET result_document='{"status":"partial"}'::jsonb WHERE id=$1`,[partial]);
+    const conversation = (await createImageConversation(fixture.db,owner,{entrypoint:"standalone",clientRequestId:randomUUID()})).snapshot;
+    const turn = {clientRequestId:randomUUID(),expectedStateRevision:0,text:"测试讨论"};
+    const entry = (kind:string,id:string)=>({kind,id});
+    const remove = (entries:ReturnType<typeof entry>[],user=owner)=>fetch(base+"/history/remove",{method:"POST",headers:{"content-type":"application/json","x-test-owner":user,"x-canvas-owner-id":user},body:JSON.stringify({entries})});
+    const done=entry("task",ok), chat=entry("conversation",conversation.id);
+    const tasks=async()=>(await (await get("video")).json()).tasks.map((t:{id:string})=>t.id);
+    const archived=async()=>(await fixture.db.query("SELECT count(*)::int n FROM audit_logs WHERE action='account.history_removed' AND actor_user_id=$1",[owner])).rows[0].n;
+    expect((await remove([done,entry("task",pending)])).status).toBe(409);
+    expect((await remove([done,entry("task",partial)])).status).toBe(409);
+    expect((await remove([done,entry("conversation",randomUUID())])).status).toBe(404);
+    expect((await remove([done],other)).status).toBe(404);
+    expect(await archived()).toBe(0);
+    expect(await tasks()).toContain(ok);
+    const original=(await fixture.db.query("SELECT to_jsonb(t) AS data FROM tasks t WHERE id=$1",[ok])).rows;
+    expect((await remove([done,chat])).status).toBe(200);
+    expect((await remove([done,chat])).status).toBe(200);
+    expect(await archived()).toBe(2);
+    expect(await tasks()).not.toContain(ok);expect(await tasks()).toContain(pending);
+    expect((await listImageConversations(fixture.db,owner,{},"test-key")).items.map(c=>c.id)).not.toContain(chat.id);
+    await expect(getImageConversation(fixture.db,owner,chat.id)).rejects.toMatchObject({status:410});
+    await expect(submitImageConversationTurn(fixture.db,owner,chat.id,{...turn,clientRequestId:randomUUID()})).rejects.toMatchObject({status:410});
+    expect((await fixture.db.query("SELECT to_jsonb(t) AS data FROM tasks t WHERE id=$1",[ok])).rows).toEqual(original);
   });
 });

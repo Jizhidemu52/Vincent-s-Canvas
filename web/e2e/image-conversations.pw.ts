@@ -124,6 +124,16 @@ class ConversationFixture {
     }
 }
 
+test("the server conversation sidebar removes an existing conversation without creating or resending",async({page,api},info)=>{
+    const fixture=new ConversationFixture();fixture.exists=true;await fixture.attach(page);let writes=0;
+    await page.route("**/api/tasks/history/remove",route=>{const {entries}=route.request().postDataJSON();expect(entries).toEqual([{kind:"conversation",id:ids.conversation}]);writes++;fixture.exists=false;return route.fulfill({json:{removed:entries}});});
+    await page.goto("/chat");const list=page.getByRole("navigation",{name:"会话列表"});const row=list.getByRole("group",{name:/针织衫改款/});
+    await row.getByRole("button",{name:/针织衫改款/}).click();await row.getByRole("button",{name:"更多操作"}).click();
+    await row.getByRole("button",{name:"从我的历史移除"}).click();const dialog=page.getByRole("dialog",{name:"从我的历史移除"});
+    await expect(dialog).toBeVisible();await page.screenshot({path:info.outputPath("conversation-remove.png")});await dialog.getByRole("button",{name:"确认移除"}).click();
+    await expect(row).toHaveCount(0);await page.reload();await expect(list).toBeVisible();await expect(row).toHaveCount(0);
+    expect(writes).toBe(1);expect([...fixture.creates,...fixture.submissions,...api.submissions]).toHaveLength(0);
+});
 test("changing the image model only saves a preference until the designer sends a turn", async ({ page, api }, info) => {
     const fixture = new ConversationFixture();
     fixture.exists = true;

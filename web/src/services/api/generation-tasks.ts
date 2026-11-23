@@ -552,8 +552,8 @@ export function getImageGenerationModels() {
     return request<{ models: ImageGenerationModel[] }>("/api/models").then(({ models }) => selectImageGenerationModels(models));
 }
 
-export async function listQueuedTasks(signal?: AbortSignal, operationType?: string) {
-    const query = new URLSearchParams({ limit: "60", ...(operationType ? { operationType } : {}) });
+export async function listQueuedTasks(signal?: AbortSignal, operationType?: string, view?: "history") {
+    const query = new URLSearchParams({ limit: "60", ...(operationType ? { operationType } : {}), ...(view ? {view} : {}) });
     const result = await request<{ tasks: QueuedTask[] }>(`/api/tasks?${query}`, { signal });
     return result.tasks;
 }

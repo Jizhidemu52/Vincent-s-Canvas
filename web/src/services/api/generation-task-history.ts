@@ -2,12 +2,23 @@ import { useUserStore } from "@/stores/use-user-store";
 import { workspaceOwnerHeaders } from "./workspace-owner";
 import type { QueuedTask } from "./generation-tasks";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { historyEntryKey, type HistoryEntry } from "../../../../shared/history-removal";
 
 export type GenerationHistoryTask = QueuedTask & {
     userId: string; toolKey?: string; modelConfigId?: string; modelId?: string; modelName?: string;
     sourceUrls: string[]; parameters: Record<string, unknown>;
 };
 export type GenerationHistoryPage = { tasks: GenerationHistoryTask[]; nextCursor: string | null; hasMore: boolean };
+
+export async function removeHistoryEntries(entries: HistoryEntry[], ownerId: string, signal?: AbortSignal) {
+    assertHistoryOwner(ownerId);
+    const response = await fetch("/api/tasks/history/remove", { method:"POST", credentials:"include", redirect:"error", cache:"no-store", signal,
+        headers:{...workspaceOwnerHeaders(), "X-Canvas-Owner-Id": ownerId, "Content-Type":"application/json"}, body:JSON.stringify({entries}) });
+    assertHistoryOwner(ownerId); signal?.throwIfAborted();
+    if (!response.ok) throw new Error(response.status === 409 ? "仍有任务正在运行或待核查，本次未移除任何记录" : response.status === 404 ? "记录不存在或不属于当前账号，本次未移除" : "未能确认移除结果，请刷新历史核对");
+    const receipt = await response.json(); assertHistoryOwner(ownerId); signal?.throwIfAborted();
+    if (!Array.isArray(receipt.removed) || receipt.removed.length!==entries.length || !entries.every((item,i)=>historyEntryKey(item)===historyEntryKey(receipt.removed[i]))) throw new Error("移除回执不完整，请刷新历史核对");
+}
 
 export function assertHistoryOwner(ownerId: string) {
     const { user, status } = useUserStore.getState();

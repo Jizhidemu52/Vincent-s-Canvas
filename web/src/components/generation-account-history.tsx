@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { RemovableHistoryList } from "./removable-history-list";
+import { historyTaskRemovable } from "../../../shared/history-removal";
 import { Button, Modal, Tooltip } from "antd";
 import { Check, Copy, Download, History, LoaderCircle, RefreshCw } from "lucide-react";
 import { useUserStore } from "@/stores/use-user-store";
@@ -85,7 +87,7 @@ function LocalProcessingDetail({ record, ownerId }: { record: LocalProcessingRec
 
 type HistorySelection = { kind: "task"; task: GenerationHistoryTask } | { kind: "local"; record: LocalProcessingRecord };
 
-function AccountHistoryList({ board, ownerId, active }: { board: string; ownerId: string; active: boolean }) {
+function AccountHistoryList({ board, ownerId, active, onChange }: { board: string; ownerId: string; active: boolean; onChange?:()=>void }) {
     const t = useUiText();
     const display = useDisplayText();
     const [tasks, setTasks] = useState<GenerationHistoryTask[]>([]);
@@ -126,9 +128,13 @@ function AccountHistoryList({ board, ownerId, active }: { board: string; ownerId
     return <section className="mb-6 space-y-3" aria-label={t("账号云端历史")} data-testid="account-history">
         <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="flex items-center gap-2 text-base font-semibold"><History size={16} />{t("账号云端历史")}</h2><Tooltip title={t(loading ? "正在读取账号历史" : "重新读取本账号的已提交记录")}><Button size="small" icon={<RefreshCw size={14} />} disabled={loading} onClick={() => void load()}>{t("刷新记录")}</Button></Tooltip></div>
         <p className="text-sm leading-relaxed text-muted-foreground">{t("本账号在此板块提交的任务与已归档的处理成果，换浏览器或电脑仍可查看。原浏览器中的旧记录继续保留，不会合并删除或覆盖。")}</p>
-        {entries.map(entry => { const title = entry.kind === "task" ? titleOf(entry.task) : entry.record.prompt; return <button key={entry.id} type="button" onClick={() => setSelected(entry)} className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary" aria-label={t("查看云端记录：{title}", { title: display(t(title)).slice(0, 80) })}>
+        <RemovableHistoryList ownerId={ownerId} disabled={loading} onRemoved={async items=>{
+            const removed=new Set(items.map(r=>r.kind+":"+r.id));
+            setTasks(old=>old.filter(r=>!removed.has("task:"+r.id)));setRecords(old=>old.filter(r=>!removed.has("local:"+r.id)));
+            setSelected(null);onChange?.();await load();
+        }} rows={entries.map(entry => { const title = entry.kind === "task" ? titleOf(entry.task) : entry.record.prompt; return {kind:entry.kind,id:entry.kind==="task"?entry.task.id:entry.record.id,title:display(t(title)).slice(0,80),disabled:entry.kind==="task"&&!historyTaskRemovable(entry.task.status,entry.task.resultDocument?.status),content:<button type="button" onClick={() => setSelected(entry)} className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary" aria-label={t("查看云端记录：{title}", { title: display(t(title)).slice(0, 80) })}>
             <History size={18} className="shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{display(t(title))}</span><span className="mt-1 block text-xs text-muted-foreground">{formatBeijingDateTime(entry.date)} · {entry.kind === "task" ? <>{t(statusLabels[entry.task.status] || entry.task.status)} · {entry.task.resultUrls?.length || 0}{t(" 份结果")}</> : t(entry.record.operation === "recolor" ? "精确换色 · 最终成果已归档" : "选区合成 · 最终成果已归档")}</span></span><span className="shrink-0 text-xs text-primary">{t("查看")}</span>
-        </button>; })}
+        </button>}; })}/>
         {loading && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle size={16} className="animate-spin" />{t("正在读取账号历史…")}</p>}
         {error && <div role="alert" className="space-y-2 text-sm text-destructive"><p><DisplayText text={t(error)} /></p><Button size="small" onClick={() => void load(lastRequestedCursor.current)}>{t("重试读取历史")}</Button></div>}
         {loaded && !entries.length && !error && <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">{t("此账号在本板块还没有可归类的云端任务或处理成果。仅存本机的旧记录仍在原浏览器保留。")}</p>}
@@ -137,9 +143,9 @@ function AccountHistoryList({ board, ownerId, active }: { board: string; ownerId
     </section>;
 }
 
-export function GenerationAccountHistory({ board, active = true }: { board: string; active?: boolean }) {
+export function GenerationAccountHistory({ board, active = true, onChange }: { board: string; active?: boolean; onChange?:()=>void }) {
     const ownerId = useUserStore(state => state.user?.id);
     const status = useUserStore(state => state.status);
     const pane = useWorkbenchTask();
-    return ownerId && (!deploymentFeatures.authenticationEnabled || status === "authenticated") ? <AccountHistoryList key={`${ownerId}:${board}`} board={board} ownerId={ownerId} active={active && pane.active} /> : null;
+    return ownerId && (!deploymentFeatures.authenticationEnabled || status === "authenticated") ? <AccountHistoryList key={`${ownerId}:${board}`} board={board} ownerId={ownerId} active={active && pane.active} onChange={onChange} /> : null;
 }

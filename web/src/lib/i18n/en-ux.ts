@@ -1,5 +1,17 @@
 /** Employee-facing interaction copy. User content and protocol identifiers are not translation keys. */
 export default {
+    "从我的历史移除": "Remove from my history",
+    "从本机历史移除": "Remove from this browser’s history",
+    "管理本机历史": "Manage browser history",
+    "仅从此浏览器的本机列表移除；云端历史、已保存的素材和画布作品不受影响。": "This removes the entry from this browser only. Cloud history, saved assets and canvas work are unchanged.",
+    "移除所选": "Remove selected",
+    "确认移除": "Confirm removal",
+    "正在移除…": "Removing…",
+    "运行中或待核查，暂不能移除": "Unavailable while running or awaiting verification",
+    "只移除当前账号的云端历史，其他设备同步。已保存的素材、画布作品和计费记录不受影响。": "This removes the entry from your account history on all devices. Saved assets, canvas work and billing records are unchanged.",
+    "这段会话已从你的历史移除": "This conversation has been removed from your history",
+    "仍有任务正在运行或待核查，本次未移除任何记录": "A task is running or awaiting verification. No entries were removed.",
+    "未能确认移除结果，请刷新历史核对": "Removal could not be confirmed. Refresh your history to check.",
     "图片已生成，但本地图片缓存保存失败：{value1}": "The image was generated, but its local image cache could not be saved: {value1}",
     "编辑默认参考底图画幅；特殊尺寸由模型自适应，不保证返回原像素尺寸。下方尺寸用于新创作。": "Edits follow the source framing by default. The model adapts unusual dimensions; the original pixel dimensions are not guaranteed. The size below applies to new creations.",
     "文本文件必须使用有效的 UTF-8 编码，请转换编码后上传": "Text files must use valid UTF-8 encoding. Convert the encoding before uploading.",

@@ -336,6 +336,10 @@ export function useImageConversation(ownerId: string, options: ImageConversation
                     );
                 } catch (failure) {
                     if (signal.aborted) break;
+                    if (failure instanceof ImageConversationApiError && failure.status === 410 && failure.code === "NOT_FOUND") {
+                        if(idRef.current===id){await select(null);setNotice("这段会话已从你的历史移除");}
+                        await refreshList(undefined,lifetime.current?.signal);return;
+                    }
                     if (failure instanceof ImageConversationApiError && [401, 403, 404].includes(failure.status))
                         throw failure;
                     if (failure instanceof ImageConversationApiError && failure.code === "EVENT_CURSOR_EXPIRED") {
@@ -636,6 +640,13 @@ export function useImageConversation(ownerId: string, options: ImageConversation
                 (options.entrypoint !== "canvas" || item.canvasExternalId === options.canvasExternalId),
         ),
         listCursor,
+        historyLocked: (conversationId:string)=>Boolean(local.receipts[conversationId] || (id===conversationId && view?.snapshot.pendingTurn)),
+        historyRemoved: async (ids:string[])=>{
+            if (!lifetime.current || lifetime.current.signal.aborted) return;
+            setConversations(items=>items.filter(item=>!ids.includes(item.id)));
+            if(idRef.current&&ids.includes(idRef.current)) await select(null);
+            await refreshList(undefined,lifetime.current.signal).catch(failure=>{if(!lifetime.current?.signal.aborted)setError(problem(failure));});
+        },
         id,
         draft,
         receipt,

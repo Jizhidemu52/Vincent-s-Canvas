@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Select, Tooltip } from "antd";
 import { ChevronDown, ChevronUp, ImagePlus, Layers3, LoaderCircle, RefreshCw, Sparkles, X } from "lucide-react";
 import { WorkbenchTasks, useWorkbenchTask } from "@/components/workbench-tasks";
+import { RemovableHistoryList } from "@/components/removable-history-list";
+import { hideStudioJobs, studioJobRemovable } from "./page-state";
 import { useUserStore } from "@/stores/use-user-store";
 import { useModuleEnabled } from "@/stores/use-module-store";
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
@@ -52,7 +54,8 @@ function LayerStudioPane({ ownerId }: { ownerId: string }) {
     const form = state.form;
     const enabled = useModuleEnabled("layer-studio");
     const unresolved = state.jobs.some(unresolvedLayerStudioJob);
-    const selected = state.jobs.find(job => job.requestId === state.selectedRequestId) || state.jobs[0];
+    const visibleJobs=state.jobs.filter(job=>!state.hiddenHistoryIds?.includes(job.requestId));
+    const selected = visibleJobs.find(job => job.requestId === state.selectedRequestId) || visibleJobs[0];
     const [uploading, setUploading] = useState(false);
     const uploadingRef = useRef(false);
     const [inputError, setInputError] = useState("");
@@ -148,7 +151,12 @@ function LayerStudioPane({ ownerId }: { ownerId: string }) {
                     <button type="button" role="tab" aria-selected={accountHistoryOpen} className={`${smallButton} ${accountHistoryOpen ? "border-b-2 border-foreground font-semibold" : "text-muted-foreground"}`} onClick={() => setAccountHistoryOpen(true)}>{t("历史记录")}</button>
                 </div>
                 <div hidden={!accountHistoryOpen}><GenerationAccountHistory board="layer-studio" active={accountHistoryOpen} />
-                    {state.jobs.length > 0 && <Field label={t("本机历史记录")}><Select aria-label={t("本机历史记录")} value={selected?.requestId || undefined} onChange={selectedRequestId => { void update(previous => ({ ...previous, selectedRequestId })).then(() => setAccountHistoryOpen(false)).catch(() => {}); }} options={state.jobs.map(job => ({ value: job.requestId, label: `${new Date(job.createdAt).toLocaleString(locale === "en-US" ? "en-US" : undefined)} · ${t(jobLabel(job))}` }))} /></Field>}
+                    {visibleJobs.length>0&&<section aria-label={t("本机历史记录")}>
+                        <Field label={t("本机历史记录")}><Select aria-label={t("本机历史记录")} value={selected?.requestId} onChange={selectedRequestId=>void update(previous=>({...previous,selectedRequestId})).then(()=>setAccountHistoryOpen(false)).catch(()=>{})} options={visibleJobs.map(job=>({value:job.requestId,label:new Date(job.createdAt).toLocaleString(locale==="en-US"?"en-US":undefined)+" · "+t(jobLabel(job))}))}/></Field>
+                        <details className="mt-2"><summary className="cursor-pointer text-xs">{t("管理本机历史")}</summary>
+                        <RemovableHistoryList localOnly ownerId={ownerId} disabled={busy} onRemoved={async entries=>{assertCurrent();await update(previous=>hideStudioJobs(previous,entries.map(e=>e.id)));}}
+                          rows={visibleJobs.map(job=>{const title=new Date(job.createdAt).toLocaleString(locale==="en-US"?"en-US":undefined)+" · "+t(jobLabel(job));return {kind:"local",id:job.requestId,title,disabled:!studioJobRemovable(job),content:<button type="button" className={smallButton} onClick={()=>void update(previous=>({...previous,selectedRequestId:job.requestId})).then(()=>setAccountHistoryOpen(false)).catch(()=>{})}>{title}</button>};})}/>
+                        </details></section>}
                 </div>
                 <div hidden={accountHistoryOpen} className="space-y-3">
                 {error && <div role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm text-destructive">{layerStudioUiMessage(error)}<button type="button" className={smallButton} onClick={() => void workspace.retrySave().catch(() => {})}>{t("重试保存")}</button></div>}

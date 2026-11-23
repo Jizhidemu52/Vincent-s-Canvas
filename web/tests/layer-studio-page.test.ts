@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { hideStudioJobs } from "../src/pages/layer-studio/page-state";
 import { applyLayerStudioSnapshot, initialLayerStudioForm, layerStudioParameters, layerStudioSubmission, newLayerStudioWorkspace, readLayerStudioWorkspace, unresolvedLayerStudioJob, validateLayerStudioForm, type LayerStudioJob } from "../src/pages/layer-studio/page-state";
 import { submitLayerStudioOnce } from "../src/pages/layer-studio/page-request";
 import { LayerStudioApiError } from "../src/services/api/layer-studio";
@@ -13,6 +14,13 @@ function job(): LayerStudioJob {
 const accepted = () => ({ id: "task-one", requestId: "request-12345678", userId: "owner-a", status: "processing", resultUrls: [], failureReason: null });
 
 describe("layer studio page contract", () => {
+    test("local history removal preserves the job, edits and source and refuses unresolved selections",()=>{
+        const state=newLayerStudioWorkspace("owner-a","workspace-a"),complete={...job(),phase:"complete" as const},pending={...job(),requestId:"pending",phase:"uncertain" as const};
+        state.jobs=[complete,pending];state.selectedRequestId=complete.requestId;
+        expect(()=>hideStudioJobs(state,[complete.requestId,pending.requestId])).toThrow();
+        const next=readLayerStudioWorkspace(hideStudioJobs(state,[complete.requestId]),state.ownerId,state.workspaceId);
+        expect(next.hiddenHistoryIds).toEqual([complete.requestId]);expect(next.jobs).toEqual(state.jobs);expect(next.selectedRequestId).toBe(pending.requestId);
+    });
     test("decomposition default 30 includes base; no background and n is always 1", () => {
         const parameters = layerStudioParameters({ ...initialLayerStudioForm(), background: "transparent", format: "jpeg" });
         expect(parameters).toEqual({ n: 1, size: "auto", layer_decomposition: true, layer_decomposition_options: { max_images: 30, text_recognition: false }, output_format: "jpeg", watermark: false, nsfw_check: true, optimize_prompt_options: { mode: "standard" } });

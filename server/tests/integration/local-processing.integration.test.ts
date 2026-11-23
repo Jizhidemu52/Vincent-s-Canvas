@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { removeAccountHistory } from "../../src/account-history-removal";
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import express from "express";
@@ -245,6 +246,22 @@ integration("selection composites require the owner's successful matching task a
     expect(await fixture.protectedRows()).toEqual(protectedBefore);
   } finally { await fixture.close(); }
 }, 30_000);
+
+integration("removing a local processing history entry preserves the actual archive and idempotent operation lookup", async()=>{
+  const fixture=await harness();
+  try {
+    const source=await fixture.upload(image("owned-source")), operation=randomUUID(), output=await fixture.upload(image("owned-output"),operation);
+    expect((await fixture.archive(recolor(output,[source],operation))).status).toBe(201);
+    const read=async(query="")=>(await (await fixture.list(query)).json()).records;
+    const [record]=await read();expect(record).toBeDefined();
+    const actor={id:fixture.owner,role:"designer" as const,departmentId:null}, removal={entries:[{kind:"local",id:record.id}]};
+    await expect(removeAccountHistory(fixture.db,{...actor,id:fixture.other},removal)).rejects.toMatchObject({status:404});
+    await removeAccountHistory(fixture.db,actor,removal);
+    expect(await read()).toEqual([]);
+    expect((await read("&clientOperationId="+operation))[0].outputAssetId).toBe(record.outputAssetId);
+    expect((await fixture.request("/"+record.outputAssetId+"/content")).status).toBe(200);
+  } finally { await fixture.close(); }
+});
 
 integration("stable history pages retain every same-timestamp operation and ignore untrusted or other-board records", async () => {
   const fixture = await harness();

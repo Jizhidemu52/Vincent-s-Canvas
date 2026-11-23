@@ -7,7 +7,13 @@ import type { LayerStudioSubmission } from "@/services/api/layer-studio";
 export type LayerStudioForm = { mode: LayerStudioMode; prompt: string; sizeMode: "tier" | "ratio" | "exact"; tier: "auto" | "1K" | "1.5K" | "2K"; ratio: string; width: number; height: number; background: "auto" | "opaque" | "transparent"; format: "png" | "jpeg"; maxImages: number; ocr: boolean; watermark: boolean; contentCheck: boolean };
 export type LayerStudioReference = { id: string; name: string; mimeType: string; bytes: number; sha256: string; width?: number; height?: number; previewable: boolean };
 export type LayerStudioJob = { requestId: string; ownerId: string; workspaceId: string; createdAt: number; submission: LayerStudioSubmission; phase: "submitting" | "pending" | "uncertain" | "complete" | "failed"; taskId?: string; taskStatus?: string; upstreamAccepted?: boolean; document?: LayerStudioResultDocument; edit?: LayerStudioEditDocument; notice?: string };
-export type LayerStudioWorkspace = { version: 1; ownerId: string; workspaceId: string; form: LayerStudioForm; references: LayerStudioReference[]; jobs: LayerStudioJob[]; selectedRequestId?: string };
+export type LayerStudioWorkspace = { version: 1; ownerId: string; workspaceId: string; form: LayerStudioForm; references: LayerStudioReference[]; jobs: LayerStudioJob[]; selectedRequestId?: string; hiddenHistoryIds?:string[] };
+export const studioJobRemovable=(job:LayerStudioJob)=>!unresolvedLayerStudioJob(job)&&job.taskStatus!=="paused"&&job.document?.status!=="partial"&&job.document?.status!=="persisting";
+export function hideStudioJobs(state:LayerStudioWorkspace,ids:string[]) {
+    if(!ids.every(id=>state.jobs.some(job=>job.requestId===id&&studioJobRemovable(job)))) throw new Error("仍有任务正在运行或待核查，本次未移除任何记录");
+    const hidden=new Set([...(state.hiddenHistoryIds??[]),...ids]);
+    return {...state,hiddenHistoryIds:[...hidden],selectedRequestId:state.selectedRequestId&&!hidden.has(state.selectedRequestId)?state.selectedRequestId:state.jobs.find(job=>!hidden.has(job.requestId))?.requestId};
+}
 export const initialLayerStudioForm = (): LayerStudioForm => ({ mode: "decompose", prompt: "", sizeMode: "tier", tier: "auto", ratio: "1:1", width: 1536, height: 1024, background: "auto", format: "png", maxImages: 30, ocr: false, watermark: false, contentCheck: true });
 export const newLayerStudioWorkspace = (ownerId: string, workspaceId: string): LayerStudioWorkspace => ({ version: 1, ownerId, workspaceId, form: initialLayerStudioForm(), references: [], jobs: [] });
 

@@ -22,6 +22,27 @@ async function imageHistory(page: Page, path = "/image") {
     await expect(page.getByRole("region", { name: "账号云端历史" })).toBeVisible();
 }
 
+test("history removal cancels without writing, batches terminal rows and survives reload", async ({page,api},info)=>{
+    const tasks=[task("00000000-0000-4000-8000-000000000001","验收已完成一"),task("00000000-0000-4000-8000-000000000002","验收已完成二"),{...task("00000000-0000-4000-8000-000000000003","验收待核查"),status:"paused"}];
+    await cloud(page.context(),tasks);let writes=0;
+    await page.route("**/api/tasks/history/remove",route=>{
+        expect(route.request().headers()["x-canvas-owner-id"]).toBe(owner);const {entries}=route.request().postDataJSON();
+        expect(entries).toEqual(tasks.slice(0,2).map(({id})=>({id,kind:"task"})));writes++;tasks.splice(0,2);return route.fulfill({json:{removed:entries}});
+    });
+    await imageHistory(page);const list=page.getByRole("region",{name:"账号云端历史"});
+    await list.getByRole("group",{name:"验收已完成一"}).getByRole("button",{name:"更多操作"}).click();
+    await list.getByRole("button",{name:"从我的历史移除"}).click();const dialog=page.getByRole("dialog",{name:"从我的历史移除"});
+    await dialog.getByRole("button",{name:"取消"}).click();expect(writes).toBe(0);
+    await list.getByRole("button",{name:"批量管理"}).click();
+    await expect(list.getByRole("checkbox",{name:"选择记录：验收待核查"})).toBeDisabled();
+    await list.getByRole("checkbox",{name:"选择记录：验收已完成一"}).check();await list.getByRole("checkbox",{name:"选择记录：验收已完成二"}).check();
+    await list.getByRole("button",{name:/移除所选/}).click();await expect(dialog).toBeVisible();
+    await page.screenshot({path:info.outputPath("history-batch-confirm.png")});
+    await dialog.getByRole("button",{name:"确认移除"}).click();await expect(list.getByRole("button",{name:/查看云端记录/})).toHaveCount(1);
+    await page.reload();await imageHistory(page);await expect(list.getByRole("button",{name:"查看云端记录：验收待核查"})).toBeVisible();
+    await expect(list.getByRole("button",{name:/查看云端记录/})).toHaveCount(1);expect(writes).toBe(1);expect(api.submissions).toHaveLength(0);
+});
+
 test("fresh browser contexts show the same account originals, paginate and keep current draft untouched", async ({ browser, page, api }, info) => {
     const tasks = Array.from({ length: 31 }, (_, index) => task(`cloud-${index}`, index === 0 ? "跨浏览器编辑记录：保留花边宽度与参考原图" : `此前生成-${index}`));
     const reads: Array<{ board: string | null; cursor: string | null }> = [];

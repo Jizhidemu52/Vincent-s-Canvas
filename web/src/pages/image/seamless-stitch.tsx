@@ -120,7 +120,7 @@ export function SeamlessStitchWorkspace() {
             const ownerId = useUserStore.getState().user?.id;
             const records: StitchTaskRecord[] = [];
             await stitchTaskStore.iterate<StitchTaskRecord, void>(record => { records.push(record); });
-            const tasks = await listQueuedTasks(undefined, "seamless_stitch");
+            const tasks = await listQueuedTasks(undefined, "seamless_stitch", "history");
             // Recover only previously persisted requests; a missing response is never a new POST.
             const owned = records.filter(record => matchesWorkbenchTask(record, workspaceId));
             for (const record of owned.filter(record => record.pending)) {
@@ -544,7 +544,7 @@ export function SeamlessStitchWorkspace() {
                     )}
                     </div>
                 {resultView === "history" ? <aside className="stitch-history-panel">
-                    <GenerationAccountHistory board="seamless-stitch" />
+                    <GenerationAccountHistory board="seamless-stitch" onChange={()=>void refreshHistory()} />
                     <div className="mb-4 flex items-center justify-between gap-3">
                         <div>
                             <h2 className="text-base font-semibold">{uiText("历史出图")}</h2>

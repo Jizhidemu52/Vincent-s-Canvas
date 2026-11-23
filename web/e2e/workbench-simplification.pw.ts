@@ -175,6 +175,11 @@ test("Doubao partial 1-of-2 results show one save warning, block export and reco
     await tabs.getByRole("tab", { name: "历史记录", exact: true }).click();
     await expect(results.getByRole("region", { name: "账号云端历史", exact: true })).toBeVisible();
     await expect(results.getByRole("combobox", { name: "本机历史记录", exact: true })).toBeVisible();
+    const localHistory=results.getByRole("region",{name:"本机历史记录",exact:true});
+    await localHistory.getByText("管理本机历史",{exact:true}).click();
+    await localHistory.getByRole("button",{name:"更多操作"}).click();
+    await expect(localHistory.getByRole("button",{name:"从本机历史移除"})).toBeDisabled();
+    await localHistory.getByText("管理本机历史",{exact:true}).click();
     await expect(warning).not.toBeVisible();
     expect(fixture.historyBoards).toEqual(["layer-studio"]);
     await tabs.getByRole("tab", { name: "本次结果", exact: true }).click();

@@ -30,6 +30,7 @@ import { conversationTurnStatus } from "./image-conversation-state";
 import { useImageConversation, type ImageConversationOptions } from "./use-image-conversation";
 import { ConversationImagePreview } from "./conversation-image-preview";
 import { ConversationImageModelChoice } from "./conversation-image-model-choice";
+import { RemovableHistoryList } from "./removable-history-list";
 import type { ConversationImageItem } from "./conversation-image-controls";
 import { ReferencePicker } from "./canvas/design-discussion/ReferencePicker";
 import { pastedConversationImageFiles } from "@/lib/conversation-image-clipboard";
@@ -331,7 +332,7 @@ function OwnedImageConversationPanel({
                         新会话
                     </button>
                     <nav className="mt-3 flex-1 space-y-1 overflow-y-auto" aria-label="会话列表">
-                        {state.conversations.map((conversation) => (
+                        <RemovableHistoryList ownerId={ownerId} disabled={state.busy||!state.ready} onRemoved={async entries=>state.historyRemoved(entries.map(e=>e.id))} rows={state.conversations.map((conversation) => ({kind:"conversation",id:conversation.id,title:conversation.title||"图片会话",disabled:state.historyLocked(conversation.id),content:(
                             <button
                                 key={conversation.id}
                                 type="button"
@@ -351,7 +352,7 @@ function OwnedImageConversationPanel({
                                     {new Date(conversation.updatedAt).toLocaleDateString()}
                                 </span>
                             </button>
-                        ))}
+                        )}))}/>
                         {state.listCursor ? (
                             <button
                                 type="button"

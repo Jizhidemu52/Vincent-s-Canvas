@@ -14,6 +14,7 @@ import type {
 import { cancelTurnRequestSchema, createConversationRequestSchema, requestKeySchema, submitTurnRequestSchema } from "../../shared/image-conversation-schemas";
 import type { Database } from "./db";
 import { withTransaction } from "./db-transaction";
+import { visibleHistory } from "./account-history-visibility";
 import {
   activeTurnStates, appendConversationEvent, appendConversationMessage, canonicalPayloadHash,
   conversationSummary, ImageConversationError, isoTimestamp, messageSnapshot, readConversation,
@@ -41,10 +42,16 @@ export async function readConversationSnapshot(client: Pick<PoolClient, "query">
     pendingTurn: pending.rows[0] ? turnSnapshot(pending.rows[0]) : null, latestEventSeq: safeCounter(conversation.last_event_seq),
     contextSummary: conversation.context_summary, contextSummaryThroughSeq: safeCounter(conversation.context_summary_through_seq) };
 }
+async function assertListedConversation(client: Pick<PoolClient,"query">, ownerId:string, conversationId:string) {
+  const listed = await client.query(`SELECT 1 FROM image_conversations c WHERE c.owner_user_id=$1 AND c.id=$2 AND ${visibleHistory("conversation","c")}`,[ownerId,conversationId]);
+  if(!listed.rows.length) throw new ImageConversationError(410,"NOT_FOUND","这段会话已从你的历史移除");
+}
 export async function getImageConversation(db: Database, ownerId: string, conversationId: string) {
   return withTransaction(db, async client => {
     await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    return readConversationSnapshot(client, await readConversation(client, ownerId, conversationId));
+    const conversation = await readConversation(client, ownerId, conversationId);
+    await assertListedConversation(client,ownerId,conversationId);
+    return readConversationSnapshot(client, conversation);
   });
 }
 export async function getImageConversationByRequest(db: Database, ownerId: string, clientRequestId: string) {
@@ -108,6 +115,7 @@ export async function submitImageConversationTurn(db: Database, ownerId: string,
       if (previous.rows[0].payload_hash !== hash || previous.rows[0].conversation_id !== conversationId) throw conflict();
       return { replayed: true, result: submission(previous.rows[0], conversation) };
     }
+    await assertListedConversation(client,ownerId,conversationId);
     if (safeCounter(conversation.state_revision) !== input.expectedStateRevision) throw new ImageConversationError(409, "CONVERSATION_REVISION_CONFLICT", "当前图片或会话状态已变化，请先刷新", { currentStateRevision: safeCounter(conversation.state_revision) });
     const pending = await client.query<{ id: string }>("SELECT id FROM image_conversation_turns WHERE conversation_id=$1 AND state=ANY($2::text[])", [conversationId, activeTurnStates]);
     if (pending.rows[0]) throw new ImageConversationError(409, "TURN_IN_PROGRESS", "本会话还有一轮正在处理", { currentStateRevision: safeCounter(conversation.state_revision), pendingTurnId: pending.rows[0].id });
@@ -215,7 +223,7 @@ export async function listImageConversations(db: Database, ownerId: string, quer
   const cursor = readCursor(query.cursor, secret, scope);
   const limit = query.limit ?? 30;
   const result = await db.query<ConversationRow & { cursor_time: string }>(`SELECT *,created_at::text AS cursor_time FROM image_conversations
-    WHERE owner_user_id=$1 ${cursor ? "AND (created_at,id)<($3::timestamptz,$4::uuid)" : ""} ORDER BY created_at DESC,id DESC LIMIT $2`,
+    WHERE owner_user_id=$1 AND ${visibleHistory("conversation","image_conversations")} ${cursor ? "AND (created_at,id)<($3::timestamptz,$4::uuid)" : ""} ORDER BY created_at DESC,id DESC LIMIT $2`,
   [ownerId, limit + 1, ...(cursor ? [cursor.value, cursor.id] : [])]);
   const rows = result.rows.slice(0, limit);
   const last = rows.at(-1);
@@ -236,7 +244,7 @@ export async function listDesignExecutionHistory(db: Database, ownerId: string, 
     LEFT JOIN image_conversation_versions v ON v.id=t.output_version_id AND v.conversation_id=c.id AND v.turn_id=t.id AND v.source='generated'
     LEFT JOIN image_conversation_versions base ON base.conversation_id=c.id
       AND base.id=COALESCE(t.input_active_version_id,CASE WHEN t.id IS NULL THEN c.active_version_id END)
-    WHERE c.owner_user_id=$1 AND c.canvas_external_id=$2 AND c.entrypoint='canvas'
+    WHERE c.owner_user_id=$1 AND c.canvas_external_id=$2 AND c.entrypoint='canvas' AND ${visibleHistory("conversation","c")}
       AND c.create_request_id ~ '^design-image-[a-f0-9]{64}:create$'
       ${cursor ? "AND (c.created_at,c.id)<($4::timestamptz,$5::uuid)" : ""}
     ORDER BY c.created_at DESC,c.id DESC LIMIT $3`, [ownerId, query.canvasExternalId, limit + 1, ...(cursor ? [cursor.value, cursor.id] : [])]);

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { expectedRejection } from "../helpers/expected-rejection";
+import { removeAccountHistory } from "../../src/account-history-removal";
 import { randomUUID } from "node:crypto";
 import { conversationSnapshotSchema } from "../../../shared/image-conversation-schemas";
 import {
@@ -31,6 +32,16 @@ integration("image conversation persistence and admission", () => {
     clientRequestId: randomUUID(), entrypoint: "standalone", ...(initialAssetId ? { initialAssetId } : {}),
   });
   const input = (revision: number, extra = {}) => ({ clientRequestId: randomUUID(), expectedStateRevision: revision, text: "仅调整背景，保留产品。", ...extra });
+
+  test("a batch containing an active or uncertain conversation never removes the other conversation",async()=>{
+    const userId=await owner(),a=await create(userId),b=await create(userId);
+    const active=await submitImageConversationTurn(fixture.db,userId,b.snapshot.id,input(0));
+    const remove=()=>removeAccountHistory(fixture.db,{id:userId,role:"designer",departmentId:null},{entries:[a,b].map(c=>({kind:"conversation",id:c.snapshot.id}))});
+    await expect(remove()).rejects.toMatchObject({status:409});
+    await fixture.db.query("UPDATE image_conversation_turns SET state='uncertain' WHERE id=$1",[active.result.turnId]);
+    await expect(remove()).rejects.toMatchObject({status:409});
+    expect((await listImageConversations(fixture.db,userId,{},secret)).items.map(c=>c.id).sort()).toEqual([a.snapshot.id,b.snapshot.id].sort());
+  });
 
   test("create atomically stores initial V1, active identity, messages and schema-valid replay events", async () => {
     const userId = await owner(), source = await asset(userId);

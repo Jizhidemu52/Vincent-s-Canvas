@@ -5,6 +5,7 @@ import { localProcessingBoards, localProcessingInputSchema, type LocalProcessing
 import { requestedContentHash } from "./asset-content-hash";
 import { AssetObjectError, isMissingAssetObject } from "./asset-object-error";
 import { writeAudit } from "./audit";
+import { visibleHistory } from "./account-history-visibility";
 import { makeCursorPage, parseCursorPage } from "./cursor-pagination";
 import type { Database } from "./db";
 import { withTransaction } from "./db-transaction";
@@ -199,7 +200,7 @@ export async function listLocalProcessing(db: Database, actor: SessionUser, quer
   values.push(limit + 1);
   const rows = (await db.query<AssetRow>(`SELECT ${assetFields} FROM assets a WHERE a.owner_user_id=$1 AND a.status='ready'
     AND a.deleted_at IS NULL AND a.kind='image' AND a.source='import' AND a.metadata->'localProcessing'->>'version'='1'
-    AND a.metadata->'localProcessing'->'input'->>'board'=$2 AND ${archivedProof} ${boundary}
+    AND a.metadata->'localProcessing'->'input'->>'board'=$2 AND ${archivedProof} ${clientOperationId ? "" : "AND "+visibleHistory("local", "a")} ${boundary}
     ORDER BY a.created_at DESC,a.id DESC LIMIT $${values.length}`, values)).rows;
   const page = makeCursorPage(rows, limit, row => ({ id: row.id, createdAt: row.createdAt }));
   return { records: page.items.map(record), hasMore: page.hasMore, nextCursor: page.nextCursor };

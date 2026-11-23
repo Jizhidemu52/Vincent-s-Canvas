@@ -38,6 +38,8 @@ import { imageAdmissionParameters, type ImageAdmissionDefaults } from "../image-
 import { PromptOptimizationError } from "../prompt-safety";
 import { promptHash } from "../prompt-recipe-store";
 import { withTransaction } from "../db-transaction";
+import { HistoryRemovalError, removeAccountHistory } from "../account-history-removal";
+import { visibleHistory } from "../account-history-visibility";
 import { assertVideoMotionPolicy } from "../video-motion-input";
 import { claimBatchAdmission, fenceBatchAdmission, findBatchForSubmission, finishBatchAdmission, readBatchAdmission, recordBatchAdmissionFailure, type BatchAdmissionToken } from "../batch-admission";
 import { prepareConfiguredQuickImageTask } from "../quick-image-configuration";
@@ -469,13 +471,24 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
     } catch (error) { next(error); }
   });
 
+  router.post("/history/remove", async (request, response, next) => {
+    response.set("Cache-Control", "private, no-store");
+    try {
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      assertCanvasOwner(request.get("x-canvas-owner-id"), actor.id);
+      response.json(await removeAccountHistory(db, actor, request.body));
+    } catch (error) {
+      if (error instanceof HistoryRemovalError) { response.status(error.status).json({ message: error.message }); return; }
+      next(error);
+    }
+  });
   router.get("/history", async (request, response, next) => {
     response.set("Cache-Control", "private, no-store");
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
       const { cursor, limit } = parseCursorPage(request.query, { defaultLimit: 30, maxLimit: 30 });
       const values: unknown[] = [actor.id];
-      const clauses = ["t.user_id=$1", ...taskHistoryScope(request.query, values)];
+      const clauses = ["t.user_id=$1", visibleHistory("task", "t"), ...taskHistoryScope(request.query, values)];
       appendCursor(clauses, values, "t.queued_at", "t.id", cursor);
       values.push(limit + 1);
       const result = await db.query(`SELECT ${taskSelect},m.model_id AS "modelId",m.name AS "modelName",to_char(t.queued_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "cursorCreatedAt"
@@ -491,7 +504,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
   router.get("/", async (request, response, next) => {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
-      const page = await readTaskPage(db, request.query, ["t.user_id=$1"], [actor.id]);
+      const page = await readTaskPage(db, request.query, ["t.user_id=$1", ...(request.query.view==="history"?[visibleHistory("task","t")]:[])], [actor.id]);
       response.json({ tasks: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore });
     } catch (error) {
       next(error);
