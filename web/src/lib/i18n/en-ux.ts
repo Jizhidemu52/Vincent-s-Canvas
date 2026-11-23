@@ -2,7 +2,6 @@
 export default {
     "从我的历史移除": "Remove from my history",
     "从本机历史移除": "Remove from this browser’s history",
-    "管理本机历史": "Manage browser history",
     "仅从此浏览器的本机列表移除；云端历史、已保存的素材和画布作品不受影响。": "This removes the entry from this browser only. Cloud history, saved assets and canvas work are unchanged.",
     "移除所选": "Remove selected",
     "确认移除": "Confirm removal",

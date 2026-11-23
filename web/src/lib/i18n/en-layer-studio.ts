@@ -1,5 +1,6 @@
 /** Layer Studio display copy. Source prompts, OCR, documents and image bytes are never rewritten. */
 const enLayerStudio: Record<string, string> = {
+    "管理本机历史": "Manage browser history",
     "豆包生图": "Doubao Image Studio",
     "拆分图层、生成画面，再自由组合。": "Separate layers, generate images, and compose freely.",
     "参考图预览": "Reference image preview",
