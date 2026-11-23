@@ -75,6 +75,8 @@ for(const mode of ["acknowledged color","lost submission response","preset mater
     const output=()=>api.document(project)?.nodes.find((n:any)=>n.id===calls[0]?.nodeId);
     await expect.poll(()=>output()?.metadata.imageTask?.taskId).toBe(taskId);
     expect(calls[0]).toMatchObject(material?{sourceAssetId:asset,kind:"material",tier:"quick",material:{presetId}}:{sourceAssetId:asset,fallbackHex:"#263754",kind:"color",tier:"quick",color:{name:"酒红",hex:"#7A1F2B"}});
+    if(mode==="preset material")expect(calls[0]).toMatchObject({targetPoint:{xPct:50,yPct:50}});
+    else expect(calls[0]).not.toHaveProperty("targetPoint");
     const saved=output().metadata.imageTask.requestId;
     if(!live)await page.reload();
     if(inspect)await expect(page.getByRole("button",{name:"修改产品标签"})).toHaveText(/翻边冷帽/);

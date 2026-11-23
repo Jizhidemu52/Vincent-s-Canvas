@@ -24,19 +24,19 @@ import {resolvePortrait,lockPreset} from "../model-library";
 type Policy={credits:()=>Promise<boolean>;maxInflightTasks:number;maxPausedTasks:number;productCards?:boolean;displayBeforeSave?:boolean};
 async function recipe(input:TryoutSubmission,db:Pick<Database,"query">,ownerId:string,items:Map<string,ProductCardItem|null>,locked=false):Promise<{prompt:string;ids:string[];model?:{name:string;presetId?:string;assetId?:string};presetId?:string;child?:"boys"|"girls"}> {
     const item=input.kind==="wear"?null:items.get(input.sourceAssetId)??null;
-    const part=input.kind==="wear"?null:input.part??closestProductPart(item,input.fallbackHex);
+    const part=input.kind==="wear"?null:input.part??(input.kind==="material"&&input.targetPoint?null:closestProductPart(item,input.fallbackHex));
     if(input.kind==="color")return {prompt:colorPrompt(item,part,input.color,input.fallbackHex),ids:[input.sourceAssetId]};
     if(input.kind==="material"){
         if("presetId" in input.material){
             const preset=(await db.query<{name:string;description:string;photo:string|null}>("SELECT name,description,thumb_asset_id AS photo FROM material_presets WHERE id=$1 AND status='published'"+(locked?" FOR SHARE":""),[input.material.presetId])).rows[0];
             if(!preset)throw new BillingError("TRYOUT_MATERIAL_UNAVAILABLE","该预设材质已下架或不存在，未提交任务");
-            if(!preset.photo)return materialEdit(input.sourceAssetId,item,part,{type:"text",name:preset.name,description:preset.description},input.fallbackHex);
-            return {...materialEdit(input.sourceAssetId,item,part,{type:"photo",assetId:preset.photo,description:preset.description},input.fallbackHex),presetId:input.material.presetId};
+            if(!preset.photo)return materialEdit(input.sourceAssetId,item,part,{type:"text",name:preset.name,description:preset.description},input.fallbackHex,input.targetPoint);
+            return {...materialEdit(input.sourceAssetId,item,part,{type:"photo",assetId:preset.photo,description:preset.description},input.fallbackHex,input.targetPoint),presetId:input.material.presetId};
         }
         const material=(await db.query("SELECT metadata,COALESCE(metadata->>'description',metadata#>>'{curatorAnalysis,description}') AS description FROM assets WHERE id=$1 AND owner_user_id=$2 AND metadata->>'source'='material-library' AND COALESCE(metadata->>'tryoutArchived','false')<>'true' AND kind='image' AND status='ready' AND deleted_at IS NULL"+(locked?" FOR SHARE":""),[input.material.assetId,ownerId])).rows[0];
         if(!material)throw new BillingError("TRYOUT_MATERIAL_UNAVAILABLE","该个人材质已移除或不属于当前账号");
         const description=material.description?.slice(0,600);
-        return materialEdit(input.sourceAssetId,item,part,{type:"photo",assetId:input.material.assetId,description,useColor:material.metadata.useColor===true},input.fallbackHex);
+        return materialEdit(input.sourceAssetId,item,part,{type:"photo",assetId:input.material.assetId,description,useColor:material.metadata.useColor===true},input.fallbackHex,input.targetPoint);
     }
     const products=input.productAssetIds.map(id=>items.get(id)??null);
     if(products.some(p=>p?.wearPosition==="none"))throw new BillingError("TRYOUT_NOT_WEARABLE","这件产品不适合上身，可使用场景展示或修正产品卡");

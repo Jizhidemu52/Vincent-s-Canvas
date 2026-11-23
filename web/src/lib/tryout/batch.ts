@@ -1,9 +1,9 @@
 import {TRYOUT_BATCH_MAX} from "../../../../shared/tryout-limits";
 import type {TryoutSubmissionInput} from "../../../../shared/tryout-submission";
-import type {DropColor,TryoutChip,WearChip} from "@/components/canvas/toolbox/tryout-swatch";
+import type {DropColor,DropRegion,TryoutChip,WearChip} from "@/components/canvas/toolbox/tryout-swatch";
 
 export type TryoutTransport=(input:TryoutSubmissionInput,owner:string,current:()=>boolean)=>Promise<Response>;
-export type BatchJob={nodeId:string;chip:TryoutChip|WearChip;region?:string};
+export type BatchJob={nodeId:string;chip:TryoutChip|WearChip;region?:DropRegion};
 export type BatchOutcome={planned:number;sent:number;accepted:string[];rejected:number;unknown:number;truncated:boolean};
 const local=(status:number,message:string)=>Response.json({message},{status});
 type Slot={input:TryoutSubmissionInput;owner:string;current:()=>boolean;finish:(r:Response)=>void};

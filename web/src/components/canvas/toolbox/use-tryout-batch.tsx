@@ -5,7 +5,7 @@ import {useCanvasGraphStore} from "@/stores/canvas/canvas-graph-store";
 import {tryoutNotice} from "./tryout-notice";
 import {isTryoutProduct} from "@/lib/tryout/product-node";
 import {batchTryout,type BatchJob} from "@/lib/tryout/batch";
-import type {DropColor,TryoutChip} from "./tryout-swatch";
+import type {DropColor,DropRegion,TryoutChip} from "./tryout-swatch";
 
 export function useTryoutBatch(drop:DropColor,writable:{current:boolean}){
     const {notification}=App.useApp(),preparing=useRef(false);
@@ -25,7 +25,7 @@ export function useTryoutBatch(drop:DropColor,writable:{current:boolean}){
         if(products.length>1&&products.includes(id))await run(products.map(nodeId=>({nodeId,chip,region:nodeId===id?region:""})));
         else await drop(id,chip,region,at);
     };
-    const group=(id:string,chips:TryoutChip[],region:string)=>{
+    const group=(id:string,chips:TryoutChip[],region:DropRegion)=>{
         const targets=products.includes(id)?products:[id];
         return run(targets.flatMap(nodeId=>chips.map(chip=>({nodeId,chip,region:nodeId===id?region:""}))));
     };

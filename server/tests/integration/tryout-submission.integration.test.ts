@@ -95,7 +95,9 @@ import {createTryoutPreviewWriter,readTryoutPreview} from "../../src/tryout-resu
         expect(w.parameters).toMatchObject({quality:"high",complexity:"medium",resolution:"2k"});
         expect((await submit({...input,requestId:randomUUID(),modelConfigId:model})).status).toBe(400);
         await sql.db.query("UPDATE assets SET metadata=$1 WHERE id=$2",[JSON.stringify({source:"material-library",uploadName:"IMG_1234",curatorAnalysis:{name:"罗纹",description:"细密纵向凸棱"},useColor:false}),person]);
-        const fabric=await submit({kind:"material",requestId:randomUUID(),canvasId:"winter",nodeId:"fabric",tier:"quick",sourceAssetId:product,material:{assetId:person,useColor:true}});
+        const fabric=await submit({kind:"material",requestId:randomUUID(),canvasId:"winter",nodeId:"fabric",tier:"quick",sourceAssetId:product,material:{assetId:person,useColor:true},fallbackHex:"#F8F7F5",targetPoint:{xPct:51,yPct:53}});
+        expect(fabric.prompt).toContain("从左 51%、从上 53%");
+        expect(fabric.prompt).not.toContain("的包边");
         expect(fabric.prompt).toContain("不取它的颜色");
         expect(fabric.prompt).toContain("细密纵向凸棱");expect(fabric.prompt).not.toContain("IMG_1234");
         const f=(await sql.db.query("SELECT source_urls FROM tasks WHERE id=$1",[fabric.taskId])).rows[0];

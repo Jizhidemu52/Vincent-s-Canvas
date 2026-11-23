@@ -2,6 +2,18 @@ import { expect,test } from "bun:test";
 import { colorPrompt,materialEdit,wearPrompt,tryoutImageOptions } from "../../shared/tryout-prompts";
 import { variantSlot,wearSlot } from "@/lib/tryout/placement";
 const hat={category:"毛线帽",wearPosition:"head"} as const;
+test("same-color fabric drops on different panels are not the same editing instruction",()=>{
+    for(const swatch of [{type:"photo",assetId:"swatch"},{type:"text",name:"粗针",description:"粗针线圈"}] as const){
+        const front=materialEdit("product",null,null,swatch,"#B8A38B",{xPct:51,yPct:53});
+        const sleeve=materialEdit("product",null,null,swatch,"#B8A38B",{xPct:17,yPct:53});
+        expect(front.prompt).not.toBe(sleeve.prompt);
+        expect(front.prompt).toContain("从左 51%、从上 53%");
+        expect(front.prompt).toContain("同色");
+        expect(front.prompt).not.toContain("颜色接近 #B8A38B 的部分");
+        expect(front.ids).toEqual(swatch.type==="photo"?["product","swatch"]:["product"]);
+        expect(materialEdit("product",null,null,swatch).prompt).not.toContain("落点");
+    }
+});
 test("templates are direct, distinguish fabric photos from color swaps, and preserve indexed references",()=>{
     expect(colorPrompt(hat,"翻边",{name:"酒红",hex:"#772233",code:"R9"})).toContain("毛线帽的翻边改为酒红（色值 #772233，色号 R9）");
     expect(colorPrompt(null,null,{name:"蓝",hex:"#315582"},"#123456")).toContain("颜色接近 #123456 的部分");

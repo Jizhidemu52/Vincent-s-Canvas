@@ -3,13 +3,15 @@ import { cachedRegions } from "@/lib/tryout/region-cache";
 import { regionAtPoint, type ProductRegions } from "@/lib/tryout/product-regions";
 import type { KitColor } from "./tryout-palette";
 import type {TryoutKit} from "../../../../../shared/tryout-kit";
+import type {FabricDropPoint} from "../../../../../shared/tryout-submission";
 import {prewarmTryoutSource} from "@/lib/tryout/prewarm";
 import {useUserStore} from "@/stores/use-user-store";
 
 export type KitMaterial=TryoutKit["materials"][number];
 export type TryoutChip=KitColor|KitMaterial;
 export type WearChip={name:string;model:import("../../../../../shared/model-match").ModelSelection;outfit?:{nodeId:string;taskId:string}};
-export type DropColor=(nodeId:string,chip:TryoutChip|WearChip,regionHex:string,droppedAt:number,transport?:import("@/lib/tryout/batch").TryoutTransport)=>Promise<void>;
+export type DropRegion=string|{hex:string;point:FabricDropPoint};
+export type DropColor=(nodeId:string,chip:TryoutChip|WearChip,region:DropRegion,droppedAt:number,transport?:import("@/lib/tryout/batch").TryoutTransport)=>Promise<void>;
 const maps=new WeakMap<HTMLImageElement,{url:string;map:Promise<ProductRegions>}>();
 function regionMap(img:HTMLImageElement) {
     const existing=maps.get(img);
@@ -94,6 +96,10 @@ export function TryoutSwatch({color,onDrop,notice,writable,selectedId,groupLabel
                     if(d!==drag.current||seq!==d.seq)return;
                     const id=regionAtPoint(map,hit.u*map.width,hit.v*map.height);
                     if(!id){d.overlay.style.display="none";return;}
+                    if(material){
+                        Object.assign(d.overlay.style,{display:"block",left:(x-8)+"px",top:(y-8)+"px",width:"16px",height:"16px",borderRadius:"50%",border:"2px solid Canvas",boxShadow:"0 0 0 1px CanvasText"});
+                        return;
+                    }
                     const key=hit.id+":"+hit.img.currentSrc+":"+id;
                     if(d.paintKey!==key){
                         d.overlay.width=map.width;d.overlay.height=map.height;
@@ -114,7 +120,7 @@ export function TryoutSwatch({color,onDrop,notice,writable,selectedId,groupLabel
                 if(!mounted.current||!writable.current||!hit.img.isConnected||hit.img.currentSrc!==url)return;
                 const id=regionAtPoint(map,hit.u*map.width,hit.v*map.height),region=map.regions.find(r=>r.id===id);
                 if(!region){notice("这里是背景，未提交试款");return;}
-                notice("");await onDrop(hit.id,color,region.color,at);
+                notice("");await onDrop(hit.id,color,material?{hex:region.color,point:{xPct:Math.round(hit.u*100),yPct:Math.round(hit.v*100)}}:region.color,at);
             }catch{if(mounted.current)notice("未能读取本次操作的结果，请查看画布任务");}
         }} onLostPointerCapture={clear} onPointerCancel={()=>{suppressClick.current=true;clear();}}>{groupLabel?"整组拖动":children??(material?color.name:null)}</button>;
 }
