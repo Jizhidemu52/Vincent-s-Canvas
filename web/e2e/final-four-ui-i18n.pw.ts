@@ -157,7 +157,14 @@ test("image settings translates visible markup and validation without altering t
     }], prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: null, configurationVersion: 1 })) } }));
     await page.goto("/image?tool=image-edit");
     const pane = activeWorkbench(page);
-    await pane.locator("input[type=file][accept='image/*']").setInputFiles({ name: "测试毛衫参考.png", mimeType: "image/png", buffer: IMAGE });
+    const tray = pane.getByRole("region", { name: "参考图", exact: true });
+    const [chooser] = await Promise.all([
+        page.waitForEvent("filechooser"),
+        tray.getByRole("button", { name: "上传图片", exact: true }).click(),
+    ]);
+    await chooser.setFiles({ name: "测试毛衫参考.png", mimeType: "image/png", buffer: IMAGE });
+    const reference = tray.getByRole("group", { name: "测试毛衫参考.png", exact: true });
+    await expect(reference).toBeVisible();
     await pane.getByRole("button", { name: "切换生成图片模型", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await dialog.locator("summary", { hasText: "高级参数" }).click();
@@ -194,5 +201,7 @@ test("image settings translates visible markup and validation without altering t
     expect(stored.text).not.toContain("Original markup layer.png"); expect(stored.text).not.toContain("Test knitwear reference.png");
     expect(stored.text).toContain("1536x1024");
     expect(stored.blobs).toEqual(expect.arrayContaining([createHash("sha256").update(IMAGE).digest("hex")]));
+    await page.reload();
+    await expect(reference).toBeVisible();
     expect(api.submissions).toEqual([]); expect(api.batchSubmissions).toEqual([]);
 });
