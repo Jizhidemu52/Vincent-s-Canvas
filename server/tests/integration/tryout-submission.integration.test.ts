@@ -245,11 +245,12 @@ import {createTryoutPreviewWriter,readTryoutPreview} from "../../src/tryout-resu
         }
         const fabricPhoto=randomUUID(),samplePreset=randomUUID();
         await sql.db.query("INSERT INTO assets(id,owner_user_id,object_key,filename,mime_type,kind,status,metadata) VALUES($1,$2,$4,'sample.png','image/png','image','ready',$3)",[fabricPhoto,other,JSON.stringify({source:"material-preset-library"}),fabricPhoto]);
-        await sql.db.query("INSERT INTO material_presets(id,name,description,thumb_asset_id,status) VALUES($1,'纹样','细密凸纹',$2,'published')",[samplePreset,fabricPhoto]);
+        await sql.db.query("INSERT INTO material_presets(id,name,description,thumb_asset_id,status) VALUES($1,'IMG_1234','细密凸纹',$2,'published')",[samplePreset,fabricPhoto]);
         const withPhoto={...preset,nodeId:"photo-preset",requestId:randomUUID(),material:{presetId:samplePreset}};
         expect((await submit({...withPhoto,sourceAssetId:foreign,requestId:randomUUID()})).error).toBe("TRYOUT_ASSET_UNAVAILABLE");
         const changed=await submit(withPhoto);
         expect(changed.status).toBe(201);expect(changed.prompt).toContain("图片2仅作面料参考");expect(changed.prompt).toContain("细密凸纹");
+        expect(changed.prompt).not.toContain("IMG_1234");
         expect((await sql.db.query("SELECT source_urls,parameters FROM tasks WHERE id=$1",[changed.taskId])).rows[0]).toMatchObject({source_urls:[product,fabricPhoto].map(id=>"/api/assets/"+id+"/content"),parameters:{tryoutPresetId:samplePreset}});
         await sql.db.query("UPDATE tasks SET status='success' WHERE id=$1",[changed.taskId]);
         await sql.db.query("UPDATE material_presets SET status='hidden' WHERE id=$1",[samplePreset]);

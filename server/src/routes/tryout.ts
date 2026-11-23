@@ -31,7 +31,7 @@ async function recipe(input:TryoutSubmission,db:Pick<Database,"query">,ownerId:s
             const preset=(await db.query<{name:string;description:string;photo:string|null}>("SELECT name,description,thumb_asset_id AS photo FROM material_presets WHERE id=$1 AND status='published'"+(locked?" FOR SHARE":""),[input.material.presetId])).rows[0];
             if(!preset)throw new BillingError("TRYOUT_MATERIAL_UNAVAILABLE","该预设材质已下架或不存在，未提交任务");
             if(!preset.photo)return materialEdit(input.sourceAssetId,item,part,{type:"text",name:preset.name,description:preset.description},input.fallbackHex);
-            return {...materialEdit(input.sourceAssetId,item,part,{type:"photo",assetId:preset.photo,description:preset.name+"："+preset.description},input.fallbackHex),presetId:input.material.presetId};
+            return {...materialEdit(input.sourceAssetId,item,part,{type:"photo",assetId:preset.photo,description:preset.description},input.fallbackHex),presetId:input.material.presetId};
         }
         const material=(await db.query("SELECT metadata,COALESCE(metadata->>'description',metadata#>>'{curatorAnalysis,description}') AS description FROM assets WHERE id=$1 AND owner_user_id=$2 AND metadata->>'source'='material-library' AND COALESCE(metadata->>'tryoutArchived','false')<>'true' AND kind='image' AND status='ready' AND deleted_at IS NULL"+(locked?" FOR SHARE":""),[input.material.assetId,ownerId])).rows[0];
         if(!material)throw new BillingError("TRYOUT_MATERIAL_UNAVAILABLE","该个人材质已移除或不属于当前账号");

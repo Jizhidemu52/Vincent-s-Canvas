@@ -20,6 +20,8 @@ export default function MaterialPresetsPanel(){
         }).catch(e=>{if(!c.signal.aborted)tell(e.message);});return ()=>c.abort();
     },[owner,rev,t]);
     const choose=(p?:Preset)=>{picture.reset();select(p?.id??"");edit(p?{name:p.name,description:p.description,status:p.status,sortOrder:p.sortOrder,thumbAssetId:p.thumbAssetId}:blank);tell("");};
+    const thumbAssetId=picture.assetId||draft.thumbAssetId;
+    const photoName=picture.uploadName||t("面料小样"),photoDescription=t("以面料参考图中可见的纹理和质感为准。");
     if(!owner)return null;
     return <section aria-label={t("材质库管理")} className="max-w-3xl space-y-4">
         <h2 className="text-xl font-semibold">{t("材质库管理")}</h2>
@@ -30,16 +32,16 @@ export default function MaterialPresetsPanel(){
             try{
                 const signal=life.current!.signal;
                 if(picture.busy||picture.photo&&!picture.assetId)return;
-                const thumbAssetId=picture.assetId||draft.thumbAssetId;
+                const entry=thumbAssetId?{...draft,thumbAssetId,name:draft.name.trim()||photoName,description:draft.description.trim()||photoDescription}:draft;
                 signal.throwIfAborted();
-                const res=await fetch("/api/admin/material-presets"+(id?"/"+id:""),{method:id?"PATCH":"POST",credentials:"same-origin",signal,headers:{"Content-Type":"application/json","X-Canvas-Owner-Id":owner},body:JSON.stringify({...draft,thumbAssetId})});
+                const res=await fetch("/api/admin/material-presets"+(id?"/"+id:""),{method:id?"PATCH":"POST",credentials:"same-origin",signal,headers:{"Content-Type":"application/json","X-Canvas-Owner-Id":owner},body:JSON.stringify(entry)});
                 const payload=await res.json();if(!res.ok)throw new Error(payload.message||t("保存未获确认，请刷新核对"));
                 if(useUserStore.getState().user?.id!==owner)return;choose(payload.preset);tell(t("材质已保存"));reload(v=>v+1);
             }catch(err){if(useUserStore.getState().user?.id===owner){tell(err instanceof Error?err.message:t("保存未获确认，请刷新核对"));reload(v=>v+1);}}finally{lock(false);}
         }}>
             <fieldset disabled={busy} className="grid gap-3">
-                <label className="grid gap-1">{t("材质名称")}<input required maxLength={80} className="rounded border bg-card p-2" value={draft.name} onChange={e=>edit({...draft,name:e.target.value})}/></label>
-                <label className="grid gap-1">{t("材质描述")}<textarea required maxLength={600} className="min-h-20 rounded border bg-card p-2" value={draft.description} onChange={e=>edit({...draft,description:e.target.value})}/></label>
+                <label className="grid gap-1">{t("材质名称")}<input required={!thumbAssetId} placeholder={thumbAssetId?photoName:undefined} maxLength={80} className="rounded border bg-card p-2" value={draft.name} onChange={e=>edit({...draft,name:e.target.value})}/></label>
+                <label className="grid gap-1">{t("材质描述")}<textarea required={!thumbAssetId} placeholder={thumbAssetId?photoDescription:undefined} maxLength={600} className="min-h-20 rounded border bg-card p-2" value={draft.description} onChange={e=>edit({...draft,description:e.target.value})}/></label>
                 <label className="grid gap-1">{t("上传材质示意图")}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{
                     const f=e.currentTarget.files?.[0];e.currentTarget.value="";if(!f)return;
                     void picture.upload(f,copy=>edit(current=>({...current,name:current.name===draft.name?copy.name:current.name,description:current.description===draft.description?copy.description:current.description})));
