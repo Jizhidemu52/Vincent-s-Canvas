@@ -359,7 +359,10 @@ test("exact formal stack: login, large upload, canvas generation/recovery, origi
         await recovered.screenshot({ path: testInfo.outputPath("formal-canvas-restored.png"), animations: "disabled" });
         await recovered.goto("/chat");
         await expect(recovered.getByTestId("server-image-conversation")).toBeVisible();
-        await recovered.getByRole("navigation", { name: "会话列表", exact: true }).getByRole("button").first().click();
+        const savedConversation = recovered.getByRole("navigation", { name: "会话列表", exact: true })
+            .locator(`button[data-conversation-id="${conversationId}"]`);
+        await savedConversation.click();
+        await expect(savedConversation).toHaveAttribute("aria-current", "page");
         await expect(recovered.locator(`[data-version-id="${version.id}"] img`)).toBeVisible();
         const restoredSnapshot = await readConversation(recovered), restoredTurn = await readTurn(recovered);
         expect(restoredSnapshot.activeVersion).toEqual(version);

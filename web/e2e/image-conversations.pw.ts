@@ -129,7 +129,10 @@ test("a recovered image shows its current result without stale repair warnings a
     fixture.exists=true;fixture.turn=conversationTurn("uncertain");fixture.messages=[conversationMessage(),
         ...["b3000000-0000-4000-8000-0000000000d1","b3000000-0000-4000-8000-0000000000d2"].map((id,i)=>({...conversationMessage(true),id,seq:2+i,kind:"status" as const,text:warning,attachments:[]}))];
     fixture.complete();await fixture.attach(page);await page.goto("/chat");
-    await page.getByRole("navigation",{name:"会话列表"}).getByRole("button",{name:/针织衫改款/}).click();
+    const sidebar=page.getByRole("navigation",{name:"会话列表"});
+    await expect(sidebar.getByRole("button",{name:"批量管理",exact:true})).toBeVisible();
+    const saved=sidebar.locator(`button[data-conversation-id="${ids.conversation}"]`);
+    await saved.click();await expect(saved).toHaveAttribute("aria-current","page");
     const card=page.locator('[data-version-id="'+ids.generated+'"]');await expect(card).toBeVisible();
     await page.reload();await expect(card).toBeVisible();await expect(page.getByText(warning,{exact:true})).toHaveCount(0);
     await expect(page.getByText("图片已保存",{exact:true})).toBeVisible();expect([...fixture.submissions,...api.submissions]).toHaveLength(0);

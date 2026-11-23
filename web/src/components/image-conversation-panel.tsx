@@ -336,6 +336,7 @@ function OwnedImageConversationPanel({
                             <button
                                 key={conversation.id}
                                 type="button"
+                                data-conversation-id={conversation.id}
                                 aria-current={state.id === conversation.id ? "page" : undefined}
                                 disabled={state.busy}
                                 onClick={() => {
