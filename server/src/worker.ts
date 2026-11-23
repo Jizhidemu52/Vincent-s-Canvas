@@ -5,6 +5,7 @@ import { createCache, createDatabase, type Cache, type Database } from "./db";
 import { classifyResultFailure, pauseOwnedTask, startTaskRepairScheduler, type PausedKind } from "./task-repair";
 import { decryptSecret } from "./security";
 import {tryoutReferenceService,invalidateTryoutReferences,pruneTryoutReferences,lookupReadyTryoutInputs} from "./tryout-reference";
+import {publishedFabric} from "./tryout-private-assets";
 import {allowedPreset} from "./model-library";
 import {createTryoutPrewarm} from "./tryout-prewarm";
 import {downloadSingleImageOriginal,downloadTryoutResult,recordTryoutResult,type TryoutResultReceipt} from "./tryout-result-receipt";
@@ -513,9 +514,10 @@ async function executeApiMartImage(
     await assertTryoutModuleEnabled(db,"canvas-tryout");
     tryout={tier,provider:{providerId:task.provider_id,baseUrl:task.base_url!,apiKey:credentials.apiKey||""}};
   }
-  const presetId=tryout&&task.parameters.tryoutKind==="wear"&&typeof task.parameters.tryoutPresetId==="string"?task.parameters.tryoutPresetId:undefined;
-  const hot=tryout?await lookupReadyTryoutInputs(db,config,{...tryout,ownerId:task.user_id,taskId:task.id,sourceUrls:task.source_urls,presetId}):undefined;
-  const sourceAssets = !fresh||hot ? [] : await loadSourceAssets(task.source_urls, portraitOwner??task.user_id, isSeedream55 ? 1 : 4, isSeedream55 ? 30 * 1024 * 1024 : undefined,presetId);
+  const fabric=Boolean(tryout && task.parameters.tryoutKind==="material");
+  const presetId=tryout&&(task.parameters.tryoutKind==="wear"||fabric)&&typeof task.parameters.tryoutPresetId==="string"?task.parameters.tryoutPresetId:undefined;
+  const hot=tryout?await lookupReadyTryoutInputs(db,config,{...tryout,ownerId:task.user_id,taskId:task.id,sourceUrls:task.source_urls,presetId,fabric}):undefined;
+  const sourceAssets = !fresh||hot ? [] : await loadSourceAssets(task.source_urls, portraitOwner??task.user_id, isSeedream55 ? 1 : 4, isSeedream55 ? 30 * 1024 * 1024 : undefined,presetId,fabric);
   if (task.request_id?.startsWith("ic:") && !task.upstream_task_id && !task.upstream_submission_started_at) validateConversationTaskSources(task, sourceAssets);
   if (task.original_size_source_id && !task.upstream_task_id && !task.upstream_submission_started_at) {
     const { hashes } = task.parameters.originalSizeReplay as { hashes: string[] };
@@ -891,20 +893,20 @@ type SourceAsset = ProviderVideoSource & {
   filename: string;
 };
 
-async function loadSourceAssets(urls: string[], userId: string, concurrency = 4, maxBytes?: number,presetId?:string): Promise<SourceAsset[]> {
+async function loadSourceAssets(urls: string[], userId: string, concurrency = 4, maxBytes?: number,presetId?:string,fabric=false): Promise<SourceAsset[]> {
   const assets: SourceAsset[] = [];
   let nextIndex = 0;
   const worker = async () => {
     while (nextIndex < urls.length) {
       const index = nextIndex++;
-      assets[index] = await loadSourceAsset(urls[index]!, userId, maxBytes,index===0?presetId:undefined);
+      assets[index] = await loadSourceAsset(urls[index]!, userId, maxBytes,index===(fabric?1:0)?presetId:undefined,fabric);
     }
   };
   await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), urls.length) }, worker));
   return assets;
 }
 
-async function loadSourceAsset(url: string, userId: string, maxBytes?: number,presetId?:string): Promise<SourceAsset> {
+async function loadSourceAsset(url: string, userId: string, maxBytes?: number,presetId?:string,fabric=false): Promise<SourceAsset> {
   const match = url.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i);
   if (!match) throw new Error("参考图不是公司素材地址");
   const result = await db.query<{
@@ -915,7 +917,7 @@ async function loadSourceAsset(url: string, userId: string, maxBytes?: number,pr
     byte_size: number;
     metadata?: Record<string, unknown>;
   }>(
-    presetId?`SELECT a.owner_user_id,a.object_key,a.mime_type,a.filename,a.byte_size::int,a.metadata FROM assets a WHERE a.id=$1 AND ${allowedPreset("$2")}`:"SELECT object_key,mime_type,filename,byte_size::int,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL",
+    presetId?`SELECT a.owner_user_id,a.object_key,a.mime_type,a.filename,a.byte_size::int,a.metadata FROM assets a WHERE a.id=$1 AND ${fabric?publishedFabric("$2"):allowedPreset("$2")}`:"SELECT object_key,mime_type,filename,byte_size::int,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL",
     [match[1], presetId??userId],
   );
   const asset = result.rows[0];

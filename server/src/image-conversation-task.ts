@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { isConversationImageModel, type ConversationImageModel } from "../../shared/mark-image-models";
 import { uuidSchema } from "../../shared/image-conversation-schemas";
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 const snapshotSchema = z.strictObject({
+  modelIdentityHash: sha256Schema.optional(),
   version: z.literal(1), turnId: uuidSchema, modelConfigId: uuidSchema, providerId: uuidSchema,
   endpointHash: sha256Schema, inputHash: sha256Schema,
   sources: z.array(z.strictObject({ assetId: uuidSchema, mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
@@ -22,11 +24,12 @@ const inputHash = (input: TaskInput) => hash(JSON.stringify([input.operationType
   parameterNames.map(name => [name, input.parameters[name] ?? null]), input.sourceUrls]));
 
 export function createConversationTaskSnapshot(input: TaskInput & {
+  apiModelId?: ConversationImageModel;
   turnId: string; modelConfigId: string; providerId: string; baseUrl: string;
   sources: Array<{ assetId: string; bytes: Uint8Array; mimeType: string }>;
 }): ConversationTaskSnapshot {
   return snapshotSchema.parse({ version: 1, turnId: input.turnId, modelConfigId: input.modelConfigId,
-    providerId: input.providerId, endpointHash: hash(input.baseUrl), inputHash: inputHash(input),
+    modelIdentityHash: input.apiModelId ? hash(input.apiModelId) : undefined, providerId: input.providerId, endpointHash: hash(input.baseUrl), inputHash: inputHash(input),
     sources: input.sources.map(source => ({ assetId: source.assetId, mimeType: source.mimeType,
       byteSize: source.bytes.byteLength, sha256: hash(source.bytes) })) });
 }
@@ -36,7 +39,8 @@ export function validateConversationTaskBinding(task: StoredTask): ConversationT
   if (!parsed.success) throw new Error("会话图片任务缺少有效的原始输入快照，尚未提交新的生成请求");
   const snapshot = parsed.data;
   if (task.request_id !== `ic:${snapshot.turnId}:image:1` || snapshot.modelConfigId !== task.model_config_id
-    || snapshot.providerId !== task.provider_id || task.model_id !== "gpt-image-2.6-flare" || task.protocol !== "apimart"
+    || snapshot.providerId !== task.provider_id || !isConversationImageModel(task.model_id)
+    || hash(task.model_id) !== (snapshot.modelIdentityHash ?? hash("gpt-image-2.6-flare")) || task.protocol !== "apimart"
     || task.workflow_config_id || !task.base_url || snapshot.endpointHash !== hash(task.base_url)
     || !["image_generation", "inpaint"].includes(task.operation_type)
     || snapshot.inputHash !== inputHash({ prompt: task.prompt, parameters: task.parameters,

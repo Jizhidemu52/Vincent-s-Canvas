@@ -102,7 +102,7 @@ export class QueuedTaskHttpError extends Error {
 }
 export type GenerationVideoCapability = { seconds: readonly [number, number]; resolutions: readonly string[]; sizes: readonly string[]; minImages: number; maxImages: number; firstFrameRequired: boolean; supportsAudio: boolean };
 export type GenerationCapabilityModel = { id: string; name: string; modelId: string; capability: GenerationVideoCapability };
-export type QueuedMediaInput = { modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; operationType: string; toolKey?: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; sourceMetadata?: Record<string, unknown>[]; sourceOrder?: Array<{ kind: "file" | "url"; index: number }>; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: (requestId: string) => void | Promise<void>; onSubmitted?: (task: QueuedTask) => void | Promise<void> };
+export type QueuedMediaInput = { requestId?: string; projectId?: string; modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; operationType: string; toolKey?: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; sourceMetadata?: Record<string, unknown>[]; sourceOrder?: Array<{ kind: "file" | "url"; index: number }>; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: (requestId: string) => void | Promise<void>; onSubmitted?: (task: QueuedTask) => void | Promise<void> };
 export type QueuedBatchItem = QueuedTask & { itemIndex: number };
 export type QueuedBatchFailure = { index: number; reason: string };
 export type QueuedBatchAction = "pause" | "resume" | "cancel";
@@ -455,8 +455,8 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
     }
     const [preflightPayload, submitPayload] = createQueuedMediaTaskPayloads({
         toolKey,
-        requestId: createClientId(),
-        projectId: currentProjectId(input.operationType === "audio_generation" ? "audio-workbench" : "video-workbench"),
+        requestId: input.requestId ?? createClientId(),
+        projectId: input.projectId ?? currentProjectId(input.operationType === "audio_generation" ? "audio-workbench" : "video-workbench"),
         operationType: input.operationType,
         modelConfigId: model.id,
         prompt: input.prompt,

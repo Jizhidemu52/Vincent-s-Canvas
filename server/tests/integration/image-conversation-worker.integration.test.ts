@@ -6,6 +6,7 @@ import {
     submitImageConversationTurn,
     cancelImageConversationTurn,
     getImageConversation,
+    getImageConversationTurn,
 } from "../../src/image-conversation-service";
 import {
     processImageConversationTurn,
@@ -57,7 +58,7 @@ integration("durable conversation planner and atomic image admission", () => {
         await fixture?.close();
     });
     const row = async (sql: string, values: unknown[] = []) => (await fixture.db.query(sql, values)).rows[0];
-    async function context(manualBase = false) {
+    async function context(manualBase = false, imageModelConfigId?: string) {
         const ownerId = randomUUID();
         await fixture.db.query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Worker fixture')", [
             ownerId,
@@ -80,6 +81,7 @@ integration("durable conversation planner and atomic image admission", () => {
             clientRequestId: randomUUID(),
             expectedStateRevision: conversation.stateRevision,
             text: "帮我看看配色",
+            ...(imageModelConfigId ? { imageModelConfigId } : {}),
             ...(assetId ? { attachments: [{ assetId, purpose: "new_base" }] } : {}),
         });
         return {
@@ -185,7 +187,7 @@ integration("durable conversation planner and atomic image admission", () => {
         return { value, counts };
     }
     test("two workers claim one turn, persist dispatch before one model call and complete a discussion without any image", async () => {
-        const current = await context(),
+        const current = await context(false, randomUUID()),
             hooks = dependencies();
         hooks.value.preparePlanner = async () => ({
             manifest,
@@ -222,6 +224,16 @@ integration("durable conversation planner and atomic image admission", () => {
                 )
             ).n,
         ).toBe(1);
+    });
+    test("a video request persists a confirmation tied to the original image without an image job or fee",async()=>{
+        const current=await context(true,randomUUID()),id=current.versionId!,assetId=current.assetId!;
+        const plan:PlannerPlan={action:"clarify",assistantText:"请确认",question:"确认视频生成？",videoProposal:{prompt:"镜头缓慢推进",userQuote:"做成视频",sourceVersionIds:[id]}};
+        const hooks=dependencies(plan);
+        hooks.value.preparePlanner=async()=>({manifest:{...manifest,images:[{assetId,versionId:id,role:"current",previewed:true}]},run:async()=>plan});
+        expect(await processImageConversationTurn(fixture.db,current.turnId,hooks.value)).toBe(true);
+        const {turn}=await getImageConversationTurn(fixture.db,current.ownerId,current.conversationId,{turnId:current.turnId});
+        expect(turn.videoProposal).toEqual({prompt:"镜头缓慢推进",sourceAssetIds:[assetId]});
+        expect(turn.taskId).toBeNull();expect(hooks.counts.images).toBe(0);expect(hooks.counts.published).toBe(0);
     });
     test.each<PlannerPlan>([
         discussion,

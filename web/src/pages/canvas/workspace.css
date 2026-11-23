@@ -208,3 +208,14 @@
     .cw-asset-card, .cw-asset-card > div { transition: none; }
     .cw-persisted-preview { transition: none; }
 }
+.canvas-image-footer {
+    pointer-events: none;
+    position: absolute;
+    inset-inline: 0;
+    top: 100%;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    column-gap: .25rem;
+}

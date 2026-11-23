@@ -35,7 +35,7 @@
 .tb-models { grid-template-columns:repeat(5,minmax(0,1fr)); gap:6px; margin-bottom:8px; }
 .tb-model { position:relative; min-width:0; aspect-ratio:1/1.7; border-radius:10px; overflow:hidden; border:1px solid var(--tb-line); background:rgba(127,127,127,.10); }
 .tb-model img { display:block; width:100%; height:100%; object-fit:cover; }
-.tb-model[aria-pressed=true],.tb-model:hover { border-color:var(--tb-accent); }
+.tb-pat[aria-pressed=true],.tb-model[aria-pressed=true],.tb-model:hover { border-color:var(--tb-accent); }
 .tb-pat span,.tb-model span { position:absolute; inset:auto 0 0; background:var(--tb-solid); color:var(--tb-ink); line-height:1.5; font-size:12px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .tb-model span { font-size:11px; }
 .tb-pat:hover,.tb-model:hover { transform:translateY(-2px); }

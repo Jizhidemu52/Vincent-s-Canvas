@@ -20,7 +20,7 @@ import { createAdminTasksRouter, createTasksRouter } from "./routes/tasks";
 import { createTryoutRouter } from "./routes/tryout";
 import {createTryoutPrewarm} from "./tryout-prewarm";
 import {createProductCards} from "./product-card-service";
-import {createPresetAnalysisRouter} from "./preset-image-analysis";
+import {createPresetAnalysisRouter,personalFabricAnalysis} from "./preset-image-analysis";
 import {createProductCardRouter} from "./routes/product-cards";
 import {createMaterialLibraryRouter,createAdminMaterialPresetsRouter} from "./routes/material-presets";
 import {createModelLibraryRouter,createAdminModelPresetsRouter} from "./routes/model-presets";
@@ -204,6 +204,7 @@ app.use(
 );
 app.use("/api/tasks/events", requireSession, requireAccountReady, createTasksEventsRouter(taskEvents));
 app.use("/api/materials",requireSession,requireAccountReady,createMaterialLibraryRouter(db,storage));
+app.post("/api/materials/mine/:assetId/analyze",requireSession,requireAccountReady,personalFabricAnalysis(db,storage,config));
 app.use("/api/tryout/models",requireSession,requireAccountReady,createModelLibraryRouter(db,storage));
 app.use("/api/admin/model-presets",requireAdminSession,requireAccountReady,createAdminModelPresetsRouter(db,storage,{cache,credits:readCreditsEnabled,maxInflightTasks:config.USER_MAX_INFLIGHT_TASKS,maxPausedTasks:config.PAUSED_TASK_LIMIT_PER_USER}));
 app.use("/api/admin/tryout-bindings",requireAdminSession,requireAccountReady,createTryoutBindingsAdmin(db));

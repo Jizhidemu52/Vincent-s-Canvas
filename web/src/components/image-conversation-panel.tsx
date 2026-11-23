@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { lazy,Suspense,useEffect, useRef, useState, type CSSProperties } from "react";
 import { IMAGE_AGENT_MAX_IMAGES } from "../../../shared/image-agent/focus";
 import { turnResultUnconfirmed } from "../../../shared/image-conversation-turn-state";
 import {
@@ -29,12 +29,14 @@ import { ChatMarkdown } from "@/pages/chat/chat-markdown";
 import { conversationTurnStatus } from "./image-conversation-state";
 import { useImageConversation, type ImageConversationOptions } from "./use-image-conversation";
 import { ConversationImagePreview } from "./conversation-image-preview";
+import { ConversationImageModelChoice } from "./conversation-image-model-choice";
 import type { ConversationImageItem } from "./conversation-image-controls";
 import { ReferencePicker } from "./canvas/design-discussion/ReferencePicker";
 import { pastedConversationImageFiles } from "@/lib/conversation-image-clipboard";
 import { useImagePreview } from "@/hooks/use-image-preview";
 
 export type ImageConversationPanelProps = ImageConversationOptions & { className?: string };
+const ConversationVideo=lazy(()=>import("./conversation-video"));
 const assetUrl = (id: string) => `/api/assets/${encodeURIComponent(id)}/content`;
 const control =
     "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border px-3 text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40";
@@ -494,6 +496,7 @@ function OwnedImageConversationPanel({
                                     )}
                                 >
                                     {message.text ? <ChatMarkdown>{message.text}</ChatMarkdown> : null}
+                                    {message.role==="assistant"&&message.kind==="text"&&turn?.videoProposal?<Suspense fallback={null}><ConversationVideo key={turn.id} owner={ownerId} entry={options.entrypoint} projectId={options.canvasExternalId||turn.conversationId} turnId={turn.id} proposal={turn.videoProposal}/></Suspense>:null}
                                     {message.attachments.map((versionId) => {
                                         const version = versions.find((item) => item.id === versionId);
                                         return version ? (
@@ -750,6 +753,7 @@ function OwnedImageConversationPanel({
                                 className="block max-h-40 min-h-16 w-full resize-none bg-transparent text-base leading-7 placeholder:text-muted-foreground"
                             />
                             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                                <div className="w-full"><ConversationImageModelChoice value={state.imageModel} onChange={state.selectImageModel} disabled={blocked} /></div>
                                 <div className="flex flex-wrap items-center gap-1">
                                     <button
                                         type="button"

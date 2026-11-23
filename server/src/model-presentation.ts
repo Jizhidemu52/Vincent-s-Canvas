@@ -1,5 +1,5 @@
 import { imageParameterProfile } from "./image-parameter-profile";
-import { MARK_PLATFORM_MODELS, MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
+import { isConversationImageModel, MARK_PLATFORM_MODELS, MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { getApimartImageCost } from "../../shared/apimart-image-costs";
 import { isLayerStudioModel, LAYER_STUDIO_MODEL_ID } from "./layer-studio-policy";
 
@@ -158,6 +158,10 @@ export function presentPublicModel(model: Record<string, unknown>, role: unknown
     modelId: hidden || mark ? model.id : model.modelId,
     ...(!image && mark ? { parameterModelId: mark.modelId } : {}),
     capabilities: model.capabilities,
+    ...(model.providerId === MARK_IMAGE_PROVIDER_ID && model.protocol === "apimart" && !model.workflowConfigId
+      && isConversationImageModel(model.modelId) && Array.isArray(model.capabilities)
+      && ["generate", "edit"].every(capability => (model.capabilities as unknown[]).includes(capability))
+      ? { conversationImage: true } : {}),
     creditCost: model.creditCost,
     rmbCost: imageCost?.rmbPerImage ?? model.rmbCost,
     ...(imageCost ? { imageCost } : {}),

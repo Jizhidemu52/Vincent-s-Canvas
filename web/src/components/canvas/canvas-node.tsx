@@ -33,6 +33,9 @@ import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-refer
 import type { ImageThumbnailEdge } from "@/lib/canvas/canvas-image-thumbnail";
 import { canvasNodeKeyAction } from "@/lib/canvas/canvas-actions";
 
+import {TryoutLabelVisibility} from "./tryout-label-visibility";
+const ProductCardChips=React.lazy(()=>import("../product-card-chips"));
+const CanvasDesignProposalNote = React.lazy(() => import("./canvas-design-proposal-note"));
 const CanvasNodeImagePreview = React.lazy(() => import("./canvas-node-image-preview"));
 
 type ResizeCorner = CanvasResizeHandle;
@@ -179,6 +182,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     const [textDraft, setTextDraft] = useState(data.metadata?.content || "");
     const [localResizePreview, setLocalResizePreview] = useState<CanvasResizeBounds | null>(null);
     const hasImageContent = data.type === CanvasNodeType.Image && hasCanvasImageSource(data.metadata);
+    const labelsOpen=React.useContext(TryoutLabelVisibility);
+    const productSource=labelsOpen && deploymentFeatures.productCardsEnabled && hasImageContent && !data.metadata?.proposalBoard && data.metadata?.tryout?.kind!=="wear" && (data.metadata?.serverAssetId||data.metadata?.storageKey||data.metadata?.content);
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content || data.metadata?.storageKey);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content);
     const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
@@ -430,7 +435,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 ...canvasNodeRenderingStyle,
                 // content-visibility:auto adds paint containment: it clips the half-outside
                 // connection/resize handles and the editor panel, including their hit areas.
-                contentVisibility: showNodeTitle || showConnectionControls || showResizeControls || showPanel || (useOverview && isMultiSelected) ? "visible" : canvasNodeRenderingStyle.contentVisibility,
+                contentVisibility: productSource || (hasImageContent && showResourceLabel && resourceLabel) ? "visible" : showNodeTitle || showConnectionControls || showResizeControls || showPanel || (useOverview && isMultiSelected) ? "visible" : canvasNodeRenderingStyle.contentVisibility,
             }}
             onMouseEnter={() => {
                 if (isMoving) return;
@@ -524,9 +529,13 @@ export const CanvasNode = React.memo(function CanvasNode({
                 </div>
 
                 {!useOverview && showImageInfo && hasImageContent ? <ImageInfoBar node={data} theme={theme} /> : null}
-                {!useOverview && !showPanel && data.metadata?.designProposal ? <aside className="canvas-design-proposal" data-canvas-no-zoom aria-label="设计方案特色与参考图" onPointerDown={event => event.stopPropagation()}><p>{data.metadata.designProposal.features.join(" · ")}</p><div>{data.metadata.designProposal.references.map((reference, index) => <figure key={reference.image}><img src={reference.image} alt={reference.title} /><figcaption>图{index + 1} · {reference.title}</figcaption></figure>)}</div></aside> : null}
+                {!useOverview && !showPanel && data.metadata?.designProposal ? <React.Suspense fallback={null}><CanvasDesignProposalNote proposal={data.metadata.designProposal} /></React.Suspense> : null}
                 {!useOverview && data.type === CanvasNodeType.Image && data.metadata?.imageAgent && Number.isInteger(data.metadata.imageAgent.version) && data.metadata.imageAgent.version > 0 ? <span data-testid="canvas-node-agent-version" className="pointer-events-none absolute left-2 top-2 z-30 rounded px-1.5 py-0.5 text-xs font-medium" style={{ color: theme.node.text, background: theme.node.panel }}>V{data.metadata.imageAgent.version}</span> : null}
-                {!useOverview && showResourceLabel && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} theme={theme} /> : null}
+                {!useOverview && hasImageContent ? <div id={"canvas-image-footer-"+data.id} className="canvas-image-footer" style={{color:theme.node.text}}>
+                    {productSource?<React.Suspense fallback={null}><ProductCardChips key={productSource} source={productSource}/></React.Suspense>:null}
+                    {showResourceLabel && resourceLabel?<ResourceLabelBadge reference={resourceLabel} theme={theme} below/>:null}
+                </div>:null}
+                {!useOverview && !hasImageContent && showResourceLabel && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} theme={theme} /> : null}
 
                 {!useOverview && !hasImageContent && !hasVideoContent && !hasAudioContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
 
@@ -693,10 +702,10 @@ function TextContent({ node, theme, isEditingContent, textDraft, textareaRef, me
     );
 }
 
-function ResourceLabelBadge({ reference, theme }: { reference: CanvasResourceReference; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function ResourceLabelBadge({ reference, theme, below=false }: { below?:boolean; reference: CanvasResourceReference; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const t = useUiText();
     return (
-        <span className={`pointer-events-none absolute right-2 top-2 z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "text-white shadow-sm" : "bg-black/35 text-white/75"}`} style={reference.active ? { background: theme.canvas.selectionStroke } : undefined}>
+        <span className={`pointer-events-none ${below?"relative mt-1":"absolute right-2 top-2"} z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "text-white shadow-sm" : "bg-black/35 text-white/75"}`} style={reference.active ? { background: theme.canvas.selectionStroke } : undefined}>
             <DisplayText text={reference.label} />
         </span>
     );

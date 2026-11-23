@@ -5,7 +5,7 @@ import {outfitRecipe} from "../tryout-outfit";
 import {readTryoutPreview} from "../tryout-result-preview";
 import {firstDisplay,noteFirstDisplay} from "../tryout-speed";
 import {z} from "zod";
-import { colorPrompt,materialPrompt,wearPrompt,tryoutImageOptions } from "../../../shared/tryout-prompts";
+import { colorPrompt,materialEdit,wearPrompt,tryoutImageOptions } from "../../../shared/tryout-prompts";
 import { assertCanvasOwner,CanvasDocumentError } from "../canvas-document";
 import { withTransaction } from "../db-transaction";
 import type { Database,Cache } from "../db";
@@ -19,6 +19,7 @@ import {prewarmInput,type createTryoutPrewarm} from "../tryout-prewarm";
 import {tryoutProductItems} from "../product-card-service";
 import {closestProductPart} from "../../../shared/product-card-region";
 import type {ProductCardItem} from "../../../shared/product-card";
+import {fabricPhotoAccess} from "../tryout-private-assets";
 import {resolvePortrait,lockPreset} from "../model-library";
 type Policy={credits:()=>Promise<boolean>;maxInflightTasks:number;maxPausedTasks:number;productCards?:boolean;displayBeforeSave?:boolean};
 async function recipe(input:TryoutSubmission,db:Pick<Database,"query">,ownerId:string,items:Map<string,ProductCardItem|null>,locked=false):Promise<{prompt:string;ids:string[];model?:{name:string;presetId?:string;assetId?:string};presetId?:string;child?:"boys"|"girls"}> {
@@ -27,13 +28,15 @@ async function recipe(input:TryoutSubmission,db:Pick<Database,"query">,ownerId:s
     if(input.kind==="color")return {prompt:colorPrompt(item,part,input.color,input.fallbackHex),ids:[input.sourceAssetId]};
     if(input.kind==="material"){
         if("presetId" in input.material){
-            const preset=(await db.query<{name:string;description:string}>("SELECT name,description FROM material_presets WHERE id=$1 AND status='published'"+(locked?" FOR SHARE":""),[input.material.presetId])).rows[0];
+            const preset=(await db.query<{name:string;description:string;photo:string|null}>("SELECT name,description,thumb_asset_id AS photo FROM material_presets WHERE id=$1 AND status='published'"+(locked?" FOR SHARE":""),[input.material.presetId])).rows[0];
             if(!preset)throw new BillingError("TRYOUT_MATERIAL_UNAVAILABLE","该预设材质已下架或不存在，未提交任务");
-            return {prompt:materialPrompt(item,part,{type:"preset",...preset},input.fallbackHex),ids:[input.sourceAssetId]};
+            if(!preset.photo)return materialEdit(input.sourceAssetId,item,part,{type:"text",name:preset.name,description:preset.description},input.fallbackHex);
+            return {...materialEdit(input.sourceAssetId,item,part,{type:"photo",assetId:preset.photo,description:preset.name+"："+preset.description},input.fallbackHex),presetId:input.material.presetId};
         }
-        const material=(await db.query("SELECT metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND metadata->>'source'='material-library' AND COALESCE(metadata->>'tryoutArchived','false')<>'true' AND kind='image' AND status='ready' AND deleted_at IS NULL"+(locked?" FOR SHARE":""),[input.material.assetId,ownerId])).rows[0];
+        const material=(await db.query("SELECT metadata,COALESCE(metadata->>'description',metadata#>>'{curatorAnalysis,description}') AS description FROM assets WHERE id=$1 AND owner_user_id=$2 AND metadata->>'source'='material-library' AND COALESCE(metadata->>'tryoutArchived','false')<>'true' AND kind='image' AND status='ready' AND deleted_at IS NULL"+(locked?" FOR SHARE":""),[input.material.assetId,ownerId])).rows[0];
         if(!material)throw new BillingError("TRYOUT_MATERIAL_UNAVAILABLE","该个人材质已移除或不属于当前账号");
-        return {prompt:materialPrompt(item,part,{type:"uploaded",name:material.metadata.name,useColor:material.metadata.useColor===true},input.fallbackHex),ids:[input.sourceAssetId,input.material.assetId]};
+        const description=material.description?.slice(0,600);
+        return materialEdit(input.sourceAssetId,item,part,{type:"photo",assetId:input.material.assetId,description,useColor:material.metadata.useColor===true},input.fallbackHex);
     }
     const products=input.productAssetIds.map(id=>items.get(id)??null);
     if(products.some(p=>p?.wearPosition==="none"))throw new BillingError("TRYOUT_NOT_WEARABLE","这件产品不适合上身，可使用场景展示或修正产品卡");
@@ -110,12 +113,13 @@ export function createTryoutRouter(db:Database,cache:Cache,policy:Policy,prewarm
                 if(prepared.execution && prepared.execution.modelConfigId!==execution.modelConfigId)throw new BillingError("TRYOUT_MODEL_CHANGED","模型绑定已变更，未提交任务");
                 const latest=await resolveTryoutBinding(client,spec.tier,true);
                 if(latest.binding.revision!==selected.binding.revision||latest.execution.modelConfigId!==execution.modelConfigId||latest.execution.configurationVersion!==execution.configurationVersion)throw new BillingError("TRYOUT_MODEL_CHANGED","试款模型或价格已变更，本次未扣费");
-                if(input.kind==="material"&&(await recipe(input,client,actor.id,items,true)).prompt!==prompt)throw new BillingError("TRYOUT_MATERIAL_CHANGED","材质描述已变更，请重新选择后再提交");
+                if(input.kind==="material"&&JSON.stringify(await original(client,true))!==JSON.stringify(spec))throw new BillingError("TRYOUT_MATERIAL_CHANGED","材质描述已变更，请重新选择后再提交");
                 if((input.kind==="refine"||input.kind==="outfit")&&JSON.stringify(await original(client,true))!==JSON.stringify(spec))throw new BillingError("TRYOUT_ORIGIN_CHANGED","原始参考记录已变化，未提交新任务");
                 const canvas=await client.query("SELECT 1 FROM canvas_documents WHERE owner_user_id=$1 AND external_id=$2 AND NOT deleted FOR SHARE",[actor.id,input.canvasId]);
                 if(!canvas.rows.length)throw new BillingError("TRYOUT_CANVAS_UNAVAILABLE","请先保存到自己的画布");
-                if(spec.presetId)await lockPreset(client,spec.presetId,ids[0]!);
-                const personal=spec.presetId?unique.filter(id=>id!==ids[0]):unique;
+                if(spec.presetId && spec.kind==="wear")await lockPreset(client,spec.presetId,ids[0]!);
+                if(spec.presetId && spec.kind==="material" && !(await client.query("SELECT a.id FROM assets a JOIN material_presets p ON p.thumb_asset_id=a.id AND p.id=$2 AND p.status='published' WHERE a.id=$1 AND "+fabricPhotoAccess+" FOR SHARE OF p,a",[ids[1],spec.presetId])).rows.length)throw new BillingError("TRYOUT_MATERIAL_UNAVAILABLE","该预设面料图已更换或下架，未提交任务");
+                const personal=spec.presetId?unique.filter(id=>id!==ids[spec.kind==="material"?1:0]):unique;
                 const assets=await client.query("SELECT id FROM assets WHERE id=ANY($1::uuid[]) AND owner_user_id=$2 AND status='ready' AND kind='image' AND deleted_at IS NULL AND COALESCE(metadata->>'tryoutArchived','false')<>'true' ORDER BY id FOR SHARE",[personal,actor.id]);
                 if(assets.rows.length!==personal.length)throw new BillingError("TRYOUT_ASSET_UNAVAILABLE","参考图尚未保存或不属于当前账号");
                 const task=await enqueueTaskInTransaction(client,prepared);

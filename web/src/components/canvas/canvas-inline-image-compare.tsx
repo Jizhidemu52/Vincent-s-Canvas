@@ -44,6 +44,13 @@ export function CanvasInlineImageCompare({ node, nodes, scale, showImageInfo, vi
     const candidates = source && !available.some(item => canvasCompareSameImage(item, source)) ? [...available, source] : available;
     const pairKey = useMemo(() => ({}), [node.id, source?.metadata?.storageKey, source?.metadata?.content, node.metadata?.storageKey, node.metadata?.content]);
     const ready = loaded?.key === pairKey ? loaded : null;
+    const [footerHeight,setFooterHeight]=useState(0);
+    useEffect(()=>{
+        const el=document.getElementById("canvas-image-footer-"+node.id);
+        if(!el){setFooterHeight(0);return;}
+        const measure=()=>setFooterHeight(el.offsetHeight);
+        measure();const observer=new ResizeObserver(measure);observer.observe(el);return ()=>observer.disconnect();
+    },[node.id]);
     const unit = 1 / Math.max(0.05, scale);
 
     useEffect(() => {
@@ -87,7 +94,7 @@ export function CanvasInlineImageCompare({ node, nodes, scale, showImageInfo, vi
                 <span className="absolute left-1/2 top-1/2 flex items-center justify-center rounded-full" style={{ transform: "translate(-50%, -50%)", width: 24 * unit, height: 24 * unit, fontSize: 14 * unit, background: theme.node.panel, color: theme.node.text, border: `${unit}px solid ${theme.canvas.selectionStroke}` }}>↔</span>
             </div> : null}
         </div>
-        <div data-canvas-no-zoom className="pointer-events-auto absolute flex flex-col" style={{ ...(placeInside ? { bottom: 0 } : { top: "100%", marginTop: (showImageInfo ? 30 : 10) * unit }), left: "50%", transform: "translateX(-50%)", width: Math.max(node.width, 248 * unit), padding: `${5 * unit}px ${8 * unit}px`, gap: 4 * unit, fontSize: 12 * unit, color: theme.node.label, background: theme.canvas.background }} onPointerDown={stop} onMouseDown={stop} onKeyDown={stop} onClick={stop} onDoubleClick={stop} onContextMenu={stop}>
+        <div data-canvas-no-zoom className="pointer-events-auto absolute flex flex-col" style={{ ...(placeInside ? { bottom: 0 } : { top: "100%", marginTop: footerHeight+(showImageInfo ? 30 : 10) * unit }), left: "50%", transform: "translateX(-50%)", width: Math.max(node.width, 248 * unit), padding: `${5 * unit}px ${8 * unit}px`, gap: 4 * unit, fontSize: 12 * unit, color: theme.node.label, background: theme.canvas.background }} onPointerDown={stop} onMouseDown={stop} onKeyDown={stop} onClick={stop} onDoubleClick={stop} onContextMenu={stop}>
             <Popover trigger="click" placement="bottom" open={pickerOpen} onOpenChange={setPickerOpen} destroyOnHidden getPopupContainer={() => document.body}
                 styles={{ container: { padding: 16, background: theme.node.panel, maxHeight: "calc(100dvh - 24px)", overflowY: "auto" }, root: { maxWidth: "calc(100vw - 24px)" } }}
                 content={<div style={{ width: "min(600px, calc(100vw - 56px))" }}><CanvasImageComparePicker images={candidates} sourceIds={sources.map(item => item.id)} preferredId={automatic ? sources[0]?.id : undefined} selectedId={source?.id} onChoose={item => { setChosen({ key: sourceSetKey, image: { ...item, metadata: { ...item.metadata } } }); closePicker(); }} onClose={closePicker} /></div>}>

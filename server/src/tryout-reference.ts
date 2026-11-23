@@ -1,6 +1,7 @@
 import {createHash,randomUUID} from "node:crypto";
 import {setTimeout as wait} from "node:timers/promises";
 import type {Database} from "./db";
+import {publishedFabric} from "./tryout-private-assets";
 import {allowedPreset} from "./model-library";
 import type {AppConfig} from "./config";
 import {createTryoutReferenceBytes} from "./asset-thumbnails";
@@ -16,14 +17,15 @@ const keyMatch="(provider_id,owner_user_id,credential_scope,content_sha256,refer
 function cachePartition(provider:Provider,tier:"quick"|"hd",edge:number){
     return {scope:hash(JSON.stringify([provider.baseUrl.replace(/\/+$/,""),provider.apiKey])),spec:tier==="hd"?"original-v1":"webp-still-v1:"+edge};
 }
-export async function lookupReadyTryoutInputs(db:Pick<Database,"query">,settings:Settings,input:Omit<Input,"sha256"|"read"|"companyPortrait">&{taskId:string;sourceUrls:string[];presetId?:string}){
+export async function lookupReadyTryoutInputs(db:Pick<Database,"query">,settings:Settings,input:Omit<Input,"sha256"|"read"|"companyPortrait">&{taskId:string;sourceUrls:string[];presetId?:string;fabric?:boolean}){
     if(settings.APIMART_UPLOAD_CACHE_ENABLED!=="true"||!input.sourceUrls.length)return;
     const ids=input.sourceUrls.map(url=>/^\/api\/assets\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/content$/i.exec(url)?.[1]);
     if(ids.some(id=>!id))throw new Error("试款参考图必须来自当前员工素材");
     const {scope,spec}=cachePartition(input.provider,input.tier,settings.TRYOUT_REFERENCE_MAX_EDGE);
-    const access=input.presetId?`(CASE WHEN a.id=($1::uuid[])[1] THEN ${allowedPreset("$6")} ELSE a.owner_user_id=$2 END)`:"a.owner_user_id=$2";
+    const slot=input.fabric?2:1;
+    const access=input.presetId?`(CASE WHEN a.id=($1::uuid[])[${slot}] THEN ${input.fabric?publishedFabric("$6"):allowedPreset("$6")} ELSE a.owner_user_id=$2 END)`:"a.owner_user_id=$2";
     const matched=await db.query<{id:string;url:string;generation_id:string}>(`SELECT a.id,c.url,c.generation_id FROM assets a JOIN provider_upload_cache c ON c.owner_user_id=a.owner_user_id AND c.content_sha256=a.content_sha256
-        WHERE a.id=ANY($1::uuid[]) AND ${access} AND a.status='ready' AND a.kind='image' AND a.deleted_at IS NULL AND c.provider_id=$3 AND c.credential_scope=$4 AND c.reference_spec=${input.presetId?"CASE WHEN a.id=($1::uuid[])[1] THEN $5 || ':published' ELSE $5 END":"$5"} AND c.url IS NOT NULL AND c.expires_at>now()+interval '2 minutes'`,[ids,input.ownerId,input.provider.providerId,scope,spec,...(input.presetId?[input.presetId]:[])]);
+        WHERE a.id=ANY($1::uuid[]) AND ${access} AND a.status='ready' AND a.kind='image' AND a.deleted_at IS NULL AND c.provider_id=$3 AND c.credential_scope=$4 AND c.reference_spec=${input.presetId?`CASE WHEN a.id=($1::uuid[])[${slot}] THEN $5 || ':published' ELSE $5 END`:"$5"} AND c.url IS NOT NULL AND c.expires_at>now()+interval '2 minutes'`,[ids,input.ownerId,input.provider.providerId,scope,spec,...(input.presetId?[input.presetId]:[])]);
     const byId=new Map(matched.rows.map(row=>[row.id,row]));
     const ordered=ids.map(id=>byId.get(id!));
     if(!ordered.every(row=>row&&isPublicHttpsUrl(row.url)))return;

@@ -16,11 +16,13 @@ export function colorPrompt(item:Item|null,part:string|null,color:TryoutColor,fa
     const area=subject(item,part)+(part ? "" : fallbackHex ? "上颜色接近 "+fallbackHex+" 的部分" : "的主体颜色");
     return "把"+area+"改为"+color.name+"（色值 "+color.hex+(color.code?"，色号 "+color.code:"")+"）。其余部位的颜色、款式结构、材质纹理、图案位置和背景保持不变。";
 }
-export type TryoutMaterial = {type:"preset";name:string;description:string} | {type:"uploaded";name:string;useColor:boolean};
-export function materialPrompt(item:Item|null,part:string|null,material:TryoutMaterial,fallbackHex?:string) {
+type TryoutMaterial = {type:"text";name:string;description:string} | {type:"photo";assetId:string;description?:string;useColor?:boolean};
+export function materialEdit(productId:string,item:Item|null,part:string|null,material:TryoutMaterial,fallbackHex?:string) {
     const area=subject(item,part)+(!part&&fallbackHex?"上颜色接近 "+fallbackHex+" 的部分":"");
-    if(material.type==="preset") return "把"+area+"换成"+material.name+"："+material.description+"。保持款式版型、结构、比例、颜色和图案位置不变，只改变材质的纹理、厚度和垂感。背景保持不变。";
-    return "图片2是材质参考。把图片2的材质迁移到"+area+"上。保持图片1的款式版型、结构、比例和图案位置不变。"+(material.useColor?"同时采用图片2的颜色。":"只取图片2的纹理和质感，不取它的颜色。")+"背景保持不变。";
+    if(material.type==="text")return {ids:[productId],prompt:"把"+area+"换成"+material.name+"："+material.description+"。保持款式版型、结构、比例、颜色和图案位置不变，只改变目标面料的纹理、厚度和垂感。未选部位的材质和背景不变。"};
+    const detail=material.description?.trim();
+    const prompt="图片1是产品，图片2仅作面料参考。将图片2的材质迁移到"+area+"。"+(detail?"面料特征："+detail+"。":"")+"以图片2中实际可见的织纹、纹路方向、表面起伏和光泽为准，沿图片1产品的表面和褶皱自然铺展。保留图片1的版型、结构、比例和图案位置，未选部位的材质和背景不变。不复制图片2的款式或背景。"+(material.useColor?"目标部位同时采用图片2的颜色。":"保持图片1的原配色，只取图片2的纹理和质感，不取它的颜色。");
+    return {ids:[productId,material.assetId],prompt};
 }
 export function wearPrompt(products:readonly (Item|null)[]) {
     if(!products.length) throw new Error("请选择上身产品");

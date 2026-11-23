@@ -20,9 +20,10 @@ export type ConversationView = {
 };
 export type ConversationAttachment = { assetId: string; name: string; purpose?: AttachmentPurpose };
 export type ConversationDraft = { text: string; attachments: ConversationAttachment[];
-    source?: { turnId: string; inputActiveVersionId: string | null; outputPreferences: NonNullable<SubmitTurnRequest["outputPreferences"]> };
+    source?: { turnId: string; inputActiveVersionId: string | null; imageModelConfigId?: string; outputPreferences: NonNullable<SubmitTurnRequest["outputPreferences"]> };
 };
 export type ConversationLocalState = {
+    imageModel?: { id: string; name: string };
     conversationId: string | null;
     drafts: Record<string, ConversationDraft>;
     receipts: Record<string, SubmitTurnRequest>;

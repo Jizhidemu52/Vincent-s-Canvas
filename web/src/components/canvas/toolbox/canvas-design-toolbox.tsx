@@ -62,7 +62,7 @@ export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onCl
             <TryoutPalette shelf={shelf} selectedId={selectedProduct} onColor={batch.apply} writable={writable} beforeEdit={beforeEdit} group={groupButton(shelf.kit.colors,t("试整组色板"))}/>
             <h4>{t("2 试材质")}<em>{t("快速出款")}</em></h4>
             <p className="tb-hint">{t("把材质拖到产品上，款式版型不变，只换材质。")}</p>
-            <TryoutMaterials shelf={shelf} selectedId={selectedProduct} onColor={batch.apply} writable={writable} beforeEdit={beforeEdit} group={groupButton(shelf.kit.materials,t("试整组材质"))}/>
+            <TryoutMaterials productCount={batch.products.length} shelf={shelf} selectedId={selectedProduct} onColor={batch.apply} writable={writable} beforeEdit={beforeEdit} group={groupButton(shelf.kit.materials,t("试整组材质"))}/>
             {groupNotice&&<p role="status">{groupNotice}</p>}
             <h4>{t("3 上身")}<em>{t("快速上身")}</em></h4>
             <p className="tb-hint">{t("把模特拖到某一款上，上身图出现在这一款的正下方。不选模特也行，系统自动配。")}</p>

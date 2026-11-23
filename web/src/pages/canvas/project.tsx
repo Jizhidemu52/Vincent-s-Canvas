@@ -25,6 +25,7 @@ import { CanvasMentionImagesProvider } from "@/components/canvas/canvas-mention-
 import type { CanvasGroupLayerHandle } from "@/components/canvas/canvas-group-layer";
 import { CanvasHoverToolbarHost } from "@/components/canvas/canvas-hover-toolbar-host";
 import { createConfigGenerationInputIndex } from "@/components/canvas/canvas-node-generation";
+import {TryoutLabelVisibility} from "@/components/canvas/tryout-label-visibility";
 import { CanvasNodeLayer } from "@/components/canvas/canvas-node-layer";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { CanvasNodePanelBoundary } from "@/components/canvas/canvas-node-panel-boundary";
@@ -3175,7 +3176,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                     {visibleConnections.length ? <Suspense fallback={null}><CanvasConnectionHover containerRef={containerRef} connections={visibleConnections} nodeById={connectionNodes.byId} scale={viewport.k} screenToCanvas={screenToCanvas} disabled={isNodeDragging || isNodeResizing || isSelecting || Boolean(connectingParams) || interactionMode === "hand"} onChange={setHoveredConnectionId} onDelete={deleteConnection} /></Suspense> : null}
                     {selectedConnectionId || connectingParams || connectionTargetNodeId ? <Suspense fallback={null}><CanvasConnectionControls edge={selectedConnectionId ? connectionById.get(selectedConnectionId) : undefined} nodes={renderedNodes} nodeById={connectionNodes.byId}
                         scale={viewport.k} theme={theme} connecting={Boolean(connectingParams)} targetId={connectionTargetNodeId} targetHint={connectionTargetHint} canConnect={canConnectNode} onReconnect={handleReconnectStart} /></Suspense> : null}
-                    <CanvasNodeLayer nodes={renderedNodes} highlight={graphHighlight}
+                    <TryoutLabelVisibility.Provider value={projectLoaded && tryoutEnabled && tryoutPanel.open}><CanvasNodeLayer nodes={renderedNodes} highlight={graphHighlight}
                         resourceReferences={resourceReferencesForActiveNode} globalReferences={globalResourceReferenceIndex}
                         nodeProps={node => ({
                             theme, themeKey: canvasThemeKey, renderQuality: nodeRenderQuality,
@@ -3202,7 +3203,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                             onStopObservation: generationRequestsRef.current.has(node.id) || runningNodeIds.has(node.id) ? stopNodeObservation : undefined,
                             onContextMenu: handleNodeContextMenu,
                             onRename: startNodeRename,
-                        })} />
+                        })} /></TryoutLabelVisibility.Provider>
 
                     {localToolsEnabled && !isNodeDragging && !isNodeResizing && !isSelecting && !connectingParams && singleSelectedNode?.type === CanvasNodeType.Image && renderedNodes.some(node => node.id === singleSelectedNode.id) ? <Suspense fallback={null}><CanvasInlineImageCompare key={singleSelectedNode.id} node={singleSelectedNode} nodes={nodes} scale={viewport.k} viewport={viewport} viewportHeight={size.height} showImageInfo={showImageInfo} onAdvanced={sourceId => sourceId ? setCompareImageIds([sourceId, singleSelectedNode.id]) : openImageCompare(singleSelectedNode)} /></Suspense> : null}
                     <CanvasSelectionOverlay ref={selectionOverlayRef} borderColor={theme.canvas.selectionStroke} background={theme.canvas.selectionFill} />

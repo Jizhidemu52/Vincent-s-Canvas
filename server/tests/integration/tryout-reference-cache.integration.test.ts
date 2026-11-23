@@ -79,6 +79,14 @@ test("prewarm bounds parallel media work, coalesces an active asset, and does no
         expect(await lookupReadyTryoutInputs(sql.db,settings,{...bound,ownerId:owner})).toBeUndefined();
         await sql.db.query("UPDATE model_presets SET status='hidden' WHERE id=$1",[preset]);
         expect(await lookupReadyTryoutInputs(sql.db,settings,bound)).toBeUndefined();
+        const fabricPreset=randomUUID();
+        await sql.db.query("UPDATE assets SET metadata=$2 WHERE id=$1",[portrait,JSON.stringify({source:"material-preset-library"})]);
+        await sql.db.query("INSERT INTO material_presets(id,name,description,thumb_asset_id,status) VALUES($1,'粗针','粗线圈',$2,'published')",[fabricPreset,portrait]);
+        const fabric={...bound,presetId:fabricPreset,fabric:true,sourceUrls:urlsFor(product,portrait)};
+        expect(await lookupReadyTryoutInputs(sql.db,settings,fabric)).toEqual([privateRef,publicRef]);
+        expect(await lookupReadyTryoutInputs(sql.db,settings,{...fabric,sourceUrls:urlsFor(portrait,product)})).toBeUndefined();
+        await sql.db.query("UPDATE material_presets SET status='hidden' WHERE id=$1",[fabricPreset]);
+        expect(await lookupReadyTryoutInputs(sql.db,settings,fabric)).toBeUndefined();
         await sql.db.query("UPDATE provider_upload_cache SET expires_at=now()-interval '2 hours'");
         await pruneTryoutReferences(sql.db);
         expect((await sql.db.query("SELECT 1 FROM provider_upload_cache")).rows.length).toBe(0);

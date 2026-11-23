@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isConversationImageModel } from "../../shared/mark-image-models";
 import type {
   AspectRatio, ExplicitOutputPreferences, FieldViolation, FixedFlareQuality, FlareResolution,
   FlareSize, ModelRoleBindings, OutputPreferences, ParameterSource, PixelDimensions,
@@ -21,6 +22,7 @@ export type ImageOutputPolicyInput = {
     lockedPreferences?: ExplicitOutputPreferences;
   };
   binding: ModelRoleBindings["imageEdit"] & { providerProtocol: string; enabled: boolean };
+  explicitModel?: boolean;
   priceSnapshot: Pick<PriceSnapshot,
     "modelId" | "quantity" | "totalCredits" | "totalRmb" | "priceVersion" | "toolKey" | "configurationVersion">;
   limits?: {
@@ -191,7 +193,7 @@ function validateBinding(binding: ImageOutputPolicyInput["binding"]) {
   if (!binding?.enabled || !uuidSchema.safeParse(binding.modelConfigId).success || !binding.provider?.trim()) {
     throw new ImageOutputPolicyError("MODEL_BINDING_UNAVAILABLE", "BINDING_UNAVAILABLE", "管理员绑定的图像模型不可用");
   }
-  if (binding.providerProtocol !== "apimart" || binding.apiModelId !== "gpt-image-2.6-flare") {
+  if (binding.providerProtocol !== "apimart" || !isConversationImageModel(binding.apiModelId)) {
     throw new ImageOutputPolicyError("MODEL_CAPABILITY_MISMATCH", "BINDING_MISMATCH", "对话改图需要已绑定的 APIMart Flare 图像模型，不会自动替换模型");
   }
 }
@@ -302,7 +304,7 @@ export function resolveEffectiveImageParameters(input: ImageOutputPolicyInput): 
   const snapshot: SettingsSnapshot = {
     policyVersion: "flare-auto-v1",
     sourceMap: {
-      model: "admin_binding", quality: qualitySource,
+      model: input.explicitModel ? "explicit_user" : "admin_binding", quality: qualitySource,
       ...(resolvedSize.mode !== "exact_pixels" ? { resolution: resolutionSource } : {}),
       ...(resolvedSize.size !== undefined ? { size: resolvedSize.source } : {}),
       complexity: "planner_intent",
@@ -312,7 +314,7 @@ export function resolveEffectiveImageParameters(input: ImageOutputPolicyInput): 
     requested,
     intent: { purpose: intent.purpose, complexity: intent.complexity, sizeMode: resolvedSize.mode },
     effective: {
-      modelConfigId: input.binding.modelConfigId, model: "gpt-image-2.6-flare", n: 1,
+      modelConfigId: input.binding.modelConfigId, model: input.binding.apiModelId, n: 1,
       quality, complexity: intent.complexity,
       ...(resolvedSize.mode !== "exact_pixels" ? { resolution } : {}),
       ...(resolvedSize.size !== undefined ? { size: resolvedSize.size } : {}),

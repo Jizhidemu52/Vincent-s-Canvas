@@ -1,13 +1,17 @@
 import { expect,test } from "bun:test";
-import { colorPrompt,materialPrompt,wearPrompt,tryoutImageOptions } from "../../shared/tryout-prompts";
+import { colorPrompt,materialEdit,wearPrompt,tryoutImageOptions } from "../../shared/tryout-prompts";
 import { variantSlot,wearSlot } from "@/lib/tryout/placement";
 const hat={category:"毛线帽",wearPosition:"head"} as const;
 test("templates are direct, distinguish fabric photos from color swaps, and preserve indexed references",()=>{
     expect(colorPrompt(hat,"翻边",{name:"酒红",hex:"#772233",code:"R9"})).toContain("毛线帽的翻边改为酒红（色值 #772233，色号 R9）");
     expect(colorPrompt(null,null,{name:"蓝",hex:"#315582"},"#123456")).toContain("颜色接近 #123456 的部分");
-    expect(materialPrompt(hat,null,{type:"preset",name:"罗纹",description:"细罗纹"})).not.toContain("图片2");
-    expect(materialPrompt(null,null,{type:"uploaded",name:"样布",useColor:false})).toContain("不取它的颜色");
-    expect(materialPrompt(null,null,{type:"uploaded",name:"样布",useColor:true})).toContain("采用图片2的颜色");
+    const text=materialEdit("product",hat,null,{type:"text",name:"罗纹",description:"细罗纹"});
+    expect(text.ids).toEqual(["product"]);expect(text.prompt).not.toContain("图片2");expect(text.prompt).toContain("细罗纹");
+    const photo={type:"photo",assetId:"fabric",description:"纵向窄凸棱"} as const;
+    const edit=materialEdit("product",hat,"翻边",photo);
+    expect(edit.ids).toEqual(["product","fabric"]);expect(edit.prompt).toContain("毛线帽的翻边");expect(edit.prompt).toContain("纵向窄凸棱");expect(edit.prompt).toContain("不取它的颜色");
+    expect(materialEdit("product",null,null,{...photo,useColor:true}).prompt).toContain("采用图片2的颜色");
+    expect(materialEdit("product",null,null,{type:"photo",assetId:"fabric"}).ids).toEqual(["product","fabric"]);
     expect(wearPrompt([hat,null])).toContain("戴上图片2的毛线帽");
     expect(wearPrompt([hat,null])).toContain("穿戴图片3中的产品");
     for(const kind of ["color","wear","material"] as const) {

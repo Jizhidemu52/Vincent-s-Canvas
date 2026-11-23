@@ -23,7 +23,7 @@ export default function MaterialPresetsPanel(){
     if(!owner)return null;
     return <section aria-label={t("材质库管理")} className="max-w-3xl space-y-4">
         <h2 className="text-xl font-semibold">{t("材质库管理")}</h2>
-        <p>{t("员工拖动预设材质时，使用这里的描述，不会多传一张参考图。隐藏仅影响新的试款。")}</p>
+        <p>{t("纯文字材质按描述试款；有面料图时，同时参考图片和描述，保留产品原配色。")}</p>
         <label className="grid gap-1">{t("选择预设材质")}<select value={id} disabled={busy} className="rounded border bg-card p-2" onChange={e=>choose(items.find(i=>i.id===e.target.value))}><option value="">{t("新增预设")}</option>{items.map(p=><option key={p.id} value={p.id}>{p.name}{p.status==="hidden"?" · "+t("已隐藏"):""}</option>)}</select></label>
         <form onSubmit={async e=>{
             e.preventDefault();if(busy||useUserStore.getState().user?.id!==owner)return;lock(true);tell("");

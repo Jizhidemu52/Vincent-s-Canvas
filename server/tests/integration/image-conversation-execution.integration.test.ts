@@ -72,6 +72,7 @@ integration("conversation image execution uses frozen owned originals and config
         plan: PlannerPlan = generate,
         outputPreferences?: OutputPreferences,
         manualBase?: "current" | "other",
+        imageModelConfigId?: string,
     ) {
         const ownerId = randomUUID();
         await fixture.db.query(
@@ -100,6 +101,7 @@ integration("conversation image execution uses frozen owned originals and config
             clientRequestId: randomUUID(),
             expectedStateRevision: conversation.stateRevision,
             text: "按本轮要求处理针织衫",
+            ...(imageModelConfigId ? { imageModelConfigId } : {}),
             outputPreferences,
             ...(manualBaseAssetId ? { attachments: [{ assetId: manualBaseAssetId, purpose: "new_base" }] } : {}),
         });
@@ -289,6 +291,21 @@ integration("conversation image execution uses frozen owned originals and config
         expect(await expectedRejection(withTransaction(fixture.db, result.validate))).toMatchObject({
             code: "ASSET_NOT_READY",
         });
+    });
+    test("an explicit image choice freezes the chosen config and price on generation and editing", async () => {
+        const selectedId = randomUUID();
+        await fixture.db.query(
+            "INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,credit_cost,rmb_cost) VALUES($1,$2,'Execution detail','gpt-image-2.6-sunburst',ARRAY['generate','edit'],2,0.01)",
+            [selectedId, MARK_IMAGE_PROVIDER_ID],
+        );
+        for (const plan of [generate, edit]) {
+            const result = await prepared(await stage(plan, undefined, undefined, selectedId));
+            expect(result.task.input.modelConfigId).toBe(selectedId);
+            expect(result.settings.sourceMap.model).toBe("explicit_user");
+            expect(result.settings.effective).toMatchObject({ modelConfigId: selectedId, model: "gpt-image-2.6-sunburst" });
+            expect(result.task.input.parameters?.conversationInput).toMatchObject({ modelConfigId: selectedId, modelIdentityHash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+            await withTransaction(fixture.db, result.validate);
+        }
     });
     test("wrong-model binding is not replaced by another catalog model", async () => {
         const current = await stage();

@@ -156,8 +156,8 @@ export async function submitImageConversationTurn(db: Database, ownerId: string,
     return { replayed: false, result: submission(inserted.rows[0], conversation) };
   });
 }
-function reusableContent({ text, attachments, outputPreferences }: AcceptedTurnInput) {
-  return { text, attachments, outputPreferences };
+function reusableContent({ text, attachments, outputPreferences, imageModelConfigId }: AcceptedTurnInput) {
+  return { text, attachments, outputPreferences, ...(imageModelConfigId ? { imageModelConfigId } : {}) };
 }
 
 export async function getReusableTurnInput(db: Database, ownerId: string, conversationId: string, turnId: string) {
@@ -246,7 +246,7 @@ export async function listDesignExecutionHistory(db: Database, ownerId: string, 
     return { id: row.create_request_id.slice(0, -7), conversationId: row.id, canvasExternalId: query.canvasExternalId,
       title: row.title, createdAt: isoTimestamp(row.created_at), initialAssetId: row.initial_asset_id,
       turnRequest: input ? submitTurnRequestSchema.parse({ clientRequestId: input.clientRequestId, expectedStateRevision: input.expectedStateRevision,
-        text: input.text, attachments: input.attachments, ...(input.replyToTurnId ? { replyToTurnId: input.replyToTurnId } : {}), outputPreferences: input.outputPreferences }) : null,
+        ...reusableContent(input), ...(input.replyToTurnId ? { replyToTurnId: input.replyToTurnId } : {}) }) : null,
       turn: row.turn_row ? turnSnapshot(row.turn_row) : null, outputVersion: row.version_row ? versionSnapshot(row.version_row) : null };
   }), nextCursor: result.rows.length > limit && last ? nextCursor(secret, scope, last.cursor_time, last.id) : null };
 }

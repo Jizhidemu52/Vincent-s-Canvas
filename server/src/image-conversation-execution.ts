@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import { compileConversationImagePrompt, resolveConversationVersion } from "../../shared/image-agent/conversation";
-import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
+import { isConversationImageModel, MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import type { ContextManifest, ImageVersion, VersionSelector } from "../../shared/image-conversation-contracts";
 import {
     acceptedTurnInputSchema,
@@ -152,9 +152,10 @@ async function imageExecution(
             : operationType === "inpaint"
               ? "canvas-edit"
               : "canvas-image";
+    const requested = execution.turn.input_payload.imageModelConfigId ?? binding.modelConfigId;
     const tool = await resolveToolExecution(
         db,
-        { toolKey, operationType, modelConfigId: binding.modelConfigId },
+        { toolKey, operationType, modelConfigId: requested },
         { allowModelOverride: true },
     );
     const model = (
@@ -167,9 +168,9 @@ async function imageExecution(
     ).rows[0];
     if (
         !model ||
-        model.id !== binding.modelConfigId ||
+        model.id !== requested ||
         model.providerId !== MARK_IMAGE_PROVIDER_ID ||
-        model.modelId !== "gpt-image-2.6-flare" ||
+        !isConversationImageModel(model.modelId) ||
         model.protocol !== "apimart" ||
         !model.enabled ||
         !model.providerEnabled ||
@@ -179,10 +180,10 @@ async function imageExecution(
         throw new ImageConversationError(
             422,
             "MODEL_CAPABILITY_MISMATCH",
-            "对话图片角色必须绑定已启用的 APIMart Flare 生图与编辑模型，不会自动更换通道",
+            "所选模型不可用于本轮对话出图；请改选可用模型或默认，不会自动更换通道",
         );
     }
-    return { binding, tool, model };
+    return { binding, tool, model: { ...model, modelId: model.modelId } };
 }
 
 async function sourceAsset(db: Query, ownerId: string, version: ImageVersion, lock = false) {
@@ -327,11 +328,12 @@ export async function prepareConversationImage(
             ...(base ? { base: { parameters: base.parameters, actualDimensions: sources[0]!.dimensions } } : {}),
             binding: {
                 modelConfigId: selected.model.id,
-                apiModelId: "gpt-image-2.6-flare",
+                apiModelId: selected.model.modelId,
                 provider: selected.model.providerId,
                 providerProtocol: selected.model.protocol,
                 enabled: true,
             },
+            explicitModel: Boolean(execution.turn.input_payload.imageModelConfigId),
             priceSnapshot: price,
             limits: options.outputLimits,
         });
@@ -363,6 +365,7 @@ export async function prepareConversationImage(
     };
     const sourceUrls = compiled.sources.map((source) => `/api/assets/${source.assetId}/content`);
     const conversationInput = createConversationTaskSnapshot({
+        apiModelId: selected.model.modelId,
         turnId: execution.turn.id,
         modelConfigId: selected.model.id,
         providerId: selected.model.providerId,

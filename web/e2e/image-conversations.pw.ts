@@ -124,6 +124,56 @@ class ConversationFixture {
     }
 }
 
+test("changing the image model only saves a preference until the designer sends a turn", async ({ page, api }, info) => {
+    const fixture = new ConversationFixture();
+    fixture.exists = true;
+    await fixture.attach(page);
+    let tasks = 0;
+    await page.route("**/api/tasks", route => { if (route.request().method() === "POST") tasks++; return route.fallback(); });
+    await page.route("**/api/models", route => route.fulfill({json: {models: [
+        {id: ids.model, name: "精细改图", conversationImage: true}, {id: ids.task, name: "视频服务"}
+    ], prices: [], tools: []}}));
+    await page.goto("/chat");
+    await page.getByRole("navigation", {name: "会话列表"}).getByRole("button", {name: /针织衫改款/}).click();
+    await page.getByRole("button", {name: "生图模型：默认"}).click();
+    const picker = page.getByRole("combobox", {name: "选择生图模型"});
+    await expect(picker.getByRole("option", {name: "视频服务"})).toHaveCount(0);
+    await picker.selectOption({label: "精细改图"});
+    const selected = page.getByRole("button", {name: "生图模型：精细改图"});
+    await expect(selected).toBeVisible();
+    await page.reload();
+    await expect(selected).toBeVisible();
+    expect([...fixture.submissions, ...api.submissions]).toHaveLength(0);
+    expect(tasks).toBe(0);
+    await selected.screenshot({path: info.outputPath("remembered-image-model.png")});
+    await page.getByRole("textbox", {name: "对话内容", exact: true}).fill("把这件毛衣改成绿色");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await expect.poll(() => fixture.submissions.length).toBe(1);
+    expect(fixture.submissions[0]).toMatchObject({imageModelConfigId: ids.model});
+});
+
+test("conversation video proposal confirms one server video task and restores its receipt after reload",async({page,api},info)=>{
+    const fixture=new ConversationFixture();fixture.exists=true;
+    const prompt="把这张毛衣照做成视频，镜头缓慢推进";
+    fixture.historyTurns=[{...conversationTurn("completed"),intent:"clarify",settingsSnapshot:null,taskId:null,outputVersionId:null,videoProposal:{prompt,sourceAssetIds:[ids.asset]}}];
+    fixture.messages=[{...conversationMessage(),text:prompt},{...conversationMessage(true),kind:"text",text:"按当前产品图制作一段视频？",attachments:[]}];
+    await fixture.attach(page);
+    const key="chat-video:"+ids.turn,writes:Record<string,unknown>[]=[];
+    const model={id:ids.model,modelId:"happyhorse-1.1",name:"已配置的视频服务",capabilities:["video"],creditCost:0,rmbCost:0,parameterModelId:"happyhorse-1.1"};
+    await page.route("**/api/models",r=>r.fulfill({json:{models:[model],prices:[],tools:[{toolKey:"video",enabled:true,modelConfigId:model.id}]}}));
+    const task={id:ids.task,requestId:key,userId:ids.owner,operationType:"video_generation",status:"success",resultUrls:["/api/assets/"+ids.resultAsset+"/content"],failureReason:null};
+    await page.route("**/api/tasks/by-request/*",r=>writes.length?r.fulfill({json:{task}}):r.fulfill({status:404,json:{}}));
+    await page.route("**/api/tasks/preflight",r=>r.fulfill({json:{ok:true,normalized:r.request().postDataJSON().parameters}}));
+    await page.route("**/api/tasks",r=>{writes.push(r.request().postDataJSON());return r.fulfill({json:{task}});});
+    const open=async()=>{await page.goto("/chat");await page.getByRole("navigation",{name:"会话列表"}).getByRole("button",{name:/针织衫改款/}).click();};
+    await open();expect(api.submissions).toHaveLength(0);const card=page.getByRole("region",{name:"本轮视频"}),button=card.getByRole("button",{name:"确认生成 1 段视频"});
+    await expect(button).toBeVisible();expect(writes).toHaveLength(0);
+    await card.screenshot({path:info.outputPath("video-confirmation.png")});
+    await button.click();await expect(card.locator("video")).toHaveAttribute("src",task.resultUrls[0]);
+    expect(writes).toHaveLength(1);expect(writes[0]).toMatchObject({requestId:key,operationType:"video_generation",toolKey:"video",modelConfigId:ids.model,sourceUrls:["/api/assets/"+ids.asset+"/content"],promptInput:{scene:"video-motion"}});
+    await page.reload();await expect(card.locator("video")).toBeVisible({timeout:30000});await expect(button).toHaveCount(0);expect(writes).toHaveLength(1);
+});
+
 test("planner preflight rejection keeps the unsent draft without receipt recovery or automatic retry", async ({ page, api }, info) => {
     const fixture = new ConversationFixture();
     fixture.exists = true;

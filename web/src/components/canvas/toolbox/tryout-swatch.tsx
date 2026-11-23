@@ -60,15 +60,16 @@ function target(x:number,y:number){
     return {id:node.dataset.nodeId,img,u,v,left,top,w,h};
 }
 type Drag={pointer:number;x:number;y:number;active:boolean;frame:number;seq:number;overlay:HTMLCanvasElement;paintKey?:string};
-export function TryoutSwatch({color,onDrop,notice,writable,selectedId,groupLabel,children}:{children?:ReactNode;color:TryoutChip;onDrop:DropColor;notice:(s:string)=>void;writable:{current:boolean};selectedId?:string;groupLabel?:string}){
+export function TryoutSwatch({color,onDrop,notice,writable,selectedId,groupLabel,children,onChoose,chosen}:{chosen?:boolean;onChoose?:()=>void;children?:ReactNode;color:TryoutChip;onDrop:DropColor;notice:(s:string)=>void;writable:{current:boolean};selectedId?:string;groupLabel?:string}){
     const material=!("hex" in color),hex="hex" in color?color.hex:"#908374";
     const drag=useRef<Drag|null>(null),mounted=useRef(false),suppressClick=useRef(false),submitting=useRef(false);
     const clear=()=>{const d=drag.current;if(d){cancelAnimationFrame(d.frame);d.overlay.remove();drag.current=null;}};
     useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false;clear();};},[]);
-    return <button type="button" aria-label={groupLabel??((material?"拖动换材质：":"拖动换色：")+color.name)} title={groupLabel??color.name} className={groupLabel?"tb-grip":material?"tb-pat":"tb-sw"} style={{background:groupLabel||material?undefined:hex}}
+    return <button type="button" aria-label={groupLabel??((material?"拖动换材质：":"拖动换色：")+color.name)} title={groupLabel??color.name} aria-pressed={chosen} className={groupLabel?"tb-grip":material?"tb-pat":"tb-sw"} style={{background:groupLabel||material?undefined:hex}}
         onClick={async e=>{
             if(e.detail&&suppressClick.current){suppressClick.current=false;return;}
             if(!writable.current||submitting.current)return;
+            if(onChoose){onChoose();return;}
             if(!selectedId){notice(groupLabel?"请把整组拖到产品上，或先选择产品":"拖到产品上松手，生成 1 款");return;}
             submitting.current=true;try{notice("");await onDrop(selectedId,color,"",Date.now());}finally{submitting.current=false;}
         }}

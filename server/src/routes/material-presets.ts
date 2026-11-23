@@ -7,7 +7,7 @@ import {withTransaction} from "../db-transaction";
 import {requireRole} from "../rbac";
 import {assertModuleEnabled} from "../module-flags";
 import {assertCanvasOwner} from "../canvas-document";
-import {ordinaryAsset} from "../tryout-private-assets";
+import {fabricPhotoAccess,ordinaryAsset} from "../tryout-private-assets";
 import type {ObjectStorage} from "../object-storage";
 import {streamAssetContent} from "../asset-delivery";
 
@@ -19,7 +19,7 @@ function samplePreview(db:Database,storage:ObjectStorage,admin=false):RequestHan
     return async(req,res,next)=>{try{
         if(!admin)await assertModuleEnabled(db,"canvas-tryout");
         const id=z.string().uuid().parse(req.params.id);
-        const asset=(await db.query("SELECT a.object_key,a.filename,a.mime_type,a.thumbnail_256_key FROM material_presets p JOIN assets a ON a.id=p.thumb_asset_id WHERE p.id=$1 "+(admin?"":"AND p.status='published'")+" AND a.status='ready' AND a.kind='image' AND a.deleted_at IS NULL AND (a.metadata->>'source'='material-preset-library' OR (a.visibility_scope='company' AND "+ordinaryAsset("a")+"))",[id])).rows[0];
+        const asset=(await db.query("SELECT a.object_key,a.filename,a.mime_type,a.thumbnail_256_key FROM material_presets p JOIN assets a ON a.id=p.thumb_asset_id WHERE p.id=$1 "+(admin?"":"AND p.status='published'")+" AND "+fabricPhotoAccess,[id])).rows[0];
         if(!asset){res.sendStatus(404);return;}
         await streamAssetContent(req,res,storage,asset.thumbnail_256_key?{filename:"fabric.webp",mime_type:"image/webp",object_key:asset.thumbnail_256_key}:asset,{cacheControl:"no-store"});
     }catch(error){next(error);}};
@@ -33,12 +33,12 @@ export function createMaterialLibraryRouter(db:Database,storage:ObjectStorage){
             const owner=(req as AuthenticatedRequest).auth.id;
             const [presets,mine]=await Promise.all([
                 db.query("SELECT "+columns+" FROM material_presets WHERE status='published' ORDER BY sort_order,id"),
-                db.query(`SELECT id,metadata->>'name' AS name,COALESCE(metadata->'useColor','false'::jsonb) AS "useColor" FROM assets WHERE owner_user_id=$1 AND metadata->>'source'='material-library' AND COALESCE(metadata->>'tryoutArchived','false')<>'true' AND kind='image' AND status='ready' AND deleted_at IS NULL ORDER BY created_at DESC,id`,[owner]),
+                db.query(`SELECT id,COALESCE(metadata->>'name',metadata#>>'{curatorAnalysis,name}',metadata->>'uploadName',filename) AS name,COALESCE(metadata->>'description',metadata#>>'{curatorAnalysis,description}','') AS description,COALESCE(metadata->'useColor','false'::jsonb) AS "useColor" FROM assets WHERE owner_user_id=$1 AND metadata->>'source'='material-library' AND COALESCE(metadata->>'tryoutArchived','false')<>'true' AND kind='image' AND status='ready' AND deleted_at IS NULL ORDER BY created_at DESC,id`,[owner]),
             ]);
             res.json({presets:presets.rows,mine:mine.rows});
         }catch(error){next(error);}
     });
-    const personal=z.object({name:fields.shape.name,useColor:z.boolean()}).strict(),uuid=z.string().uuid();
+    const personal=z.object({name:fields.shape.name,useColor:z.boolean(),description:z.string().trim().max(600).optional()}).strict(),uuid=z.string().uuid();
     for(const method of ["post","patch","delete"] as const)router[method](method==="post"?"/mine":"/mine/:id",async(req,res,next)=>{
         try{
             const actor=(req as AuthenticatedRequest).auth;
@@ -46,7 +46,7 @@ export function createMaterialLibraryRouter(db:Database,storage:ObjectStorage){
             await assertModuleEnabled(db,"canvas-tryout");
             const entry=method==="post"?personal.extend({assetId:uuid}).parse(req.body):undefined;
             const id=entry?.assetId??z.object({id:uuid}).parse(req.params).id;
-            const data=entry?{name:entry.name,useColor:entry.useColor,tryoutArchived:false}:method==="delete"?{tryoutArchived:true}:personal.partial().refine(v=>Object.keys(v).length>0).parse(req.body);
+            const data=entry?{name:entry.name,useColor:entry.useColor,description:entry.description,tryoutArchived:false}:method==="delete"?{tryoutArchived:true}:personal.partial().refine(v=>Object.keys(v).length>0).parse(req.body);
             const found=await db.query(`UPDATE assets SET metadata=metadata || $3::jsonb,updated_at=now() WHERE id=$1 AND owner_user_id=$2 AND metadata->>'source'='material-library' AND kind='image' AND status='ready' AND deleted_at IS NULL RETURNING id`,[id,actor.id,JSON.stringify(data)]);
             if(!found.rows.length){res.status(404).json({message:"个人材质不存在"});return;}
             if(method==="delete")res.status(204).end();else res.json({id});

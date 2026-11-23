@@ -41,7 +41,7 @@ export default function ProductCardChips({source,inline=false,onPickPart}:{sourc
             }catch{}
         }
         const watcher=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting)){watcher.disconnect();void start();}});
-        if(marker.current)watcher.observe(marker.current);
+        if(marker.current)watcher.observe(marker.current.closest("[data-node-id]")??marker.current);
         return ()=>{watcher.disconnect();controller.abort();window.clearTimeout(timer);};
     },[source,owner]);
     const selected=Math.max(0,card?.items.findIndex(i=>i.primary)??0),item=card?.items[selected];
@@ -60,7 +60,7 @@ export default function ProductCardChips({source,inline=false,onPickPart}:{sourc
         finally{if(current())setSaving(false);}
     };
     const applyDraft=()=>{if(card&&draft&&draft.category.trim()&&draft.parts.every(p=>p.trim()))void save({...card,items:card.items.map((v,i)=>i===selected?draft:v)});};
-    return <><div ref={marker} aria-hidden className="pointer-events-none absolute inset-0"/>{card&&item?<div aria-label={t("产品卡")} className={(inline?"relative ":"absolute inset-x-1 top-1 max-h-[95%] overflow-auto ")+"z-[1] w-fit max-w-full rounded-md bg-white/95 px-2 py-1 text-xs text-neutral-900 shadow"} onPointerDown={e=>e.stopPropagation()} onMouseDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()} onDoubleClick={e=>e.stopPropagation()} onKeyDown={e=>{e.stopPropagation();if(draft&&e.key==="Enter"&&e.target instanceof HTMLInputElement&&!e.nativeEvent.isComposing){e.preventDefault();applyDraft();}}}>
+    return <><div ref={marker} aria-hidden className="pointer-events-none absolute inset-0"/>{card&&item?<div aria-label={t("产品卡")} className={(inline?"relative rounded-md bg-white/95 px-2 py-1 text-neutral-900 shadow":"pointer-events-auto relative mt-1 min-w-0 break-words text-left")+" z-[1] w-fit max-w-full text-xs"} onPointerDown={e=>e.stopPropagation()} onMouseDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()} onDoubleClick={e=>e.stopPropagation()} onKeyDown={e=>{e.stopPropagation();if(draft&&e.key==="Enter"&&e.target instanceof HTMLInputElement&&!e.nativeEvent.isComposing){e.preventDefault();applyDraft();}}}>
         {card.items.length>1?<div className="flex flex-wrap gap-1">{card.items.map((v,i)=><button type="button" key={i} disabled={saving} aria-pressed={i===selected} onClick={()=>void save({...card,items:card.items.map((v,j)=>({...v,primary:j===i}))})}>{v.category}</button>)}</div>:null}
         {onPickPart&&!draft?<div aria-label={t("改动部位")} className="flex flex-wrap gap-1">{item.parts.map((part,i)=><button key={i} type="button" className="rounded-md border px-2 py-1" onClick={()=>onPickPart(part)}>{part}</button>)}</div>:null}
         {draft?<div className="grid gap-1">

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { conversationImageModels } from "./mark-image-models";
 import type * as Contract from "./image-conversation-contracts";
 
 export const safeIntegerSchema = z.number().int().min(0).max(9_000_000_000_000_000);
@@ -128,6 +129,7 @@ export const createConversationRequestSchema = z
     }) satisfies z.ZodType<Contract.CreateConversationRequest>;
 
 const turnInputFields = {
+    imageModelConfigId: uuidSchema.optional(),
     clientRequestId: requestKeySchema,
     expectedStateRevision: safeIntegerSchema,
     text: z.string().min(1).max(10_000).regex(/\S/, "消息必须包含非空白内容"),
@@ -151,7 +153,7 @@ export const acceptedTurnInputSchema = z.strictObject({
     reuseInputFromTurnId: uuidSchema.optional(),
     outputPreferences: outputPreferencesSchema,
 }) satisfies z.ZodType<Contract.AcceptedTurnInput>;
-export const reusableTurnInputSchema = acceptedTurnInputSchema.pick({ text: true, attachments: true, outputPreferences: true }).extend({
+export const reusableTurnInputSchema = acceptedTurnInputSchema.pick({ text: true, attachments: true, outputPreferences: true, imageModelConfigId: true }).extend({
     conversationId: uuidSchema, turnId: uuidSchema, inputActiveVersionId: uuidSchema.nullable(),
 });
 export const cancelTurnRequestSchema = z.strictObject({
@@ -209,7 +211,7 @@ export const parameterSourceSchema = z.enum([
     "admin_binding",
 ]);
 export const parameterSourceMapSchema = z.strictObject({
-    model: z.literal("admin_binding"),
+    model: z.enum(["admin_binding", "explicit_user"]),
     quality: parameterSourceSchema,
     resolution: parameterSourceSchema.optional(),
     size: parameterSourceSchema.optional(),
@@ -226,7 +228,7 @@ export const outputPolicyIntentSchema = z.strictObject({
 export const effectiveImageParametersSchema = z
     .strictObject({
         modelConfigId: uuidSchema,
-        model: z.literal("gpt-image-2.6-flare"),
+        model: z.enum(conversationImageModels),
         n: z.literal(1),
         quality: flareQualitySchema,
         complexity: flareComplexitySchema,
@@ -446,6 +448,7 @@ export const imageTurnSchema = z
         autoActivate: z.boolean(),
         settingsSnapshot: settingsSnapshotSchema.nullable(),
         assistant: assistantStatusSchema,
+        videoProposal: z.strictObject({prompt:z.string().trim().min(1).max(5000),sourceAssetIds:z.array(uuidSchema).max(5),seconds:z.number().int().min(1).max(120).optional()}).optional(),
         lastError: turnErrorSchema.nullable(),
         createdAt: isoDateTimeSchema,
         updatedAt: isoDateTimeSchema,
@@ -628,7 +631,7 @@ export const modelRoleBindingsSchema = z.strictObject({
     imageEdit: z.strictObject({
         modelConfigId: uuidSchema,
         provider: z.string().min(1),
-        apiModelId: z.literal("gpt-image-2.6-flare"),
+        apiModelId: z.enum(conversationImageModels),
     }),
 }) satisfies z.ZodType<Contract.ModelRoleBindings>;
 export const versionSelectorSchema = z.discriminatedUnion("kind", [
@@ -660,6 +663,7 @@ export const clarifyPlanSchema = z.strictObject({
     assistantText: z.string().min(1),
     question: z.string().min(1),
     choices: z.array(z.string().min(1)).optional(),
+    videoProposal: z.strictObject({userQuote:z.string().trim().min(1).max(1000),prompt:z.string().trim().min(1).max(5000),sourceVersionIds:z.array(uuidSchema).max(5),seconds:z.number().int().min(1).max(120).optional()}).optional(),
 }) satisfies z.ZodType<Contract.ClarifyPlan>;
 export const restorePlanSchema = z.strictObject({
     action: z.literal("restore"),

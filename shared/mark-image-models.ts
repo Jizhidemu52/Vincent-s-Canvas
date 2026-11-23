@@ -1,6 +1,10 @@
 /** Dedicated provider identity keeps Mark credentials and model choices separate from other channels. */
 export const MARK_IMAGE_PROVIDER_ID = "9567f5da-bb4d-4e4b-b680-c7184d00a001";
 export const MARK_IMAGE_PROVIDER_NAME = "APIMart 平台";
+export const conversationImageModels = ["gpt-image-2.6-flare", "gpt-image-2.6-sunburst"] as const;
+export type ConversationImageModel = typeof conversationImageModels[number];
+export const isConversationImageModel = (id: unknown): id is ConversationImageModel =>
+  conversationImageModels.some(value => id === value);
 export const MARK_IMAGE_BASE_URL = "https://api.apimart.ai/v1";
 export const MARK_IMAGE_MODELS = [
   { demoOrdinal: 1, modelId: "gpt-image-2.5-flare", name: "aplmart-gpt2.5-flare", description: "快速出方案与常规改图", defaultEnabled: true },

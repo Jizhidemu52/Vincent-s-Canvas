@@ -36,6 +36,16 @@ function manualBaseProfile() {
 }
 
 describe("image conversation private planner profile", () => {
+    test("video confirmation is scoped to this request and its real reference images",()=>{
+        const ctx=plannerContext();ctx.currentUserText="把这张图片做成视频，镜头推近";
+        const profile=prepareImageConversationPlannerProfile(plannerMessages(ctx.currentUserText),ctx);
+        const video={userQuote:"把这张图片做成视频",prompt:"镜头推近产品",sourceVersionIds:[ctx.manifest.images[0]!.versionId],seconds:6};
+        const plan={action:"clarify" as const,question:"确认制作一段视频？",assistantText:"等待确认",videoProposal:video};
+        expect(validateImageConversationPlannerOutput(plannerReply(plan),profile)).toEqual(plan);
+        for(const bad of [{...video,userQuote:"上一轮要求制作"},{...video,sourceVersionIds:[plannerIds.outside]}])
+            expect(()=>validateImageConversationPlannerOutput(plannerReply({...plan,videoProposal:bad}),profile)).toThrow("视频提议");
+        expect(validateImageConversationPlannerOutput(plannerReply({action:"discuss",assistantText:"这是视频提示词。"}),profile)).not.toHaveProperty("videoProposal");
+    });
     test("reuses image-agent domain rules and supplies one schema tool, bounded data and exact current user text", () => {
         const context = plannerContext(),
             input = plannerMessages();

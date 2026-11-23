@@ -421,7 +421,9 @@ export function useImageConversation(ownerId: string, options: ImageConversation
         const source = currentDraft.source;
         const limitError = conversationImageLimitError(currentDraft.attachments.length, Boolean(source ? source.inputActiveVersionId : snapshot.activeVersionId));
         if (limitError) throw new Error(limitError);
+        const imageModelConfigId = regenerate ? source?.imageModelConfigId : localRef.current.imageModel?.id;
         const input: SubmitTurnRequest = {
+            ...(imageModelConfigId ? { imageModelConfigId } : {}),
             clientRequestId: createClientId(),
             expectedStateRevision: snapshot.stateRevision,
             text: requestedText,
@@ -470,7 +472,7 @@ export function useImageConversation(ownerId: string, options: ImageConversation
                 const version = viewRef.current?.versions.find(version => version.assetId === item.assetId);
                 return { ...item, name: version ? `图${version.imageNo} · ${version.label}` : `原附件 ${index + 1}` };
             }),
-            source: { turnId, inputActiveVersionId: input.inputActiveVersionId, outputPreferences: input.outputPreferences },
+            source: { turnId, inputActiveVersionId: input.inputActiveVersionId, imageModelConfigId: input.imageModelConfigId, outputPreferences: input.outputPreferences },
         };
         if (regenerate) return sendDraft(restored, signal, true);
         await save(current => ({ ...current, drafts: { ...current.drafts, [id]: restored } }));
@@ -642,6 +644,9 @@ export function useImageConversation(ownerId: string, options: ImageConversation
         error,
         notice,
         connection,
+        imageModel: local.imageModel,
+        selectImageModel: (imageModel: ConversationLocalState["imageModel"]) =>
+            void save(current => ({ ...current, imageModel })).catch(failure => setError(problem(failure))),
         submit,
         reuseTurn,
         acceptedCount,

@@ -1,13 +1,11 @@
 import { useUiText } from "@/lib/i18n";
-import {lazy,Suspense,type ReactNode} from "react";
+import type {ReactNode} from "react";
 import type { CanvasNodeData } from "@/types/canvas";
 import type { ImageThumbnailEdge } from "@/lib/canvas/canvas-image-thumbnail";
 import { canvasImageRenderProps } from "@/lib/canvas/canvas-image-render-quality";
 import { useCanvasImageThumbnail } from "./use-canvas-image-thumbnail";
 import {useModuleEnabled} from "@/stores/use-module-store";
-import {deploymentFeatures} from "@/lib/deployment-features";
 import {observeQuickDisplay} from "@/lib/tryout/display-timing";
-const ProductCardChips=lazy(()=>import("../product-card-chips"));
 
 function TryoutBadge({node}:{node:CanvasNodeData}){
     const t=useUiText(),enabled=useModuleEnabled("canvas-tryout"),meta=node.metadata,trace=meta?.tryout;
@@ -23,8 +21,7 @@ export default function CanvasNodeImagePreview({ node, edge, placeholderColor, r
 }) {
     const t = useUiText();
     const preview = useCanvasImageThumbnail(node, edge);
-    const tryout=useModuleEnabled("canvas-tryout");
-    const productSource=tryout&&deploymentFeatures.productCardsEnabled&&!node.metadata?.proposalBoard&&node.metadata?.tryout?.kind!=="wear"&&(node.metadata?.serverAssetId||node.metadata?.storageKey||node.metadata?.content);
+
     const fit = node.metadata?.freeResize ? "object-fill" : "object-contain";
     const tone=node.metadata?.tryoutTone,filter=tone?`brightness(${tone.brightness??100}%) contrast(${tone.contrast??100}%) saturate(${tone.saturate??100}%)`:undefined;
     return <div className="relative h-full w-full overflow-hidden" style={{ background: placeholderColor }}>
@@ -36,7 +33,7 @@ export default function CanvasNodeImagePreview({ node, edge, placeholderColor, r
                 style={{ opacity: preview.loaded ? 1 : 0,filter }}
                 className={`cw-image-progressive pointer-events-none relative block h-full w-full select-none ${fit} ${preview.loaded && node.metadata?.sourceTaskId ? "cw-image-result-reveal" : ""}`} />
                 : <div className="h-full w-full animate-pulse" style={{ background: placeholderColor }} aria-label={t("正在恢复图片预览")} />}
-        {productSource?<Suspense fallback={null}><ProductCardChips key={productSource} source={productSource}/></Suspense>:null}
+
         {node.metadata?.tryout?.tier?<TryoutBadge node={node}/>:null}
     </div>;
 }

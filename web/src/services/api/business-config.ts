@@ -3,6 +3,7 @@ import { getToolDefinition } from "../../../../shared/feature-catalog";
 import type { ApimartImageCost } from "../../../../shared/apimart-image-costs";
 
 export type PublicModel = {
+    conversationImage?: boolean;
     id: string;
     name: string;
     modelId: string;

@@ -78,10 +78,14 @@ export function turnAssistant(row: TurnRow): AssistantStatus {
   return { kind: "status", text: labels[row.state], canCancel: activeTurnStates.includes(row.state) };
 }
 export function turnSnapshot(row: TurnRow): ImageTurn {
+  const video=row.state==="completed"&&row.plan?.action==="clarify"?row.plan.videoProposal:undefined;
+  const refs=new Map([...(row.context_manifest?.images??[]),...(row.context_manifest?.attachments??[])].map(ref=>[ref.versionId,ref.assetId]));
+  const sourceAssetIds=video?.sourceVersionIds.flatMap(id=>refs.get(id)??[])??[];
   return { id: row.id, conversationId: row.conversation_id, clientRequestId: row.client_request_id,
     acceptedRevision: safeCounter(row.accepted_revision), inputActiveVersionId: row.input_active_version_id,
     baseVersionId: row.base_version_id, outputVersionId: row.output_version_id, replyToTurnId: row.reply_to_turn_id,
     intent: row.intent, state: row.state, plannerStatus: row.planner_status, taskId: row.task_id,
+    ...(video&&sourceAssetIds.length===video.sourceVersionIds.length?{videoProposal:{prompt:video.prompt,sourceAssetIds,...(video.seconds?{seconds:video.seconds}:{})}}:{}),
     autoActivate: row.auto_activate, settingsSnapshot: row.settings_snapshot, assistant: turnAssistant(row), lastError: row.last_error,
     createdAt: isoTimestamp(row.created_at), updatedAt: isoTimestamp(row.updated_at) };
 }

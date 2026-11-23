@@ -161,6 +161,7 @@ export const IMAGE_CONVERSATION_PLANNER_SYSTEM_PROMPT = [
     IMAGE_AGENT_COLLABORATION_GUIDANCE,
     IMAGE_AGENT_REQUEST_FIDELITY_GUIDANCE,
     IMAGE_AGENT_RESPONSE_SAFETY_GUIDANCE,
+    "只有本轮用户明确要求实际制作视频或让产品图动起来时（不是询问、否定、假设、引用、只写视频提示词或分镜），用 clarify.videoProposal 请求一次视频费用确认，不创建静态图。userQuote 逐字引用本轮的执行要求。prompt 写完整动作、镜头和保留要求；sourceVersionIds 按实际需要列本轮工作集的稳定版本 ID，文生视频用空数组。用户指定秒数才写 seconds。需要哪张参考图不明确时先普通 clarify，不带 videoProposal。已生成或排队不是规划器可以宣称的事实。普通讨论永远不附 videoProposal。",
     "用户明确要求撤销修改、回到原图或旧版且不再加工时用 restore，不调用生成。用户要求从原图重做仍有效的要求时用 edit，base=original、stateSource=active；一般继续修改用 base=current、stateSource=base。切换其他分支不能自行继承当前分支要求。",
     "edit 的 changes 只写本轮实际增量，preserve 只写仍有效的明确保留项；历史加宽、缩短、旋转不是要对当前图再次执行的增量。revoke 只列要撤销的已有 constraint.key。requestedState 和版本摘要记录目标，不证明图片已达到要求、已验收或用户已采纳助手建议。",
     "版本选择与 references 只能使用本轮 versions 目录中的稳定 id。current/original/previous 分别指 inputActiveVersionId、其 rootVersionId 和 parentVersionId；缺失目标应 clarify。新上传参考不自动替代当前底图。每张参考明确 role 和 instruction，不编造任何 URL、用户 ID、密钥、SQL 或模型配置。",
@@ -307,6 +308,11 @@ export function validateImageConversationPlannerOutput(
     )
         plannerInvalid("PLANNER_VERSION_INVALID", "规划选择了本轮目录之外或不存在的版本，本轮未执行图片操作");
     const explicitBase = context.manifest.attachments.find((attachment) => attachment.purpose === "new_base");
+    if(plan.action==="clarify"&&plan.videoProposal){
+        const v=plan.videoProposal,known=new Set([...context.manifest.images,...context.manifest.attachments].map(ref=>ref.versionId));
+        if(!context.currentUserText.includes(v.userQuote)||new Set(v.sourceVersionIds).size!==v.sourceVersionIds.length||v.sourceVersionIds.some(id=>!known.has(id))||(explicitBase&&v.sourceVersionIds[0]!==explicitBase.versionId))
+            plannerInvalid("PLANNER_PLAN_INVALID","视频提议与本轮原文或参考图不符，未提交视频任务");
+    }
     if (
         explicitBase &&
         (plan.action === "generate_new" ||

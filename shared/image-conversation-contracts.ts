@@ -63,6 +63,7 @@ export interface CreateConversationRequest {
 }
 
 export interface SubmitTurnRequest {
+  imageModelConfigId?: UUID;
   clientRequestId: RequestKey;
   expectedStateRevision: SafeInteger;
   text: string; // 1..10,000 characters; must contain non-whitespace content
@@ -128,7 +129,7 @@ export interface ImageObservation {
 export type ParameterSource = "explicit_user" | "inherited" | "planner_intent" | "policy" | "admin_binding";
 
 export interface ParameterSourceMap {
-  model: "admin_binding";
+  model: "admin_binding" | "explicit_user";
   quality: ParameterSource;
   resolution?: ParameterSource;
   size?: ParameterSource;
@@ -148,7 +149,7 @@ export interface OutputPolicyIntent {
 export interface EffectiveImageParameters {
   /** Existing server model_configs.id; selected only by administrator binding. */
   modelConfigId: UUID;
-  model: "gpt-image-2.6-flare";
+  model: import("./mark-image-models").ConversationImageModel;
   n: 1;
   quality: FlareQuality;
   complexity: FlareComplexity;
@@ -274,6 +275,7 @@ export interface ImageTurn {
   autoActivate: boolean;
   settingsSnapshot: SettingsSnapshot | null;
   assistant: AssistantStatus;
+  videoProposal?: { prompt: string; sourceAssetIds: UUID[]; seconds?: number };
   lastError: TurnError | null;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
@@ -481,7 +483,7 @@ export interface ModelRoleBindings {
     modelConfigId: UUID;
     /** Trusted provider binding must resolve to the existing APIMart channel. */
     provider: string;
-    apiModelId: "gpt-image-2.6-flare";
+    apiModelId: import("./mark-image-models").ConversationImageModel;
   };
 }
 
@@ -529,6 +531,7 @@ export interface ClarifyPlan {
   assistantText: string;
   question: string;
   choices?: string[];
+  videoProposal?: { userQuote: string; prompt: string; sourceVersionIds: UUID[]; seconds?: number };
 }
 
 export interface RestorePlan {

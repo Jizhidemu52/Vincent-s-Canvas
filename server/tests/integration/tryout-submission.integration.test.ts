@@ -94,9 +94,10 @@ import {createTryoutPreviewWriter,readTryoutPreview} from "../../src/tryout-resu
         expect(w.source_urls).toEqual([person,product].map(id=>"/api/assets/"+id+"/content"));
         expect(w.parameters).toMatchObject({quality:"high",complexity:"medium",resolution:"2k"});
         expect((await submit({...input,requestId:randomUUID(),modelConfigId:model})).status).toBe(400);
-        await sql.db.query("UPDATE assets SET metadata=$1 WHERE id=$2",[JSON.stringify({source:"material-library",name:"羊毛",useColor:false}),person]);
+        await sql.db.query("UPDATE assets SET metadata=$1 WHERE id=$2",[JSON.stringify({source:"material-library",uploadName:"IMG_1234",curatorAnalysis:{name:"罗纹",description:"细密纵向凸棱"},useColor:false}),person]);
         const fabric=await submit({kind:"material",requestId:randomUUID(),canvasId:"winter",nodeId:"fabric",tier:"quick",sourceAssetId:product,material:{assetId:person,useColor:true}});
         expect(fabric.prompt).toContain("不取它的颜色");
+        expect(fabric.prompt).toContain("细密纵向凸棱");expect(fabric.prompt).not.toContain("IMG_1234");
         const f=(await sql.db.query("SELECT source_urls FROM tasks WHERE id=$1",[fabric.taskId])).rows[0];
         expect(f.source_urls).toEqual([product,person].map(id=>"/api/assets/"+id+"/content"));
         const presetId="60000000-0000-4000-8000-000000000001",preset={kind:"material",tier:"quick",canvasId:"winter",nodeId:"preset",sourceAssetId:product,requestId:randomUUID(),material:{presetId},fallbackHex:"#F9F8F6"};
@@ -242,5 +243,17 @@ import {createTryoutPreviewWriter,readTryoutPreview} from "../../src/tryout-resu
                 expect(await fixture.zCard("tryout:temporary-preview:recent")).toBe(128);
             }finally{await fixture.close();}
         }
+        const fabricPhoto=randomUUID(),samplePreset=randomUUID();
+        await sql.db.query("INSERT INTO assets(id,owner_user_id,object_key,filename,mime_type,kind,status,metadata) VALUES($1,$2,$4,'sample.png','image/png','image','ready',$3)",[fabricPhoto,other,JSON.stringify({source:"material-preset-library"}),fabricPhoto]);
+        await sql.db.query("INSERT INTO material_presets(id,name,description,thumb_asset_id,status) VALUES($1,'纹样','细密凸纹',$2,'published')",[samplePreset,fabricPhoto]);
+        const withPhoto={...preset,nodeId:"photo-preset",requestId:randomUUID(),material:{presetId:samplePreset}};
+        expect((await submit({...withPhoto,sourceAssetId:foreign,requestId:randomUUID()})).error).toBe("TRYOUT_ASSET_UNAVAILABLE");
+        const changed=await submit(withPhoto);
+        expect(changed.status).toBe(201);expect(changed.prompt).toContain("图片2仅作面料参考");expect(changed.prompt).toContain("细密凸纹");
+        expect((await sql.db.query("SELECT source_urls,parameters FROM tasks WHERE id=$1",[changed.taskId])).rows[0]).toMatchObject({source_urls:[product,fabricPhoto].map(id=>"/api/assets/"+id+"/content"),parameters:{tryoutPresetId:samplePreset}});
+        await sql.db.query("UPDATE tasks SET status='success' WHERE id=$1",[changed.taskId]);
+        await sql.db.query("UPDATE material_presets SET status='hidden' WHERE id=$1",[samplePreset]);
+        expect((await submit({...withPhoto,requestId:randomUUID()})).error).toBe("TRYOUT_MATERIAL_UNAVAILABLE");
+        expect((await submit({...hd,nodeId:withPhoto.nodeId,sourceTaskId:changed.taskId})).error).toBe("TRYOUT_MATERIAL_UNAVAILABLE");
     }finally{await new Promise<void>(done=>server.close(()=>done()));await sql.close();}
 },30000);
