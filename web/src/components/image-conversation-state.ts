@@ -125,3 +125,21 @@ export function conversationTurnStatus(turn: ImageTurn) {
     };
     return names[turn.state];
 }
+
+export function conversationTimeline(messages: ConversationMessage[], turns: ImageTurn[]) {
+    const known = new Set(turns.map(turn => turn.id));
+    const contentTurns = new Set<string>();
+    const lastStatus = new Map<string, string>();
+    const isStatus = (message: ConversationMessage) =>
+        message.role === "assistant" && message.kind === "status" && !message.attachments.length;
+    for (const message of messages) {
+        if (!message.turnId || !known.has(message.turnId)) continue;
+        if (isStatus(message)) lastStatus.set(message.turnId, message.id);
+        else contentTurns.add(message.turnId);
+    }
+    return messages.flatMap(message => {
+        const turnId = message.turnId;
+        if (!turnId || !known.has(turnId) || !isStatus(message)) return [message];
+        return !contentTurns.has(turnId) && lastStatus.get(turnId) === message.id ? [{ ...message, text: "" }] : [];
+    });
+}

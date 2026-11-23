@@ -26,7 +26,7 @@ import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { useUserStore } from "@/stores/use-user-store";
 import { useChatBottomFollow } from "@/hooks/use-chat-bottom-follow";
 import { ChatMarkdown } from "@/pages/chat/chat-markdown";
-import { conversationTurnStatus } from "./image-conversation-state";
+import { conversationTimeline, conversationTurnStatus } from "./image-conversation-state";
 import { useImageConversation, type ImageConversationOptions } from "./use-image-conversation";
 import { ConversationImagePreview } from "./conversation-image-preview";
 import { ConversationImageModelChoice } from "./conversation-image-model-choice";
@@ -277,7 +277,7 @@ function OwnedImageConversationPanel({
         Boolean(state.id && !state.view);
     const canSend = !blocked && state.imageCount <= IMAGE_AGENT_MAX_IMAGES && state.draft.text.trim().length > 0 && state.draft.text.length <= 10000;
     const versions = state.view?.versions || [],
-        messages = state.view?.messages || [];
+        messages = conversationTimeline(state.view?.messages || [], state.view?.turns || []);
     const follow = useChatBottomFollow(state.view?.messages, state.id || undefined);
     const latestTurn = state.view?.turns.reduce<ImageTurn | undefined>((latest, turn) =>
         !latest || turn.acceptedRevision > latest.acceptedRevision ? turn : latest, undefined);
@@ -515,7 +515,7 @@ function OwnedImageConversationPanel({
                                             </p>
                                         );
                                     })}
-                                    {turn && messages.findLast((item) => item.turnId === turn.id)?.id === message.id ? (
+                                    {turn && pending?.id !== turn.id && messages.findLast((item) => item.turnId === turn.id)?.id === message.id ? (
                                         <TurnStatus turn={turn} />
                                     ) : null}
                                     {message.role === "user" && turn && (
@@ -555,7 +555,9 @@ function OwnedImageConversationPanel({
                         {pending ? (
                             <div role="status" className="rounded-lg bg-muted/50 px-3 py-2">
                                 <TurnStatus turn={pending} />
-                                <p className="mt-1 text-xs text-muted-foreground">{pending.assistant.text}</p>
+                                {pending.assistant.text !== pending.lastError?.message && pending.assistant.text !== conversationTurnStatus(pending) ? (
+                                    <p className="mt-1 text-xs text-muted-foreground">{pending.assistant.text}</p>
+                                ) : null}
                             </div>
                         ) : null}
                         {state.notice ? (

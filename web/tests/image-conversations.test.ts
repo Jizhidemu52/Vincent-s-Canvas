@@ -1,12 +1,24 @@
 import { afterEach, expect, test } from "bun:test";
 import { createImageConversationApi, ImageConversationApiError, allConversationPages, readImageConversationEvents } from "@/services/api/image-conversations";
-import { applyConversationEvent, conversationTurnStatus } from "@/components/image-conversation-state";
+import { applyConversationEvent, conversationTimeline, conversationTurnStatus } from "@/components/image-conversation-state";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { useUserStore, type LocalUser } from "@/stores/use-user-store";
 import type { PublicConversationEvent as ConversationEvent } from "../../shared/image-conversation-public";
 import { conversationIds as ids, conversationTime as now, conversationSnapshot, conversationTurn, conversationVersion, conversationMessage } from "./fixtures/image-conversation";
 
 const originalUser = useUserStore.getState(), originalFeatures = { ...deploymentFeatures };
+test("lifecycle projection preserves authored text, media and unmatched history without mutating audit messages", () => {
+    const warning = { ...conversationMessage(true), kind: "status" as const, attachments: [], text: "原任务结果待核查" };
+    const retry = { ...warning, id: "second-status" };
+    const user = { ...conversationMessage(), text: warning.text };
+    const reply = { ...warning, kind: "text" as const };
+    const media = { ...warning, attachments: [ids.generated] };
+    const turn = conversationTurn("uncertain");
+    expect(conversationTimeline([warning, retry], [])).toEqual([warning, retry]);
+    expect(conversationTimeline([warning, retry], [turn])).toEqual([{ ...retry, text: "" }]);
+    expect(conversationTimeline([user, warning, reply, media], [turn])).toEqual([user, reply, media]);
+    expect(retry.text).toBe("原任务结果待核查");
+});
 afterEach(() => { useUserStore.setState(originalUser); Object.assign(deploymentFeatures, originalFeatures); });
 function client(handler: (path: string, init: RequestInit) => Promise<Response>) {
     deploymentFeatures.authenticationEnabled = true;

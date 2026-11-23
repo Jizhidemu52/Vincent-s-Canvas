@@ -124,6 +124,18 @@ class ConversationFixture {
     }
 }
 
+test("a recovered image shows its current result without stale repair warnings after reload",async({page, api},info)=>{
+    const fixture=new ConversationFixture(),warning="原任务结果待核查，请查询原任务或联系管理员；不要重复生成。";
+    fixture.exists=true;fixture.turn=conversationTurn("uncertain");fixture.messages=[conversationMessage(),
+        ...["b3000000-0000-4000-8000-0000000000d1","b3000000-0000-4000-8000-0000000000d2"].map((id,i)=>({...conversationMessage(true),id,seq:2+i,kind:"status" as const,text:warning,attachments:[]}))];
+    fixture.complete();await fixture.attach(page);await page.goto("/chat");
+    await page.getByRole("navigation",{name:"会话列表"}).getByRole("button",{name:/针织衫改款/}).click();
+    const card=page.locator('[data-version-id="'+ids.generated+'"]');await expect(card).toBeVisible();
+    await page.reload();await expect(card).toBeVisible();await expect(page.getByText(warning,{exact:true})).toHaveCount(0);
+    await expect(page.getByText("图片已保存",{exact:true})).toBeVisible();expect([...fixture.submissions,...api.submissions]).toHaveLength(0);
+    await page.screenshot({path:info.outputPath("recovered-without-stale-warning.png")});
+});
+
 test("the server conversation sidebar removes an existing conversation without creating or resending",async({page,api},info)=>{
     const fixture=new ConversationFixture();fixture.exists=true;await fixture.attach(page);let writes=0;
     await page.route("**/api/tasks/history/remove",route=>{const {entries}=route.request().postDataJSON();expect(entries).toEqual([{kind:"conversation",id:ids.conversation}]);writes++;fixture.exists=false;return route.fulfill({json:{removed:entries}});});
