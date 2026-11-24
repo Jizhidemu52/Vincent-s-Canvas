@@ -3,6 +3,7 @@ import ts from "typescript";
 import { ApiMartImageProviderFailure, ApiMartImageQueryRetryable, apiMartImageModel, apiMartImageOptions, buildApiMartImageRequest } from "../src/apimart-image";
 import { apiMartPollIntervalMs } from "../src/apimart-poll-interval";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
+import { QWEN_IMAGE_MODEL } from "../../shared/qwen-image-options";
 import { DemoStateStore, DemoStorageError, materializeDemoAsset } from "../src/demo-state-store";
 import { ImageResultPersistenceError } from "../src/image-result-storage";
 import { queryProviderTaskStatus } from "../src/provider-status-query";
@@ -61,7 +62,7 @@ function createHarness(failurePhase?: FailurePhase) {
     demoState, DemoStorageError, materializeDemoAsset, ImageResultPersistenceError, demoAssets: new Map(), demoTasks: new Map(), now: () => new Date().toISOString(),
     apiMartBaseUrl: "https://apimart.invalid/v1",
     apiMartApiKey: "mock-model-key",
-    gptImage2ProviderId: "legacy-apimart", MARK_IMAGE_PROVIDER_ID,
+    gptImage2ProviderId: "legacy-apimart", MARK_IMAGE_PROVIDER_ID, QWEN_IMAGE_MODEL,
     buildApiMartImageRequest, apiMartImageModel, apiMartImageOptions, apiMartPollIntervalMs, ApiMartImageProviderFailure, ApiMartImageQueryRetryable,
     Bun: { sleep: async () => {} },
     sleep: async () => {},

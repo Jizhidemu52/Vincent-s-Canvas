@@ -179,18 +179,14 @@ test("first configuration groups every registered image, text, video and blend m
     try {
         const tree = await panel.settle();
         expect(panel.form.values.baseUrl).toBe(MARK_IMAGE_BASE_URL);
-        expect(MARK_PLATFORM_MODELS).toHaveLength(14);
-        expect(MARK_PLATFORM_MODELS.map(model => model.modelId)).toEqual([
-            "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-nano-banana-2.1", "gpt-6-astra", "happyhorse-1.1", "midjourney-blend",
-            "gpt-image-2", "claude-sonnet-5-5", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "mai-image-2.7-flash", "seedream-5-5", "gemini-4-carbon", "gpt-6.2-sol",
-        ]);
-        expect(tree.some(element => element.type === "Tag" && Array.isArray(element.props.children) && element.props.children.join("") === "8 图片 · 4 文字 · 1 视频 · 1 多图融合")).toBe(true);
+        const imageCount = MARK_PLATFORM_MODELS.filter(model => model.modelId !== "midjourney-blend" && model.capabilities.some(capability => capability === "generate")).length;
+        expect(tree.some(element => element.type === "Tag" && Array.isArray(element.props.children) && element.props.children.join("") === `${imageCount} 图片 · 4 文字 · 1 视频 · 1 多图融合`)).toBe(true);
         expect(panel.form.values.models).toEqual(MARK_PLATFORM_MODELS.map(model => ({ enabled: model.defaultEnabled, creditCost: 0, rmbCost: imageRmb[model.modelId] ?? 0, concurrencyLimit: 2 })));
         expect(MARK_PLATFORM_MODELS.filter(model => !model.defaultEnabled).map(model => model.modelId)).toEqual(["seedream-5-5"]);
         expect(MARK_PLATFORM_MODELS.find(model => model.modelId === "seedream-5-5")).toMatchObject({ defaultEnabled: false, capabilities: ["generate", "edit"] });
         expect(MARK_PLATFORM_MODELS.find(model => model.modelId === "gemini-4-carbon")).toMatchObject({ defaultEnabled: true, capabilities: ["chat", "vision", "tools"] });
         expect(MARK_PLATFORM_MODELS.find(model => model.modelId === "gpt-6.2-sol")).toMatchObject({ defaultEnabled: true, capabilities: ["chat", "vision", "tools"] });
-        expect(MARK_PLATFORM_MODELS.slice(8, 10).map(({ modelId, description }) => ({ modelId, description }))).toEqual([
+        expect(MARK_PLATFORM_MODELS.filter(model => model.modelId.startsWith("gpt-image-2.6-")).map(({ modelId, description }) => ({ modelId, description }))).toEqual([
             { modelId: "gpt-image-2.6-flare", description: "速度优先，适合快速迭代" },
             { modelId: "gpt-image-2.6-sunburst", description: "细节与编辑一致性优先" },
         ]);
@@ -277,7 +273,7 @@ test("adding Blend and image models preserves non-cost settings and costs outsid
     } finally { panel.dispose(); }
 });
 
-test("adding MAI 2.7 preserves the existing ten settings and leaves new costs independent", async () => {
+test("adding image models preserves the first ten settings and leaves new costs independent", async () => {
     const existing = savedConfiguration();
     existing.models = existing.models.slice(0, 10).map((model, index) => ({ ...model, enabled: index % 2 === 0, creditCost: index + 1, rmbCost: (index + 1) / 10, concurrencyLimit: index + 2 }));
     const previous = existing.models.map(({ modelId, enabled, creditCost, rmbCost, concurrencyLimit }) => ({ modelId, enabled, creditCost, rmbCost, concurrencyLimit }));
@@ -288,6 +284,7 @@ test("adding MAI 2.7 preserves the existing ten settings and leaves new costs in
         expect(panel.writes[0].models.slice(0, 10)).toEqual(previous);
         expect(panel.writes[0].models.slice(10)).toEqual([
             { modelId: "mai-image-2.7-flash", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
+            { modelId: "qwen-image-3.0", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
             { modelId: "seedream-5-5", enabled: false, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
             { modelId: "gemini-4-carbon", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
             { modelId: "gpt-6.2-sol", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },

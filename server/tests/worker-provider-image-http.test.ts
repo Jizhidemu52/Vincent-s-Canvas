@@ -163,6 +163,18 @@ test("fresh Flare uses ordered HTTP references through the real provider adapter
   expect(h.downloads()).toBe(0);
 });
 
+test("Qwen sends owned reference bytes in order and polls the original task without a public image grant", async () => {
+  const h = harness({ origin: "" });
+  const task = { ...providerTask(), model_id: "qwen-image-3.0", parameters: { size: "3:4", resolution: "2k" } };
+  await expect(h.dispatch(task)).rejects.toBeInstanceOf(ApiMartImageTaskPending);
+  expect(h.grants).toHaveLength(0);
+  expect(h.calls[0]?.payload).toMatchObject({ model: task.model_id, size: "3:4", resolution: "2K", image_urls: sources.map(source => `data:${source.mimeType};base64,${source.bytes.toString("base64")}`) });
+  expect(task.upstream_task_id).toBe("upstream-owned");
+  await h.dispatch(task);
+  expect(h.calls.map(call => call.method)).toEqual(["POST", "GET"]);
+  expect(h.loaded()).toBe(1);
+});
+
 function conversationTask() {
   const task = { ...providerTask(), request_id: "ic:70000000-0000-4000-8000-000000000001:image:1",
     model_config_id: "70000000-0000-4000-8000-000000000002", provider_id: "70000000-0000-4000-8000-000000000003",

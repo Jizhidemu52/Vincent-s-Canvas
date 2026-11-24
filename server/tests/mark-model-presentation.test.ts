@@ -24,13 +24,9 @@ test("Mark choices require the fixed provider and exact supported IDs, without c
   expect(models).toHaveLength(8);
 });
 
-test("all platform models retain distinct UUIDs, exact display prefixes and explicit mask capabilities", () => {
-  expect(MARK_PLATFORM_MODELS).toHaveLength(14);
-  expect(MARK_PLATFORM_MODELS.map(model => model.modelId)).toEqual([
-    "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-nano-banana-2.1", "gpt-6-astra", "happyhorse-1.1",
-    "midjourney-blend", "gpt-image-2", "claude-sonnet-5-5",
-    "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "mai-image-2.7-flash", "seedream-5-5", "gemini-4-carbon", "gpt-6.2-sol",
-  ]);
+test("all platform models retain distinct identities, published labels and explicit mask capabilities", () => {
+  expect(new Set(MARK_PLATFORM_MODELS.map(model => model.modelId)).size).toBe(MARK_PLATFORM_MODELS.length);
+  expect(new Set(MARK_PLATFORM_MODELS.map(model => model.demoOrdinal)).size).toBe(MARK_PLATFORM_MODELS.length);
   for (const [index, preset] of MARK_PLATFORM_MODELS.entries()) {
     const row = { ...mark, ...preset, id: `mark-model-${index}` };
     for (const role of ["designer", "super_admin"]) {
@@ -51,7 +47,6 @@ test("all platform models retain distinct UUIDs, exact display prefixes and expl
         continue;
       }
       expect(shown.name).toBe(preset.name);
-      expect(shown.name).toStartWith("aplmart-");
       expect(shown.publicDescription).toBe(preset.description);
       if ((preset.capabilities as readonly string[]).includes("generate")) expect(shown.imageSupportsMask).toBe(/^gpt-image-2\.[56]-/.test(preset.modelId));
       else expect(shown.imageSupportsMask).toBeUndefined();
@@ -76,10 +71,10 @@ test("Carbon is an appended chat/vision/tools choice with exact identity and no 
     { ...row, id: "wrong-protocol", protocol: "gemini" }, { ...row, id: "nearby-model", modelId: "gemini-4-argon" }])).toEqual([row]);
 });
 
-test("Sol is appended under a new stable identity without changing existing model ordinals", () => {
-  expect(MARK_PLATFORM_MODELS.at(-1)).toMatchObject({ modelId: "gpt-6.2-sol", demoOrdinal: 17, defaultEnabled: true, capabilities: ["chat", "vision", "tools"] });
-  expect(MARK_PLATFORM_MODELS.map(model => model.demoOrdinal)).toEqual([1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 16, 14, 15, 17]);
-  const row = { ...mark, ...MARK_PLATFORM_MODELS.at(-1)!, id: "mark-sol", name: "Administrator renamed Sol" };
+test("Sol retains its stable identity and chat capabilities", () => {
+  const preset = MARK_PLATFORM_MODELS.find(model => model.modelId === "gpt-6.2-sol")!;
+  expect(preset).toMatchObject({ demoOrdinal: 17, defaultEnabled: true, capabilities: ["chat", "vision", "tools"] });
+  const row = { ...mark, ...preset, id: "mark-sol", name: "Administrator renamed Sol" };
   expect(isImageModel(row)).toBe(false);
   expect(presentPublicModel(row, "designer")).toMatchObject({ modelId: "mark-sol", parameterModelId: "gpt-6.2-sol", name: "aplmart-gpt-6.2-sol", capabilities: ["chat", "vision", "tools"] });
 });

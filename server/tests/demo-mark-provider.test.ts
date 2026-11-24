@@ -89,7 +89,7 @@ describe("read-only demo Mark catalog", () => {
     expect(mark.models.slice(0, MARK_PLATFORM_MODELS.length).map(model => [model.id, model.modelId])).toEqual(MARK_PLATFORM_MODELS.map(model => [`d5000000-0000-4000-8000-${String(model.demoOrdinal).padStart(12, "0")}`, model.modelId]));
     expect(new Set(mark.models.map(model => model.id)).size).toBe(mark.models.length);
     const available = listAvailableDemoModels(mark.models, [mark.provider]);
-    expect(available).toHaveLength(12);
+    expect(available.map(model => model.modelId)).toEqual(MARK_PLATFORM_MODELS.filter(model => model.defaultEnabled && model.modelId !== "gpt-6.2-sol").map(model => model.modelId));
     expect(available.some(model => model.modelId === "seedream-5-5")).toBe(false);
     expect(mark.models.filter(model => !model.enabled).map(model => model.modelId)).toEqual(["seedream-5-5", "grok-imagine-image-2.0"]);
     expect(mark.models.find(model => model.modelId === "claude-sonnet-5-5")).toMatchObject({ id: "d5000000-0000-4000-8000-000000000010", enabled: true });
