@@ -77,7 +77,7 @@ sqlTest("real PostgreSQL SQL preserves featured order and explicit empty selecti
     const initial = await getFeatured();
     expect(initial.models.map((model: { modelId: string }) => model.modelId).sort()).toEqual([
       "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-nano-banana-2.1", "midjourney-blend", "gpt-image-2",
-      "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "mai-image-2.7-flash",
+      "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "mai-image-2.7-flash", "qwen-image-3.0",
     ].sort());
     expect(initial.models.find((model: { id: string }) => model.id === modelId("gpt-image-2.6-sunburst"))).toMatchObject({ enabled: false, isFeatured: false });
     expect(initial.featuredModelIds).toEqual([
@@ -104,6 +104,7 @@ sqlTest("real PostgreSQL SQL preserves featured order and explicit empty selecti
     expect(publicResponse.status).toBe(200);
     const publicBody = await publicResponse.json();
     expect(publicBody.models.filter((model: { isFeatured: boolean }) => model.isFeatured).map((model: { id: string }) => model.id)).toEqual(ordered);
+    expect(publicBody.models.find((model: { id: string }) => model.id === modelId("qwen-image-3.0"))).toMatchObject({ name: "Qwen Image 3.0", imageParameterProfile: "qwen-image", isFeatured: false });
     expect(JSON.stringify(publicBody)).not.toMatch(/fixture-mark|encrypted_credentials|providerId|providerName|providerEnabled|hasCredentials/);
     expect((await request(featuredPath, "PUT", { modelConfigIds: [modelId("gpt-image-2.6-sunburst")] })).status).toBe(400);
     expect((await getFeatured()).featuredModelIds).toEqual(ordered);
