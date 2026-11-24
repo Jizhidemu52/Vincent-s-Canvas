@@ -1,4 +1,4 @@
-import {TryoutSwatch,prewarmVisibleRegions,type DropColor} from "./tryout-swatch";
+import {TryoutSwatch,prewarmVisibleTryoutSources,type DropColor} from "./tryout-swatch";
 import { lazy, Suspense, useEffect, useState,type ReactNode } from "react";
 import { editKit, type TryoutKit } from "../../../../../shared/tryout-kit";
 import type {WorkbenchKit} from "./tryout-material-kit";
@@ -10,7 +10,7 @@ export type KitColor=TryoutKit["colors"][number];
 export function TryoutPalette({writable,beforeEdit,onColor,selectedId,group,shelf}:{shelf:WorkbenchKit;group:ReactNode;selectedId?:string;onColor:DropColor;writable:{current:boolean};beforeEdit:()=>void}){
     const t=useUiText(),{kit,setKit}=shelf;
     const [open,setOpen]=useState(false),[notice,setNotice]=useState("");
-    useEffect(prewarmVisibleRegions,[]);
+    useEffect(prewarmVisibleTryoutSources,[]);
     const edit=(color:KitColor|null,replaceId?:string)=>{
         if(!writable.current){setNotice(t("此画布当前不可编辑"));return;}
         if(!shelf.canEdit){setNotice(t(shelf.error?"无法读取材质库":"正在读取材质库"));return;}

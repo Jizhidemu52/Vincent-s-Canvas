@@ -1,9 +1,9 @@
 import {TRYOUT_BATCH_MAX} from "../../../../shared/tryout-limits";
 import type {TryoutSubmissionInput} from "../../../../shared/tryout-submission";
-import type {DropColor,DropRegion,TryoutChip,WearChip} from "@/components/canvas/toolbox/tryout-swatch";
+import type {DropColor,TryoutChip,WearChip} from "@/components/canvas/toolbox/tryout-swatch";
 
 export type TryoutTransport=(input:TryoutSubmissionInput,owner:string,current:()=>boolean)=>Promise<Response>;
-export type BatchJob={nodeId:string;chip:TryoutChip|WearChip;region?:DropRegion};
+export type BatchJob={nodeId:string;chip:TryoutChip|WearChip};
 export type BatchOutcome={planned:number;sent:number;accepted:string[];rejected:number;unknown:number;truncated:boolean};
 const local=(status:number,message:string)=>Response.json({message},{status});
 type Slot={input:TryoutSubmissionInput;owner:string;current:()=>boolean;finish:(r:Response)=>void};
@@ -12,7 +12,7 @@ export async function batchTryout(jobs:BatchJob[],drop:DropColor,owner:string,ca
     const slots=new Map<number,Slot>(),completed:Promise<unknown>[]=[],at=Date.now();
     await Promise.all(picked.map((job,i)=>new Promise<void>(ready=>{
         const capture:TryoutTransport=(input,user,current)=>new Promise<Response>(finish=>{slots.set(i,{input,owner:user,current,finish});ready();});
-        completed.push(Promise.resolve().then(()=>drop(job.nodeId,job.chip,job.region??"",at,capture)).catch(()=>{}).finally(ready));
+        completed.push(Promise.resolve().then(()=>drop(job.nodeId,job.chip,at,capture)).catch(()=>{}).finally(ready));
     })));
     const live:Slot[]=[];
     for(let i=0;i<picked.length;i++){

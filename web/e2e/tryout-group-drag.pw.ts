@@ -1,6 +1,6 @@
 import {expect,test} from "./fixtures";
 
-for(const kind of ["material","color"])test("an unselected product accepts one whole "+kind+" kit only on its foreground",async({page,api},info)=>{
+for(const kind of ["material","color"])test("an unselected product accepts one whole "+kind+" kit without selecting a region",async({page,api},info)=>{
     const project="ab000000-0000-4000-8000-000000000001",asset="ab000000-0000-4000-8000-000000000002";
     const now=new Date().toISOString(),colors=[{id:"red",name:"酒红",hex:"#823B45"},{id:"lime",name:"梨绿",hex:"#B8D977"}];
     const materials=["粗针","细针"].map((name,i)=>({name,id:"p"+i,presetId:"60000000-0000-4000-8000-00000000000"+(i+1)}));
@@ -12,13 +12,9 @@ for(const kind of ["material","color"])test("an unselected product accepts one w
     await page.route("**/api/tryout/quick/batch",r=>{
         const owner=r.request().headers()["x-canvas-owner-id"],items=r.request().postDataJSON().items;
         calls.push(items.map((i:{color?:{hex:string};material?:{presetId:string}})=>i.color?.hex??i.material?.presetId));
-        const tasks=items.map((item:{kind:string;requestId:string;sourceAssetId:string;fallbackHex:string},i:number)=>{
-            expect(item).toMatchObject({kind,sourceAssetId:asset});expect(item.fallbackHex.toUpperCase()).toBe("#263754");
-            if(kind==="material")expect(item).toMatchObject({
-                targetPoint:{xPct:50,yPct:50},
-                boundary:[{x:250,y:250},{x:750,y:250},{x:750,y:750},{x:250,y:750}].map(({x,y})=>({x:expect.closeTo(x,-1),y:expect.closeTo(y,-1)})),
-            });
-            else expect(item).not.toHaveProperty("boundary");
+        const tasks=items.map((item:{kind:string;requestId:string;sourceAssetId:string},i:number)=>{
+            expect(item).toMatchObject({kind,sourceAssetId:asset});
+            for(const key of ["fallbackHex","targetPoint","boundary","part"]) expect(item).not.toHaveProperty(key);
             const taskId="ab000000-0000-4000-8000-00000000001"+i;
             api.tasks.set(taskId,{id:taskId,requestId:"tryout:"+owner+":"+item.requestId,userId:owner,status:"waiting",createdAt:now,resultUrls:[],failureReason:null});
             return {requestId:item.requestId,taskId,prompt:"模拟整组"};
@@ -30,24 +26,9 @@ for(const kind of ["material","color"])test("an unselected product accepts one w
     await expect.poll(()=>target.evaluate(el=>(el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
     const drag=async(frac:number)=>{await handle.scrollIntoViewIfNeeded();const a=(await handle.boundingBox())!,b=(await target.boundingBox())!;
         await page.mouse.move(a.x+a.width/2,a.y+a.height/2);await page.mouse.down();await page.mouse.move(b.x+b.width*frac,b.y+b.height*frac,{steps:12});await page.mouse.up();};
-    await drag(.05);await expect(page.getByText("这里是背景，未提交试款")).toBeVisible();expect(calls).toHaveLength(0);
+    await drag(-.35);expect(calls).toHaveLength(0);
     await drag(.5);
-    if(kind==="material"){
-        const dialog=page.getByRole("dialog",{name:/圈选换料部位/});
-        const confirm=dialog.getByRole("button",{name:"确认局部换料"});
-        await expect(confirm).toBeDisabled();
-        expect(calls).toHaveLength(0);
-        await dialog.getByRole("button",{name:"取消",exact:true}).click();
-        await expect(dialog).toHaveCount(0);expect(calls).toHaveLength(0);
-        await drag(.5);await expect(dialog).toBeVisible();
-        const outline=dialog.getByRole("img",{name:"换料部位轮廓"});
-        await expect(outline).toBeVisible();
-        const bounds=(await outline.boundingBox())!;
-        for(const [x,y] of [[.25,.25],[.75,.25],[.75,.75],[.25,.75]]) await page.mouse.click(bounds.x+bounds.width*x,bounds.y+bounds.height*y);
-        await expect(confirm).toBeEnabled();expect(calls).toHaveLength(0);
-        await page.screenshot({path:info.outputPath("group-material-before-confirm.png")});
-        await confirm.click();
-    }
+    await expect(page.getByRole("dialog",{name:/圈选换料部位/})).toHaveCount(0);
     await expect.poll(()=>calls).toEqual([kind==="color"?colors.map(c=>c.hex):materials.map(m=>m.presetId)]);
     await expect(page.getByText("已受理 2 款")).toBeVisible();
     await page.screenshot({path:info.outputPath("group-"+kind+".png")});

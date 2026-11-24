@@ -16,11 +16,10 @@ import type {TryoutMeta} from "../../../../shared/tryout";
 import type { TryoutSubmissionInput } from "../../../../shared/tryout-submission";
 
 export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
-    return async(sourceId,swatch,dropRegion,droppedAt,transport)=>{
-        const regionHex=typeof dropRegion==="string"?dropRegion:dropRegion.hex;
+    return async(sourceId,swatch,droppedAt,transport)=>{
         const {nodesRef,runtime,projectId,message,setField,isCurrent}=context;
         const source=nodesRef.current.find(n=>n.id===sourceId),owner=useUserStore.getState().user?.id;
-        if(!owner||!isCurrent()||source?.type!==CanvasNodeType.Image||!hasCanvasImageSource(source.metadata)||source.metadata.status==="loading"||source.metadata.status==="error"||source.metadata.proposalBoard||source.metadata.tryout?.kind==="wear")return;
+        if(!owner||!isCurrent()||source?.type!==CanvasNodeType.Image||!hasCanvasImageSource(source.metadata)||source.metadata.status==="loading"||source.metadata.status==="error"||source.metadata.locked||source.metadata.proposalBoard||source.metadata.tryout?.kind==="wear")return;
         const metadata=source.metadata,url=canvasImageSource(metadata);
         const color="hex" in swatch?{name:swatch.name,hex:swatch.hex,...(swatch.library?{library:swatch.library}:{}),...(swatch.code?{code:swatch.code}:{})}:null;
         const wear="model" in swatch?swatch:null;
@@ -30,7 +29,7 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
         if(origin&&(products.length>4||new Set(products).size!==products.length)){void message.warning("一套最多四件不同产品，本次未提交");return;}
         const material="hex" in swatch||"model" in swatch?null:{name:swatch.name,presetId:swatch.presetId,assetId:swatch.assetId};
         if(!wear&&!color&&!material?.assetId&&!material?.presetId)return;
-        const prompt=wear?wearPrompt(products.map(()=>null)):color?colorPrompt(null,null,color,regionHex):"试材质："+swatch.name,id=createClientUuid(),requestId=createClientUuid();
+        const prompt=wear?wearPrompt(products.map(()=>null)):color?colorPrompt(null,null,color):"试材质："+swatch.name,id=createClientUuid(),requestId=createClientUuid();
         const trace:TryoutMeta={version:1,rootNodeId,sourceNodeId:previous?.sourceNodeId??source.id,tier:"quick",prompt,timing:{droppedAt},...(wear?{kind:"wear",model:previous?.model??{name:wear.name,...("auto" in wear.model?{}:wear.model)},products} as const:color?{kind:"color",color} as const:{kind:"material",material:material!} as const)};
         const binding={projectId,ownerId:owner,requestId:"tryout:"+owner+":"+requestId,resultIndex:0};
         const output=()=>nodesRef.current.find(n=>n.id===id);
@@ -56,9 +55,8 @@ export function colorDrop(context:CanvasImageActionRuntimeContext):DropColor{
             const original=nodesRef.current.find(n=>n.id===sourceId)?.metadata;
             if(!original||canvasImageSource(original)!==url||original.storageKey!==metadata.storageKey)throw new Error("原图已变更，未提交试款");
             const common={tier:"quick",canvasId:projectId,nodeId:id,requestId} as const;
-            const region={...(regionHex?{fallbackHex:regionHex}:{}),...(material&&typeof dropRegion!=="string"?{targetPoint:dropRegion.point,boundary:dropRegion.boundary}:{})};
             if(origin){const m=nodesRef.current.find(n=>n.id===origin.nodeId)?.metadata;if(m?.sourceTaskId!==origin.taskId||m?.imageTask||m.locked||m.status!=="success")throw new Error("原上身图已变化，未提交搭配");}
-            const input:TryoutSubmissionInput=origin?{kind:"outfit",canvasId:projectId,nodeId:id,requestId,originTaskId:origin.taskId,originNodeId:origin.nodeId,sourceAssetId}:wear?{...common,kind:"wear",model:wear.model,productAssetIds:[sourceAssetId]}:color?{...common,sourceAssetId,kind:"color",color,...region}:{...common,sourceAssetId,kind:"material",...region,material:material!.presetId?{presetId:material!.presetId}:{assetId:material!.assetId!}};
+            const input:TryoutSubmissionInput=origin?{kind:"outfit",canvasId:projectId,nodeId:id,requestId,originTaskId:origin.taskId,originNodeId:origin.nodeId,sourceAssetId}:wear?{...common,kind:"wear",model:wear.model,productAssetIds:[sourceAssetId]}:color?{...common,sourceAssetId,kind:"color",color}:{...common,sourceAssetId,kind:"material",material:material!.presetId?{presetId:material!.presetId}:{assetId:material!.assetId!}};
             if(notice&&!notice.canSend())throw new Error("已取消，本次未提交");
             uncertain=true;
             const res=transport?await transport(input,owner,()=>{

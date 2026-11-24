@@ -1,6 +1,6 @@
 import {expect,fixturePng,test} from "./fixtures";
 
-for(const mode of ["acknowledged color","lost submission response","preset material","chosen material","live first display"])test("a background drop costs nothing and a product drop survives reload: "+mode,async({page,api},info)=>{
+for(const mode of ["acknowledged color","lost submission response","preset material","chosen material","live first display"])test("a canvas background drop costs nothing and a whole-product drop survives reload: "+mode,async({page,api},info)=>{
     const lostAck=mode==="lost submission response",material=mode.endsWith("material"),presetId="60000000-0000-4000-8000-000000000001";
     const project="ba000000-0000-4000-8000-000000000001",asset="ba000000-0000-4000-8000-000000000002",taskId="ba000000-0000-4000-8000-000000000003";
     const png=await page.evaluate(()=>{
@@ -11,7 +11,7 @@ for(const mode of ["acknowledged color","lost submission response","preset mater
     api.assetBytes.set(asset,Buffer.from(png,"base64"));
     const now=new Date().toISOString(),nodes=[{id:"sample",type:"image",title:"隔离色块样品",width:220,height:220,position:{x:250,y:180},metadata:{serverAssetId:asset,status:"success"}}];
     api.documents.set(project,{id:project,revision:1,deleted:false,updatedAt:now,document:{id:project,title:"拖色恢复验证",createdAt:now,updatedAt:now,nodes,connections:[],groups:[],...(material?{tryoutKit:{version:1,colors:[],materials:[]}}:{}),viewport:{x:0,y:0,k:1},backgroundMode:"dots",showImageInfo:false,chatSessions:[],activeChatId:null,history:{past:[],future:[]}}});
-    const calls:Array<{requestId:string;nodeId:string;sourceAssetId:string;fallbackHex:string}>=[];
+    const calls:Array<{requestId:string;nodeId:string;sourceAssetId:string}>=[];
     const inspect=mode==="acknowledged color";
     const live=mode==="live first display",displays:Array<{source:string;droppedAt:number;submittedAt:number;shownAt:number}>=[];
     await page.route("**/api/tryout/results/"+taskId+"/display",route=>{expect(route.request().headers()["x-canvas-owner-id"]).toBeTruthy();displays.push(route.request().postDataJSON());return route.fulfill({status:204});});
@@ -34,7 +34,7 @@ for(const mode of ["acknowledged color","lost submission response","preset mater
         const req=route.request(),input=req.postDataJSON(),owner=req.headers()["x-canvas-owner-id"];
         calls.push(input);api.tasks.set(taskId,{id:taskId,userId:owner,requestId:"tryout:"+owner+":"+input.requestId,status:"waiting",createdAt:now,resultUrls:[],failureReason:null});
         if(lostAck)await route.abort("connectionreset");
-        else await route.fulfill({json:{taskId,prompt:"隔离供应商 · 保存命中区域"}});
+        else await route.fulfill({json:{taskId,prompt:"隔离供应商 · 整件试款"}});
     });
     await page.goto("/canvas/"+project);if(inspect){await expect(page.locator('[data-node-id="sample"] img[data-canvas-image-resolution]')).toBeVisible();await expect(page.getByRole("button",{name:"修改产品标签"})).toHaveCount(0);expect(observations).toBe(0);}await page.getByRole("button",{name:"试款台",exact:true}).click();
     if(material){
@@ -52,22 +52,13 @@ for(const mode of ["acknowledged color","lost submission response","preset mater
         await page.mouse.move(a.x+a.width/2,a.y+a.height/2);await page.mouse.down();await page.mouse.move(b.x+b.width*frac,b.y+b.height*frac,{steps:12});await page.mouse.up();
     };
     await swatch.click();if(material)await expect(swatch).toHaveAttribute("aria-pressed","true");else await expect(page.getByRole("status").filter({hasText:"拖到产品上松手"})).toBeVisible();expect(calls).toHaveLength(0);
-    await drop(.04);await expect(page.getByRole("status").filter({hasText:"这里是背景"})).toBeVisible();expect(calls).toHaveLength(0);
+    await drop(-.35);expect(calls).toHaveLength(0);
     if(mode==="chosen material"){
         await img.locator('xpath=ancestor::*[@data-node-id][1]').click();
         const apply=page.getByRole("button",{name:/换材质 · 粗针 · 1 款/});await expect(apply).toBeEnabled();expect(calls).toHaveLength(0);
         await apply.click();
     }else await drop(.5);
-    if(mode==="preset material"){
-        const dialog=page.getByRole("dialog",{name:/圈选换料部位/}),confirm=dialog.getByRole("button",{name:"确认局部换料"});
-        await expect(confirm).toBeDisabled();
-        await dialog.getByRole("button",{name:"取消"}).click();expect(calls).toHaveLength(0);
-        await drop(.5);
-        const frame=(await dialog.getByRole("img",{name:"换料部位轮廓"}).boundingBox())!;
-        for(const [x,y] of [[.31,.24],[.67,.24],[.66,.81],[.34,.81]]) await page.mouse.click(frame.x+frame.width*x,frame.y+frame.height*y);
-        await expect(confirm).toBeEnabled();expect(calls).toHaveLength(0);
-        await page.screenshot({path:info.outputPath("confirmed-area-before-submit.png")});await confirm.click();
-    }
+    await expect(page.getByRole("dialog",{name:/圈选换料部位/})).toHaveCount(0);
     await expect.poll(()=>calls.length).toBe(1);
     if(inspect){
         expect(observations).toBeGreaterThan(0);await expect(page.getByRole("button",{name:"修改产品标签"})).toHaveCount(0);
@@ -84,9 +75,10 @@ for(const mode of ["acknowledged color","lost submission response","preset mater
     }
     const output=()=>api.document(project)?.nodes.find((n:any)=>n.id===calls[0]?.nodeId);
     await expect.poll(()=>output()?.metadata.imageTask?.taskId).toBe(taskId);
-    expect(calls[0]).toMatchObject(material?{sourceAssetId:asset,kind:"material",tier:"quick",material:{presetId}}:{sourceAssetId:asset,fallbackHex:"#263754",kind:"color",tier:"quick",color:{name:"酒红",hex:"#7A1F2B"}});
-    if(mode==="preset material")expect(calls[0]).toMatchObject({targetPoint:{xPct:50,yPct:50}});
-    else expect(calls[0]).not.toHaveProperty("targetPoint");
+    expect(calls[0]).toMatchObject(material?{sourceAssetId:asset,kind:"material",tier:"quick",material:{presetId}}:{sourceAssetId:asset,kind:"color",tier:"quick",color:{name:"酒红",hex:"#7A1F2B"}});
+    for(const key of ["fallbackHex","targetPoint","boundary","part"]) expect(calls[0]).not.toHaveProperty(key);
+    expect(output().position.x).toBeGreaterThanOrEqual(nodes[0].position.x+nodes[0].width);
+    expect(api.document(project)?.nodes.find((n:any)=>n.id==="sample")).toMatchObject(nodes[0]);
     const saved=output().metadata.imageTask.requestId;
     if(!live)await page.reload();
     if(inspect)await expect(page.getByRole("button",{name:"修改产品标签"})).toHaveText(/翻边冷帽/);

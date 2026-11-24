@@ -38,7 +38,7 @@ export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onCl
     const t=useUiText();
     const discussion=tab==="discussion";
     const shelf=useWorkbenchKit(),batch=useTryoutBatch(onColor,writable),selectedProduct=batch.products[0];
-    const groupButton=(chips:TryoutChip[],label:string)=>chips[0]&&<TryoutSwatch selectedId={selectedProduct} color={chips[0]} groupLabel={label+" · "+Math.min(12,(batch.products.length||1)*chips.length)+" "+t("款")} onDrop={(id,_chip,region)=>batch.group(id,chips,region)} writable={writable} notice={setGroupNotice}/>;
+    const groupButton=(chips:TryoutChip[],label:string)=>chips[0]&&<TryoutSwatch selectedId={selectedProduct} color={chips[0]} groupLabel={label+" · "+Math.min(12,(batch.products.length||1)*chips.length)+" "+t("款")} onDrop={id=>batch.group(id,chips)} writable={writable} notice={setGroupNotice}/>;
     const saved=node?.metadata?.proposalBoard;
     const board=saved?.version===2 && pending && pending.id===node?.id ? {...saved,...pending.patch} : saved;
     const run=async(options?:Partial<TryoutBoardOptions>)=>{
@@ -61,7 +61,7 @@ export function CanvasDesignToolbox({node,count,selectedCount,onRun,onBoard,onCl
             <p className="tb-hint">{t("把颜色拖到产品上，旁边直接出这个颜色的款。原款不动。")}</p>
             <TryoutPalette shelf={shelf} selectedId={selectedProduct} onColor={batch.apply} writable={writable} beforeEdit={beforeEdit} group={groupButton(shelf.kit.colors,t("试整组色板"))}/>
             <h4>{t("2 试材质")}<em>{t("快速出款")}</em></h4>
-            <p className="tb-hint">{t("把材质拖到产品上，款式版型不变，只换材质。")}</p>
+            <p className="tb-hint">{t("把材质拖到产品上，松手后生成整件换材质款，原款不动。")}</p>
             <TryoutMaterials productCount={batch.products.length} shelf={shelf} selectedId={selectedProduct} onColor={batch.apply} writable={writable} beforeEdit={beforeEdit} group={groupButton(shelf.kit.materials,t("试整组材质"))}/>
             {groupNotice&&<p role="status">{groupNotice}</p>}
             <h4>{t("3 上身")}<em>{t("快速上身")}</em></h4>

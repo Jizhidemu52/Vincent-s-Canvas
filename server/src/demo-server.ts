@@ -7,7 +7,7 @@ import { logDemoRequest } from "./request-logging";
 import { taskSubmissionSchema, batchSubmissionSchema, type TaskSubmission } from "../../shared/task-contracts";
 import type { PromptInput } from "../../shared/prompt-contracts";
 import { hashAssetContent, requestedContentHash } from "./asset-content-hash";
-import { ZodError } from "zod";
+import { z, ZodError } from "zod";
 import { demoTaskSummary, pageDemoRecords, parseDemoTaskFilters } from "./demo-list-pagination";
 import { singleImageTaskParameters } from "./image-task-policy";
 import { imageTaskApiReplacer, imageTaskFailureDetail, imageTaskPauseReason, type ImageTaskFailureDetail, type ImageTaskFailurePhase } from "./image-task-diagnostics";
@@ -65,6 +65,8 @@ import { verifyOaToken, OaError, OA_SESSION_TTL_SECONDS } from "./oa";
 import { readReferenceImportBody, referenceImportFailure, runReferenceImportAction } from "./routes/reference-import";
 import { moduleKeys, moduleIsEnabled, toolDefinitions, type ToolKey } from "../../shared/feature-catalog";
 import { DemoToolConfigurationError, resolveDemoToolConfiguration } from "./demo-tool-configuration";
+import { demoMaterialPresets, demoTryoutTask, type DemoTryoutInput } from "./demo-tryout";
+import { outfitTryout, refineTryout, tryoutBatch, tryoutSubmission } from "../../shared/tryout-submission";
 import { applyDefaultChatModel, CANVAS_DESIGN_CHAT_TOOL_KEY, INITIAL_CANVAS_DESIGN_CHAT_MODEL_ID, INITIAL_CHAT_MODEL_ID } from "./chat-model-policy";
 import { sqlitePromptRecipeStore } from "./demo-prompt-recipes";
 import { createDemoPromptCompiler, handleDemoPromptRecipes } from "./demo-prompt-runtime";
@@ -81,7 +83,9 @@ import { assertVideoMotionPolicy, ensureVideoMotionRecipe, videoMotionParameters
 
 const sessions = new Map<string, string>();
 const modules = moduleKeys;
-const demoModuleFlags = Object.fromEntries(modules.map(key => [key, key !== "canvas-tryout"]));
+const demoHost = resolveDemoHost();
+const localTryout = demoHost === "127.0.0.1" && process.env.OA_LOGIN_ENABLED !== "true" && process.env.DEMO_CANVAS_TRYOUT_ENABLED === "true";
+const demoModuleFlags = Object.fromEntries(modules.map(key => [key, key !== "canvas-tryout" || localTryout]));
 // Preserve existing mock model IDs; adding a formal board must not renumber models.
 const legacyDemoTools = ["detail-enhance", "image-edit", "angle-control", "seamless-stitch", "image", "video"]
   .map(key => toolDefinitions.find(item => item.toolKey === key)!);
@@ -602,7 +606,6 @@ async function callDemoGemini(input: { input: DemoResponseInput[]; tools: DemoRe
 }
 
 const demoPort = Number(process.env.DEMO_PORT || 3100);
-const demoHost = resolveDemoHost();
 
 const demoSourceProbes = new WeakMap<Uint8Array, MediaMetadata>();
 async function createProviderVideoSources(_model: SupportedVideoModelId, sources: DemoAsset[]) {
@@ -1737,6 +1740,72 @@ Bun.serve({
         return json(demoPromptBatches.result(batch, demoTasks.values()), 201);
       });
     }
+    if (localTryout && (path.startsWith("/api/tryout/") || path === "/api/materials" || path.startsWith("/api/materials/mine/"))) {
+      if (request.method !== "GET" || request.headers.has("x-canvas-owner-id")) assertCanvasOwner(request.headers.get("x-canvas-owner-id"), user.id);
+      const library = (source: string) => [...demoAssets.values()].filter(asset => asset.ownerUserId === user.id && asset.mimeType.startsWith("image/") && demoAssetByteLength(asset) && asset.metadata?.source === source && asset.metadata?.tryoutArchived !== true);
+      if (path === "/api/materials" && request.method === "GET") {
+        return json({ presets: demoMaterialPresets, mine: library("material-library").map(asset => ({ id: asset.id, name: String(asset.metadata?.uploadName || asset.filename), description: String(asset.metadata?.description || ""), useColor: asset.metadata?.useColor === true })) });
+      }
+      if (path === "/api/tryout/models" && request.method === "GET") {
+        const portraits = library("model-library");
+        return json({ presets: [], mine: portraits.map(asset => ({ id: asset.id, name: String(asset.metadata?.name || asset.filename), audience: asset.metadata?.audience ?? "women" })), preference: { assetId: portraits.find(asset => asset.metadata?.tryoutDefault === true)?.id } });
+      }
+      if (path === "/api/tryout/models/default" && request.method === "PUT") {
+        const { assetId } = z.strictObject({ assetId: z.string().uuid().optional() }).parse(await request.json());
+        const portraits = library("model-library");
+        if (assetId && !portraits.some(asset => asset.id === assetId)) return json({ message: "个人模特不可用" }, 404);
+        saveDemoAssetMetadata(portraits.filter(asset => (asset.metadata?.tryoutDefault === true) !== (asset.id === assetId)).map(asset => ({ ...demoAssetFields(asset), metadata: { ...asset.metadata, tryoutDefault: asset.id === assetId } })));
+        return new Response(null, { status: 204 });
+      }
+      const entry = /^\/api\/(materials|tryout\/models)\/mine\/([0-9a-f-]+)(\/analyze)?$/i.exec(path);
+      if (entry) {
+        const material = entry[1] === "materials";
+        const asset = library(material ? "material-library" : "model-library").find(item => item.id === entry[2]);
+        if (!asset) return json({ message: "素材不存在或已移除" }, 404);
+        if (material && entry[3] && request.method === "POST") return json({ status: "needs-input" });
+        if (!entry[3] && (request.method === "DELETE" || material && request.method === "PATCH")) {
+          const { name, ...fields } = request.method === "DELETE" ? { name: undefined, tryoutArchived: true } : z.strictObject({ name: z.string().trim().min(1).max(80).optional(), description: z.string().max(600).optional(), useColor: z.boolean().optional() }).parse(await request.json());
+          saveDemoAssetMetadata([{ ...demoAssetFields(asset), metadata: { ...asset.metadata, ...fields, ...(name ? { uploadName: name } : {}) } }]);
+          return new Response(null, { status: 204 });
+        }
+      }
+      if (request.method === "POST" && (path === "/api/tryout/prewarm" || /^\/api\/tryout\/results\/[0-9a-f-]+\/display$/i.test(path))) return new Response(null, { status: 204 });
+      if (request.method === "POST" && (path === "/api/tryout/quick" || path === "/api/tryout/quick/batch")) {
+        const admit = async (input: DemoTryoutInput) => {
+          const modelConfigId = markImageProvider.models.find(model => model.modelId === "gpt-image-2" && model.enabled)?.id;
+          if (!modelConfigId || !markImageProvider.apiKey) throw new DemoToolConfigurationError("PROVIDER_NOT_CONFIGURED", "本机试款需要先配置 APIMart 图片模型", 503);
+          const requestId = `tryout:${user.id}:${input.kind === "refine" ? "hd:" + input.sourceTaskId : input.requestId}`;
+          const order = (asset: DemoAsset) => Number(asset.metadata?.tryoutDefault === true);
+          const portraits = library("model-library").sort((a,b) => order(b) - order(a)).map(asset => ({ id: asset.id, name: String(asset.metadata?.name || asset.filename) }));
+          const materials = new Map(library("material-library").map(asset => [asset.id, { description: String(asset.metadata?.description || ""), useColor: asset.metadata?.useColor === true }]));
+          const submission = demoTryoutTask(input, { requestId, modelConfigId, portraits, materials, prior: id => {
+            const task = demoTasks.get(id);
+            return task?.ownerUserId === user.id && task.requestId.startsWith(`tryout:${user.id}:`) ? task : undefined;
+          } });
+          const result = await demoAdmissionGate.run("task:" + user.id + ":" + requestId, promptHash(submission), () => submitDemoTask(submission));
+          const body = await result.json();
+          if (!result.ok) throw new DemoToolConfigurationError(body.error || "TRYOUT_UNAVAILABLE", body.message || "未能提交试款", result.status);
+          return { status: result.status, receipt: { taskId: body.task.id, prompt: body.task.prompt, model: body.task.parameters?.tryoutModel } };
+        };
+        const body = await request.json();
+        if (path.endsWith("/batch")) {
+          const { items } = tryoutBatch.parse(body);
+          const tasks = [];
+          for (const item of items) {
+            try { tasks.push({ requestId: item.requestId, ...(await admit(item)).receipt }); }
+            catch (error) {
+              if (!(error instanceof DemoToolConfigurationError) || error.status >= 500) throw error;
+              tasks.push({ requestId: item.requestId, error: { code: error.code, message: error.message } });
+            }
+          }
+          return json({ tasks });
+        }
+        const schema = body?.kind === "refine" ? refineTryout : body?.kind === "outfit" ? outfitTryout : tryoutSubmission;
+        const result = await admit(schema.parse(body));
+        return json(result.receipt, result.status);
+      }
+    }
+
     if (path === "/api/tasks/preflight" && request.method === "POST") {
       const input = taskSubmissionSchema.parse(await request.json());
       if (input.operationType !== "video_generation")

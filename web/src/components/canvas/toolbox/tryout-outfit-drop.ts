@@ -20,7 +20,7 @@ export function outfitDrop(nodes:{current:CanvasNodeData[]},writable:{current:bo
         }
         marker?.remove();
         if(blocked){void ui.message.info("一套最多四件不同产品，本次未提交");return true;}
-        void drop(id,{name:"搭配",model:{auto:true},outfit:origin},"",Date.now());
+        void drop(id,{name:"搭配",model:{auto:true},outfit:origin},Date.now());
         return true;
     };
 }

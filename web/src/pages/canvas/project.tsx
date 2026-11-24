@@ -2030,7 +2030,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const quickWear=async(node?:CanvasNodeData)=>{
         if(!node||!tryoutEnabled||!writable.current||!isTryoutProduct(node)||wearing.current.has(node.id))return;
         wearing.current.add(node.id);
-        try{await tryoutColorNode(node.id,{name:"自动配模特",model:{auto:true}},"",Date.now());}
+        try{await tryoutColorNode(node.id,{name:"自动配模特",model:{auto:true}},Date.now());}
         finally{wearing.current.delete(node.id);}
     };
 

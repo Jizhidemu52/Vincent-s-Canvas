@@ -23,7 +23,7 @@ export function TryoutModels({nodeId,count,writable,onDrop}:{nodeId?:string;coun
         lock(true);tell("");try{await action(owner,c.signal);}catch(e){if(!c.signal.aborted)tell(e instanceof Error?e.message:t("请刷新核对"));}
         finally{if(!c.signal.aborted){lock(false);reload(i=>i+1);}}
     };
-    const wear=async(id:string,chip:WearChip)=>{if(!writable.current||pending.current)return;pending.current=true;try{await onDrop(id,chip,"",Date.now());}finally{pending.current=false;}};
+    const wear=async(id:string,chip:WearChip)=>{if(!writable.current||pending.current)return;pending.current=true;try{await onDrop(id,chip,Date.now());}finally{pending.current=false;}};
     const tile=(name:string,model:ModelSelection,img:string,asset:string,preset?:string,description?:string)=>{
         const chip={name,model},key=JSON.stringify(model);
         const warm=()=>void prewarmTryoutSource(asset,owner,()=>!!lifetime.current&&!lifetime.current.signal.aborted,preset);
