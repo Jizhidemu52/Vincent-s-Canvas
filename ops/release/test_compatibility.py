@@ -77,7 +77,7 @@ class CompatibilityRetentionTests(unittest.TestCase):
                 return b""
             self.fail("unexpected external command: " + repr(arguments))
 
-        def cutover(current, target, fallback, *args):
+        def cutover(current, target, fallback, *args, **kwargs):
             deploy.write_new_json(runner.audit / "containers-started.private.json", rows)
             deploy.write_new_json(runner.audit / "baseline.private.json", baseline)
 

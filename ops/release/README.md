@@ -17,6 +17,9 @@ v0.5.114 → v0.5.115 的 056–058 仅由已验证发布包中的 `ops/release/
 - `ops/release/stack-smoke.sh candidate.json /new/private/evidence`：仅 GitHub 隔离测试项目；正式后端、合成 Provider、无真实付费调用。
 - `ops/release/package-artifact.sh candidate.json verification.json /new/package`：验证同一镜像后导出白名单工具与镜像，不打包环境、数据库或私有配置。
 - `bash ops/baota/deploy.sh doctor /absolute/instance.json [--session-file /absolute/probe.json]`：对现有宝塔实例运行 16 项检查并在实例审计目录保存 `doctor.json`。退出码 `0` 表示全部通过，`1` 表示有未通过的检查，`2` 表示无法启动。发布标记走实际的 `/deployment-release.json`，与本机入口和三个运行容器的标签比对。
+- `bash ops/baota/deploy.sh render-proxy /absolute/instance.json /absolute/new-proxy.conf`：从实际 Web 回环端口生成带管理标记的代理文件，返回 SHA-256。只写入指定的新文件。维护窗口启用独立 `include` 时，保留站点证书、日志和访问限制，并更新实例的两份配置哈希。
+- `bash ops/baota/deploy.sh plan /absolute/instance.json /absolute/package --session-file /absolute/probe.json`：运行现有发布预检和 `doctor`，在预检审计目录写入 `doctor-before.json`。只读检查结果允许提前发现生产配置差异。
+- `bash ops/baota/deploy.sh apply /absolute/instance.json /absolute/package --probe-account-file /absolute/probe-account.json --fixture /absolute/20mb.png`：使用专用设计师账号登录，在发布前端到端自检全绿才进入原镜像切换。切换后通过公司域名新登录，绑定目标提交再跑 16 项，并对 20,000,000 字节的测试 PNG 验证上传与下载 SHA-256。账号文件由操作者持有且权限 `0600`，字段为 `origin`、`identifier`、`password`、`cookieName`。验收图留在专用账号下，回执留在发布审计目录。后置验收失败立即调用已有应用回滚，重新关闭入口、排空任务、保护当时已写入的数据库数据。若旧版本或实例状态不满足回滚条件，由维护审计保留现场。
 - `bash ops/deploy.sh preflight /absolute/instance.json /absolute/package`：验证包、实际容器/卷/网络/配置、零待执行迁移，生成私有预检证据；不停止容器、不改数据库、不加载镜像。
 - `bash ops/deploy.sh apply /absolute/instance.json /absolute/package /absolute/preflight-audit`：仅接受 15 分钟内且仍匹配的预检；先加载并核验镜像、关闭已审阅维护门、排空活动、停止三个应用服务、备份并核对数据库，再替换应用镜像。基础设施和 `newvcan-*` 不变。
 - `bash ops/deploy.sh rollback /absolute/instance.json /absolute/successful-deployment-audit`：使用该发布保存的完整旧 Compose 与旧 image ID，在新的维护窗口保留当前数据并回滚应用。旧镜像、旧代码挂载目录和该审计目录必须保留。

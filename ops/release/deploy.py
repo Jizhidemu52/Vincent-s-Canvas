@@ -397,7 +397,7 @@ class Deployment:
             if self.instance.get("ingress") and path in [self.instance["ingress"]["siteFile"], self.instance["ingress"]["proxyFile"]]: continue
             require(sha_file(path) == expected, "APPLICATION_CONFIGURATION_CHANGED")
 
-    def cutover(self, baseline, target, fallback, release=None, images=None):
+    def cutover(self, baseline, target, fallback, release=None, images=None, verify_public=True):
         gate_closed = False
         launched = False
         stopped_confirmed = False
@@ -433,7 +433,7 @@ class Deployment:
             # Gate changes ingress temporarily, so compare only application inputs here.
             self.application_configuration_unchanged(baseline)
             self.gate("open"); self.gate("verify-open"); gate_closed = False
-            self.wait_health(self.instance["publicBaseUrl"], release)
+            if verify_public: self.wait_health(self.instance["publicBaseUrl"], release)
         except Exception:
             # No uncertain writes are retried. A failed new application may be
             # restored only after positively stopping it and proving zero change.
@@ -455,7 +455,7 @@ class Deployment:
                            "maintenanceMayBeClosed": gate_closed, "manualReviewRequired": True})
             raise
 
-    def apply(self, package, preflight):
+    def apply(self, package, preflight, verify_public=True):
         release = verify_package(package)
         prior = read_json(private_directory(preflight) / "preflight.json")
         require(0 <= time.time() - prior.get("createdAt", 0) <= 900, "PREFLIGHT_EXPIRED")
@@ -483,7 +483,7 @@ class Deployment:
         write_new_json(self.audit / "rollback.private.json", compose_literals(fallback))
         write_new_json(self.audit / "preparation-baseline.private.json", current)
         self.compose("config", "--quiet", model=self.audit / "candidate.private.json")
-        self.cutover(current, self.audit / "candidate.private.json", self.audit / "rollback.private.json", release, images)
+        self.cutover(current, self.audit / "candidate.private.json", self.audit / "rollback.private.json", release, images, verify_public=verify_public)
         self.activate(self.audit / "candidate.private.json")
         evidence = ["candidate-model.private.json", "candidate.private.json", "rollback-model.private.json", "rollback.private.json", "containers-started.private.json", "baseline.private.json"]
         receipt = {"schema": 1, "status": "applied", "instanceSha256": sha_file(self.instance_path), "commit": release["commit"], "imageIds": {role: row["id"] for role, row in release["images"].items()}, "audit": str(self.audit), "databaseChanged": False, "infrastructureChanged": False,

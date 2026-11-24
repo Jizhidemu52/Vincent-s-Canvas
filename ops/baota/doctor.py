@@ -35,33 +35,38 @@ def run(*argv, data=None, timeout=12):
 
 
 @contextmanager
-def request(origin, path, headers=None, timeout=8):
+def request(origin, path, headers=None, timeout=8, method="GET", body=None, status=200):
     url = urlsplit(origin)
     connection_type = HTTPSConnection if url.scheme == "https" else HTTPConnection
     connection = connection_type(url.hostname, url.port, timeout=timeout)
     try:
-        connection.request("GET", path, headers={"Accept-Encoding": "identity", **(headers or {})})
+        connection.request(method, path, body=body, headers={"Accept-Encoding": "identity", **(headers or {})})
         response = connection.getresponse()
-        check(response.status == 200, f"{path.split('?')[0]} 返回 HTTP {response.status}")
+        check(response.status == status, f"{path.split('?')[0]} 返回 HTTP {response.status}")
         yield response
     finally:
         connection.close()
 
 
-def get(origin, path, headers=None, limit=32 * 1024 * 1024):
-    with request(origin, path, headers) as response:
+def get(origin, path, headers=None, limit=32 * 1024 * 1024, timeout=8):
+    with request(origin, path, headers, timeout=timeout) as response:
         body = response.read(limit + 1)
         check(len(body) <= limit, "响应超过诊断长度上限")
         return body, response.headers
 
 
+def private_input(path, origin, fields):
+    check(path.is_absolute() and path.is_file() and not path.is_symlink(), "验收凭据必须为绝对路径的普通文件")
+    check(path.stat().st_mode & 0o777 == 0o600 and path.stat().st_uid == os.geteuid(), "验收凭据文件须由当前用户持有，权限为 0600")
+    value = read_json(path)
+    check(isinstance(value, dict) and set(value) == {"origin", *fields} and all(isinstance(item, str) for item in value.values())
+          and value["origin"].rstrip("/") == origin.rstrip("/"), "验收凭据字段或实例域名不一致")
+    return value
+
+
 def session_headers(path, origin):
     check(path is not None, "需要提供生产域名专用验收会话 --session-file")
-    check(path.is_absolute() and path.is_file() and not path.is_symlink(), "验收会话必须为绝对路径的普通文件")
-    check(path.stat().st_mode & 0o077 == 0 and path.stat().st_uid == os.geteuid(), "验收会话文件须由当前用户持有，权限为 0600")
-    value = read_json(path)
-    check(isinstance(value, dict) and set(value) == {"origin", "cookie"} and isinstance(value["origin"], str)
-          and value["origin"].rstrip("/") == origin.rstrip("/"), "验收会话与当前实例域名不一致")
+    value = private_input(path, origin, {"cookie"})
     cookie = value["cookie"]
     check(isinstance(cookie, str) and re.fullmatch(r"[A-Za-z0-9_.-]+=[A-Za-z0-9_.%~-]{8,4096}", cookie), "验收会话必须只包含一个有效的会话 Cookie")
     return {"Cookie": cookie}
@@ -118,9 +123,11 @@ def time_setting(value):
 class Doctor:
     service_roles = ("web", "api", "worker", "postgres", "redis", "minio")
 
-    def __init__(self, instance, session=None):
+    def __init__(self, instance, session=None, probe_headers=None, expected_release=None):
         self.instance = instance
         self.session = session
+        self.probe_headers = probe_headers
+        self.expected_release = expected_release
         self.app = instance["containers"]
         self.api, self.web = self.app["api"], self.app["web"]
         self.public, self.local = instance["publicBaseUrl"], instance["localBaseUrl"]
@@ -165,11 +172,16 @@ class Doctor:
         check(sha_file(path) == self.ingress["expectedProxySha256"], "外层代理文件哈希与实例不一致")
         return path.read_bytes()
 
-    def ports(self):
+    def web_port(self):
         port = urlsplit(self.local).port
         bindings = self.containers[self.web]["NetworkSettings"]["Ports"].get("3000/tcp")
+        check(port is not None and bindings == [{"HostIp": "127.0.0.1", "HostPort": str(port)}], "Web 必须按实例声明的端口只监听回环")
+        return port
+
+    def ports(self):
+        port = self.web_port()
         upstreams = set(re.findall(r"http://127\.0\.0\.1:(\d+)\b", no_comments(self.proxy_raw().decode())))
-        check(bindings == [{"HostIp": "127.0.0.1", "HostPort": str(port)}] and upstreams == {str(port)}, "Web 实际映射、实例端口及宝塔反代端口必须一致并只监听回环")
+        check(upstreams == {str(port)}, "Web 实际映射与宝塔反代端口不一致")
         return f"Compose 与反代均为 127.0.0.1:{port}"
 
     def health_states(self):
@@ -197,6 +209,8 @@ class Doctor:
         for row in self.app.values():
             labels = self.containers[row]["Config"]["Labels"]
             check(labels.get("org.opencontainers.image.revision") == live["commit"] and labels.get("org.opencontainers.image.version") == live["version"], "运行容器与生产发布标记不一致")
+        if self.expected_release:
+            check(all(live[key] == self.expected_release[key] for key in ("version", "commit")), "线上版本或提交与目标发布包不一致")
         return live["version"] + " " + live["commit"]
 
     def migrations(self):
@@ -267,7 +281,8 @@ class Doctor:
         return "生产画布深链返回当前 SPA"
 
     def stream(self):
-        return probe_stream(self.public, session_headers(self.session, self.public))
+        headers = self.probe_headers or session_headers(self.session, self.public)
+        return probe_stream(self.public, headers)
 
     def upload_limits(self):
         for name, source in (("外层", self.outer), ("容器", self.inner)):
@@ -321,25 +336,33 @@ class Doctor:
         return self.results
 
 
+def require_local_engine():
+    require(sys.platform == "linux" and not os.environ.get("DOCKER_HOST"), "只支持本机 Linux Docker")
+    endpoint = json.loads(run("docker", "context", "inspect", "--format", "{{json .Endpoints.docker.Host}}"))
+    require(isinstance(endpoint, str) and endpoint.startswith("unix:///"), "只支持本机 Docker Unix socket")
+
+
+def report(instance, rows, audit):
+    failures = sum(row["status"] == "失败" for row in rows)
+    write_new_json(audit, {"schema": 1, "kind": "canvas-baota-doctor", "instance": instance["name"], "checkedAt": int(time.time()), "checks": rows, "failures": failures})
+    for row in rows:
+        print(f"[{row['status']}] {row['id']:2}  {row['name']}  {row['detail']}")
+    print(f"结论：{failures} 项未通过。审计文件 {audit}", flush=True)
+    return failures
+
+
 def main():
     parser = argparse.ArgumentParser(description="宝塔生产实例 16 项只读自检")
     parser.add_argument("instance", type=Path)
     parser.add_argument("--session-file", type=Path)
     args = parser.parse_args()
-    require(sys.platform == "linux" and not os.environ.get("DOCKER_HOST"), "只支持本机 Linux Docker")
+    require_local_engine()
     require(args.instance.is_absolute(), "实例文件必须使用绝对路径")
     instance = validate_instance(read_json(args.instance))
-    endpoint = json.loads(run("docker", "context", "inspect", "--format", "{{json .Endpoints.docker.Host}}"))
-    require(isinstance(endpoint, str) and endpoint.startswith("unix:///"), "只支持本机 Docker Unix socket")
     os.umask(0o077)
     audit = Path(tempfile.mkdtemp(prefix="doctor-", dir=private_directory(instance["auditRoot"]))) / "doctor.json"
     rows = Doctor(instance, args.session_file).verify()
-    failures = sum(row["status"] == "失败" for row in rows)
-    write_new_json(audit, {"schema": 1, "kind": "canvas-baota-doctor", "instance": instance["name"], "checkedAt": int(time.time()), "checks": rows, "failures": failures})
-    for row in rows:
-        print(f"[{row['status']}] {row['id']:2}  {row['name']}  {row['detail']}")
-    print(f"结论：{failures} 项未通过。审计文件 {audit}")
-    return int(failures != 0)
+    return int(report(instance, rows, audit) != 0)
 
 
 if __name__ == "__main__":
