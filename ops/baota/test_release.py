@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from email.message import Message
 import hashlib
 from http.server import BaseHTTPRequestHandler
 import json
@@ -67,6 +68,28 @@ class AssetHandler(BaseHTTPRequestHandler):
 
 
 class AcceptanceTest(unittest.TestCase):
+    def test_release_will_not_read_password_for_http_origin(self):
+        with patch.object(acceptance, "private_input") as read, self.assertRaisesRegex(ProbeFailed, "HTTPS"):
+            acceptance.account_file(Path("unused"), "http://canvas.test")
+        read.assert_not_called()
+
+    def test_https_login_requires_a_secure_session_cookie(self):
+        response_headers = Message()
+        response_headers["Set-Cookie"] = AssetHandler.cookie + "; HttpOnly; Path=/"
+        payload = json.dumps({"user": {"id": AssetHandler.actor, "role": "designer"}}).encode()
+
+        @contextmanager
+        def request(*_args, **_options):
+            yield SimpleNamespace(headers=response_headers, read=lambda size: payload)
+
+        account = {"identifier": "probe", "password": "fake-password", "cookieName": "test_session"}
+        with patch.object(acceptance, "request", request):
+            with self.assertRaisesRegex(ProbeFailed, "Secure"):
+                acceptance.login("https://canvas.test", account)
+            response_headers.replace_header("Set-Cookie", AssetHandler.cookie + "; Secure; HttpOnly; Path=/")
+            headers, _ = acceptance.login("https://canvas.test", account)
+        self.assertEqual(headers["Cookie"], AssetHandler.cookie)
+
     def test_local_http_login_and_20mb_original_roundtrip(self):
         class Fixture(AssetHandler):
             seen = []

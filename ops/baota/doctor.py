@@ -28,6 +28,10 @@ def check(condition, message):
         raise ProbeFailed(message)
 
 
+def require_public_https(origin):
+    check(urlsplit(origin).scheme == "https", "正式域名必须使用 HTTPS，生产浏览器只接收 HTTPS 下的 Secure 会话 Cookie")
+
+
 def run(*argv, data=None, timeout=12):
     result = subprocess.run(argv, input=data, capture_output=True, timeout=timeout, check=False)
     check(result.returncode == 0, "只读探针执行失败，请检查命令权限与目标服务")
@@ -66,6 +70,7 @@ def private_input(path, origin, fields):
 
 def session_headers(path, origin):
     check(path is not None, "需要提供生产域名专用验收会话 --session-file")
+    require_public_https(origin)
     value = private_input(path, origin, {"cookie"})
     cookie = value["cookie"]
     check(isinstance(cookie, str) and re.fullmatch(r"[A-Za-z0-9_.-]+=[A-Za-z0-9_.%~-]{8,4096}", cookie), "验收会话必须只包含一个有效的会话 Cookie")
@@ -235,6 +240,7 @@ class Doctor:
         errors, warnings = (self.runtime_result[key] for key in ("errors", "warnings"))
         check(all(re.fullmatch(allowed_key, key) for key in errors + warnings), "服务端环境探针返回异常")
         check(not errors, "生产变量校验失败：" + ", ".join(errors))
+        require_public_https(self.public)
         return "生产变量通过" + ("，提醒：" + ", ".join(warnings) if warnings else "")
 
     def managed_proxy(self):

@@ -3,9 +3,10 @@ import hashlib
 from http.cookies import SimpleCookie
 import json
 import re
+from urllib.parse import urlsplit
 import uuid
 
-from doctor import check, get, private_input, request
+from doctor import check, get, private_input, request, require_public_https
 
 
 IMAGE_BYTES = 20_000_000
@@ -27,6 +28,7 @@ def json_response(response):
 
 
 def account_file(path, origin):
+    require_public_https(origin)
     account = private_input(path, origin, {"identifier", "password", "cookieName"})
     check(0 < len(account["identifier"].strip()) <= 200 and 0 < len(account["password"]) <= 4096
           and re.fullmatch(r"[A-Za-z0-9_.-]+", account["cookieName"]), "专用验收账号配置不完整")
@@ -43,6 +45,7 @@ def login(origin, account):
         cookie = cookies.get(account["cookieName"])
         user = payload.get("user") if isinstance(payload, dict) else None
         check(cookie is not None and isinstance(user, dict), "登录未取得验收会话")
+        check(urlsplit(origin).scheme != "https" or bool(cookie["secure"]), "生产登录响应缺少 Secure 会话 Cookie")
         check(re.fullmatch(r"[A-Za-z0-9_.%~-]{8,4096}", cookie.value), "会话 Cookie 的格式异常")
         return {"Cookie": cookie.key + "=" + cookie.value}, user
 

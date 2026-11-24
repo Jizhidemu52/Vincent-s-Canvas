@@ -62,6 +62,19 @@ class DoctorTest(unittest.TestCase):
         return doctor.Doctor({"containers": {"api": "api", "web": "web", "worker": "worker"},
                               "publicBaseUrl": "http://canvas.test", "localBaseUrl": "http://127.0.0.1:3300"})
 
+    def test_production_environment_requires_https_for_browser_sessions(self):
+        instance = self.doctor()
+        instance.runtime_result = {"errors": [], "warnings": []}
+        with self.assertRaisesRegex(doctor.ProbeFailed, "HTTPS"):
+            instance.environment()
+        instance.public = "https://canvas.test"
+        self.assertEqual(instance.environment(), "生产变量通过")
+
+    def test_stream_session_will_not_read_credentials_for_http_origin(self):
+        with patch.object(doctor, "private_input") as read, self.assertRaisesRegex(doctor.ProbeFailed, "HTTPS"):
+            doctor.session_headers(Path("unused"), "http://canvas.test")
+        read.assert_not_called()
+
     def test_stream_reads_authentication_and_heartbeats_from_same_origin(self):
         with service(StreamHandler) as origin:
             result = doctor.probe_stream(origin, {"Cookie": StreamHandler.cookie}, duration=0.09)
