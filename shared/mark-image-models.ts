@@ -1,3 +1,5 @@
+import { QWEN_IMAGE_MODEL } from "./qwen-image-options";
+
 /** Dedicated provider identity keeps Mark credentials and model choices separate from other channels. */
 export const MARK_IMAGE_PROVIDER_ID = "9567f5da-bb4d-4e4b-b680-c7184d00a001";
 export const MARK_IMAGE_PROVIDER_NAME = "APIMart 平台";
@@ -30,6 +32,7 @@ export const MARK_PLATFORM_MODELS = [
   { demoOrdinal: 10, modelId: "claude-sonnet-5-5", name: "aplmart-claude-sonnet-5-5", description: "文字对话与图文理解", defaultEnabled: true, capabilities: ["chat", "vision", "tools"] as const },
   ...MARK_GPT26_IMAGE_MODELS.map(model => ({ ...model, capabilities: ["generate", "edit", "batch"] as const })),
   { demoOrdinal: 16, modelId: "mai-image-2.7-flash", name: "aplmart-mai2.7-flash", description: "快速出图与最多 5 图参考编辑；支持 1K / 2K 文生图", defaultEnabled: true, capabilities: ["generate", "edit", "batch"] as const },
+  { demoOrdinal: 18, modelId: QWEN_IMAGE_MODEL, name: "Qwen Image 3.0", description: "文生图与参考图编辑，支持 1K / 2K、最多 3 张参考图", defaultEnabled: true, capabilities: ["generate", "edit", "batch"] as const },
   { demoOrdinal: 14, modelId: "seedream-5-5", name: "豆包生图", description: "图片生成、参考图编辑与透明背景；图层拆分使用独立工作区", defaultEnabled: false, capabilities: ["generate", "edit"] as const },
   { demoOrdinal: 15, modelId: "gemini-4-carbon", name: "aplmart-gemini-4-carbon", description: "文字对话、图文理解与工具调用", defaultEnabled: true, capabilities: ["chat", "vision", "tools"] as const },
   { demoOrdinal: 17, modelId: "gpt-6.2-sol", name: "aplmart-gpt-6.2-sol", description: "文字对话、图文理解与工具调用", defaultEnabled: true, capabilities: ["chat", "vision", "tools"] as const },

@@ -16,6 +16,7 @@ function nativeImageOptionFields(profile: Profile): ImageOptionField[] {
     ];
     if (profile.kind === "mai-image") return [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k"] }, profile.mai27 ? moderation : boolean("web_grounding", "联网参考", "默认关闭；开启后模型可使用联网信息辅助生成。")];
     if (profile.kind === "grok-image") return [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k"] }, moderation];
+    if (profile.kind === "qwen-image") return [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k"] }, moderation, { key: "negative_prompt", label: "排除内容" }];
     if (profile.kind === "standard" || profile.kind === "quality-resolution") return profile.outputFormats?.length ? [
         ...(profile.kind === "quality-resolution" ? [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k", "4k"] }] : []),
         { key: "background", label: "背景", options: profile.backgrounds || ["auto", "opaque", "transparent"] },
@@ -49,7 +50,7 @@ function nativeImageOptionFields(profile: Profile): ImageOptionField[] {
 
 export function imageOptionFields(profile: Profile): ImageOptionField[] {
     const fields = nativeImageOptionFields(profile);
-    if (["midjourney", "midjourney-blend"].includes(profile.kind)) return fields;
+    if (["midjourney", "midjourney-blend", "qwen-image"].includes(profile.kind)) return fields;
     return [...fields, { key: "negative_prompt", label: "排除内容", tip: "此模型没有原生排除参数；由服务端作为自然语言要求加入实际发送的提示词，不保证逐项排除。原提示词保持不变。" }];
 }
 

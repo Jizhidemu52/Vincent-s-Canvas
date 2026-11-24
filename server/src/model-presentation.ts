@@ -138,6 +138,7 @@ const anonymousProfiles = {
   "grok-image": "grok-image",
   "mai-image": "mai-image",
   "mai-image-v2": "mai-image-v2",
+  "qwen-image": "qwen-image",
   seedream55: "seedream55",
 } as const;
 

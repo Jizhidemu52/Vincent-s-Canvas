@@ -24,6 +24,7 @@ import { serveStandaloneWeb } from "./demo-standalone-web";
 import { ApiMartImageProviderFailure, ApiMartImageQueryRetryable, apiMartImageModel, preflightApiMartImageRequest, runApiMartImageTask } from "./apimart-image";
 import { createDemoMarkProvider } from "./demo-mark-provider";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
+import { QWEN_IMAGE_MODEL, QWEN_IMAGE_REFERENCE_LIMIT } from "../../shared/qwen-image-options";
 import { listAvailableDemoModels, resolveDemoExternalProviders, videoModelConfigIds } from "./demo-provider-configuration";
 import { applyDemoProviderCredentials } from "./demo-provider-credentials";
 import { DEMO_STREAM_IDLE_TIMEOUT_SECONDS } from "./demo-server-config";
@@ -1532,12 +1533,13 @@ Bun.serve({
         let editInput: ImageEditInput<DemoAsset>;
         try {
           editInput = await prepareImageEditInput(sources, input.parameters || {}, { protocol: model.providerId === openTokenProviderId ? "openai" : "apimart", modelId: imageModelId, operationType: input.operationType! });
-          if (input.parameters.quickImageAction || imageModelId === "seedream-5-5") preflightApiMartImageRequest({ modelId: imageModelId, prompt: input.prompt, parameters: input.parameters, sourceImages: editInput.references });
+          if (input.parameters.quickImageAction || imageModelId === "seedream-5-5" || imageModelId === QWEN_IMAGE_MODEL) preflightApiMartImageRequest({ modelId: imageModelId, prompt: input.prompt, parameters: input.parameters, sourceImages: editInput.references });
           await validateQuickImageSource(editInput.references[0], input.parameters || {});
         } catch (error) {
           if (error instanceof ImageEditInputError || error instanceof ImageResultProcessingError) return json({ error: error.code, message: error.message }, 400);
           if (input.parameters.quickImageAction) return json({ error: "QUICK_IMAGE_SOURCE_INVALID", message: error instanceof Error ? error.message : "参考图片或参数无效" }, 400);
           if (imageModelId === "seedream-5-5") return json({ error: "SEEDREAM_INPUT_INVALID", message: error instanceof Error ? error.message : "豆包参考图片或参数无效" }, 400);
+          if (imageModelId === QWEN_IMAGE_MODEL) return json({ error: "INVALID_IMAGE_PARAMETERS", message: error instanceof Error ? error.message : "参考图片或参数无效" }, 400);
           throw error;
         }
         if ((imageModelId === "midjourney" || imageModelId === "midjourney-blend") && input.operationType !== "image_generation")
@@ -1547,6 +1549,7 @@ Bun.serve({
         const maximumReferences = imageModelId === "midjourney-blend" ? 4
           : imageModelId === "seedream-5-5" ? 10
           : imageModelId === "mai-image-2.6-flash" || imageModelId === "mai-image-2.7-flash" ? 5
+          : imageModelId === QWEN_IMAGE_MODEL ? QWEN_IMAGE_REFERENCE_LIMIT
           : imageModelId === "grok-imagine-image-2.0" ? 3
           : apiMartModel === "gpt-image-2" ? 15
           : isGptImage2 || imageModelId === "gemini-nano-banana-2.1" ? 16

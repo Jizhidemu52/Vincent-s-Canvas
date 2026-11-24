@@ -5,8 +5,9 @@ import type { ApiUserRole } from "@/services/api/auth";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 import { normalizeImageOptions, readImageOptions } from "./image-advanced-settings";
 import { validateGpt26GifParameters } from "../../../shared/gpt26-image-options";
+import { QWEN_IMAGE_MAX_EDGE, QWEN_IMAGE_MIN_EDGE, QWEN_IMAGE_MODEL, QWEN_IMAGE_RATIOS } from "../../../shared/qwen-image-options";
 
-type InternalImageParameterProfile = "standard" | "gpt" | "gemini" | "midjourney" | "midjourney-blend" | "unverified" | "quality-resolution" | "resolution-1k" | "grok-image" | "mai-image" | "seedream55";
+type InternalImageParameterProfile = "standard" | "gpt" | "gemini" | "midjourney" | "midjourney-blend" | "unverified" | "quality-resolution" | "resolution-1k" | "grok-image" | "mai-image" | "seedream55" | "qwen-image";
 export type ImageParameterProfile = InternalImageParameterProfile | "standard-flex" | "standard-flex-plus" | "quality-resolution-v2" | "mai-image-v2" | "pixel" | "resolution" | "speed" | "blend";
 const publicProfileKinds: Partial<Record<ImageParameterProfile, InternalImageParameterProfile>> = { "standard-flex": "standard", "standard-flex-plus": "standard", "quality-resolution-v2": "quality-resolution", "mai-image-v2": "mai-image", pixel: "gpt", resolution: "gemini", speed: "midjourney", blend: "midjourney-blend" };
 const flexibleSizes = ["1024x1024", "1536x1024", "1024x1536", "2048x2048", "2048x1152", "1152x2048", "3840x2160", "2160x3840", "2880x2880", "auto"];
@@ -24,7 +25,7 @@ export function imageModelProfile(model: string, models: readonly PublicModel[] 
     const actual = (configured?.modelId || id).toLowerCase();
     const configuredKind = configured?.imageParameterProfile;
     const kind: InternalImageParameterProfile = (configuredKind && (publicProfileKinds[configuredKind] || configuredKind) as InternalImageParameterProfile)
-        || (actual === "seedream-5-5" ? "seedream55" : actual === "gpt-image-2.6-flare" || actual === "gpt-image-2.6-sunburst" ? "quality-resolution" : ["mai-image-2.6-flash", "mai-image-2.7-flash"].includes(actual) ? "mai-image" : actual.includes("midjourney-blend") ? "midjourney-blend" : actual.includes("midjourney") ? "midjourney"
+        || (actual === QWEN_IMAGE_MODEL ? "qwen-image" : actual === "seedream-5-5" ? "seedream55" : actual === "gpt-image-2.6-flare" || actual === "gpt-image-2.6-sunburst" ? "quality-resolution" : ["mai-image-2.6-flash", "mai-image-2.7-flash"].includes(actual) ? "mai-image" : actual.includes("midjourney-blend") ? "midjourney-blend" : actual.includes("midjourney") ? "midjourney"
             : actual.includes("vcen-gpt2") || actual.includes("gpt-image-2-extend") ? "gpt"
                 : actual.includes("gemini-3.1-flash-image-preview") || actual.includes("nano-banana-2") ? "gemini" : actual === "gemini-3.1-flash-image" ? "unverified" : "standard");
     const midjourney = kind === "midjourney" || kind === "midjourney-blend";
@@ -36,6 +37,7 @@ export function imageModelProfile(model: string, models: readonly PublicModel[] 
     const mai27 = configuredKind === "mai-image-v2" || (!configuredKind && actual === "mai-image-2.7-flash");
     const maiMaxPixels = mai27 ? 4194304 : 2359296;
     const seedream = kind === "seedream55";
+    const qwen = kind === "qwen-image";
     const verified = kind !== "unverified";
     const extendedQuality = kind === "standard" && (configuredKind === "standard-flex-plus" || actual === "gpt-image-2.5-flare" || actual === "gpt-image-2.5-sunburst");
     const flexibleSize = kind === "standard" && (extendedQuality || configuredKind === "standard-flex" || actual === "gpt-image-2");
@@ -43,21 +45,22 @@ export function imageModelProfile(model: string, models: readonly PublicModel[] 
     const canSeeIdentity = isAdminRole(role);
     return {
         // Ordinary image actions submit exactly one task; file batches are a separate workflow.
-        kind, verified, mai27, maxCount: 1, customSize: mai || kind === "gpt" || constrainedPixels, customAspect: midjourney || mai, upstreamCount: 1,
+        kind, verified, mai27, maxCount: 1, customSize: mai || qwen || kind === "gpt" || constrainedPixels, customAspect: midjourney || mai, upstreamCount: 1,
         supportsGif: gpt26, supportsMarkup: gpt26, supportsComplexity: gpt26,
-        sizeConstraints: mai ? { multiple: 1, minEdge: 768, maxEdge: mai27 ? Math.floor(maiMaxPixels / 768) : 3072, maxAspectRatio: mai27 ? maiMaxPixels / (768 * 768) : 4, minPixels: 589824, maxPixels: maiMaxPixels } : constrainedPixels ? { multiple: 16, minEdge: 0, maxEdge: 3840, maxAspectRatio: 3, minPixels: 655360, maxPixels: 8294400 } : undefined,
-        sizeConstraintMessage: mai27 ? "宽高须为不少于 768 的正整数，总像素不超过 4194304。模型将实际输出宽高各向下取整到 32 的倍数；宽高比模式支持 1:4 至 4:1，不支持自适应。" : mai ? "宽高须为不少于 768 的正整数，比例在 1:4 至 4:1 内，总像素不超过 2359296。建议使用 32 的倍数；否则模型会将实际输出宽高各向下取整到 32 的倍数。" : constrainedPixels ? "宽高须为 16 的倍数，单边不超过 3840，长短边比例不超过 3:1，总像素为 655360–8294400。超过 2560 × 1440 的输出为实验尺寸。" : "",
+        sizeConstraints: qwen ? { multiple: 1, minEdge: QWEN_IMAGE_MIN_EDGE, maxEdge: QWEN_IMAGE_MAX_EDGE, maxAspectRatio: 8, minPixels: 0, maxPixels: QWEN_IMAGE_MAX_EDGE ** 2 } : mai ? { multiple: 1, minEdge: 768, maxEdge: mai27 ? Math.floor(maiMaxPixels / 768) : 3072, maxAspectRatio: mai27 ? maiMaxPixels / (768 * 768) : 4, minPixels: 589824, maxPixels: maiMaxPixels } : constrainedPixels ? { multiple: 16, minEdge: 0, maxEdge: 3840, maxAspectRatio: 3, minPixels: 655360, maxPixels: 8294400 } : undefined,
+        sizeConstraintMessage: qwen ? "宽高须为 512–2048 范围内的整数。精确像素尺寸优先于分辨率档位。" : mai27 ? "宽高须为不少于 768 的正整数，总像素不超过 4194304。模型将实际输出宽高各向下取整到 32 的倍数；宽高比模式支持 1:4 至 4:1，不支持自适应。" : mai ? "宽高须为不少于 768 的正整数，比例在 1:4 至 4:1 内，总像素不超过 2359296。建议使用 32 的倍数；否则模型会将实际输出宽高各向下取整到 32 的倍数。" : constrainedPixels ? "宽高须为 16 的倍数，单边不超过 3840，长短边比例不超过 3:1，总像素为 655360–8294400。超过 2560 × 1440 的输出为实验尺寸。" : "",
         backgrounds: constrainedPixels || seedream ? ["auto", "opaque", "transparent"] : [],
         outputFormats: seedream ? ["png", "jpeg"] : constrainedPixels ? ["png", "jpeg", "webp", ...(gpt26 ? ["gif"] : [])] : [],
         outputCompression: constrainedPixels,
-        resolutions: seedream ? ["1k", "1.5k", "2k"] : independentResolution ? ["1k", "2k", "4k"] : grok || mai ? ["1k", "2k"] : [],
-        supportsMask: !mai && !seedream && (configured?.imageSupportsMask ?? (!resolutionOnly && !midjourney && !grok)),
-        supportsOfficialFallback: !seedream && (configured?.imageSupportsOfficialFallback ?? (kind !== "gemini" || !["gemini-3.1-flash-image-preview-official", "nano-banana-2"].includes(actual))),
+        resolutions: seedream ? ["1k", "1.5k", "2k"] : independentResolution ? ["1k", "2k", "4k"] : grok || mai || qwen ? ["1k", "2k"] : [],
+        supportsMask: !mai && !seedream && !qwen && (configured?.imageSupportsMask ?? (!resolutionOnly && !midjourney && !grok)),
+        supportsOfficialFallback: !seedream && !qwen && (configured?.imageSupportsOfficialFallback ?? (kind !== "gemini" || !["gemini-3.1-flash-image-preview-official", "nano-banana-2"].includes(actual))),
         requiresPrompt: kind !== "midjourney-blend",
-        sizes: !verified ? ["auto"] : seedream ? seedreamRatios : mai27 ? maiRatios.filter(size => size !== "auto") : mai ? maiRatios : grok ? grokRatios : independentResolution ? [...gptRatios, "auto"] : flexibleSize ? flexibleSizes : kind === "standard" ? ["1024x1024", "1536x1024", "1024x1536", "auto"] : kind === "gemini" || resolutionOnly ? geminiRatios : kind === "gpt" ? [...gptRatios, "auto"] : [...gptRatios, "1:4", "4:1", "1:8", "8:1"],
-        qualities: !verified || mai || seedream ? ["auto"] : grok ? ["low", "medium"] : independentResolution ? ["auto", "low", "medium", "high", "xhigh", "max"] : midjourney ? ["relax", "fast", "turbo"] : extendedQuality ? ["auto", "max", "xhigh", "high", "medium", "low"] : kind === "standard" ? ["auto", "high", "medium", "low"] : kind === "gemini" ? ["0.5k", "1k", "2k", "4k"] : ["1k", "2k", "4k"],
+        sizes: !verified ? ["auto"] : qwen ? [...QWEN_IMAGE_RATIOS] : seedream ? seedreamRatios : mai27 ? maiRatios.filter(size => size !== "auto") : mai ? maiRatios : grok ? grokRatios : independentResolution ? [...gptRatios, "auto"] : flexibleSize ? flexibleSizes : kind === "standard" ? ["1024x1024", "1536x1024", "1024x1536", "auto"] : kind === "gemini" || resolutionOnly ? geminiRatios : kind === "gpt" ? [...gptRatios, "auto"] : [...gptRatios, "1:4", "4:1", "1:8", "8:1"],
+        qualities: !verified || mai || seedream || qwen ? ["auto"] : grok ? ["low", "medium"] : independentResolution ? ["auto", "low", "medium", "high", "xhigh", "max"] : midjourney ? ["relax", "fast", "turbo"] : extendedQuality ? ["auto", "max", "xhigh", "high", "medium", "low"] : kind === "standard" ? ["auto", "high", "medium", "low"] : kind === "gemini" ? ["0.5k", "1k", "2k", "4k"] : ["1k", "2k", "4k"],
         qualityLabel: independentResolution || grok ? "图片质量" : resolutionOnly ? "清晰度 / 分辨率" : midjourney ? "生成速度" : kind === "standard" ? "画质" : "分辨率",
         tip: !verified ? "当前渠道的此模型参数文档待确认，暂用渠道默认设置，不额外传入尺寸或画质。"
+            : qwen ? "支持文生图和参考图编辑、1K / 2K、7 种比例或精确像素。每个任务生成 1 张，最多使用 3 张参考图，单张最多 10 MiB。"
             : seedream ? "支持 1K / 1.5K / 2K、常用比例和最多 10 张参考图，每次生成 1 张。支持 PNG / JPEG，透明背景固定输出 PNG；不支持蒙版，图层拆分请使用独立图层工作区。"
             : mai27 ? "文生图支持 1K / 2K、宽高比及最多 4194304 总像素，不支持自适应。最多 5 张参考图，图生图尺寸由模型决定；不支持 4K、蒙版、透明背景或联网参考，固定输出 PNG。"
             : mai ? "文生图支持 1K / 2K、宽高比及合规像素尺寸，最多 5 张参考图。图生图尺寸由模型决定，约 100 万像素；不支持 4K、蒙版或透明背景参数，固定输出 PNG。"
@@ -69,7 +72,7 @@ export function imageModelProfile(model: string, models: readonly PublicModel[] 
                 : flexibleSize ? "支持 2K / 4K 像素预设及合规自定义尺寸；超过 2560 × 1440 为实验尺寸。画质与像素尺寸分别设置。"
                 : kind === "standard" ? "支持三种固定尺寸及自适应；自适应由模型结合描述和参考图决定输出尺寸。画质不等于分辨率。"
                     : kind === "gemini" ? "支持 0.5K / 1K / 2K / 4K，最多 14 张参考图；参考图限 JPEG、PNG、WebP，单张最多 10 MiB。每次生成 1 张。" : "支持 1K / 2K / 4K、15 种比例及像素尺寸，最多 15 张参考图。每次生成 1 张。",
-        documentationUrl: !verified || !canSeeIdentity || independentResolution || resolutionOnly || seedream ? "" : mai27 ? "https://docs.apimart.ai/en/api-reference/images/mai-image-2.7/generation" : mai ? "https://docs.apib.ai/cn/api-reference/images/mai-image-2.6/generation" : grok ? "https://docs.apimart.ai/cn/api-reference/images/grok-imagine-2.0-ext/official" : kind === "gpt" ? "https://docs.apimart.ai/en/api-reference/images/gpt-image-2/generation" : kind === "gemini" ? "https://docs.apimart.ai/en/api-reference/images/gemini-3.1-flash/generation" : midjourney ? `https://docs.apimart.ai/en/api-reference/images/midjourney/${kind === "midjourney-blend" ? "blend" : "imagine"}` : "https://docs.opentoken.io/api/openai/image-generation/",
+        documentationUrl: !verified || !canSeeIdentity || independentResolution || resolutionOnly || seedream ? "" : qwen ? "https://docs.apib.ai/cn/api-reference/images/qwen-image-3.0/generation" : mai27 ? "https://docs.apimart.ai/en/api-reference/images/mai-image-2.7/generation" : mai ? "https://docs.apib.ai/cn/api-reference/images/mai-image-2.6/generation" : grok ? "https://docs.apimart.ai/cn/api-reference/images/grok-imagine-2.0-ext/official" : kind === "gpt" ? "https://docs.apimart.ai/en/api-reference/images/gpt-image-2/generation" : kind === "gemini" ? "https://docs.apimart.ai/en/api-reference/images/gemini-3.1-flash/generation" : midjourney ? `https://docs.apimart.ai/en/api-reference/images/midjourney/${kind === "midjourney-blend" ? "blend" : "imagine"}` : "https://docs.opentoken.io/api/openai/image-generation/",
     };
 }
 
@@ -156,12 +159,13 @@ export function imageModelSettingsError(size: string, profile: ReturnType<typeof
     const constraints = profile.sizeConstraints;
     if (!constraints) return "";
     const raw = size.trim().toLowerCase();
+    if (profile.kind === "qwen-image" && (raw === "auto" || raw === "")) return "";
     if (profile.mai27 && raw === "auto") return "该模型文生图不支持自适应，请选择宽高比或像素尺寸。";
     if (profile.kind === "mai-image" && /^[1-9]\d*:[1-9]\d*$/.test(raw)) {
         const [width, height] = raw.split(":").map(Number);
         return Math.max(width!, height!) / Math.min(width!, height!) <= 4 ? "" : "宽高比须在 1:4 至 4:1 范围内";
     }
-    if ((profile.kind === "quality-resolution" || profile.kind === "mai-image") && profile.sizes.includes(raw)) return "";
+    if ((profile.kind === "quality-resolution" || profile.kind === "mai-image" || profile.kind === "qwen-image") && profile.sizes.includes(raw)) return "";
     const value = flexibleRatioSizes[raw] || raw;
     if (value === "auto") return "";
     const match = /^([1-9]\d*)x([1-9]\d*)$/.exec(value);

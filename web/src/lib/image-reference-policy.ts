@@ -1,5 +1,6 @@
 import type { ImageReferenceItem, ImageReferenceOrigin, ReferenceImage } from "@/types/image";
 import { AVIF_REFERENCE_UNSUPPORTED_MESSAGE } from "../../../shared/generation-error";
+import { QWEN_IMAGE_REFERENCE_LIMIT, QWEN_IMAGE_REFERENCE_MAX_BYTES, QWEN_IMAGE_REFERENCE_MIMES } from "../../../shared/qwen-image-options";
 import { uiText } from "./i18n";
 import { imageModelProfile } from "./image-model-settings";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
@@ -17,6 +18,7 @@ export function referencePolicyForModel(modelId: string, profile = imageModelPro
     const normalized = modelId.trim().toLowerCase();
     const label = (name: string) => isAdminRole(useUserStore.getState().user?.role) ? name : "当前模型";
     if (profile.kind === "seedream55") return { label: "豆包生图", minimum: 0, maximum: 10, supportsReferences: true };
+    if (profile.kind === "qwen-image") return { label: "Qwen Image 3.0", minimum: 0, maximum: QWEN_IMAGE_REFERENCE_LIMIT, supportsReferences: true };
     if (profile.kind === "mai-image") return { label: label(profile.mai27 ? "MAI Image 2.7 Flash" : "MAI Image 2.6 Flash"), minimum: 0, maximum: 5, supportsReferences: true };
     if (profile.kind === "quality-resolution") return { label: label("当前出图模型"), minimum: 0, maximum: 16, supportsReferences: true };
     if (profile.kind === "resolution-1k") return { label: "当前工作台（应用限制，并非渠道固定上限）", minimum: 0, maximum: 16, supportsReferences: true };
@@ -50,15 +52,17 @@ export function validateImageReferences(modelId: string, references: ReferenceIm
 export function imageReferenceFileError(file: { name?: string; size?: number; type?: string }, profile: Pick<ReturnType<typeof imageModelProfile>, "kind">) {
     if (file.type?.toLowerCase() === "image/avif") return uiText(AVIF_REFERENCE_UNSUPPORTED_MESSAGE);
     const kind = profile.kind;
-    if (kind !== "grok-image" && kind !== "gemini" && kind !== "midjourney-blend" && kind !== "seedream55") return undefined;
+    if (kind !== "grok-image" && kind !== "gemini" && kind !== "midjourney-blend" && kind !== "seedream55" && kind !== "qwen-image") return undefined;
     const maximumMiB = kind === "seedream55" ? 30 : kind === "midjourney-blend" ? 12 : 10;
     const label = file.name ? `参考图 ${file.name}` : "参考图";
     if (file.size !== undefined && (!Number.isFinite(file.size) || file.size <= 0)) return `${label}为空或大小无效，请重新添加原图；尚未提交生成。`;
-    if (file.size !== undefined && file.size > maximumMiB * 1024 * 1024) {
+    if (file.size !== undefined && file.size > (kind === "qwen-image" ? QWEN_IMAGE_REFERENCE_MAX_BYTES : maximumMiB * 1024 * 1024)) {
         return `${label}（${(file.size / 1024 / 1024).toFixed(2)} MiB）超过当前模型单张 ${maximumMiB} MiB 上限。请另存较小副本或切换模型；原图未修改，尚未提交生成。`;
     }
     if (kind === "seedream55") {
         if (file.type && !["image/jpeg", "image/png", "image/webp", "image/bmp", "image/tiff", "image/gif", "image/heic", "image/heif"].includes(file.type.toLowerCase())) return `${label}格式不支持，请使用 JPEG、PNG、WebP、BMP、TIFF、GIF、HEIC 或 HEIF；原图未修改，尚未提交生成。`;
+    } else if (kind === "qwen-image") {
+        if (file.type && !(QWEN_IMAGE_REFERENCE_MIMES as readonly string[]).includes(file.type.toLowerCase())) return `${label}格式不支持，请使用 JPEG、PNG、WebP、BMP、TIFF 或 GIF。`;
     } else if (kind !== "midjourney-blend" && file.type && !["image/jpeg", "image/png", "image/webp"].includes(file.type.toLowerCase())) {
         return `${label}格式不支持，请使用 JPEG、PNG 或 WebP；原图未修改，尚未提交生成。`;
     }

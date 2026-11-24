@@ -1,4 +1,5 @@
 import { MARK_GPT26_IMAGE_MODELS, MARK_IMAGE_MODELS, MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
+import { QWEN_IMAGE_MODEL } from "../../shared/qwen-image-options";
 
 /** Public UI capability hint; never includes provider addresses or credentials. */
 export function imageParameterProfile(protocol: unknown, modelId: unknown, providerId?: unknown) {
@@ -10,6 +11,7 @@ export function imageParameterProfile(protocol: unknown, modelId: unknown, provi
     : model === "gpt-image-2.5-flare" || model === "gpt-image-2.5-sunburst" ? "standard-flex-plus"
       : model === "gpt-image-2" ? "standard-flex" : "standard";
   if (model === "mai-image-2.7-flash") return "mai-image-v2";
+  if (model === QWEN_IMAGE_MODEL) return "qwen-image";
   if (model === "mai-image-2.6-flash") return "mai-image";
   if (model === "seedream-5-5") return "seedream55";
   if (model.includes("midjourney-blend")) return "midjourney-blend";

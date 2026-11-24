@@ -5,10 +5,11 @@ import { apiMartPollIntervalMs } from "./apimart-poll-interval";
 import { validateGpt26GifParameters } from "../../shared/gpt26-image-options";
 import { isPublicHttpUrl, normalizeApiMartImageUrl, uploadApiMartImage, validateApiMartGenerationImage } from "./apimart-upload";
 import { buildSeedream55Request, parseSeedream55Manifest, seedream55PollInterval, type Seedream55Manifest } from "./seedream55-image";
+import { QWEN_IMAGE_MAX_EDGE, QWEN_IMAGE_MIN_EDGE, QWEN_IMAGE_MODEL, QWEN_IMAGE_RATIOS, QWEN_IMAGE_REFERENCE_LIMIT, QWEN_IMAGE_REFERENCE_MAX_BYTES, QWEN_IMAGE_REFERENCE_MIMES } from "../../shared/qwen-image-options";
 
 type MarkImageModel = "gpt-image-2.5-flare" | "gpt-image-2.5-sunburst" | "gpt-image-2.6-flare" | "gpt-image-2.6-sunburst" | "gemini-nano-banana-2.1";
 type GrokImageModel = "grok-imagine-image-2.0";
-export type ApiMartImageModel = "seedream-5-5" | "gpt-image-2" | "gemini-3.1-flash-image-preview" | "midjourney" | "midjourney-blend" | "mai-image-2.6-flash" | "mai-image-2.7-flash" | MarkImageModel | GrokImageModel;
+export type ApiMartImageModel = "seedream-5-5" | typeof QWEN_IMAGE_MODEL | "gpt-image-2" | "gemini-3.1-flash-image-preview" | "midjourney" | "midjourney-blend" | "mai-image-2.6-flash" | "mai-image-2.7-flash" | MarkImageModel | GrokImageModel;
 export type ApiMartImageBytes = { bytes: Uint8Array; mimeType: string; filename?: string };
 type ImageReference = string | ApiMartImageBytes;
 
@@ -53,7 +54,7 @@ const GROK_RESPONSE_VERSION = "2026-07-27";
 
 export function apiMartImageModel(modelId: string): ApiMartImageModel | null {
   const normalized = modelId.trim().toLowerCase();
-  if (normalized === "seedream-5-5") return normalized;
+  if (normalized === "seedream-5-5" || normalized === QWEN_IMAGE_MODEL) return normalized;
   if (normalized === "mai-image-2.6-flash" || normalized === "mai-image-2.7-flash") return normalized;
   if (normalized === "grok-imagine-image-2.0") return normalized;
   if (MARK_IMAGE_MODELS.has(normalized)) return normalized as MarkImageModel;
@@ -85,6 +86,7 @@ function buildImageRequest(input: ApiMartImageInput, encodeReferences: boolean):
   if (input.markupImage && !kind.startsWith("gpt-image-2.6-")) throw new Error("当前模型不支持独立标注图层");
   if (kind !== "midjourney-blend" && !input.prompt.trim()) throw new Error("请填写图像生成或编辑描述");
   if (input.parameters.n !== undefined && input.parameters.n !== 1) throw new Error("画布已拆分批量任务，每个图片任务的 n 必须为 1");
+  if (kind === QWEN_IMAGE_MODEL) return buildQwenImageRequest(input, encodeReferences);
   if (isMaiImageModel(kind)) return buildMaiImageRequest(input, false, encodeReferences);
   if (isMarkImageModel(kind)) return buildMarkImageRequest(input, kind, false, encodeReferences);
   if (kind === "grok-imagine-image-2.0") return buildGrokImageRequest(input);
@@ -171,6 +173,46 @@ function isMarkImageModel(kind: ApiMartImageModel): kind is MarkImageModel {
 
 function isMaiImageModel(kind: ApiMartImageModel) {
   return kind === "mai-image-2.6-flash" || kind === "mai-image-2.7-flash";
+}
+
+function buildQwenImageRequest(input: ApiMartImageInput, encodeReferences: boolean): ApiMartImageRequest {
+  const parameters = input.parameters;
+  if (input.maskDataUrl !== undefined || input.maskImage !== undefined || parameters.mask_url !== undefined) throw new Error("Qwen Image 3.0 不支持独立蒙版");
+  const references = imageReferences(input);
+  if (references.length > QWEN_IMAGE_REFERENCE_LIMIT) throw new Error(`Qwen Image 3.0 最多支持 ${QWEN_IMAGE_REFERENCE_LIMIT} 张参考图`);
+  for (const reference of references) {
+    if (typeof reference === "string" && !reference.startsWith("data:")) {
+      if (!isPublicHttpUrl(reference)) throw new Error("Qwen Image 3.0 参考图必须使用公开图片链接或图片原件");
+      continue;
+    }
+    const inline = typeof reference === "string" ? /^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/.exec(reference) : undefined;
+    const mimeType = typeof reference === "string" ? inline?.[1] : reference.mimeType;
+    const bytes = typeof reference === "string" ? inline && inline[2]!.length % 4 === 0 ? Buffer.byteLength(inline[2]!, "base64") : 0 : reference.bytes.byteLength;
+    if (!(QWEN_IMAGE_REFERENCE_MIMES as readonly string[]).includes(mimeType ?? "") || !bytes || bytes > QWEN_IMAGE_REFERENCE_MAX_BYTES) {
+      throw new Error("Qwen Image 3.0 参考图必须为 10 MiB 以内的 JPEG、PNG、WebP、BMP、TIFF 或 GIF");
+    }
+  }
+  const size = parameters.size === undefined || parameters.size === "auto" ? "1:1" : String(parameters.size).toLowerCase();
+  const ratio = size.replace("x", ":");
+  const isRatio = (QWEN_IMAGE_RATIOS as readonly string[]).includes(ratio);
+  const pixels = /^([1-9]\d*)x([1-9]\d*)$/.exec(size);
+  if (!isRatio && (!pixels || pixels.slice(1).some(edge => Number(edge) < QWEN_IMAGE_MIN_EDGE || Number(edge) > QWEN_IMAGE_MAX_EDGE))) {
+    throw new Error("Qwen Image 3.0 需要受支持的宽高比或单边 512–2048 像素的尺寸");
+  }
+  const resolution = enumParameter(typeof parameters.resolution === "string" ? parameters.resolution.toUpperCase() : parameters.resolution, ["1K", "2K"], "resolution", "1K");
+  if (parameters.negative_prompt !== undefined && typeof parameters.negative_prompt !== "string") throw new Error("negative_prompt 必须为文字");
+  for (const key of ["nsfw_check", "prompt_extend"]) if (parameters[key] !== undefined && typeof parameters[key] !== "boolean") throw new Error(`${key} 必须为布尔值`);
+  const extensionMode = parameters.prompt_extend_mode === undefined ? undefined : enumParameter(parameters.prompt_extend_mode, ["direct", "agent"], "prompt_extend_mode");
+  if (extensionMode === "agent" && references.length) throw new Error("Qwen Image 3.0 图生图仅支持 direct 提示词扩写模式");
+  return { path: "/images/generations", pollIntervalMs: 3000, timeoutMs: 240_000, payload: {
+    model: QWEN_IMAGE_MODEL, prompt: input.prompt, n: 1, size: isRatio ? ratio : size,
+    ...(isRatio ? { resolution } : {}),
+    ...(references.length ? { image_urls: referencePayload(references, encodeReferences) } : {}),
+    ...(parameters.negative_prompt ? { negative_prompt: parameters.negative_prompt } : {}),
+    ...(parameters.nsfw_check !== undefined ? { nsfw_check: parameters.nsfw_check } : {}),
+    ...(parameters.prompt_extend !== undefined ? { prompt_extend: parameters.prompt_extend } : {}),
+    ...(extensionMode ? { prompt_extend_mode: extensionMode } : {}),
+  } };
 }
 function buildMaiImageRequest(input: ApiMartImageInput, allowInlineReferences = false, encodeReferences = true): ApiMartImageRequest {
   if (!input.prompt.trim()) throw new Error("请填写图像生成或编辑描述");
@@ -505,7 +547,7 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
   const poll = runtime.fetch || fetch;
   const wait = runtime.sleep || sleep;
   let taskId = input.upstreamTaskId?.trim();
-  let pollIntervalMs = kind === "seedream-5-5" ? seedream55PollInterval(input.submissionStartedAt, runtime.now?.()) : kind === "gemini-nano-banana-2.1" || kind === "mai-image-2.7-flash" ? 3_000 : 2_000;
+  let pollIntervalMs = kind === "seedream-5-5" ? seedream55PollInterval(input.submissionStartedAt, runtime.now?.()) : kind === "gemini-nano-banana-2.1" || kind === "mai-image-2.7-flash" || kind === QWEN_IMAGE_MODEL ? 3_000 : 2_000;
   if (!taskId) {
     if (input.submissionStarted) throw new Error("图片提交状态未知；为避免重复收费，不会自动重新提交，请核查上游任务");
     if (kind === "grok-imagine-image-2.0") {

@@ -13,6 +13,7 @@ import {assertPortraitSubmission,portraitSourceOwner,stageGeneratedPortrait} fro
 import {createTryoutPreviewWriter} from "./tryout-result-preview";
 import {assertModuleEnabled as assertTryoutModuleEnabled} from "./module-flags";
 import {MARK_GPT26_IMAGE_MODELS as tryoutModels} from "../../shared/mark-image-models";
+import { QWEN_IMAGE_MODEL } from "../../shared/qwen-image-options";
 import { settleReservation } from "./billing";
 import { withTransaction } from "./db-transaction";
 import { popReadyTask, scheduleQueuedTask } from "./task-queue";
@@ -555,7 +556,7 @@ async function executeApiMartImage(
       const ref=tryoutReferenceService(db,config),provider={providerId:task.provider_id,baseUrl:task.base_url!,apiKey:credentials.apiKey||""};
       sourceImages=[];
       for(const image of editInput.references)sourceImages.push(await ref({ownerId:task.user_id,taskId:task.id,tier:"hd",provider,sha256:createHash("sha256").update(image.bytes).digest("hex"),read:async()=>image}));
-    } else {
+    } else if (task.model_id !== QWEN_IMAGE_MODEL) {
       if (!config.PROVIDER_IMAGE_PUBLIC_ORIGIN) throw Object.assign(
         new Error("服务端未配置参考图访问域名；尚未上传到供应商或提交生成，请联系管理员配置 PROVIDER_IMAGE_PUBLIC_ORIGIN"),
         { code: "PROVIDER_IMAGE_ORIGIN_REQUIRED" },

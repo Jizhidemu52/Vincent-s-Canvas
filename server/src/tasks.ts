@@ -3,6 +3,8 @@ import { visibleHistory } from "./account-history-visibility";
 import type { PoolClient } from "pg";
 import { IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX } from "../../shared/generation-error";
 import { singleImageTaskParameters } from "./image-task-policy";
+import { QWEN_IMAGE_MODEL, QWEN_IMAGE_REFERENCE_LIMIT } from "../../shared/qwen-image-options";
+import { preflightApiMartImageRequest } from "./apimart-image";
 import { BillingError, reserveCredits, settleReservation, type PriceSnapshot } from "./billing";
 import { workflowPollWindow } from "./task-poll-window";
 import type { Cache, Database } from "./db";
@@ -181,11 +183,11 @@ export async function assertUserTaskCapacity(db: Pick<Database, "query">, userId
   }
 }
 
-async function isSeedreamExecution(db: Pick<Database, "query">, execution: ToolConfiguration & { modelConfigId: string }) {
+async function directApiMartModel(db: Pick<Database, "query">, execution: ToolConfiguration & { modelConfigId: string }) {
   const model = (await db.query<{ modelId: string; protocol: string; workflowConfigId: string | null }>(
     `SELECT m.model_id AS "modelId",p.protocol,m.workflow_config_id AS "workflowConfigId"
       FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [execution.modelConfigId])).rows[0];
-  return model?.modelId === "seedream-5-5" && model.protocol === "apimart" && !model.workflowConfigId;
+  return model?.protocol === "apimart" && !model.workflowConfigId ? model.modelId : undefined;
 }
 
 /** Acquire before conversation, turn, task and fee locks in a shared transaction. */
@@ -221,7 +223,15 @@ export async function prepareTaskEnqueue(
     throw error;
   }
   const execution = input.toolConfiguration ?? await resolveToolExecution(db, input);
-  const isSeedream55 = await isSeedreamExecution(db, execution);
+  const apiMartModel = await directApiMartModel(db, execution);
+  const isSeedream55 = apiMartModel === "seedream-5-5";
+  if (apiMartModel === QWEN_IMAGE_MODEL) {
+    if (input.sourceUrls.length > QWEN_IMAGE_REFERENCE_LIMIT) throw new BillingError("TOO_MANY_REFERENCES", `Qwen Image 3.0 最多支持 ${QWEN_IMAGE_REFERENCE_LIMIT} 张参考图`);
+    try {
+      preflightApiMartImageRequest({ modelId: apiMartModel, parameters: input.parameters, prompt: input.prompt,
+        sourceImages: input.sourceUrls.map(() => "https://owned-reference.invalid/source.png") });
+    } catch (error) { throw new BillingError("INVALID_IMAGE_PARAMETERS", error instanceof Error ? error.message : "图片参数无效"); }
+  }
   if (isLayerStudio && (!isSeedream55 || execution.toolKey !== "layer-studio")) throw new BillingError("INVALID_LAYER_TASK", "图层工具配置不匹配");
   if (isSeedream55 && !isLayerStudio) {
     if (!["image_generation", "inpaint", "upscale", "batch_image", "seamless_stitch"].includes(input.operationType)) throw new BillingError("INVALID_IMAGE_TASK", "豆包生图仅支持图片生成或编辑任务");
@@ -266,7 +276,7 @@ export async function enqueueTaskInTransaction(client: PoolClient, prepared: Pre
   if (prepared.execution.modelConfigId !== execution.modelConfigId || prepared.execution.toolKey !== execution.toolKey) {
     throw new BillingError("TOOL_MODEL_CHANGED", "图片模型已变化，请重新提交；尚未扣费");
   }
-  const isSeedream55 = await isSeedreamExecution(client, execution);
+  const isSeedream55 = await directApiMartModel(client, execution) === "seedream-5-5";
   const isLayerStudio = (input.toolKey ?? input.parameters?.tool) === "layer-studio";
   if (prepared.layer && !isSeedream55) throw new BillingError("TOOL_MODEL_CHANGED", "图片模型已变化，请重新提交；尚未扣费");
   if (isLayerStudio && (!isSeedream55 || execution.toolKey !== "layer-studio")) throw new BillingError("INVALID_LAYER_TASK", "图层工具配置不匹配");

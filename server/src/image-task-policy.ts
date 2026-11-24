@@ -1,4 +1,5 @@
 import { apiMartImageModel } from "./apimart-image";
+import { QWEN_IMAGE_MODEL, QWEN_IMAGE_REFERENCE_LIMIT } from "../../shared/qwen-image-options";
 
 const imageOperations = new Set(["image_generation", "inpaint", "upscale", "batch_image", "seamless_stitch"]);
 
@@ -7,6 +8,7 @@ export function promptImageReferenceLimit(target: { modelId: string; protocol: s
   if (target.workflowConfigId) return /^(?:gpt-image-2|gpt-image-2-ext)$/.test(target.modelId) ? 16 : 8;
   if (target.protocol === "apimart") {
     const model = apiMartImageModel(target.modelId);
+    if (model === QWEN_IMAGE_MODEL) return QWEN_IMAGE_REFERENCE_LIMIT;
     if (model === "seedream-5-5") return 10;
     if (model === "mai-image-2.6-flash" || model === "mai-image-2.7-flash") return 5;
     if (model === "grok-imagine-image-2.0") return 3;

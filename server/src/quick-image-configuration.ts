@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { AdminQuickImageConfiguration, QuickImageConfigurationInput, QuickImageEligibleModel } from "../../shared/quick-image-configuration";
 import { isQuickImageAction, quickImageModelId, type QuickImageAction } from "../../shared/quick-image-tools";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
+import { QWEN_IMAGE_MODEL } from "../../shared/qwen-image-options";
 import { apiMartImageModel, preflightApiMartImageRequest } from "./apimart-image";
 import type { Database } from "./db";
 import { prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, quickImageDefaultParameters, quickImageDefaultPrompts, quickImageOutputParameters, type QuickImageInput, type QuickImageSnapshot } from "./quick-image-tools";
@@ -31,6 +32,7 @@ export function validateQuickImageConfiguration(action: QuickImageAction, raw: Q
   if (!isQuickImageEligibleModel(model)) throw new ToolConfigurationError("QUICK_IMAGE_MODEL_UNSUPPORTED", "请选择已启用、支持单图编辑的 APIMart 标准图片模型");
   const kind = apiMartImageModel(model.modelId)!;
   const allowed = kind === "mai-image-2.7-flash" ? ["nsfw_check", "background"] : kind === "mai-image-2.6-flash" ? ["web_grounding"]
+    : kind === QWEN_IMAGE_MODEL ? ["size", "resolution", "nsfw_check", "negative_prompt"]
     : kind === "grok-imagine-image-2.0" ? ["size", "aspect_ratio", "resolution", "nsfw_check"]
     : kind === "gemini-nano-banana-2.1" ? ["size", "resolution"]
     : kind.startsWith("gpt-image-2.5-") || kind.startsWith("gpt-image-2.6-")

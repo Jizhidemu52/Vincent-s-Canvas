@@ -3,7 +3,7 @@ export const EXAMPLES = {
     sketch: { prompt: "保留服装结构，把这件毛衣转换成干净的黑白款式图。", title: "黑白款式图" },
 };
 
-const profiles = new Set(["seedream55", "quality-resolution", "quality-resolution-v2", "gpt", "gemini", "pixel", "resolution", "resolution-1k", "standard", "standard-flex", "standard-flex-plus", "mai-image", "mai-image-v2"]);
+const profiles = new Set(["seedream55", "quality-resolution", "quality-resolution-v2", "gpt", "gemini", "pixel", "resolution", "resolution-1k", "standard", "standard-flex", "standard-flex-plus", "mai-image", "mai-image-v2", "qwen-image"]);
 export const activeStatuses = new Set(["preparing", "submitting", "waiting", "processing"]);
 export const ownedAsset = value => typeof value === "string" && /^\/api\/assets\/[0-9a-f-]{36}\/content$/i.test(value);
 
@@ -19,7 +19,7 @@ export function imageParameters(model, referenceCount) {
     const profile = model.imageParameterProfile;
     if (!profiles.has(profile)) throw new Error("这个模型的图片参数尚未接入设计讨论。");
     if ((profile === "mai-image" || profile === "mai-image-v2") && referenceCount) return { count: 1 };
-    if (profile === "mai-image-v2") return { size: "1:1", resolution: "1k", count: 1 };
+    if (profile === "mai-image-v2" || profile === "qwen-image") return { size: "1:1", resolution: "1k", count: 1 };
     if (profile === "seedream55") return { size: "auto", resolution: "1k", n: 1, count: 1 };
     if (profile.startsWith("quality-resolution")) return { size: "auto", quality: "auto", resolution: "1k", count: 1 };
     if (profile.startsWith("standard")) return { size: "auto", quality: "auto", count: 1 };

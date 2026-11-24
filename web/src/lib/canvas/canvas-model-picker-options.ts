@@ -37,6 +37,7 @@ export function canvasModelPresentation(label: string) {
         [/gpt|openai/i, "OpenAI", "/icons/openai.svg"],
         [/grok|\bxai\b/i, "xAI", "/icons/grok.svg"],
         [/\bmai\b/i, "Microsoft"],
+        [/\bqwen\b/i, "阿里千问"],
         [/豆包|seedream/i, "豆包"],
         [/deepseek/i, "DeepSeek", "/icons/deepseek.svg"],
         [/\bglm\b|智谱/i, "智谱", "/icons/glm.svg"],

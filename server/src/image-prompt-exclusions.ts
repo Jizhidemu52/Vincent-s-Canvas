@@ -1,4 +1,5 @@
 import { PromptOptimizationError } from "./prompt-safety";
+import { QWEN_IMAGE_MODEL } from "../../shared/qwen-image-options";
 
 type ImagePromptInput = { operationType: string; prompt: string; parameters: Record<string, unknown> };
 export const isImagePromptOperation = (operationType: string) => ["image_generation", "inpaint", "batch_image", "upscale"].includes(operationType);
@@ -21,7 +22,7 @@ export function applyImagePromptExclusions<T extends ImagePromptInput>(input: T,
   if (!negativePrompt) { delete parameters.negative_prompt; return { ...input, parameters }; }
   const modelId = target?.modelId.trim().toLowerCase();
   if (modelId === "midjourney-blend") throw new PromptOptimizationError("NEGATIVE_PROMPT_UNSUPPORTED", "多图融合不接受文字提示词或排除内容，请改用图片生成模型");
-  const native = target?.protocol === "apimart" && ["midjourney", "midjourney-v7"].includes(modelId || "");
+  const native = target?.protocol === "apimart" && ["midjourney", "midjourney-v7", QWEN_IMAGE_MODEL].includes(modelId || "");
   const prompt = native ? input.prompt : `${input.prompt}\n\n排除要求（自然语言约束）：请不要在生成结果中出现以下内容：\n${negativePrompt}`;
   if (prompt.length > 20_000) throw new PromptOptimizationError("IMAGE_PROMPT_TOO_LONG", "提示词加上排除内容超过 20000 字符，请精简后重试");
   if (native) parameters.negative_prompt = negativePrompt;
