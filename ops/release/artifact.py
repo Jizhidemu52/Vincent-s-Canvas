@@ -18,7 +18,7 @@ from creative_seed import MIGRATIONS as CREATIVE_MIGRATIONS, SEED_PATH, build_so
 PACKAGE_FILES = [
     "ops/deploy.sh", "ops/release/deploy.py", "ops/release/contract.py", "ops/release/README.md",
     "ops/release/activity.sql", "ops/release/database-state.sql", "ops/release/maintenance.sql",
-    "ops/baota/gate.py", "ops/baota/site-proxy.conf",
+    "ops/baota/deploy.sh", "ops/baota/doctor.py", "ops/baota/gate.py", "ops/baota/runtime-probe.ts", "ops/baota/site-proxy.conf",
     "ops/release/usage-048.py", "ops/release/usage-048-state.sql", "ops/release/usage-048-catalog.json",
     "server/src/migrations/048_usage_daily_facts.sql",
     "ops/release/quick-image-049.py", "ops/release/quick-image-049-catalog.json",

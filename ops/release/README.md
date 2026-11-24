@@ -16,6 +16,7 @@ v0.5.114 → v0.5.115 的 056–058 仅由已验证发布包中的 `ops/release/
 
 - `ops/release/stack-smoke.sh candidate.json /new/private/evidence`：仅 GitHub 隔离测试项目；正式后端、合成 Provider、无真实付费调用。
 - `ops/release/package-artifact.sh candidate.json verification.json /new/package`：验证同一镜像后导出白名单工具与镜像，不打包环境、数据库或私有配置。
+- `bash ops/baota/deploy.sh doctor /absolute/instance.json [--session-file /absolute/probe.json]`：对现有宝塔实例运行 16 项检查并在实例审计目录保存 `doctor.json`。退出码 `0` 表示全部通过，`1` 表示有未通过的检查，`2` 表示无法启动。发布标记走实际的 `/deployment-release.json`，与本机入口和三个运行容器的标签比对。
 - `bash ops/deploy.sh preflight /absolute/instance.json /absolute/package`：验证包、实际容器/卷/网络/配置、零待执行迁移，生成私有预检证据；不停止容器、不改数据库、不加载镜像。
 - `bash ops/deploy.sh apply /absolute/instance.json /absolute/package /absolute/preflight-audit`：仅接受 15 分钟内且仍匹配的预检；先加载并核验镜像、关闭已审阅维护门、排空活动、停止三个应用服务、备份并核对数据库，再替换应用镜像。基础设施和 `newvcan-*` 不变。
 - `bash ops/deploy.sh rollback /absolute/instance.json /absolute/successful-deployment-audit`：使用该发布保存的完整旧 Compose 与旧 image ID，在新的维护窗口保留当前数据并回滚应用。旧镜像、旧代码挂载目录和该审计目录必须保留。
@@ -23,6 +24,8 @@ v0.5.114 → v0.5.115 的 056–058 仅由已验证发布包中的 `ops/release/
 隔离栈验证发布标记后、浏览器 smoke 与容器清理前，必须运行 `verify-container-worker.py`：绑定实际 Web 容器、精确 image ID 与 commit，核对 minified PDF worker / URL wrapper 的真实 HTTP 字节、JavaScript MIME、`nosniff`、immutable 缓存，以及 CSS、HTML/no-store 和缺失 worker 的非缓存 404。失败即阻止该栈验收与导出；成功的 `pdf-worker-http.json` 仅作为公有验证回执归档到现有 release-receipts。此探针不创建或修改容器、不访问生产、不调用模型；离线模拟测试不代替正式容器检查。
 
 所有命令都必须使用真实目标的 `instance.json`；没有默认服务器。实例包含已核对的 Compose 文件、环境文件、实际应用容器名、数据库身份、受保护容器及 PostgreSQL/Redis/MinIO 实际 volume 名、网络、维护门脚本 SHA256、域名及本机探针。不能从示例猜生产值。实例与展开后的 Compose 含私有运行信息，应置于 0700 目录且文件 0600，不入仓库。
+
+`doctor` 从 API 容器核对生产环境，向数据库发起只读查询，对 Redis 发起 PING，对 MinIO 发起只读列表请求。任务进度验收使用专用测试账号的有效会话，`probe.json` 由操作者临时提供，只包含 `origin` 和 `cookie` 两个字段，归当前操作者持有且权限 `0600`。`origin` 必须是实例生产域名，`cookie` 只填一个 `名称=值`。文件内容不进入日志或审计。检查以正常 GET 请求连续接收实际任务心跳至少 90 秒，正常鉴权仍可续期测试会话。缺少会话时此项失败，其他诊断继续。20 MB 文件往返单独使用测试画布实测并留档。
 
 维护门是实例指定、哈希锁定的 Python 脚本：`python3 gate.py close|verify-closed|open|verify-open <instance.json> <audit-directory>`。该脚本负责当前宝塔站点的维护响应、Nginx 校验和外层入口验证；发布器不会替换证书、站点认证或访问限制。失败时默认保留维护门关闭，不盲目恢复服务或恢复数据库。实例可记录外层代理文件哈希供根任务实际核对。
 
