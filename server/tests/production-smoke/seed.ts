@@ -1,3 +1,4 @@
+import { recraftProviderId, recraftTools } from "../../../shared/recraft-tools";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { Database } from "../../src/db";
 import { SMOKE_PROVIDER_KEY } from "./mock-provider";
@@ -41,9 +42,14 @@ export async function seedSmokeDatabase(db: Database, env: Environment, security
     try {
         await client.query("BEGIN");
         await client.query("LOCK TABLE users,providers,model_configs,tasks,assets IN SHARE ROW EXCLUSIVE MODE");
-        const existing = await client.query<{ count: number }>(`SELECT ((SELECT count(*) FROM users)+(SELECT count(*) FROM providers)
-            +(SELECT count(*) FROM model_configs)+(SELECT count(*) FROM tasks)+(SELECT count(*) FROM assets))::int AS count`);
+        const tools = Object.values(recraftTools);
+        const existing = await client.query<{ count: number }>(`SELECT (
+            (SELECT count(*) FROM users) + (SELECT count(*) FROM tasks) + (SELECT count(*) FROM assets)
+            + (SELECT count(*) FROM providers WHERE NOT (id=$1 AND protocol='custom' AND base_url='https://external.api.recraft.ai/v1' AND encrypted_credentials IS NULL))
+            + (SELECT count(*) FROM model_configs m WHERE NOT (provider_id=$1 AND (id,model_id) IN (SELECT * FROM unnest($2::uuid[],$3::text[]))))
+        )::int AS count`, [recraftProviderId, tools.map(tool => tool.id), tools.map(tool => tool.endpoint)]);
         if (existing.rows[0]?.count !== 0) throw new Error("Smoke seed requires an empty disposable database; existing records were not changed");
+        await client.query("UPDATE providers SET enabled=false WHERE id=$1", [recraftProviderId]);
         await client.query(`INSERT INTO users(id,username,display_name,password_hash,role,status,must_change_password,credit_balance,credit_limit,monthly_credit_limit)
             VALUES($1,$2,'正式隔离栈验收账号',$3,'designer','active',false,1000,1000,1000)`,
         [identity.userId, identity.username, await security.hashPassword(identity.password)]);

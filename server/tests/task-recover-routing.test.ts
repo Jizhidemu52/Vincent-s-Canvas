@@ -71,11 +71,11 @@ import type { TaskPausedKind } from "../../shared/task-repair";
     expect((await query("SELECT count(*)::int AS n FROM credit_reservations WHERE user_id=$1 AND request_id=$2",[owner,`review-size:${original}`])).rows[0].n).toBe(1);
     expect(deliveries.slice(before)).toEqual([receipt.task.id]);
     const quickId=randomUUID();
-    await query("INSERT INTO quick_image_configurations(action,model_config_id,prompt,parameters) VALUES('remove-background',$1,'保留彩色主体，去掉背景',$2)",[model,JSON.stringify({size:"1:1"})]);
-    const quick=await prepareConfiguredQuickImageTask(pg.db,{operationType:"inpaint",toolKey:"image-edit",prompt:"",sourceUrls:[url],parameters:{quickImageAction:"remove-background"}});
+    await query("INSERT INTO quick_image_configurations(action,model_config_id,prompt,parameters) VALUES('item-extract',$1,'保留商品主体，输出白底商品图',$2)",[model,JSON.stringify({size:"1:1"})]);
+    const quick=await prepareConfiguredQuickImageTask(pg.db,{operationType:"inpaint",toolKey:"image-edit",prompt:"",sourceUrls:[url],parameters:{quickImageAction:"item-extract"}});
     await query("UPDATE assets SET content_sha256=$2 WHERE id=$1",[asset,archive.references[0]!.sha256]);
     await query(`INSERT INTO tasks(id,request_id,user_id,project_id,tool_key,model_config_id,operation_type,status,paused_kind,repair_error_code,prompt,parameters,source_urls)
-      VALUES($1::uuid,($1::uuid)::text,$2,'isolation','image-edit',$3,'inpaint','paused','needs_review','IMAGE_RESULT_TRANSPARENCY_MISSING',$4,$5,$6)`,[quickId,owner,model,quick.prompt,JSON.stringify(quick.parameters),JSON.stringify([url])]);
+      VALUES($1::uuid,($1::uuid)::text,$2,'isolation','image-edit',$3,'inpaint','paused','needs_review','RESULT_OUTPUT_INVALID',$4,$5,$6)`,[quickId,owner,model,quick.prompt,JSON.stringify(quick.parameters),JSON.stringify([url])]);
     const quickUrl=`${base}/${quickId}/original-size-reissue`;
     const quickQuote=await (await fetch(quickUrl,{headers:{"x-test-actor":owner}})).json();
     expect(quickQuote.quote).toMatchObject({width:1024,height:896});

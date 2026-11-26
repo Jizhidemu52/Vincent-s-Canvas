@@ -34,7 +34,7 @@ sqlTest("formal smoke seed creates usable local-provider bindings and rejects re
         const user = (await state.db.query("SELECT password_hash,role,must_change_password,credit_balance FROM users WHERE id=$1", [seed.userId])).rows[0];
         expect(user).toMatchObject({ role: "designer", must_change_password: false, credit_balance: 1000 });
         expect(await verifyPassword(user.password_hash, seed.password)).toBe(true);
-        const providers = await state.db.query("SELECT base_url,encrypted_credentials FROM providers");
+        const providers = await state.db.query("SELECT base_url,encrypted_credentials FROM providers WHERE enabled");
         expect(providers.rows).toHaveLength(3);
         for (const provider of providers.rows) {
             expect(provider.base_url).toBe("http://mock-provider:4180/v1");
@@ -42,7 +42,7 @@ sqlTest("formal smoke seed creates usable local-provider bindings and rejects re
         }
         const models = await state.db.query(`SELECT m.id,m.model_id AS "modelId",m.capabilities,m.credit_cost,m.rmb_cost,m.concurrency_limit,
             p.id AS "providerId",p.name AS "providerName",p.base_url AS "providerBaseUrl",p.protocol
-            FROM model_configs m JOIN providers p ON p.id=m.provider_id`);
+            FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE p.enabled`);
         expect(models.rows).toHaveLength(4);
         expect(models.rows.filter(model => model.id !== seed.models.chat).every(isSelectableCreativeModel)).toBe(true);
         expect(models.rows.find(row => row.id === seed.models.image).capabilities).toEqual(["generate", "edit", "batch"]);
@@ -78,7 +78,7 @@ sqlTest("smoke seed rolls back its new rows if migrated bindings were already ma
     try {
         await state.db.query("UPDATE tool_api_configurations SET configuration_version=3 WHERE tool_key='canvas-image'");
         await expect(seedSmokeDatabase(state.db, env, { hashPassword, encryptSecret })).rejects.toThrow("preconfigured tool bindings");
-        for (const table of ["users", "providers", "model_configs"]) expect((await state.db.query(`SELECT count(*)::int AS count FROM ${table}`)).rows[0].count).toBe(0);
+        for (const [table, count] of [["users", 0], ["providers", 1], ["model_configs", 3]] as const) expect((await state.db.query(`SELECT count(*)::int AS count FROM ${table}`)).rows[0].count).toBe(count);
         expect((await state.db.query("SELECT configuration_version FROM tool_api_configurations WHERE tool_key='canvas-image'")).rows[0].configuration_version).toBe(3);
     } finally { await state.close(); }
 }, 60_000);

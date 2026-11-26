@@ -138,6 +138,8 @@ sqlTest("configuration export is a stable read-only snapshot of whitelisted bind
 sqlTest("configuration export rolls back a failed SQL read and releases its snapshot before a subsequent download", async () => {
     const state = await fixture();
     try {
+        const expected = await fetch(state.url).then(response => response.json());
+        expect(expected).toMatchObject({ schemaVersion: 1, promptRecipes: [] });
         await state.db.query("ALTER TABLE prompt_recipe_versions RENAME COLUMN version TO unavailable_version");
         state.statements.length = 0;
         const failed = await fetch(state.url);
@@ -149,9 +151,9 @@ sqlTest("configuration export rolls back a failed SQL read and releases its snap
         await state.db.query("ALTER TABLE prompt_recipe_versions RENAME COLUMN unavailable_version TO version");
         const recovered = await fetch(state.url);
         expect(recovered.status).toBe(200);
-        expect(await recovered.json()).toMatchObject({ schemaVersion: 1, providers: [], models: [], promptRecipes: [] });
+        expect(await recovered.json()).toEqual(expected);
         expect(state.transactionModes).toEqual([
-            { isolation: "repeatable read", readOnly: "on" }, { isolation: "repeatable read", readOnly: "on" },
+            { isolation: "repeatable read", readOnly: "on" }, { isolation: "repeatable read", readOnly: "on" }, { isolation: "repeatable read", readOnly: "on" },
         ]);
     } finally { await state.close(); }
 }, 60_000);
