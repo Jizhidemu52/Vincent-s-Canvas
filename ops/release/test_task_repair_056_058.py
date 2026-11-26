@@ -11,7 +11,7 @@ from contract import Rejected
 import test_usage_048_docker as docker_fixture
 
 ROOT = Path(__file__).resolve().parents[2]
-COMBINED = {"migrations": artifact.migrations(ROOT)}
+COMBINED = {"migrations": [row for row in artifact.migrations(ROOT) if row["name"] <= repair.TRYOUT_MIGRATIONS[-1]]}
 RELEASE = {"migrations": [r for r in COMBINED["migrations"] if r["name"] < "059"]}
 LEDGER = repair.before_release(RELEASE)["migrations"]
 STATE = (ROOT / "ops/release/database-state.sql").read_text(encoding="utf8")
@@ -28,6 +28,11 @@ INSERT INTO tasks(status,attempts,upstream_task_id,upstream_submission_started_a
 
 
 class RepairContracts(unittest.TestCase):
+    def test_historical_combined_release_ends_at_the_reviewed_migration(self):
+        self.assertEqual(repair.reviewed_tail(COMBINED), repair.TASK_REPAIR_MIGRATIONS + repair.TRYOUT_MIGRATIONS)
+        with self.assertRaisesRegex(Rejected, "EXPECTED_REVIEWED_TAIL_FROM_055"):
+            repair.reviewed_tail({"migrations": [*COMBINED["migrations"], {"name": "066_future.sql"}]})
+
     def test_reject_partial_future_tampered_or_already_migrated(self):
         for rows in [RELEASE["migrations"][:-1], RELEASE["migrations"] + [{"name":"059_future.sql"}]]:
             with self.assertRaises(Rejected): repair.before_release({"migrations": rows})
