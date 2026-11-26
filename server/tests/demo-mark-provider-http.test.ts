@@ -29,7 +29,7 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     env: { ...process.env, DEMO_STATE_PATH: ":memory:", DEMO_RECOVERY_FILE: "", DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1", DEMO_SEEDREAM55_ENABLED: "false",
       OA_LOGIN_ENABLED: "false", AUTH_ENABLED: "true", CREDITS_ENABLED: "false", LOCAL_STANDALONE: "false", ROLE_PORTALS_ENABLED: "true", STANDALONE_WEB_DIR: "",
       OPENTOKEN_API_KEY: "", APIMART_API_KEY: "", GPT_IMAGE_2_API_KEY: "",
-      MARK_IMAGE_BASE_URL: `http://127.0.0.1:${provider.port}/v1`, MARK_IMAGE_API_KEY: "fake-mark-http-key" },
+      MARK_IMAGE_BASE_URL: `http://127.0.0.1:${provider.port}/v1`, RECRAFT_API_TOKEN: "", MARK_IMAGE_API_KEY: "fake-mark-http-key" },
   });
   const base = `http://127.0.0.1:${port}`;
   const request = (path: string, method = "GET", body?: unknown) => fetch(base + path, {
@@ -129,29 +129,19 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     for (const retiredName of ["aplmart-mai2.6-flash", "aplmart-grok2", "aplmart-nano2"]) expect(models.some(model => model.name === retiredName)).toBe(false);
     const quickInput = { requestId: crypto.randomUUID(), projectId: "mark-fixture", toolKey: "canvas-edit", operationType: "inpaint", sourceUrls: [sourceUrl], parameters: { quickImageAction: "remove-background", size: "4:1", resolution: "4k", quality: "high" } };
     const quickResponse = await request("/api/tasks", "POST", quickInput);
-    expect(quickResponse.status).toBe(201);
-    const quick = (await quickResponse.json()).task;
-    expect(quick.modelConfigId).toBe("d5000000-0000-4000-8000-000000000013");
-    expect(quick.parameters).not.toHaveProperty("size"); expect(quick.parameters).not.toHaveProperty("resolution");
-    expect(quick.parameters.quickImage).toMatchObject({ action: "remove-background", recipeVersion: 2, configurationVersion: 0 });
-    expect((await request("/api/tasks", "POST", quickInput).then(response => response.json())).task.id).toBe(quick.id);
-    expect((await request("/api/tasks", "POST", { ...quickInput, prompt: "changed quick retry must return existing" }).then(response => response.json())).task.id).toBe(quick.id);
-    for (let attempt = 0; attempt < 100 && submissions.length < 6; attempt++) await Bun.sleep(50);
-    expect(submissions).toHaveLength(6);
-    expect(submissions[5]).toMatchObject({ model: "mai-image-2.6-flash", n: 1, web_grounding: false });
-    expect(submissions[5]!.prompt).toContain("finished full-color subject image");
-    expect(submissions[5]!.prompt).not.toContain("Create a precise foreground alpha matte");
-    expect(submissions[5]).not.toHaveProperty("size"); expect(submissions[5]).not.toHaveProperty("resolution"); expect(submissions[5]).not.toHaveProperty("quality");
+    expect(quickResponse.status).toBe(503);
+    expect((await quickResponse.json()).error).toBe("PROVIDER_NOT_CONFIGURED");
+    expect(submissions).toHaveLength(5);
     const selectedInput = { requestId: crypto.randomUUID(), projectId: "mark-fixture", operationType: "image_generation", modelConfigId: mai.id, prompt: "Selected MAI 2.7 image", parameters: { size: "16:9", resolution: "2k" } };
     const selectedResponse = await request("/api/tasks", "POST", selectedInput);
     expect(selectedResponse.status).toBe(201);
     const selectedTask = (await selectedResponse.json()).task;
     expect(selectedTask.modelConfigId).toBe(mai.id);
     expect((await request("/api/tasks", "POST", selectedInput).then(response => response.json())).task.id).toBe(selectedTask.id);
-    for (let attempt = 0; attempt < 100 && submissions.length < 7; attempt++) await Bun.sleep(50);
-    expect(submissions).toHaveLength(7);
-    expect(submissions[6]).toMatchObject({ model: "mai-image-2.7-flash", prompt: selectedInput.prompt, n: 1, size: "16:9", resolution: "2K" });
-    expect(submissions[6]).not.toHaveProperty("web_grounding");
+    for (let attempt = 0; attempt < 100 && submissions.length < 6; attempt++) await Bun.sleep(50);
+    expect(submissions).toHaveLength(6);
+    expect(submissions[5]).toMatchObject({ model: "mai-image-2.7-flash", prompt: selectedInput.prompt, n: 1, size: "16:9", resolution: "2K" });
+    expect(submissions[5]).not.toHaveProperty("web_grounding");
   } finally {
     child.kill(); await child.exited; provider.stop(true);
   }

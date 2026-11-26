@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import express, { type ErrorRequestHandler } from "express";
 import { ZodError } from "zod";
 import { MARK_IMAGE_PROVIDER_ID } from "../../../shared/mark-image-models";
-import { recraftTools, isRecraftAction } from "../../../shared/recraft-tools";
+import { recraftProviderId, recraftTools, isRecraftAction } from "../../../shared/recraft-tools";
 import { quickImageModelId, quickImageTaskTarget, type QuickImageAction } from "../../../shared/quick-image-tools";
 import type { Cache } from "../../src/db";
 import type { PromptCompiler } from "../../src/prompt-compiler";
@@ -140,6 +140,20 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
     expect((await send(actor, { ...input("remove-background"), sourceUrls: [] })).status).toBe(400);
     expect((await send(actor, { ...input("remove-background"), requestId: "short" })).status).toBe(400);
     expect(await counts(actor)).toEqual({ tasks: 0, reservations: 0, compilations: 0 }); expect(queued.size).toBe(queueBefore);
+  });
+
+  test("a saved provider credential admits Recraft when the environment has no token", async () => {
+    const actor = await user(), token = process.env.RECRAFT_API_TOKEN;
+    delete process.env.RECRAFT_API_TOKEN;
+    try {
+      expect((await send(actor, input("vectorize"))).status).toBe(400);
+      expect(await counts(actor)).toEqual({ tasks: 0, reservations: 0, compilations: 0 });
+      await query("UPDATE providers SET encrypted_credentials=$1 WHERE id=$2", ["fixture-ciphertext", recraftProviderId]);
+      expect((await send(actor, input("vectorize"))).status).toBe(201);
+    } finally {
+      await query("UPDATE providers SET encrypted_credentials=NULL WHERE id=$1", [recraftProviderId]);
+      if (token !== undefined) process.env.RECRAFT_API_TOKEN = token;
+    }
   });
 
   test("forged execution settings are removed across the actual HTTP/SQL boundary", async () => {

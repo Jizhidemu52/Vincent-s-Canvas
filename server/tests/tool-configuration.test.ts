@@ -1,3 +1,4 @@
+import { recraftProviderId, recraftTools } from "../../shared/recraft-tools";
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { Server } from "node:http";
@@ -47,6 +48,7 @@ function fixture() {
       if (sql.startsWith("SELECT t.id") && sql.includes("WHERE t.batch_id=")) return { rows: [...tasks.values()].filter(row => row.batchId === values[0] && row.userId === values[1]) };
       if (sql.startsWith("SELECT t.id") && sql.includes("WHERE t.request_id=")) return { rows: [] };
       if (sql.includes("AS paused FROM tasks")) return { rows: [{ count: tasks.size, paused: 0 }] };
+      if (sql.startsWith("SELECT default_model_config_id") && sql.includes("FROM image_generation_defaults")) return { rows: [] };
       if (sql.includes("FROM model_presentation_settings")) return { rows: [] };
       if (sql.includes("FROM module_flags")) return { rows: [{ enabled: flags.get(String(values[0])) }] };
       if (sql.includes("FROM quick_image_configurations")) return { rows: [] };
@@ -377,33 +379,32 @@ describe("formal catalog configuration", () => {
 describe("authoritative scoped execution", () => {
   test("quick image routes enforce each built-in recipe and action model without altering ordinary bindings", async () => {
     const state = fixture();
-    state.models[1]!.modelId = quickImageModelId("remove-background");
-    state.models[1]!.protocol = "apimart";
-    state.models[1]!.providerId = MARK_IMAGE_PROVIDER_ID;
+    state.models[1]!.protocol = "custom";
+    state.models[1]!.providerId = recraftProviderId;
     for (const key of ["image-edit", "detail-enhance", "canvas-edit"] as const) state.bind(key, { modelConfigId: modelId, creditCostOverride: 0 });
     const { url } = await serve(state, "designer");
-    for (const action of ["remove-background", "hd-upscale"] as const) for (const canvas of [false, true]) {
-      state.models[1]!.modelId = quickImageModelId(action);
+    for (const action of ["remove-background", "hd-upscale", "vectorize"] as const) for (const canvas of [false, true]) {
+      Object.assign(state.models[1]!, { id: recraftTools[action].id, modelId: recraftTools[action].endpoint });
       const target = quickImageTaskTarget(action, canvas);
       const response = await post(`${url}/tasks`, { ...target, requestId: `quick-${action}-${canvas}`, projectId: "canvas", modelConfigId: modelId,
         prompt: "forged prompt", parameters: { quickImageAction: action, size: "1:1", resolution: "1k", n: 9, background: "opaque", output_format: "jpeg" }, sourceUrls: [`/api/assets/${modelId}/content`] });
       expect(response.status).toBe(201);
       const { task } = await response.json();
-      expect(task.modelConfigId).toBe(secondModelId); expect(task.toolKey).toBe(target.toolKey);
+      expect(task.modelConfigId).toBe(recraftTools[action].id); expect(task.toolKey).toBe(target.toolKey);
       expect(task.prompt).not.toContain("forged prompt");
-      expect(task.parameters).toMatchObject({ quickImageAction: action, ...(action === "hd-upscale" ? { resolution: "4k", size: "auto" } : {}), n: 1, count: 1 });
-      if (action === "remove-background") { expect(task.parameters).not.toHaveProperty("size"); expect(task.parameters).not.toHaveProperty("resolution"); }
+      expect(task.parameters).toMatchObject({ quickImageAction: action, n: 1, count: 1 });
+      expect(task.parameters).not.toHaveProperty("size"); expect(task.parameters).not.toHaveProperty("resolution");
       expect(task.parameters).not.toHaveProperty("background"); expect(task.parameters).not.toHaveProperty("output_format");
       expect(task.optimized).toBe(false);
     }
-    expect(state.queues).toBe(4); expect(state.reservations).toHaveLength(4);
+    expect(state.queues).toBe(6); expect(state.reservations).toHaveLength(6);
     expect((await resolveToolExecution(state.db, { toolKey: "image-edit", operationType: "inpaint" })).modelConfigId).toBe(modelId);
     state.flags.set("canvas", false);
     await expect(resolveToolExecution(state.db, { toolKey: "canvas-edit", operationType: "inpaint", parameters: { quickImageAction: "hd-upscale" } })).rejects.toMatchObject({ code: "MODULE_DISABLED" });
     state.models[1]!.enabled = false;
     const disabled = await post(`${url}/tasks`, { ...quickImageTaskTarget("remove-background"), requestId: "quick-disabled-model", projectId: "canvas", parameters: { quickImageAction: "remove-background" }, sourceUrls: ["owned-image"] });
     expect(disabled.status).toBe(400); expect((await disabled.json()).error).toBe("MODEL_DISABLED");
-    expect(state.queues).toBe(4); expect(state.reservations).toHaveLength(4);
+    expect(state.queues).toBe(6); expect(state.reservations).toHaveLength(6);
     expect(state.statements.some(({ sql }) => /(?:UPDATE|INSERT INTO) (?:model_configs|providers|tool_api_configurations|module_flags)/.test(sql))).toBe(false);
   });
 

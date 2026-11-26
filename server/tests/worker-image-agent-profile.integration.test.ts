@@ -1,3 +1,4 @@
+import { recraftProviderId } from "../../shared/recraft-tools";
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import ts from "typescript";
@@ -105,7 +106,7 @@ integration("production Worker exact image-agent prompt boundary over isolated P
             requests.push({ method: "GET", url });
             return Response.json({ data: { status: "completed", result: { images: [{ url: "https://provider.invalid/result.png" }] } } });
         };
-        const dependencies = {
+        const dependencies = { recraftProviderId,
             db: fixture.db, postgresPromptRecipeStore, imageAgentProviderPrompt,
             config: { PROVIDER_ENCRYPTION_KEY: "fixture-encryption-only", PROVIDER_IMAGE_PUBLIC_ORIGIN: ownedOrigin },
             cache, storage,

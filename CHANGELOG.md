@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.5.141
+
++ [改进] Recraft 可使用后台保存的加密凭据，去背景、高清放大和 Pro 矢量化共用该配置。
+
 ## v0.5.140
 
 + [新增] 导航栏与自由画布右侧接入 Recraft 去背景、高清放大和 Vectorizer Pro 图片转 SVG。

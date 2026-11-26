@@ -1,3 +1,4 @@
+import { recraftProviderId } from "../../shared/recraft-tools";
 import { classifyResultFailure, pauseOwnedTask, requeueRepairs } from "../src/task-repair";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -20,7 +21,7 @@ const source = ts.createSourceFile("worker.ts", await Bun.file(new URL("../src/w
 const forbidden = (name: string) => () => { throw new Error(`Unexpected ${name}`); };
 const timing = { measure: async (_stage: string, action: () => unknown) => action(), finish() {} };
 function worker(dependencies: Record<string, unknown>, runTask = false) {
-  const deps = {
+  const deps = { recraftProviderId,
     readApiMartVideoReceipt, saveApiMartVideoReceipt, TaskExecutionLost, VideoTaskPending, VideoProviderFailure, VideoSubmissionClaimLost,
     ApiMartImageProviderFailure, ApiMartImageTaskPending, ProviderSubmissionRejected, submissionWasNotSent, WorkflowTaskPending, Seedream55OutputLimitExceeded,
     storage: { configured: true }, config: { TASK_MOCK_MODE: "false", PROVIDER_ENCRYPTION_KEY: "fixture-only" },

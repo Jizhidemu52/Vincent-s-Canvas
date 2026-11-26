@@ -1,3 +1,4 @@
+import { recraftProviderId } from "../../shared/recraft-tools";
 import { expect, test } from "bun:test";
 import ts from "typescript";
 import {createHash} from "node:crypto";
@@ -82,7 +83,7 @@ function harness(options: { origin?: string; creativeUpload?:boolean; failIssue?
     if (method === "POST" && url.endsWith("/custom/image")) return Response.json({ resultUrls: ["https://provider.invalid/custom-result.png"] });
     throw new Error(`Unexpected provider request: ${method} ${url}`);
   };
-  const dependencies = {
+  const dependencies = { recraftProviderId,
     createHash,portraitSourceOwner:async()=>"original-admin",assertPortraitSubmission:async()=>{events.push("validate-portrait-slot");},
     withTransaction:async(_db:unknown,f:(c:typeof db)=>Promise<unknown>)=>f(db),
     tryoutReferenceService:()=>async(input:{ownerId:string;tier:string;read:()=>Promise<{assetId?:string;bytes:Uint8Array}>})=>{expect(input.ownerId).toBe(options.creativeUpload?newTask().user_id:"original-admin");expect(input.tier).toBe("hd");const source=await input.read();expect(source.bytes).toEqual(bytes);return "https://provider.invalid/"+(options.creativeUpload?source.assetId:"portrait-original")+".png";},

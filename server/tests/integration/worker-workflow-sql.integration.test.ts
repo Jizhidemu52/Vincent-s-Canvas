@@ -1,3 +1,4 @@
+import { recraftProviderId } from "../../../shared/recraft-tools";
 import { classifyResultFailure, pauseOwnedTask, requeueRepairs } from "../../src/task-repair";
 import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -39,7 +40,7 @@ async function fixture(providerFetch: (url: string, init?: RequestInit) => Promi
     return node.getText(source);
   }).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   let sourceLoads = 0, stored = 0;
-  const dependencies = { db: sql.db, cache: redis.cache, randomUUID, TASK_LEASE_SECONDS, config: { TASK_MOCK_MODE: "false", PROVIDER_ENCRYPTION_KEY: "fixture" },
+  const dependencies = { recraftProviderId, db: sql.db, cache: redis.cache, randomUUID, TASK_LEASE_SECONDS, config: { TASK_MOCK_MODE: "false", PROVIDER_ENCRYPTION_KEY: "fixture" },
     acquireModelLease, releaseModelLease, startTaskLeaseHeartbeat, TaskExecutionLost, withTransaction, settleReservation,
     scheduleQueuedTask, queueScore, canAutomaticallyRetryTask, recalculateBatch, VideoTaskPending, ApiMartImageTaskPending, WorkflowTaskPending,
     VideoSubmissionClaimLost, VideoProviderFailure, ApiMartImageProviderFailure, ProviderSubmissionRejected, isDefinitiveSubmissionRejection, submissionWasNotSent,

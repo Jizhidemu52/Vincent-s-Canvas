@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { moduleKeys, toolDefinitions } from "../../shared/feature-catalog";
 import { resolveDemoToolConfiguration } from "../src/demo-tool-configuration";
-import { MARK_IMAGE_PROVIDER_ID, MARK_PLATFORM_MODELS } from "../../shared/mark-image-models";
-import { quickImageModelId } from "../../shared/quick-image-tools";
+import { MARK_PLATFORM_MODELS } from "../../shared/mark-image-models";
+import { recraftProviderId, recraftTools } from "../../shared/recraft-tools";
 import { DemoQuickImageConfigurationStore } from "../src/demo-quick-image-configuration";
 
 const flags = Object.fromEntries(moduleKeys.map(key => [key, true]));
@@ -11,19 +11,19 @@ const providers = [{ id: "provider", enabled: true }];
 const binding = { toolKey: "creative-garment-colorway" as const, modelConfigId: "model-a", enabled: true };
 
 describe("demo formal tool configuration", () => {
-  test("quick actions use MAI for removal while ordinary requests keep the configured model and flags", () => {
+  test("quick actions use Recraft for removal while ordinary requests keep the configured model and flags", () => {
     const configured = [{ toolKey: "canvas-edit", modelConfigId: "model-a", enabled: true }];
-    const nano = { id: "10000000-0000-4000-8000-000000000001", modelId: quickImageModelId("remove-background"), providerId: MARK_IMAGE_PROVIDER_ID, enabled: true, capabilities: ["generate", "edit"] };
-    const quickProviders = [...providers, { id: MARK_IMAGE_PROVIDER_ID, enabled: true, protocol: "apimart" }];
+    const removal = { id: recraftTools["remove-background"].id, modelId: recraftTools["remove-background"].endpoint, providerId: recraftProviderId, enabled: true, capabilities: ["generate", "edit"] };
+    const quickProviders = [...providers, { id: recraftProviderId, enabled: true, protocol: "custom" }];
     const unprepared = { operationType: "inpaint", toolKey: "canvas-edit", sourceUrls: ["owned"], modelConfigId: "model-b", parameters: { quickImageAction: "remove-background" } };
-    const input = new DemoQuickImageConfigurationStore([...models, nano], quickProviders).prepare(unprepared);
-    expect(resolveDemoToolConfiguration(input, configured, [...models, nano], quickProviders, flags).modelConfigId).toBe(nano.id);
-    expect(resolveDemoToolConfiguration({ ...input, modelConfigId: "model-a", parameters: {} }, configured, [...models, nano], providers, flags).modelConfigId).toBe("model-a");
+    const input = new DemoQuickImageConfigurationStore([...models, removal], quickProviders).prepare(unprepared);
+    expect(resolveDemoToolConfiguration(input, configured, [...models, removal], quickProviders, flags).modelConfigId).toBe(removal.id);
+    expect(resolveDemoToolConfiguration({ ...input, modelConfigId: "model-a", parameters: {} }, configured, [...models, removal], providers, flags).modelConfigId).toBe("model-a");
     expect(() => resolveDemoToolConfiguration(input, configured, models, providers, flags)).toThrow("未启用");
-    expect(() => resolveDemoToolConfiguration(input, configured, [...models, { ...nano, providerId: "provider" }], quickProviders, flags)).toThrow("已变化");
-    expect(() => resolveDemoToolConfiguration(unprepared, configured, [...models, nano], quickProviders, flags)).toThrow("服务端配置快照");
-    expect(() => resolveDemoToolConfiguration({ ...input, toolKey: "creative-style-to-sketch" }, configured, [...models, nano], quickProviders, flags)).toThrow("不匹配");
-    expect(() => resolveDemoToolConfiguration(input, configured, [...models, nano], providers, { ...flags, canvas: false })).toThrow("关闭");
+    expect(() => resolveDemoToolConfiguration(input, configured, [...models, { ...removal, providerId: "provider" }], quickProviders, flags)).toThrow("已变化");
+    expect(() => resolveDemoToolConfiguration(unprepared, configured, [...models, removal], quickProviders, flags)).toThrow("服务端配置快照");
+    expect(() => resolveDemoToolConfiguration({ ...input, toolKey: "creative-style-to-sketch" }, configured, [...models, removal], quickProviders, flags)).toThrow("不匹配");
+    expect(() => resolveDemoToolConfiguration(input, configured, [...models, removal], providers, { ...flags, canvas: false })).toThrow("关闭");
   });
   test("chat ignores canvas and client choices, including shared upstream IDs from other providers", () => {
     const chats = [

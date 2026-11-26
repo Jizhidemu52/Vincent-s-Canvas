@@ -1,5 +1,5 @@
 import type { Database } from "./db";
-import { isRecraftAction } from "../../shared/recraft-tools";
+import { isRecraftAction, recraftProviderId } from "../../shared/recraft-tools";
 import { validateRecraftSource } from "./recraft-image";
 import { ToolConfigurationError } from "./tool-configuration";
 import { ObjectStorage } from "./object-storage";
@@ -53,7 +53,10 @@ export async function preflightStoredQuickImageTask(db: Pick<Database, "query">,
   try {
     // Identical adapter path to the worker, before uploads, queue admission or credits.
     if (isRecraftAction(configuration.action) && !configuration.adminTest) {
-      if (!process.env.RECRAFT_API_TOKEN?.trim()) throw new Error("服务端尚未配置 Recraft API 密钥");
+      if (!process.env.RECRAFT_API_TOKEN?.trim()) {
+        const row = (await db.query("SELECT encrypted_credentials IS NOT NULL AS configured FROM providers WHERE id=$1 AND enabled=true", [recraftProviderId])).rows[0];
+        if (!row?.configured) throw new Error("服务端尚未配置 Recraft API 密钥");
+      }
       await validateRecraftSource(configuration.action, source);
       return snapshot;
     }

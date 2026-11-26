@@ -1,3 +1,4 @@
+import { recraftTools } from "../../shared/recraft-tools";
 import { expect, test } from "bun:test";
 import ts from "typescript";
 import { DemoStateStore, DemoStorageError, demoAssetFields, materializeDemoAsset } from "../src/demo-state-store";
@@ -25,7 +26,7 @@ function harness(options: { path?: string; process?: Parameters<typeof storeImag
   class DemoVideoTerminalError extends Error {}
   let submissions = 0;
   const downloads: string[] = [];
-  const deps = {
+  const deps = { recraftTools,
     demoState, demoAssets, demoDeletedAssets: new Map(), demoTasks, DemoStorageError, demoAssetFields, decodeInlineImageResult,
     scheduleDemoAssetThumbnails: (asset: { id: string }) => {
       // Derived previews must never be scheduled before their original is durable.

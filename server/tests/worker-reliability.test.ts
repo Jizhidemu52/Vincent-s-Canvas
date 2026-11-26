@@ -1,3 +1,4 @@
+import { recraftProviderId } from "../../shared/recraft-tools";
 import { classifyResultFailure, pauseOwnedTask } from "../src/task-repair";
 import { expect, test } from "bun:test";
 import { disposeProviderResults } from "../src/media-result-file";
@@ -21,7 +22,7 @@ function productionFunctions(names: string[], dependencies: Record<string, unkno
     return node.getText(source);
   }).join("\n");
   const js = ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-  return new Function("classifyResultFailure", "pauseOwnedTask", ...Object.keys(dependencies), `${js}; return { ${names.join(",")}${extra} };`)(classifyResultFailure, pauseOwnedTask, ...Object.values(dependencies));
+  return new Function("recraftProviderId", "classifyResultFailure", "pauseOwnedTask", ...Object.keys(dependencies), `${js}; return { ${names.join(",")}${extra} };`)(recraftProviderId, classifyResultFailure, pauseOwnedTask, ...Object.values(dependencies));
 }
 
 test("queue read failures back off and recover without ending the worker or losing a later task", async () => {

@@ -360,7 +360,10 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
     const action = task.parameters.quickImageAction;
     if (!isRecraftAction(action) || task.model_config_id !== recraftTools[action].id || task.model_id !== recraftTools[action].endpoint || task.source_urls.length !== 1 || task.workflow_config_id || task.protocol !== "custom") throw new Error("Recraft 工具配置与任务不匹配");
     const source = await loadSourceAsset(task.source_urls[0]!, task.user_id, 20_000_000);
-    return [await runRecraftImage(action, source, () => claimProviderSubmission(task))];
+    const token = task.encrypted_credentials && config.PROVIDER_ENCRYPTION_KEY
+      ? (JSON.parse(decryptSecret(task.encrypted_credentials, config.PROVIDER_ENCRYPTION_KEY)) as { apiKey?: string }).apiKey
+      : undefined;
+    return [await runRecraftImage(action, source, () => claimProviderSubmission(task), token)];
   }
   if(task.request_id?.startsWith("preset-gen:")&&(task.protocol!=="apimart"||task.workflow_config_id||!tryoutModels.some(m=>m.modelId===task.model_id)))throw new Error("管理员模特生成绑定已变化，请核对原任务和高清配置");
   if (task.original_size_source_id) {

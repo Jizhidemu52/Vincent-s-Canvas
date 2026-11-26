@@ -1,3 +1,4 @@
+import { recraftProviderId } from "../../shared/recraft-tools";
 import { describe, expect, test } from "bun:test";
 import ts from "typescript";
 import { openAiImageParameters } from "../src/openai-image-parameters";
@@ -32,7 +33,7 @@ const demoCode = await declaration("../src/demo-server.ts", "runOpenTokenImageTa
 
 function harness(extra: Record<string, unknown> = {}) {
   const submissions: RequestInit[] = [];
-  const dependencies = {
+  const dependencies = { recraftProviderId,
     config: { PROVIDER_ENCRYPTION_KEY: "unit-test" },
     decryptSecret: () => '{"apiKey":"unit-test"}',
     openAiImageParameters,
