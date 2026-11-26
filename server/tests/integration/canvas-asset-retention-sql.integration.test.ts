@@ -105,6 +105,26 @@ sqlTest("existing canvas references survive deletion, revoked sharing and unavai
     });
 }, 60_000);
 
+sqlTest("account autosave resolves revision conflicts with its own trashed media while keeping original content access closed", async () => {
+    await withFixture(async ({ db, assets, owner, other, put, api, origin, storageReads }) => {
+        const original = documentFor("original", [assets.deleted]);
+        expect((await put(original.id, 0, original)).status).toBe(200);
+        await db.query("UPDATE assets SET deleted_at=now() WHERE id=$1", [assets.deleted]);
+        const save = (id: string, revision: number, doc: unknown, employee = owner) =>
+            api("PUT", id, { baseRevision: revision, document: doc, retainOwnTrashedReferences: true }, employee);
+        expect((await save(original.id, 0, original)).status).toBe(409);
+        const copy = { ...original, id: "conflict-copy" };
+        expect((await save(copy.id, 0, copy)).status).toBe(200);
+        expect((await api("GET", copy.id)).body.document.document).toEqual(copy);
+        expect((await save(original.id, 1, { ...original, title: "已自动同步" })).status).toBe(200);
+        expect((await save(copy.id, 0, copy, other)).status).toBe(403);
+        expect((await save("foreign", 0, documentFor("foreign", [assets.private]))).status).toBe(403);
+        expect((await save("unknown", 0, documentFor("unknown", [randomUUID()]))).status).toBe(403);
+        expect((await fetch(`${origin}/api/assets/${assets.deleted}/content`, { headers: { "test-actor": owner } })).status).toBe(404);
+        expect(storageReads()).toBe(0);
+    });
+}, 60_000);
+
 sqlTest("retained IDs cannot authorize new assets or move unavailable references across canvases or employees", async () => {
     await withFixture(async ({ db, assets, other, put, api }) => {
         const source = documentFor("source", [assets.deleted]);

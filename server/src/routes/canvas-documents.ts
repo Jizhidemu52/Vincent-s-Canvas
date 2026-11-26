@@ -54,7 +54,10 @@ export function createCanvasDocumentsRouter(db: Database) {
             if (assetIds.length) {
                 const access = accessClause(actor);
                 const shifted = access.sql.replace(/\$(\d+)/g, (_, number) => `$${Number(number) + 1}`);
-                const accessible = await db.query<{ id: string }>(`SELECT a.id FROM assets a WHERE a.id=ANY($1::uuid[]) AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted}`, [assetIds, ...access.values]);
+                const libraryScope = request.body?.retainOwnTrashedReferences === true
+                    ? "(a.deleted_at IS NULL OR a.owner_user_id=$2)"
+                    : "a.deleted_at IS NULL";
+                const accessible = await db.query<{ id: string }>(`SELECT a.id FROM assets a WHERE a.id=ANY($1::uuid[]) AND a.status='ready' AND ${libraryScope} AND ${shifted}`, [assetIds, ...access.values]);
                 const accessibleIds = new Set(accessible.rows.map(row => row.id));
                 const unavailableIds = assetIds.filter(assetId => !accessibleIds.has(assetId));
                 if (unavailableIds.length) {

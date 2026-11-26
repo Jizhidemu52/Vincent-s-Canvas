@@ -149,3 +149,25 @@ test("an unavailable cloud list in a fresh browser retries without creating anot
         expect(api.documents.size).toBe(1);
     } finally { await fresh.close(); }
 });
+
+test("account autosave resumes without a click after a temporary server lock", async ({ page, api }, info) => {
+    let locked = true;
+    let refused = 0;
+    await page.route("**/api/canvas-documents/*", async route => {
+        if (route.request().method() !== "PUT") return route.fallback();
+        expect(route.request().postDataJSON().retainOwnTrashedReferences).toBe(true);
+        if (!locked) return route.fallback();
+        refused++;
+        return route.fulfill({ status: 423, json: { error: "MAINTENANCE", message: "服务暂时锁定" } });
+    });
+    const id = await newCanvas(page);
+    await uploadImage(page, "automatic-retry.png");
+    await expect.poll(() => refused).toBeGreaterThan(0);
+    expect(api.documents.has(id)).toBe(false);
+    locked = false;
+    await expect.poll(() => api.documents.get(id)?.document?.nodes.length, { timeout: 45000 }).toBe(1);
+    const node = api.documents.get(id)!.document!.nodes[0];
+    await page.reload();
+    await expect(page.locator(`[data-node-id="${node.id}"]`)).toBeVisible();
+    await page.screenshot({ path: info.outputPath("automatic-retry.png") });
+});
