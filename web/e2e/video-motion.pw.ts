@@ -1,3 +1,4 @@
+import { expandMobileOptions, showMobilePane } from "./headless-workbench";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { BrowserContext, Page } from "@playwright/test";
@@ -53,6 +54,7 @@ async function uploadReferences(page: Page, count: number) {
 }
 
 async function openMotion(page: Page) {
+    await expandMobileOptions(page, "动效设置");
     const panel = page.getByTestId("video-motion-panel");
     if (await panel.getAttribute("open") === null) await panel.locator("summary").click();
     return panel;
@@ -121,6 +123,7 @@ for (const count of [1, 2]) test(`${count} reference image(s) select frame mode 
     expect(await page.locator(".generation-workbench main").evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath(`motion-${count}-frames-390.png`), fullPage: true });
+    await showMobilePane(page, "查看结果");
     await page.getByText(summary, { exact: true }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: info.outputPath(`result-${count}-frames-390.png`), fullPage: true });
 });

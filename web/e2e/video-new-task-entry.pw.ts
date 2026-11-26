@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import type { BrowserContext, Page } from "@playwright/test";
 import { test, expect, fixturePng, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
-import { activeWorkbench, workbenchPanes } from "./headless-workbench";
+import { showMobilePane, activeWorkbench, workbenchPanes } from "./headless-workbench";
 
 const model = { id: "10000000-0000-4000-8000-000000000003", name: "测试视频模型", modelId: "wan2.7", capabilities: ["video"], creditCost: 0, rmbCost: 0 };
 const resultA = readFileSync(new URL("./media/video.mp4", import.meta.url));
@@ -136,6 +136,7 @@ test("video mobile history New keeps its drawer on persistence failure, then clo
         };
     });
     const aId = await submitA(page, api);
+    await showMobilePane(page, "创作");
     await active(page).getByRole("button", { name: "记录", exact: true }).click();
     const drawer = page.getByRole("dialog", { name: "生成记录", exact: true });
     await drawer.getByRole("button", { name: "新建", exact: true }).click();

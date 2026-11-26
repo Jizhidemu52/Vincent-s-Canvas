@@ -280,6 +280,7 @@ test("history examples fit desktop, dark and mobile layouts without covering the
     await expect(page.locator("html")).not.toHaveAttribute("data-magicui-theme-vt", "active");
     await page.screenshot({ path: info.outputPath("history-example-desktop-dark.png"), fullPage: true, animations: "disabled" });
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "查看结果", exact: true }).click();
     await page.getByRole("tab", { name: /^历史记录/ }).click();
     await expect(record(page)).toBeVisible();
     await expect(record(page).getByTestId("practice-example-toggle")).toHaveAttribute("aria-expanded", "true");
@@ -289,6 +290,7 @@ test("history examples fit desktop, dark and mobile layouts without covering the
     await page.getByRole("tab", { name: "本次结果", exact: true }).click();
     await expect(record(page)).toHaveCount(0);
     await page.goto("/creative/garment-colorway");
+    await page.getByRole("button", { name: "查看结果", exact: true }).click();
     await record(page).getByTestId("practice-example-toggle").click();
     for (const image of await article(page).locator("img").all()) {
         await image.scrollIntoViewIfNeeded();

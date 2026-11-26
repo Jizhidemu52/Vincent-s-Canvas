@@ -56,7 +56,7 @@ export default function IndexPage() {
                     {entries.filter(entry => isModuleAvailable(flags, tools, entry.flag)).map(({ path, icon: Icon, title, description, action, preview }) => <Link to={path} className="wb-surface home-tool" key={path}>
                         <div className="home-tool-preview"><WorkbenchImage src={`/design-examples/${preview}.webp`} alt={uiText("工具效果示意")} loading="lazy" /><span>{uiText("示例")}</span></div>
                         <div className="home-tool-top"><Icon size={20} strokeWidth={1.5} /></div>
-                        <h2>{uiText(title || "")}</h2><p>{uiText(description || "")}</p><span className="home-tool-action">{uiText(action || "")}<ArrowRight size={16} /></span>
+                        <h2>{uiText(title || "")}</h2><p>{uiText(description || "")}</p><span className="home-tool-action"><span>{uiText(action || "")}</span><ArrowRight size={16} /></span>
                     </Link>)}
                 </section>
                 <section className="my-8" aria-label={uiText("全部工具")}><h2 className="mb-4 text-xl font-semibold">{uiText("全部工具")}</h2><div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">{navigationTools.filter(tool => tool.group !== "admin" && isModuleAvailable(flags, tools, navigationModuleKey(tool.slug) as ModuleKey)).map(tool => <Link key={tool.slug} to={tool.path} className="wb-surface flex items-center gap-2 px-4 py-3 text-sm"><tool.icon className="size-4 shrink-0" />{uiText(tool.label)}</Link>)}</div></section>

@@ -1,3 +1,4 @@
+import { showMobilePane } from "./headless-workbench";
 import { test, expect, IMAGE } from "./fixtures";
 import type { Page } from "@playwright/test";
 
@@ -80,6 +81,7 @@ test("image partial failure keeps only failed history and media selected, then p
     await page.getByRole("button", { name: /^取\s*消$/ }).click();
     await expect(page.getByRole("dialog", { name: "批量删除生成记录", exact: true })).toBeHidden();
     await page.setViewportSize({ width: 390, height: 844 });
+    await showMobilePane(page, "查看结果");
     await page.getByRole("tab", { name: /^历史记录/ }).click();
     await expect(page.getByRole("checkbox", { name: "选择记录：批量记录 b", exact: true })).toBeChecked();
     await expect(page.getByRole("button", { name: "批量删除（1）", exact: true }).last()).toBeVisible();

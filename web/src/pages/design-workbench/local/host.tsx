@@ -23,6 +23,7 @@ type Mount = (root: HTMLElement, services: LocalWorkbenchServices) => (() => voi
 export function LocalDesignWorkbench({ moduleKey, title, description, mount }: { moduleKey: "pattern-placement" | "pattern-repeat"; title: string; description: string; mount: Mount }) {
     useUiText();
     const host = useRef<HTMLDivElement>(null);
+    const [panel, setPanel] = useState("canvas");
     const [dirty, setDirty] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [assetPickerError, setAssetPickerError] = useState("");
@@ -106,7 +107,7 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
     }, [enabled, identityReady, moduleKey, mount, ownerId]);
 
     return (
-        <main className="local-design-workbench">
+        <main className="local-design-workbench" data-editor-panel={panel}>
             <header className="local-workbench-heading">
                 <div>
                     <Link to="/creative">{uiText("← 创意工作台")}</Link>
@@ -144,7 +145,14 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
             ) : !identityReady ? (
                 <p role="status">{isManagementAccount ? uiText("当前工作台仅面向设计师账号，请使用员工设计师身份进入。") : uiText("请完成员工身份验证后使用工作台。")}</p>
             ) : (
-                <div ref={host} className="local-workbench-host" />
+                <>
+                    <nav aria-label={uiText("工作区视图")} className="design-panel-tabs">
+                        {Object.entries({ assets: "素材", canvas: "画布", inspect: moduleKey === "pattern-placement" ? "定位参数" : "连续预览", export: "导出" }).map(([key, label]) =>
+                            <button type="button" key={key} aria-pressed={panel === key} onClick={() => { setPanel(key); host.current?.scrollTo(0, 0); }}>{uiText(label)}</button>
+                        )}
+                    </nav>
+                    <div ref={host} className="local-workbench-host" />
+                </>
             )}
             {enabled && identityReady && exampleHost ? createPortal(<div onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}><PracticeExampleRecord /></div>, exampleHost) : null}
             {enabled && identityReady && selectRoot ? <LocalWorkbenchSelects root={selectRoot} /> : null}

@@ -96,6 +96,8 @@ test("框选混合节点后从工具栏和右键下载原图 ZIP，排除未选�
     await page.getByRole("button", { name: "切换到深色主题", exact: true }).click();
     for (const width of [736, 360]) {
         await page.setViewportSize({ width, height: 700 });
+        const tools = page.getByRole("button", { name: "工具", exact: true });
+        if (await tools.isVisible()) await tools.click();
         await expect(downloadButton).toBeVisible();
         const box = (await downloadButton.boundingBox())!;
         expect(box.x).toBeGreaterThanOrEqual(0);

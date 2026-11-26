@@ -4,7 +4,7 @@ import type { BrowserContext, Page, TestInfo } from "@playwright/test";
 import { test, expect, fixturePng, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
 import { seedRetiredRecipes, snapshotRetiredRecipes, expectRecipeRetired } from "./retired-recipe-fixtures";
-import { activeWorkbench as active, workbenchPanes, readWorkbenchRegistry } from "./headless-workbench";
+import { showMobilePane, activeWorkbench as active, workbenchPanes, readWorkbenchRegistry } from "./headless-workbench";
 
 // Each pressure case performs up to ten independent uploads, submissions,
 // reconciliations and original-byte checks. Keep this bounded when the main CI
@@ -113,12 +113,13 @@ async function upload(page: Page, sources: Source[], video = false) {
 }
 
 async function next(page: Page, count: number, entry: "history" | "footer" | "mobile" = "footer") {
-    if (entry === "mobile" && new URL(page.url()).pathname === "/video") { await active(page).getByRole("button", { name: "记录", exact: true }).click(); const drawer = page.getByRole("dialog", { name: "生成记录", exact: true }); await drawer.getByRole("button", { name: "新建", exact: true }).click(); await expect(drawer).toHaveCount(0); }
+    if (entry === "mobile" && new URL(page.url()).pathname === "/video") { await showMobilePane(page, "创作"); await active(page).getByRole("button", { name: "记录", exact: true }).click(); const drawer = page.getByRole("dialog", { name: "生成记录", exact: true }); await drawer.getByRole("button", { name: "新建", exact: true }).click(); await expect(drawer).toHaveCount(0); }
     else if (entry === "history" || entry === "mobile") {
         // The synthetic double-submit leaves the pointer over the prior result
         // layout. Move it away so the live queue tooltip closes before navigation.
         await page.mouse.move(0, 0);
         await expect(page.getByRole("tooltip")).toHaveCount(0);
+        await showMobilePane(page, "查看结果");
         await active(page).getByRole("tab", { name: /^历史记录/ }).click();
         await active(page).getByRole("button", { name: "新建", exact: true }).click();
     }
@@ -209,7 +210,9 @@ for (const kind of ["image", "video"] as const) for (let round = 0; round < 5; r
         for (const index of [9, 7, 5, 3, 1, 8, 6, 4, 2, 0]) finish(api, r, ids[index], failed.has(ids[index]));
         await verifyResults(page, api, r, kind, ids.filter(id => !failed.has(id)));
         for (let index = 0; index < 10; index++) await expect(workbenchPanes(page).nth(index).getByRole("textbox", { name: kind === "image" ? "图像提示词" : "视频提示词", exact: true, includeHidden: true })).toHaveValue(markers[index]);
+        await showMobilePane(page, "创作");
         await expect(active(page).getByRole("textbox", { name: kind === "image" ? "图像提示词" : "视频提示词", exact: true })).toHaveValue(markers[9]);
+        await showMobilePane(page, "查看结果");
         await active(page).getByRole("tab", { name: /^历史记录/ }).click();
         await expect(active(page).getByRole("heading", { name: "生成记录", exact: true })).toBeVisible();
         const registry = await readWorkbenchRegistry(page);

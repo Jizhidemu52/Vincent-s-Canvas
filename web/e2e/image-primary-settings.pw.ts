@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { test, expect, IMAGE } from "./fixtures";
 import { antSelect, chooseAntSelect } from "./antd-select-helpers";
-import { activeWorkbench } from "./headless-workbench";
+import { expandMobileOptions, activeWorkbench, showMobilePane } from "./headless-workbench";
 import { toolDefinitions } from "../../shared/feature-catalog";
 
 const output = resolve(import.meta.dirname, "../../output/ui-plan-20261112/image-primary");
@@ -27,6 +27,7 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 108
         await referenceInput.setInputFiles({ name: "inline-reference.png", mimeType: "image/png", buffer: IMAGE });
         await expect(pane.getByRole("region", { name: "参考图", exact: true })).toContainText("1 张");
         expect([...api.assetBytes.values()]).toEqual([IMAGE]);
+        await expandMobileOptions(page, "模型与出图设置");
         const primary = pane.getByRole("region", { name: "常用参数", exact: true });
         await expect(primary).toBeVisible();
         const picker = primary.getByRole("combobox", { name: "选择模型", exact: true });
@@ -69,6 +70,7 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 108
         expect(api.submissions[0]).toMatchObject({ modelConfigId: models[1]!.id, operationType: "inpaint" });
         expect(api.submissions[0]!.sourceUrls).toHaveLength(1);
         expect(api.submissions[0]!.parameters).toMatchObject({ size: "16:9", resolution: "2k" });
+        await showMobilePane(page, "创作");
         await chooseAntSelect(ratio, "9:16");
         expect(api.submissions[0]!.parameters).toMatchObject({ size: "16:9", resolution: "2k" });
         expect(api.submissions).toHaveLength(1);

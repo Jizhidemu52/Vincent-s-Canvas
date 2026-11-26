@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { test, expect, IMAGE } from "./fixtures";
 import { antSelect, chooseAntSelect } from "./antd-select-helpers";
-import { activeWorkbench } from "./headless-workbench";
+import { expandMobileOptions, activeWorkbench } from "./headless-workbench";
 import { toolDefinitions } from "../../shared/feature-catalog";
 
 const output = resolve(import.meta.dirname, "../../output/mai27-model-settings");
@@ -21,6 +21,7 @@ for (const width of [1440, 390]) test(`MAI 2.7 selection and text-to-image setti
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
     await page.goto("/creative/text-to-style");
     const pane = activeWorkbench(page);
+    await expandMobileOptions(page, "模型与出图设置");
     const settings = pane.locator(".cs-output-settings");
     await settings.locator(":scope > summary").click();
     const picker = settings.getByRole("combobox", { name: "选择模型", exact: true });

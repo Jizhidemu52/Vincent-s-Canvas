@@ -213,7 +213,7 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
             </section>
         </div>
         {selectionEnabled && tool === "selection" && ws.images.primary && <RegionSelectionDialog source={ws.images.primary} initialMask={ws.selection?.mask.dataUrl} onClose={() => setTool(null)} onSave={blob => ws.saveSelection(ws.images.primary!.id, blob)} />}
-        {recolorEnabled && tool === "recolor" && ws.images.primary && <RecolorDialog source={ws.images.primary} onClose={() => setTool(null)} onSave={async (blob, description, save) => { await ws.saveLocalResult(ws.images.primary!.id, blob, description, save); setView("results"); }} />}
+        {recolorEnabled && tool === "recolor" && ws.images.primary && <RecolorDialog source={ws.images.primary} onClose={() => setTool(null)} onSave={async (blob, description, save) => { await ws.saveLocalResult(ws.images.primary!.id, blob, description, save); setView("results"); setMobilePane("results"); }} />}
         {traceEnabled && traceImage && <VectorTraceDialog source={traceImage} onClose={() => setTraceImage(null)} />}
     </main>;
 }

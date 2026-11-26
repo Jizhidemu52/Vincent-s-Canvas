@@ -1,3 +1,4 @@
+import { showMobilePane } from "./headless-workbench";
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { unzipSync } from "fflate";
@@ -79,6 +80,7 @@ test("main navigation enables creative prompt preview, cancels without generatio
     await mobileToggle.click();
     await expect(page.getByRole("button", { name: "生成前确认：已关闭", exact: true })).toHaveAttribute("aria-pressed", "false");
     await page.reload();
+    await showMobilePane(page, "创作");
     await expect(description).toHaveValue("钴蓝色针织帽，罗纹翻边");
     await page.getByRole("button", { name: "打开导航菜单", exact: true }).click();
     await drawer.getByRole("button", { name: "帮助与使用说明", exact: true }).click();

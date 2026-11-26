@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 import { test, expect, fixturePng, type MockCanvasApi } from "./fixtures";
-import { activeWorkbench as active, workbenchPanes } from "./headless-workbench";
+import { showMobilePane, activeWorkbench as active, workbenchPanes } from "./headless-workbench";
 
 const owner = "00000000-0000-4000-8000-000000000099";
 const thumbs = (page: Page) => active(page).getByRole("group", { name: "结果缩略图", exact: true }).getByRole("button");
@@ -43,6 +43,7 @@ async function seedHistory(page: Page, count: number) {
         }
     }, { owner, images: Array.from({ length: count }, (_, index) => `data:image/png;base64,${fixturePng(35 + index * 25).toString("base64")}`) });
     await page.reload();
+    await showMobilePane(page, "查看结果");
     await expect(thumbs(page)).toHaveCount(count);
 }
 

@@ -38,6 +38,7 @@
     .home-tools .home-tool { display: grid; grid-template-columns: 1fr auto; align-items: center; padding: 12px; gap: 8px; }
     .home-tool-preview { grid-column: 1 / -1; height: 72px; margin: -12px -12px 0; }
     .home-tool-top, .home-tool p, .home-tool-preview span { display: none; }
-    .home-tool h2 { font-size: 15px; }
-    .home-tool-action { font-size: 0; border: none; padding: 0; margin: 0; }
+    .home-tool h2 { font-size: 16px; }
+    .home-tool-action > span { display: none; }
+    .home-tool-action { border: none; padding: 0; margin: 0; }
 }

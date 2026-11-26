@@ -92,6 +92,7 @@ test("助手草稿和已上传参考图在清空画布选区后保留；自然�
     expect(Boolean(userMessage.references[0].storageKey) || /^\/api\/assets\/[^/]+\/content/.test(userMessage.references[0].dataUrl || "")).toBe(true);
     expect(userMessage.references[0].dataUrl || "").not.toContain("base64");
     await page.setViewportSize({ width: 720, height: 900 });
+    await page.getByRole("button", { name: "画布设置", exact: true }).click();
     await page.getByRole("button", { name: "切换到深色主题", exact: true }).click();
     const bounds = await panel.boundingBox();
     expect(bounds!.x).toBeGreaterThanOrEqual(0);

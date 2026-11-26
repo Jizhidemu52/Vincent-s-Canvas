@@ -1331,6 +1331,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         disabled: !workbenchTask.active || !draftReady || !handoffReady || readingReferences || running || restoringHistory || user?.status !== "active",
     });
 
+    const recoveryControls = running ? <Button block onClick={stopPendingQueries}>{uiText("停止本页查询（不取消服务端任务）")}</Button> : pendingImages.length ? <><Button block onClick={() => void resumePendingImages(pendingImages)}>{pendingStatusCount ? <>{uiText("刷新进度（")}{pendingStatusCount}）</> : uiText("重试保存")}</Button>{pendingImages.some(record => !record.stopped) && <Button block onClick={stopPendingQueries}>{uiText("停止自动刷新")}</Button>}</> : null;
     return (
         <div className="wb-page image-workbench generation-workbench flex h-full flex-col overflow-hidden" style={{ "--generation-submit-height": `${submitToolbarHeight}px` } as CSSProperties}>
             <MobileWorkbenchSwitch pane={mobilePane} onChange={setMobilePane} />
@@ -1446,7 +1447,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 </div> : null}
                             </div>
                             {running ? <Button block icon={<Plus className="size-4" />} loading={workbenchTask.creating} disabled={!workbenchTask.ready || workbenchTask.creating} onClick={() => void createTask()}>{uiText("新建任务，继续创作")}</Button> : null}
-                            {running ? <Button block onClick={stopPendingQueries}>{uiText("停止本页查询（不取消服务端任务）")}</Button> : pendingImages.length ? <><Button block onClick={() => void resumePendingImages(pendingImages)}>{pendingStatusCount ? <>{uiText("刷新进度（")}{pendingStatusCount}）</> : uiText("重试保存")}</Button>{pendingImages.some(record => !record.stopped) && <Button block onClick={stopPendingQueries}>{uiText("停止自动刷新")}</Button>}</> : null}
+
                             {/* Keep the primary action bottom-most so a second pointer click cannot hit a newly inserted action. */}
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 {optimizingPrompt ? uiText("正在优化提示词…") : running ? uiText("正在生成，请稍候…") : uiText(toolModeConfig.button)}
@@ -1455,6 +1456,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                     </div>
 
                     <div className="wb-surface image-results-panel thin-scrollbar min-w-0 p-6">
+                        {recoveryControls}
                         <div className="image-result-tabs" role="tablist" aria-label={uiText("结果视图")}>
                             <button type="button" role="tab" aria-selected={!logsOpen} onClick={returnToCurrentTask}>{uiText("本次结果")}{running ? <LoaderCircle className="size-4 animate-spin" /> : null}</button>
                             <button type="button" role="tab" aria-selected={logsOpen} onClick={() => setLogsOpen(true)}><History className="size-4" />{uiText("历史记录")}<span>{logs.length}</span></button>

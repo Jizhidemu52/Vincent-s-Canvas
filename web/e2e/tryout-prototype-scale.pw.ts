@@ -11,14 +11,18 @@ for(const [width,height] of [[1440,1000],[900,873],[390,844]])test("tryout workb
         return photos?r.fulfill({path:join(photos,p.identity+"-full.png"),contentType:"image/png"}):r.fulfill({body:fixturePng(90),contentType:"image/png"});
     });
     await page.setViewportSize({width,height});await newCanvas(page);
+    const settings = page.getByRole("button", { name: "画布设置", exact: true });
+    if (width < 768) await settings.click();
     await page.getByTestId("language-switch").filter({visible:true}).first().click({trial:true});
+    if (width < 768) await settings.click();
     await page.getByRole("button",{name:"试款台",exact:true}).click();
     const panel=page.getByTestId("canvas-design-toolbox");
     await expect(panel.locator(".tb-pat")).toHaveCount(4);await expect(panel.locator(".tb-model")).toHaveCount(5);
     await expect.poll(()=>panel.locator(".tb-model img").evaluateAll(els=>els.every(e=>(e as HTMLImageElement).naturalWidth>0))).toBe(true);
     const rect=(r:{x:number;y:number;width:number;height:number}|null)=>Object.values(r!).map(n=>Math.round(n));
     const box=await panel.boundingBox(),w=width<=900?260:296;
-    expect(rect(box)).toEqual([width-16-w,64,w,height-84]);
+    if (width >= 768) expect(rect(box)).toEqual([width-16-w,64,w,height-84]);
+    else { expect(box!.x).toBeCloseTo(8,0); expect(box!.width).toBeCloseTo(width-16,0); expect(box!.y+box!.height).toBeCloseTo(height-8,0); expect(box!.height).toBeLessThanOrEqual(height*0.58+1); }
     for(const [sel,h] of [[".tb-sw",42],[".tb-pat",56],[".tb-wide",38]] as const)expect((await panel.locator(sel).first().boundingBox())!.height).toBe(h);
     const snap=await panel.screenshot({path:info.outputPath("workbench-"+width+".png")});expect(snap.byteLength).toBeGreaterThan(1000);
     if(process.env.TRYOUT_REVIEW_PROTOTYPE){

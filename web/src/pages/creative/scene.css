@@ -228,5 +228,5 @@
     .cs-layout { overflow-y: auto; }
     .cs-form-panel, .cs-stage { padding: 16px; }
     .cs-submit-panel { position: static; padding: 12px 0 max(8px, env(safe-area-inset-bottom)); }
-    .cs-form-heading h1 { font-size: 22px; }
+    .cs-form-heading h1 { font-size: 20px; }
 }

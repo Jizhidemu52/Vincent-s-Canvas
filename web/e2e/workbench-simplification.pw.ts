@@ -1,3 +1,4 @@
+import { showMobilePane } from "./headless-workbench";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -138,11 +139,14 @@ test("image editing right-side history retains legacy local and cloud image-gene
     expect(historyBox && editorBox && historyBox.x > editorBox.x + editorBox.width).toBe(true);
     await page.screenshot({ path: resolve(output, "image-edit-history-desktop.png"), fullPage: true, animations: "disabled" });
     await narrowScreenshot(page, "image-edit-history-mobile.png");
+    await showMobilePane(page, "查看结果");
     await history.locator("button.image-history-card").filter({ hasText: "原图像生成本机记录" }).click();
     await expect(workspace(page).getByRole("heading", { name: "历史预览", exact: true })).toBeVisible();
     await expect(workspace(page).getByRole("button", { name: "恢复为草稿继续改", exact: true })).toHaveCount(0);
     await workspace(page).locator(".image-results-panel > div").filter({ has: page.getByRole("heading", { name: "历史预览", exact: true }) }).getByRole("button", { name: "复用提示词", exact: true }).click();
+    await showMobilePane(page, "创作");
     await expect(page.getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("历史针织款式");
+    await showMobilePane(page, "查看结果");
     await history.getByRole("button", { name: "查看云端记录：原图像生成云端记录", exact: true }).click();
     const detail = page.getByRole("dialog", { name: "云端任务详情", exact: true });
     await expect(detail.getByRole("img", { name: "账号历史原件", exact: true })).toBeVisible();

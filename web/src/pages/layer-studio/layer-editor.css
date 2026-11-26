@@ -439,3 +439,13 @@
         font-size: 13px;
     }
 }
+@media (max-width: 767px) {
+    .layer-studio-workbench > header { padding: 8px 14px; }
+    .layer-studio-workbench > header h1 { font-size: 20px; }
+    .layer-studio-workbench > header p { margin-top: 0; }
+    .layer-studio-workbench [data-mobile-pane=form] > main,
+    .layer-studio-workbench [data-mobile-pane=results] > aside { display: none; }
+    .layer-studio-workbench [data-testid=layer-studio-submit-bar] {
+        position: fixed; inset: auto 0 0; padding: 6px 12px max(8px,env(safe-area-inset-bottom));
+    }
+}

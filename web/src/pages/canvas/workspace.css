@@ -144,7 +144,7 @@
 @media (max-width: 720px) { .cw-project-card, .cw-project-card.is-agent-open { width: min(480px, calc(100vw - 112px)); } .cw-agent-panel { width: min(480px, calc(100vw - 24px)); bottom: 68px; } .cw-dock { overflow-x: auto; justify-content: flex-start; } .cw-tools { flex-shrink: 0; } .cw-generator-body { padding-inline: 16px; } .cw-generator-footer { padding-inline: 16px; } }
 @media (max-width: 720px) { .cw-account-card { width: auto; } .cw-account-avatar, .cw-account-name { display: none; } .cw-project-card { gap: 4px; } .cw-share { padding: 0 8px; } }
 @media (max-width: 720px) {
-    .cw-workspace { --cw-minimap-bottom: 168px; }
+    .cw-workspace [data-testid=canvas-mini-map] { --cw-minimap-bottom: max(168px, calc(var(--cw-prompt-dock-space, 0px) + 48px)); }
     .cw-project-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-rows: 24px 20px; column-gap: 4px; row-gap: 0; height: 56px; padding: 4px 8px; }
     .cw-brand { grid-column: 1; grid-row: 1; justify-content: flex-start; width: 100%; min-width: 0; height: 24px; }
     .cw-brand .inchoice-brand { width: min(130px, calc(100% - 15px)); }

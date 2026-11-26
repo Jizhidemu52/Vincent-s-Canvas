@@ -252,6 +252,29 @@
 .local-design-workbench .local-workbench-toast.error {
     color: var(--danger);
 }
+.design-panel-tabs { display: none; }
+@media (max-width: 767px) {
+    .local-design-workbench[data-editor-panel] { display: flex; flex-direction: column; gap: 8px; overflow: hidden; padding: 8px 12px; }
+    .local-design-workbench .local-workbench-heading { margin: 0; padding: 0; }
+    .local-design-workbench .local-workbench-heading h1 { margin: 0; font-size: 20px; }
+    .local-design-workbench .local-workbench-heading :is(p,.badge) { display: none; }
+    .design-panel-tabs { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); flex: none; border-bottom: 1px solid var(--line); }
+    .design-panel-tabs button { min-height: 44px; border-bottom: 2px solid transparent; }
+    .design-panel-tabs button[aria-pressed=true] { font-weight: 600; border-color: var(--accent); }
+    .local-design-workbench .local-workbench-host { flex: 1; min-height: 0; overflow: auto; }
+    .local-design-workbench[data-editor-panel] .local-workbench-host .workspace { display: flex; flex-direction: column; min-height: 0; }
+    .local-design-workbench:not([data-editor-panel=assets]) .local-workbench-host :is(.placement-assets,.repeat-left),
+    .local-design-workbench:not([data-editor-panel=canvas]) .local-workbench-host :is(.placement-center,.repeat-stage),
+    .local-design-workbench:is([data-editor-panel=assets],[data-editor-panel=canvas]) .local-workbench-host :is(.placement-inspector,.repeat-right),
+    .local-design-workbench:not([data-editor-panel=export]) .local-workbench-host :is(.workbench-project-bar,.repeat-export-group,.repeat-save-group,.placement-delivery),
+    .local-design-workbench[data-editor-panel=export] .local-workbench-host :is(.repeat-preview-group,.placement-inspector .panel-head,.placement-inspector .panel-body > div:not(.placement-delivery)) { display: none; }
+    .local-design-workbench[data-editor-panel] .placement-demo .placement-inspector > .panel-body,
+    .local-design-workbench[data-editor-panel] .repeat-right > .panel-body { display: flex; flex-direction: column; }
+    .local-design-workbench[data-editor-panel] .repeat-left > .panel-body { display: flex; flex-direction: column; gap: 8px; }
+    .local-design-workbench .repeat-left section:has(.repeat-upload) { order: -1; }
+    .local-design-workbench .placement-delivery { display: flex; flex-direction: column; gap: 6px; }
+    .local-design-workbench .placement-delivery > .mb-4 { order: 1; }
+}
 @media (max-width: 760px) {
     .local-design-workbench {
         padding: 16px;

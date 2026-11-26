@@ -826,6 +826,7 @@ function VideoGenerationWorkspace() {
         disabled: !workspaceActive || !draftReady || readingReferences || submitting || previewLoading || user?.status !== "active",
     });
 
+    const recoveryControls = running ? <Button block onClick={() => { for (const controller of observationControllers.current.values()) controller.abort(); }}>{uiText("停止本页查询（不取消服务端任务）")}</Button> : logs.some(log => log.status === "查询暂停") ? <Button block onClick={() => resumePendingLogs(logs)}>{uiText("继续查询原任务")}</Button> : null;
     return (
         <div className="wb-page generation-workbench video-workbench flex h-full flex-col overflow-hidden">
             <MobileWorkbenchSwitch pane={mobilePane} onChange={setMobilePane} />
@@ -971,7 +972,7 @@ function VideoGenerationWorkspace() {
                             {logsError ? <div role="alert" className="mb-3 text-sm text-destructive"><p>{display(uiText(logsError))}</p><p>{uiText(logsReady ? "已有视频任务不受影响；可重新读取记录。" : "视频记录读取成功后才能生成；不会重复提交原任务。")}</p><Button size="small" loading={logsLoading} disabled={logsLoading} onClick={() => void refreshLogs(true)}>{uiText("重新读取视频记录")}</Button></div> : null}
                             {!canGenerate || submitting || readingReferences || previewLoading ? <p role="status" className="mb-2 text-[13px] text-muted-foreground">{!draftReady ? uiText("正在恢复草稿…") : !logsReady ? uiText(logsLoading ? "正在恢复视频记录…" : "视频记录尚未读取，请重试") : submitting ? uiText(planning ? "AI 正在规划动效并提交视频" : "正在提交，请勿重复点击") : readingReferences ? uiText("正在读取参考素材，请稍候") : previewLoading ? uiText("正在读取历史结果，请稍候") : !planning && !prompt.trim() ? uiText("还差：填写提示词") : quotaBlocked ? uiText("当前账号暂时无法提交，请联系管理员") : validationError ? display(uiText(validationError)) : !user || user.status !== "active" ? uiText("当前设计师账号不可用") : null}</p> : null}
                             <Button block icon={<Plus className="size-4" />} loading={workbenchTask.creating} disabled={!workbenchTask.ready || workbenchTask.creating} onClick={() => void createTask()}>{uiText("新建任务，继续创作")}</Button>
-                            {running ? <Button block onClick={() => { for (const controller of observationControllers.current.values()) controller.abort(); }}>{uiText("停止本页查询（不取消服务端任务）")}</Button> : logs.some(log => log.status === "查询暂停") ? <Button block onClick={() => resumePendingLogs(logs)}>{uiText("继续查询原任务")}</Button> : null}
+
                             {/* Keep the primary action bottom-most so a second pointer click cannot hit a newly inserted action. */}
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={submitting} disabled={!canGenerate || submitting || readingReferences || previewLoading} onClick={() => void generate()}>
                                 {submitting ? uiText("正在提交视频") : running ? uiText("继续生成新视频") : uiText("生成视频")}
@@ -980,6 +981,7 @@ function VideoGenerationWorkspace() {
                     </div>
 
                     <div className="wb-surface thin-scrollbar video-result-panel min-w-0 p-5 lg:min-h-0 lg:overflow-y-auto">
+                        {recoveryControls}
                         <div role="tablist" aria-label={uiText("视频结果视图")} className="generation-result-tabs mb-4">
                             <button type="button" role="tab" aria-selected={resultView === "current"} onClick={() => setResultView("current")}>{uiText("本次结果")}</button>
                             <button type="button" role="tab" aria-selected={resultView === "history"} onClick={() => setResultView("history")}>{uiText("历史记录")}</button>

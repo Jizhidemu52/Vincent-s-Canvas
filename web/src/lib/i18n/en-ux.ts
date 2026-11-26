@@ -1,5 +1,7 @@
 /** Employee-facing interaction copy. User content and protocol identifiers are not translation keys. */
 export default {
+    "连续预览": "Repeat preview",
+    "输出设置": "Output settings",
     "没有匹配的工具": "No matching tools",
     "视频与音频参考": "Video and audio references",
     "动效设置": "Motion settings",

@@ -50,6 +50,7 @@ test("product candidates need explicit identification and confirmation, then fre
     await page.locator(".cs-history-item").first().click();
     await expect(target).toHaveValue("新的手动产品");
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "创作", exact: true }).click();
     await page.locator(".cs-product-candidates").scrollIntoViewIfNeeded();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath("product-target-mobile.png"), fullPage: true });

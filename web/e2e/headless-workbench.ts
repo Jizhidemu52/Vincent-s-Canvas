@@ -3,6 +3,16 @@ import type { Page } from "@playwright/test";
 export const workbenchPanes = (page: Page) => page.getByRole("region", { name: /^(创作工作区|Creation workspace)$/, exact: true }).locator(":scope > div:last-child > div");
 export const activeWorkbench = (page: Page) => workbenchPanes(page).filter({ visible: true });
 
+export async function showMobilePane(page: Page, label: "创作" | "查看结果") {
+    const tabs = page.getByRole("navigation", { name: "工作区视图", exact: true });
+    if ((page.viewportSize()?.width ?? 1024) < 768) await tabs.getByRole("button", { name: label, exact: true }).click();
+}
+
+export async function expandMobileOptions(page: Page, label: string) {
+    const toggle = page.getByRole("button", { name: label, exact: true }).filter({ visible: true });
+    if ((page.viewportSize()?.width ?? 1024) < 768 && await toggle.getAttribute("aria-expanded") === "false") await toggle.click();
+}
+
 export type WorkbenchRegistryRecord = {
     key: string;
     value: { version: 1; activeId: string; nextNumber: number; tasks: Array<{ id: string; number: number; createdAt: number }> };

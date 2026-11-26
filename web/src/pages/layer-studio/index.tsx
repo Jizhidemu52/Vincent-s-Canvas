@@ -2,6 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Select, Tooltip } from "antd";
 import { ChevronDown, ChevronUp, ImagePlus, Layers3, LoaderCircle, RefreshCw, Sparkles, X } from "lucide-react";
 import { WorkbenchTasks, useWorkbenchTask } from "@/components/workbench-tasks";
+import { MobileWorkbenchSwitch, type WorkbenchPane } from "@/components/mobile-workbench-switch";
+import { MobileOptions } from "@/components/mobile-options";
+import { ConversationImagePreview } from "@/components/conversation-image-preview";
+import { serverAssetContentUrl } from "@/lib/canvas/canvas-image-source";
 import { RemovableHistoryList } from "@/components/removable-history-list";
 import { hideStudioJobs, studioJobRemovable } from "./page-state";
 import { useUserStore } from "@/stores/use-user-store";
@@ -27,6 +31,7 @@ const jobLabel = (job: LayerStudioJob) => job.phase === "complete" ? "生成成�
 function ReferencePreview({ reference, assertCurrent }: { reference: LayerStudioReference; assertCurrent: () => void }) {
     const t = useUiText();
     const [url, setUrl] = useState("");
+    const [preview, setPreview] = useState(false);
     useEffect(() => {
         if (!reference.previewable) return;
         const controller = new AbortController();
@@ -41,8 +46,14 @@ function ReferencePreview({ reference, assertCurrent }: { reference: LayerStudio
         })().catch(() => {});
         return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
     }, [reference.id, reference.previewable, assertCurrent]);
-    return url ? <img src={url} alt={t("参考图预览")} className="size-12 shrink-0 rounded object-contain bg-muted" onError={() => setUrl("")} />
-        : <span className="flex size-12 shrink-0 items-center justify-center rounded bg-muted text-muted-foreground"><ImagePlus size={18} /></span>;
+    const placeholder = <span className="flex size-full items-center justify-center rounded bg-muted text-muted-foreground"><ImagePlus size={18} /></span>;
+    if (!reference.previewable) return <span className="size-12 shrink-0">{placeholder}</span>;
+    return <>
+        <button type="button" className="size-20 shrink-0 rounded bg-muted md:size-12" aria-label={t("放大参考图") + " · " + reference.name} onClick={() => setPreview(true)}>
+            {url ? <img src={url} alt={t("参考图预览")} className="size-full object-contain" onError={() => setUrl("")} /> : placeholder}
+        </button>
+        {preview && <ConversationImagePreview image={{ id: reference.id, label: reference.name, name: reference.name, dataUrl: serverAssetContentUrl(reference.id) }} onClose={() => setPreview(false)} />}
+    </>;
 }
 
 function LayerStudioPane({ ownerId }: { ownerId: string }) {
@@ -57,6 +68,9 @@ function LayerStudioPane({ ownerId }: { ownerId: string }) {
     const visibleJobs=state.jobs.filter(job=>!state.hiddenHistoryIds?.includes(job.requestId));
     const selected = visibleJobs.find(job => job.requestId === state.selectedRequestId) || visibleJobs[0];
     const [uploading, setUploading] = useState(false);
+    const [pane, setPane] = useState<WorkbenchPane>("form");
+    const scroller = useRef<HTMLDivElement>(null);
+    const showPane = (next: WorkbenchPane) => { setPane(next); scroller.current?.scrollTo(0, 0); };
     const uploadingRef = useRef(false);
     const [inputError, setInputError] = useState("");
     const [accountHistoryOpen, setAccountHistoryOpen] = useState(false);
@@ -104,12 +118,13 @@ function LayerStudioPane({ ownerId }: { ownerId: string }) {
     }).catch(() => {});
 
     if (!ready) return <div className="p-5 text-sm" role={error ? "alert" : "status"}>{error ? layerStudioUiMessage(error) : t("正在读取独立工作区…")}{error && <button type="button" className={smallButton} onClick={workspace.retryRead}>{t("重试读取")}</button>}</div>;
-    return <div className="flex h-full min-h-0 flex-col">
+    return <div className="layer-studio-workbench flex h-full min-h-0 flex-col">
         <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 py-4">
             <Layers3 className="size-6 text-primary" /><div><h1 className="text-[28px] font-semibold leading-tight">{t(LAYER_STUDIO_LABEL)}</h1><p className="mt-1 text-[13px] text-muted-foreground">{t("拆分图层、生成画面，再自由组合。")}</p></div>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto lg:grid lg:grid-cols-[minmax(360px,440px)_minmax(0,1fr)] lg:overflow-hidden">
-            <aside className="flex min-h-0 flex-col border-b border-border lg:border-r lg:border-b-0" aria-label={t("输入与生成设置")}>
+        <MobileWorkbenchSwitch pane={pane} onChange={showPane} />
+        <div ref={scroller} data-mobile-pane={pane} className="min-h-0 flex-1 overflow-y-auto lg:grid lg:grid-cols-[minmax(360px,440px)_minmax(0,1fr)] lg:overflow-hidden">
+            <aside className="flex min-h-0 flex-col border-b border-border max-md:pb-20 lg:border-r lg:border-b-0" aria-label={t("输入与生成设置")}>
               <div className="min-h-0 flex-1 space-y-4 p-4 lg:overflow-y-auto">
                 <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1" role="group" aria-label={t("工作模式")}>
                     {([['decompose', t("图层拆分")], ['generate', t("图片生成 / 编辑")]] as const).map(([mode, title]) => <button type="button" key={mode} disabled={locked} aria-pressed={form.mode === mode}
@@ -129,6 +144,7 @@ function LayerStudioPane({ ownerId }: { ownerId: string }) {
                 </section>
                 <Field label={form.mode === "decompose" ? t("拆分说明（可选）") : t("图片描述（必填）")}><textarea aria-label={form.mode === "decompose" ? t("拆分说明") : t("图片描述")} className={`${control} min-h-28 resize-y`} maxLength={20_000} disabled={locked} value={form.prompt} placeholder={form.mode === "decompose" ? t("可留空自动识别主体、文字与背景") : t("描述画面，或说明参考图的修改与融合方式")} onChange={event => modify({ prompt: event.target.value })} /></Field>
                 <DisplayTranslationPreview text={form.prompt} />
+                <MobileOptions label="输出设置">
                 {form.mode === "generate" && <Field label={t("尺寸方式")}><Select aria-label={t("尺寸方式")} disabled={locked} value={form.sizeMode} onChange={sizeMode => modify({ sizeMode })} options={[{ value: "tier", label: t("自动比例 · 选择档位") }, { value: "ratio", label: t("指定宽高比") }, { value: "exact", label: t("精确像素") }]} /></Field>}
                 {form.mode === "decompose" || form.sizeMode !== "exact" ? <div className="grid grid-cols-2 gap-3"><Field label={t("输出尺寸")}><Select aria-label={t("输出尺寸")} value={form.tier} disabled={locked} onChange={tier => modify({ tier })} options={[...(form.mode === "decompose" ? [{ value: "auto", label: t("适配原图") }] : []), ...LAYER_STUDIO_TIERS.map(value => ({ value, label: value }))]} /></Field>{form.mode === "generate" && form.sizeMode === "ratio" && <Field label={t("宽高比")}><Select aria-label={t("宽高比")} value={form.ratio} disabled={locked} onChange={ratio => modify({ ratio })} options={LAYER_STUDIO_RATIOS.map(value => ({ value, label: value }))} /></Field>}</div>
                     : <><div className="grid grid-cols-2 gap-3"><Field label={t("宽度（像素）")}><input type="number" min={1} className={control} disabled={locked} value={form.width} onChange={event => modify({ width: Number(event.target.value) })} /></Field><Field label={t("高度（像素）")}><input type="number" min={1} className={control} disabled={locked} value={form.height} onChange={event => modify({ height: Number(event.target.value) })} /></Field></div><p className="text-[13px] text-muted-foreground">{t("总像素 921600–4624220，宽高比 1/16–16。")}</p></>}
@@ -136,12 +152,13 @@ function LayerStudioPane({ ownerId }: { ownerId: string }) {
                 {form.mode === "decompose" && <><Field label={t("输出总数上限（含底图）")}><input type="number" min={2} max={100} step={1} className={control} disabled={locked} value={form.maxImages} onChange={event => modify({ maxImages: Number(event.target.value) })} /></Field><p className="text-[13px] text-muted-foreground">{t("2–100，默认 30；不是保证生成张数。透明图层始终为 PNG。")}</p><label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={locked} checked={form.ocr} onChange={event => modify({ ocr: event.target.checked })} />{t("请求文字 OCR")}</label>{form.ocr && <p className="text-[13px] leading-relaxed text-muted-foreground">{t("OCR 可能缺失或不准确；填写拆分说明可能影响返回。需要文字时可留空说明，但仍不保证识别。")}</p>}</>}
                 <div className="flex flex-wrap gap-4 text-sm"><label className="flex items-center gap-2"><input type="checkbox" disabled={locked} checked={form.watermark} onChange={event => modify({ watermark: event.target.checked })} />{t("添加水印")}</label><label className="flex items-center gap-2"><input type="checkbox" disabled={locked} checked={form.contentCheck} onChange={event => modify({ contentCheck: event.target.checked })} />{t("提交前内容检查")}</label></div>
                 <p className="text-[13px] leading-relaxed text-muted-foreground">{t("标准提示词优化始终启用，无法关闭。内容检查选项不改变服务的安全规则。")}</p>
+                </MobileOptions>
                 {inputError && <div role="alert" className="text-sm text-destructive">{layerStudioUiMessage(inputError)}</div>}
               </div>
                 <div className="sticky bottom-0 z-10 shrink-0 space-y-2 border-t border-border bg-background p-4" data-testid="layer-studio-submit-bar">
                     {!enabled ? <p className="text-sm text-muted-foreground">{t("功能暂未开放；已有结果仍可编辑和下载。")}</p> : validation ? <p className="text-sm text-muted-foreground">{layerStudioUiMessage(validation)}</p> : estimateError ? <div role="alert" className="text-sm text-destructive">{layerStudioUiMessage(estimateError)}<button type="button" className={smallButton} onClick={() => { setEstimate(null); setEstimateAttempt(value => value + 1); }}>{t("重新检查")}</button></div>
                         : !quote && <p className="text-sm text-muted-foreground">{t("正在检查任务配置…")}</p>}
-                    <button type="button" aria-label={form.mode === "decompose" ? t("开始拆分") : t("生成图片")} aria-busy={busy} disabled={locked || !enabled || Boolean(validation || error || estimateError) || !quote} onClick={() => void workspace.submit()} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40">{busy ? <LoaderCircle size={16} className="animate-spin" /> : <Sparkles size={16} />}{busy ? t("处理中…") : form.mode === "decompose" ? t("开始拆分") : t("生成图片")}</button>
+                    <button type="button" aria-label={form.mode === "decompose" ? t("开始拆分") : t("生成图片")} aria-busy={busy} disabled={locked || !enabled || Boolean(validation || error || estimateError) || !quote} onClick={() => { setAccountHistoryOpen(false); showPane("results"); void workspace.submit(); }} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40">{busy ? <LoaderCircle size={16} className="animate-spin" /> : <Sparkles size={16} />}{busy ? t("处理中…") : form.mode === "decompose" ? t("开始拆分") : t("生成图片")}</button>
                     {unresolved && <button type="button" className={`${smallButton} w-full`} disabled={!taskPane.ready || taskPane.creating} onClick={() => void taskPane.createNewTask()}>{t("继续创作")}</button>}
                 </div>
             </aside>

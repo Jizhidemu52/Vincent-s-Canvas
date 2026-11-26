@@ -3,6 +3,7 @@ const enLayerStudio: Record<string, string> = {
     "管理本机历史": "Manage browser history",
     "豆包生图": "Doubao Image Studio",
     "拆分图层、生成画面，再自由组合。": "Separate layers, generate images, and compose freely.",
+    "放大参考图": "Enlarge reference image",
     "参考图预览": "Reference image preview",
     "输入与生成设置": "Input and generation settings",
     "工作模式": "Working mode",

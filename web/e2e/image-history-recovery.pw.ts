@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 import { test, expect, IMAGE } from "./fixtures";
-import { activeWorkbench, readWorkspaceRecords } from "./headless-workbench";
+import { showMobilePane, activeWorkbench, readWorkspaceRecords } from "./headless-workbench";
 
 async function uploadSource(page: Page) {
     const chooser = page.waitForEvent("filechooser");
@@ -94,6 +94,7 @@ for (const failure of ["history", "pending-cleanup", "image-cache"]) test(`image
     expect(api.submissions).toHaveLength(1);
     expect(recoveries).toEqual([]);
     await page.reload();
+    await showMobilePane(page, "查看结果");
     await expect(activeWorkbench(page).getByRole("button", { name: "下载", exact: true })).toBeVisible();
     await downloadOriginal(page, originalBytes);
     expect(api.submissions).toHaveLength(1);

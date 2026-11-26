@@ -1,3 +1,4 @@
+import { expandMobileOptions } from "./headless-workbench";
 import { test, expect, IMAGE } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
 import type { Locator, Page } from "@playwright/test";
@@ -100,6 +101,7 @@ test("mobile: image and video primary actions remain visible and video draft sur
     // still requires one. Keep the mobile footer and blank-draft contract explicit.
     await expect(prompt).toHaveValue("");
     await expect(prompt).toHaveAttribute("placeholder", /可不填/);
+    await expandMobileOptions(page, "动效设置");
     await expect(page.getByTestId("video-motion-panel")).toBeVisible();
     await expect(page.getByRole("button", { name: "生成视频", exact: true })).toBeEnabled();
     await expect(page.getByText("还差：填写提示词", { exact: true })).toHaveCount(0);

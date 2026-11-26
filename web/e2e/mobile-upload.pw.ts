@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect, newCanvas, IMAGE, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
-import { activeWorkbench, workbenchPanes, readWorkbenchRegistry } from "./headless-workbench";
+import { showMobilePane, activeWorkbench, workbenchPanes, readWorkbenchRegistry } from "./headless-workbench";
 import { expectPersistedReferenceOriginal } from "./reference-image-assertions";
 
 const file = (name: string) => ({ name, mimeType: "image/png", buffer: IMAGE });
@@ -46,6 +46,7 @@ for (const width of [320, 390]) {
     test(`image picker uploads gallery originals into the active task at ${width}px`, async ({ page, api }, info) => {
         await page.setViewportSize({ width, height: 844 });
         await page.goto("/image?tool=image-edit");
+        await showMobilePane(page, "查看结果");
         await activeWorkbench(page).getByRole("tab", { name: /历史记录/ }).click();
         await activeWorkbench(page).locator(".image-history-panel").getByRole("button", { name: "新建", exact: true }).click();
         await expect(workbenchPanes(page)).toHaveCount(2);

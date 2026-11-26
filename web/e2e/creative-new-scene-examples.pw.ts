@@ -28,10 +28,12 @@ test("all creative cards load real cover images and the two added cards remain c
         const card = page.locator(`.creative-card:has(a[href='/creative/${id}'])`);
         const image = card.locator(".creative-cover > img");
         await expectDecodedImage(image);
-        const size = await image.evaluate((element: HTMLImageElement) => ({ rendered: element.clientWidth / element.clientHeight, original: element.naturalWidth / element.naturalHeight, fit: getComputedStyle(element).objectFit, labelSpace: Number.parseFloat(getComputedStyle(element).paddingBottom) }));
-        expect(Math.abs(size.rendered - size.original)).toBeLessThan(0.02);
-        expect(size.fit).toBe("contain");
-        expect(size.labelSpace).toBeGreaterThanOrEqual(38);
+        const thumbnail = await image.boundingBox();
+        const cover = await card.locator(".creative-cover").boundingBox();
+        expect(thumbnail!.width).toBeGreaterThanOrEqual(80);
+        expect(thumbnail!.height).toBeLessThanOrEqual(cover!.height + 1);
+        expect(await image.evaluate(element => getComputedStyle(element).objectFit)).toBe("contain");
+        await expect(card.locator(".creative-cover-flow")).toBeHidden();
         await card.screenshot({ path: info.outputPath(`${id}-mobile-card.png`) });
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
@@ -80,6 +82,7 @@ for (const [sceneId, draftLabel, action] of [
         }
         await page.screenshot({ path: info.outputPath(`${sceneId}-examples-desktop.png`), fullPage: true });
         await page.setViewportSize({ width: 390, height: 844 });
+        await page.getByRole("button", { name: "查看结果", exact: true }).click();
         for (const image of await page.getByTestId("design-example-article").locator("img").all()) await expectDecodedImage(image);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
         await page.screenshot({ path: info.outputPath(`${sceneId}-examples-mobile.png`), fullPage: true });

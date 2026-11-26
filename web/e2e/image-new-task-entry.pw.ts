@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Page } from "@playwright/test";
 import { test, expect, fixturePng, type MockCanvasApi } from "./fixtures";
-import { activeWorkbench as active, workbenchPanes, readWorkbenchRegistry, readWorkspaceRecords } from "./headless-workbench";
+import { showMobilePane, activeWorkbench as active, workbenchPanes, readWorkbenchRegistry, readWorkspaceRecords } from "./headless-workbench";
 
 const prompt = (page: Page) => active(page).getByRole("textbox", { name: "图像提示词", exact: true });
 const historyNew = (page: Page) => active(page).locator(".image-history-panel").getByRole("button", { name: "新建", exact: true });
@@ -22,6 +22,7 @@ async function submitA(page: Page, api: MockCanvasApi) {
     await prompt(page).fill("ENTRY_A_绿色圆形包，仅用A原件");
     await active(page).getByRole("button", { name: "开始编辑", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
+    await showMobilePane(page, "创作");
     await expect(active(page).getByRole("button", { name: /正在生成，请稍候/ })).toBeDisabled();
     return [...api.tasks.keys()][0];
 }
@@ -64,6 +65,7 @@ async function storedLogs(page: Page) {
 
 test("history New submits B while A remains processing and keeps reverse-completed originals separate", async ({ page, api }) => {
     const aId = await submitA(page, api);
+    await showMobilePane(page, "查看结果");
     await active(page).getByRole("tab", { name: /历史记录/ }).click();
     await expect(historyNew(page)).toBeEnabled();
     await historyNew(page).click();
@@ -138,6 +140,7 @@ test("running footer creates only one independent B when activated twice", async
 test("mobile history New switches to an independent B while A keeps running", async ({ page, api }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const aId = await submitA(page, api);
+    await showMobilePane(page, "查看结果");
     await active(page).getByRole("tab", { name: /历史记录/ }).click();
     const history = active(page).locator(".image-history-panel");
     await expect(history).toBeVisible();
@@ -164,6 +167,7 @@ test("a failed history New registry write preserves running A and its pending re
         };
     });
     const aId = await submitA(page, api);
+    await showMobilePane(page, "查看结果");
     await active(page).getByRole("tab", { name: /历史记录/ }).click();
     await expect(historyNew(page)).toBeEnabled();
     await historyNew(page).click();

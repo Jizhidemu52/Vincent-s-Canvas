@@ -76,7 +76,7 @@ test("Omni automatic multi-image reference and explicit frame modes preserve ext
     const drawer = await openSettings(page);
     await selectMode(page, "首尾帧");
     await drawer.getByRole("button", { name: "关闭", exact: true }).click();
-    await expect(page.getByRole("img", { name: "omni-3.png", exact: true }).locator("..")).toContainText("图片3");
+    await expect(page.locator(".video-ref-image").filter({ has: page.getByRole("img", { name: "omni-3.png", exact: true }) })).toContainText("图片3");
     await page.getByRole("textbox", { name: "视频提示词", exact: true }).fill("从首帧平稳过渡到尾帧，保留参考人物。");
     await page.getByRole("button", { name: "生成视频", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);

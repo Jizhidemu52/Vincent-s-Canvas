@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import type { BrowserContext, Page } from "@playwright/test";
 import { test, expect, IMAGE, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
-import { activeWorkbench, workbenchPanes } from "./headless-workbench";
+import { showMobilePane, activeWorkbench, workbenchPanes } from "./headless-workbench";
 
 const videoBytes = readFileSync(new URL("./media/video.mp4", import.meta.url));
 const imageModel = { id: "10000000-0000-4000-8000-000000000001", name: "E2E Image", modelId: "gpt-image-2", capabilities: ["generate", "edit", "batch"], creditCost: 0, rmbCost: 0 };
@@ -188,6 +188,7 @@ for (const viewport of [{ width: 1800, height: 1200 }, { width: 390, height: 844
                 await expect.poll(() => attempts).toBe(1);
                 await expect(workbenchPanes(page)).toHaveCount(1);
                 await expect(workbenchPanes(page).first()).toBeVisible();
+                await showMobilePane(page, "创作");
                 await expect(prompt).toHaveValue(`POINTER_${kind}_${viewport.width}`);
                 expect(await page.evaluate(() => (window as any).__submitPointerTargets)).not.toEqual(expect.arrayContaining([expect.stringMatching(/新建任务|停止.*查询/)]));
                 const during = (await submit.boundingBox())!;
@@ -197,6 +198,7 @@ for (const viewport of [{ width: 1800, height: 1200 }, { width: 390, height: 844
                 const original = [...api.tasks.values()][0]!;
                 const oldReads = api.taskReads.filter(path => path === `/api/tasks/${original.id}`).length;
                 await expect.poll(() => api.taskReads.filter(path => path === `/api/tasks/${original.id}`).length).toBeGreaterThan(oldReads);
+                await showMobilePane(page, "查看结果");
                 await expect(pane(page).getByRole("button", { name: "停止本页查询（不取消服务端任务）", exact: true })).toBeVisible();
                 expect(attempts).toBe(1);
                 expect(controls).toEqual([]);

@@ -56,6 +56,7 @@ for (const mode of ["new", "selected", "narrow", "disabled", "multiple"] as cons
         await expect(dock.getByText(mode === "selected" ? "改这件：针织帽" : "生成新产品", { exact: true })).toBeVisible();
         await input.fill("请将帽檐改为深蓝色");
         if (mode === "selected") await expect(page.getByPlaceholder("描述要生成的图片内容")).not.toBeVisible();
+        if (mode === "narrow") await dock.getByRole("button", { name: "生成设置", exact: true }).click();
         await more.click();
         await expect(more).toHaveAttribute("aria-expanded", "true");
         await more.click();

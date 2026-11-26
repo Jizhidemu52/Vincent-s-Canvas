@@ -164,6 +164,7 @@ test("missing configured price disables generation but saved result editor remai
 test("mobile layout and exact-size validation stay usable without a request", async ({ page, studio }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await generatedMode(page);
+    await pane(page).getByRole("button", { name: "输出设置", exact: true }).click();
     await pane(page).getByRole("combobox", { name: "尺寸方式", exact: true }).click();
     await page.locator(".ant-select-dropdown:visible .ant-select-item-option-content").getByText("精确像素", { exact: true }).click();
     await pane(page).getByLabel("宽度（像素）", { exact: true }).fill("1");
@@ -243,6 +244,7 @@ test("missing layer recovery is actionable in the editor and preserves edits wit
     await recovery.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath("partial-desktop.png") });
     await page.setViewportSize({ width: 390, height: 844 });
+    await pane(page).getByRole("button", { name: "查看结果", exact: true }).click();
     const resume = recovery.getByRole("button", { name: "重试保存", exact: true });
     await resume.scrollIntoViewIfNeeded();
     await expect(resume).toBeInViewport();

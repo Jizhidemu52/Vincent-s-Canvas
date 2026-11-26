@@ -158,7 +158,9 @@ for (const scenario of [{ name: "desktop-light-English", width: 1680, height: 10
         await expect(page.locator(".cw-workspace")).toHaveAttribute("data-theme", scenario.theme);
         const bounds = (await control.boundingBox())!;
         expect(scenario.width - bounds.x - bounds.width).toBeCloseTo(12, 0);
-        expect(scenario.height - bounds.y - bounds.height).toBeCloseTo(64, 0);
+        const dock = await page.locator(".cw-dock").boundingBox();
+        expect(dock).toBeTruthy();
+        expect(bounds.y + bounds.height).toBeLessThanOrEqual(dock!.y);
         expect(bounds.width).toBeGreaterThanOrEqual(40);
         expect(await toggle.evaluate(element => {
             const bounds = element.getBoundingClientRect();
@@ -169,13 +171,14 @@ for (const scenario of [{ name: "desktop-light-English", width: 1680, height: 10
         await toggle.focus(); await page.keyboard.press("Space");
         await expect(toggle).toHaveAttribute("aria-pressed", "true");
         await page.screenshot({ path: info.outputPath(`${scenario.name}-idle.png`), animations: "disabled" });
+        if (scenario.width < 768) await page.getByRole("button", { name: "工具", exact: true }).click();
 
         await page.locator('[data-usage-control="canvas-tool.zoom"]').click();
         await page.getByRole("button", { name: scenario.english ? "Show minimap" : "打开小地图", exact: true }).click();
         await page.locator('[data-usage-control="canvas-tool.zoom"]').click();
         const minimap = page.getByTestId("canvas-mini-map"); await expect(minimap).toBeVisible();
-        const mapBounds = (await minimap.boundingBox())!;
-        expect(mapBounds.y + mapBounds.height).toBeLessThanOrEqual(bounds.y);
+        if (scenario.width < 768) await page.getByRole("button", { name: "收起工具", exact: true }).click();
+        await expect.poll(async () => (await minimap.boundingBox())!.y + (await minimap.boundingBox())!.height).toBeLessThanOrEqual((await control.boundingBox())!.y);
         await toggle.click();
         await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
@@ -201,6 +204,7 @@ for (const scenario of [{ name: "desktop-light-English", width: 1680, height: 10
         await expect(assistant).toHaveCount(0);
         await expect(toggle).toBeVisible();
         await expect(toggle).toHaveAttribute("aria-pressed", "false");
+        if (scenario.width < 768) await page.getByRole("button", { name: "工具", exact: true }).click();
         await page.locator('[data-usage-control="canvas-tool.more"]').click();
         const templateAction = page.getByRole("menuitem").filter({ has: page.locator('[data-usage-control="canvas-tool.designTemplate"]') });
         await expect(templateAction).toBeVisible();
