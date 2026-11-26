@@ -75,6 +75,12 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
             return entry && !entry.redirect && !entry.pendingDelete && entry.local === snapshot(project);
         }).map(project => project.id),
         pendingDeleteIds: () => Object.keys(baseline).filter(id => baseline[id].pendingDelete),
+        hasSavedImageTask(projectId: string, nodeId: string, requestId: string, ownerId: string) {
+            const entry = baseline[projectId];
+            if (!entry?.revision || !entry.local || entry.pendingDelete || entry.redirect) return false;
+            const task = parseCanvasProject(entry.local).nodes.find(node => node.id === nodeId)?.metadata?.imageTask;
+            return task?.ownerId === ownerId && task.projectId === projectId && task.requestId === requestId;
+        },
         async hydrate(local: CanvasProject[], options: { live?: boolean; deferUncached?: boolean } = {}) {
             const documents = await io.list();
             const projects = new Map(local.map(project => [project.id, project]));

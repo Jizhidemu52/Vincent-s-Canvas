@@ -59,6 +59,28 @@ function harness(initial: CanvasProject[] = [], cloud: CloudCanvasDocument[] = [
 }
 const known = (value: CanvasProject, revision = 1): CanvasCloudBaseline => ({ [value.id]: { revision, local: encoded(value) } });
 
+test("parallel generation authorizes only the saved task binding even while a sibling changes", async () => {
+    const local = project();
+    const binding = { ownerId: "employee", projectId: local.id, requestId: "branch:0", resultIndex: 0 };
+    local.nodes[0]!.metadata!.imageTask = binding;
+    const h = harness();
+    const saved = (owner = binding.ownerId, request = binding.requestId, node = "image-a") =>
+        h.engine.hasSavedImageTask(local.id, node, request, owner);
+    expect(saved()).toBe(false);
+    await h.engine.save([local]);
+    local.nodes.push({ ...clone(local.nodes[0]!), id: "sibling" });
+    expect(h.engine.synchronizedProjectIds([local])).toEqual([]);
+    expect(saved()).toBe(true);
+    expect(saved("other")).toBe(false);
+    expect(saved(binding.ownerId, "next:0")).toBe(false);
+    expect(saved(binding.ownerId, binding.requestId, "sibling")).toBe(false);
+    for (const excluded of [{ pendingDelete: true }, { redirect: "copy" }, { revision: 0 }]) {
+        const baseline = known(local);
+        Object.assign(baseline[local.id]!, excluded);
+        expect(harness([], [], baseline).engine.hasSavedImageTask(local.id, "image-a", binding.requestId, binding.ownerId)).toBe(false);
+    }
+});
+
 test("fresh library uses summaries without loading or deleting unopened cloud documents", async () => {
     const documents = Array.from({ length: 60 }, (_, index) => envelope(project(`cloud-${index}`), 3));
     const h = harness([], documents);

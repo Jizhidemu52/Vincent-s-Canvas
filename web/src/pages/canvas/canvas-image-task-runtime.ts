@@ -205,7 +205,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
             const previousSourceTaskId = previous?.sourceTaskId;
             try {
                 await patch(nodeId, binding, { imageTask: binding, sourceTaskId: undefined, status: "loading", errorDetails: undefined }, false);
-                await confirmCanvasBeforeImageSubmission(binding.projectId);
+                await confirmCanvasBeforeImageSubmission(binding.projectId, nodeId, binding.requestId);
                 signal.throwIfAborted();
             } catch (error) {
                 // This callback is awaited before POST: a failed first save is known not to have submitted.

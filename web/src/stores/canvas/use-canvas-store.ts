@@ -189,13 +189,10 @@ export async function flushCanvasCloudPersistence() {
     await cloudPersistence?.flush();
 }
 
-export async function confirmCanvasBeforeImageSubmission(projectId: string) {
+export async function confirmCanvasBeforeImageSubmission(projectId: string, nodeId: string, requestId: string) {
     if (!cloudPersistence) return;
     if (!isCanvasOwnerValid()) throw new Error("账号已切换，请重新打开画布");
-    const project = useCanvasStore.getState().openProject(projectId);
-    if (!project) throw new Error("请先打开要保存的画布");
-    await cloudPersistence.flush();
-    if (!(await cloudPersistence.synchronizedProjectIds([project])).includes(projectId)) {
+    if (!await cloudPersistence.confirmImageTask(projectId, nodeId, requestId)) {
         throw new Error("画布尚未得到服务器保存确认，本次生图尚未提交。请保留页面，待同步成功后重试。");
     }
 }

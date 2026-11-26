@@ -207,6 +207,11 @@ export function createCloudCanvasPersistence(owner: string, name: string, hooks:
         },
         schedule,
         flush,
+        async confirmImageTask(projectId: string, nodeId: string, requestId: string) {
+            await flush();
+            assertOwner();
+            return (await initialize()).hasSavedImageTask(projectId, nodeId, requestId, owner);
+        },
         refresh(project: CanvasProject) {
             return enqueue(async () => {
                 assertOwner();
