@@ -1,3 +1,4 @@
+import { ConversationImagePreview } from "@/components/conversation-image-preview";
 import { uiText, useUiLocale, useUiText } from "@/lib/i18n";
 import { colorMoodPalette, colorMoodPalettes } from "../../../../shared/color-moods";
 import { useDisplayText } from "@/hooks/use-display-text";
@@ -275,10 +276,11 @@ function SceneUploadSlot({ slot, reference, onImage, onAsset, disabled, scopeKey
     const task = useWorkbenchTask();
     const ownerId = useUserStore(state => state.user?.id);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const [previewOpen, setPreviewOpen] = useState(false);
     const selectionScope = `${scopeKey}:${task.id}:${slot.id}:${slot.label}:${ownerId}`;
     const latest = useRef({ selectionScope, disabled, active: task.active });
     latest.current = { selectionScope, disabled, active: task.active };
-    useEffect(() => { setAssetPickerOpen(false); }, [selectionScope, task.active]);
+    useEffect(() => { setAssetPickerOpen(false); setPreviewOpen(false); }, [selectionScope, task.active]);
     const uploadId = `cs-upload-${slot.id}-${useId()}`;
     const productSource=deploymentFeatures.productCardsEnabled&&task.active&&slot.id==="primary"&&reference&&(reference.serverAssetId||reference.sourceAssetId||reference.storageKey||reference.dataUrl);
     const imageDrop = useImageDrop({
@@ -302,6 +304,8 @@ function SceneUploadSlot({ slot, reference, onImage, onAsset, disabled, scopeKey
                         <span className="cs-upload-replace"><Upload size={14} aria-hidden="true" />{uiText("重新上传")}</span>
                     </> : <span className="cs-upload-empty"><ImagePlus size={28} strokeWidth={1.5} aria-hidden="true" /><strong>{uiText("上传")}{uiText(slot.label || "")}</strong><span>{uiText("点击或拖入 PNG / JPG / WebP")}</span></span>}
                 </label>
+                {reference && <button type="button" className="cs-tool-entry" disabled={disabled} onClick={() => setPreviewOpen(true)}>{uiText("查看原图")}</button>}
+                {previewOpen && reference && <ConversationImagePreview image={{ id: reference.id, label: reference.name || slot.label, name: reference.name || slot.label, dataUrl: reference.dataUrl || reference.url, storageKey: reference.storageKey }} onClose={() => setPreviewOpen(false)} />}
                 {productSource?<div className="relative min-h-px"><Suspense fallback={null}><ProductCardChips key={productSource} source={productSource} inline onPickPart={disabled?undefined:onPickPart}/></Suspense></div>:null}
                 {onAsset && <button type="button" className="cs-tool-entry" aria-label={uiText("从素材库选择{label}", { label: uiText(slot.label) })} disabled={disabled || !task.active} onClick={() => setAssetPickerOpen(true)}><FolderOpen size={14} aria-hidden="true" />{uiText("从素材库选择")}</button>}
                 {assetPickerOpen && onAsset && task.active && <AssetPickerModal open selectionMode="single-image" onClose={() => setAssetPickerOpen(false)} onInsert={async asset => {

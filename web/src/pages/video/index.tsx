@@ -1,3 +1,6 @@
+import { MobileOptions } from "@/components/mobile-options";
+import { ConversationImagePreview } from "@/components/conversation-image-preview";
+import { MobileWorkbenchSwitch, type WorkbenchPane } from "@/components/mobile-workbench-switch";
 import { uiText, useUiText, getUiLocale } from "@/lib/i18n";
 import { displayNotice, DisplayText, DisplayTranslationPreview, useDisplayText  } from "@/hooks/use-display-text";
 import { GenerationAccountHistory } from "@/components/generation-account-history";
@@ -203,6 +206,9 @@ function VideoGenerationWorkspace() {
     const [audioReferences, setAudioReferences, audiosReady] = useVideoDraft<ReferenceAudio[]>(draftScope("video:audios"), [], draftEditRevisionRef, async items => Promise.all(items.map(async item => ({ ...item, url: await resolveMediaUrl(item.storageKey, item.url) }))));
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [historyResults, setHistoryResults] = useState<GenerationResult[]>([]);
+    const [referencePreviewId, setReferencePreviewId] = useState("");
+    const previewReference = references.find(item => item.id === referencePreviewId);
+    const [mobilePane, setMobilePane] = useState<WorkbenchPane>("form");
     const [resultView, setResultView] = useState<"current" | "history">("current");
     const previewLogRef = useRef(previewLog);
     previewLogRef.current = previewLog;
@@ -445,6 +451,7 @@ function VideoGenerationWorkspace() {
         const release = workbenchSubmissions.acquire(`video:${user?.id}:${workspaceId}`);
         if (!release) { message.info(uiText("视频正在提交，请勿重复点击")); return; }
         setSubmitting(true);
+        setMobilePane("results");
         setResultView("current");
         let log = { ...buildLog({ prompt: snapshot.text, model: snapshot.config.model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: null, status: "生成中" }), workspaceId, promptInput: snapshot.promptInput };
         visibleResultLogIdsRef.current.add(log.id);
@@ -594,7 +601,7 @@ function VideoGenerationWorkspace() {
     const createTask = async () => {
         // Preserve this workspace and its in-flight observers. A failed registry
         // write must not discard the draft or close the mobile history portal.
-        if (await workbenchTask.createNewTask()) setLogsOpen(false);
+        if (await workbenchTask.createNewTask()) { setLogsOpen(false); setMobilePane("form"); }
     };
 
     const deleteSelectedLogs = async () => {
@@ -821,7 +828,8 @@ function VideoGenerationWorkspace() {
 
     return (
         <div className="wb-page generation-workbench video-workbench flex h-full flex-col overflow-hidden">
-            <main className="video-workbench-layout min-h-0 flex-1">
+            <MobileWorkbenchSwitch pane={mobilePane} onChange={setMobilePane} />
+            <main data-mobile-pane={mobilePane} className="video-workbench-layout min-h-0 flex-1">
                     <div {...imageDrop.dropProps} aria-busy={imageDrop.reading || readingReferences} className={`wb-surface generation-form flex min-w-0 flex-col p-5 lg:min-h-0 lg:overflow-hidden${imageDrop.dragging ? " outline outline-2 outline-offset-2 outline-primary" : ""}`}>
                         {imageDrop.dragging ? <p role="status" className="mb-3 rounded-lg bg-primary/10 p-3 text-sm text-foreground">{uiText("松开以添加参考图片，不会自动生成。")}</p> : null}
                         <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto">
@@ -857,8 +865,8 @@ function VideoGenerationWorkspace() {
                                 </div>
                                 <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-border p-2 pb-3 overscroll-x-contain">
                                     {references.map((item, index) => (
-                                        <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-border">
-                                            <WorkbenchImage src={item.dataUrl} alt={display(item.name)} loading="lazy" decoding="async" className="size-full object-cover" />
+                                        <div key={item.id} className="video-ref-image group relative size-20 shrink-0 overflow-hidden rounded-md border border-border">
+                                            <button type="button" className="block size-full cursor-zoom-in" aria-label={uiText("查看原图") + " · " + display(item.name)} onClick={() => setReferencePreviewId(item.id)}><WorkbenchImage src={item.dataUrl} alt={display(item.name)} loading="lazy" decoding="async" className="size-full object-contain" /></button>
                                             <span className="absolute left-1 top-1 rounded bg-black/60 px-2 py-1 text-xs font-medium text-white">{(currentMode === "first-frame" || currentMode === "first-last-frame") && index === 0 ? uiText("首帧") : currentMode === "first-last-frame" && index === 1 ? uiText("尾帧") : uiText("图片{index}", { index: index + 1 })}</span>
                                             <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
                                             <button
@@ -875,6 +883,7 @@ function VideoGenerationWorkspace() {
                                 </div>
                                 <p className="mt-2 text-xs leading-5 text-muted-foreground">{uiText(modelSpec?.imageInputHint || "")}</p>
                             </div>
+                            {(modelSpec?.maxVideos || modelSpec?.maxAudios || videoReferences.length || audioReferences.length) ? <MobileOptions label="视频与音频参考">
                             {modelSpec?.maxVideos || videoReferences.length ? <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-sm font-semibold">{uiText("参考视频 · 最多 ")}{modelSpec?.maxVideos || 0} {uiText(" 段")}</span>
@@ -927,10 +936,11 @@ function VideoGenerationWorkspace() {
                                 </div>
                             </div> : null}
 
+                            </MobileOptions> : null}
                                 </div>
                             </details>
 
-                            {planning ? <VideoMotionPanel value={motion} onChange={setMotion} disabled={!draftReady} nativeAudio={modelSpec?.nativeAudio} /> : null}
+                            {planning ? <MobileOptions label="动效设置"><VideoMotionPanel value={motion} onChange={setMotion} disabled={!draftReady} nativeAudio={modelSpec?.nativeAudio} /></MobileOptions> : null}
                             <div>
                                 <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                                     <span className="shrink-0 text-base font-semibold">{uiText(planning ? "想要的效果（可选）" : "视频提示词")}</span>
@@ -1044,6 +1054,7 @@ function VideoGenerationWorkspace() {
                 </div>
             </Drawer>
             <PromptSelectDialog open={workspaceActive && promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={next => reusePrompt(next)} />
+            {previewReference && <ConversationImagePreview image={{ id: previewReference.id, label: previewReference.name, name: previewReference.name, dataUrl: previewReference.dataUrl, storageKey: previewReference.storageKey }} onClose={() => setReferencePreviewId("")} />}
             <AssetPickerModal open={workspaceActive && assetPickerOpen} defaultTab="my-assets" onInsert={insertPickedAsset} onClose={() => setAssetPickerOpen(false)} />
             <Modal title={uiText("删除生成记录")} open={workspaceActive && deleteConfirmOpen} onCancel={() => { if (!deletingLogs) setDeleteConfirmOpen(false); }} onOk={deleteSelectedLogs} confirmLoading={deletingLogs} cancelButtonProps={{ disabled: deletingLogs }} okText={uiText("删除")} okButtonProps={{ danger: true }} cancelText={uiText("取消")}>
                 {uiText("确定删除选中的")}{selectedLogIds.length} {uiText("条生成记录吗？")}</Modal>

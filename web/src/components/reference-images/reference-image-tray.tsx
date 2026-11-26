@@ -1,4 +1,6 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
+import { ConversationImagePreview } from "@/components/conversation-image-preview";
+import { serverAssetContentUrl } from "@/lib/canvas/canvas-image-source";
 import { Button, Select, Tag, Tooltip } from "antd";
 import { ChevronLeft, ChevronRight, ClipboardPaste, FolderPlus, GripVertical, Trash2, Upload, X } from "lucide-react";
 import { useState } from "react";
@@ -25,6 +27,8 @@ type Props = {
 export function ReferenceImageTray({ references, loading, fixedReferenceKey, validation, onChange, onRequestUpload, onRequestAssets, onRequestCanvas, onRequestClipboard }: Props) {
     useUiLocale();
     const display = useDisplayText();
+    const [previewKey, setPreviewKey] = useState("");
+    const preview = references.find(reference => reference.referenceKey === previewKey);
     const [draggingKey, setDraggingKey] = useState<string | null>(null);
     const move = (from: number, to: number) => {
         if (references[from]?.referenceKey === fixedReferenceKey || references[to]?.referenceKey === fixedReferenceKey) return;
@@ -41,17 +45,17 @@ export function ReferenceImageTray({ references, loading, fixedReferenceKey, val
     };
 
     return (
-        <section className="min-w-0" aria-label={uiText("参考图")}>
+        <section className="reference-image-tray min-w-0" aria-label={uiText("参考图")}>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                     <span className="text-base font-semibold">{uiText("参考图")}</span>
                     <Tag color={validation.valid ? "default" : "error"} className="m-0">{uiText("{count} 张", { count: references.length })}</Tag>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="ref-source-actions flex flex-wrap gap-2">
                     {onRequestCanvas ? <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={onRequestCanvas}>{uiText("从画布选择")}</Button> : null}
                     {onRequestAssets ? <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={onRequestAssets}>{uiText("从素材库选择")}</Button> : null}
                     {onRequestClipboard ? <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onRequestClipboard}>{uiText("剪切板")}</Button> : null}
-                    <Button size="small" loading={loading} icon={<Upload className="size-3.5" />} onClick={onRequestUpload}>{uiText("上传图片")}</Button>
+                    <Button className="ref-upload" size="small" loading={loading} icon={<Upload className="size-3.5" />} onClick={onRequestUpload}>{uiText("上传图片")}</Button>
                     {references.some(reference => reference.referenceKey !== fixedReferenceKey) ? <Button size="small" danger icon={<X className="size-3.5" />} onClick={() => onChange(references.filter(reference => reference.referenceKey === fixedReferenceKey))}>{fixedReferenceKey ? uiText("清空附加图") : uiText("清空")}</Button> : null}
                 </div>
             </div>
@@ -68,8 +72,9 @@ export function ReferenceImageTray({ references, loading, fixedReferenceKey, val
                         onDrop={() => drop(item.referenceKey)}
                         className={`group w-36 shrink-0 rounded-md border border-border bg-muted/30 p-1 transition ${draggingKey === item.referenceKey ? "opacity-50" : ""}`}
                     >
-                        <div className="relative h-24 overflow-hidden rounded-md bg-muted">
-                        <CanvasPersistedMediaPreview kind="image" url={item.dataUrl} storageKey={item.storageKey} serverAssetId={item.serverAssetId} width={item.width} height={item.height} alt={display(item.name)} className="wb-preview-image size-full object-contain" />
+                        <div className="ref-thumbnail relative h-24 overflow-hidden rounded-md bg-muted">
+                        <button type="button" className="block size-full cursor-zoom-in" aria-label={uiText("查看原图") + " · " + display(item.name)} onClick={() => setPreviewKey(item.referenceKey)}>
+                        <CanvasPersistedMediaPreview kind="image" url={item.dataUrl} storageKey={item.storageKey} serverAssetId={item.serverAssetId} width={item.width} height={item.height} alt={display(item.name)} className="wb-preview-image size-full object-contain" /></button>
                         <span className="absolute left-1 top-1 rounded bg-black/65 px-1.5 py-0.5 text-xs font-medium text-white">{uiText("图片{count}", { count: index + 1 })}</span>
                         <Tag className="absolute bottom-1 left-1 m-0 max-w-[70px] truncate border-0 bg-black/65 px-1.5 py-0.5 text-xs text-white"><DisplayText text={item.originLabel} /></Tag>
                         {item.referenceKey !== fixedReferenceKey ? <><span className="absolute right-1 bottom-1 rounded bg-black/65 p-1 text-white" aria-hidden="true"><GripVertical className="size-3" /></span>
@@ -90,6 +95,7 @@ export function ReferenceImageTray({ references, loading, fixedReferenceKey, val
             </div>
             {!validation.valid && validation.message ? <p role="alert" className="mt-2 text-[13px] text-destructive"><DisplayText text={validation.message} /></p> : null}
             {loading ? <p role="status" className="mt-2 text-xs text-muted-foreground">{uiText("正在读取参考图，请稍候…")}</p> : null}
+            {preview && <ConversationImagePreview image={{ id: preview.referenceKey, label: preview.name, name: preview.name, dataUrl: serverAssetContentUrl(preview.serverAssetId) || preview.dataUrl, storageKey: preview.storageKey }} onClose={() => setPreviewKey("")} />}
         </section>
     );
 }

@@ -30,3 +30,12 @@
     .creative-section + .creative-section { margin-top: 24px; }
 }
 @media (prefers-reduced-motion: reduce) { .creative-card { transition: none; } .creative-card:hover { transform: none; } }
+@media (max-width: 767px) {
+    .creative-grid { grid-template-columns: minmax(0,1fr); gap: 8px; }
+    .creative-card > a:has(.creative-cover) { display: grid; grid-template-columns: 84px minmax(0,1fr); align-items: center; }
+    .creative-card .creative-cover { height: 100%; min-height: 80px; aspect-ratio: auto; }
+    .creative-card .creative-cover img { padding: 0; object-fit: contain; }
+    .creative-cover-flow { display: none; }
+    .creative-card-copy { padding: 10px 12px; }
+    .creative-card p { font-size: 13px; }
+}

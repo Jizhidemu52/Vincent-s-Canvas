@@ -1,6 +1,6 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
 import type { CSSProperties } from "react";
-import { Eye, Keyboard, Settings2 } from "lucide-react";
+import { Eye, Info, Keyboard, Settings2 } from "lucide-react";
 
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
@@ -8,7 +8,8 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
-import { Tooltip } from "antd";
+import { Popover, Tooltip } from "antd";
+import { UsageCollectionNotice } from "./frequent-navigation";
 
 type UserStatusActionsProps = {
     showConfig?: boolean;
@@ -30,6 +31,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
 
     return (
         <div className="inline-flex shrink-0 items-center gap-1">
+            {variant === "canvas" && <Popover trigger="click" placement="bottomRight" content={<div className="cw-workspace-notice"><strong>{uiText("工作区与数据")}</strong><p>{deploymentFeatures.authenticationEnabled ? uiText("画布按当前账号身份保存，链接不等于公开分享。") : uiText("本地试用：画布保存在当前浏览器。更换设备前请导出备份。")}</p><UsageCollectionNotice compact /></div>}><button type="button" className="cw-icon" aria-label={uiText("工作区与使用记录说明")}><Info size={16} /></button></Popover>}
             <Tooltip title={uiText(promptPreview ? "生成前确认已开启：固定板块编译后先核对再出图" : "开启生成前确认：固定板块编译后先核对再出图")}><button type="button" className={naturalIconClass} style={iconStyle} onClick={() => updateConfig("promptPreview", !promptPreview)} aria-pressed={promptPreview}
                 aria-label={uiText(promptPreview ? "生成前确认：已开启" : "生成前确认：已关闭")}>
                 <Eye className={promptPreview ? "size-4 text-primary" : "size-4"} />

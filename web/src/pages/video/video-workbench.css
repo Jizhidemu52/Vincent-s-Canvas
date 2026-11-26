@@ -62,3 +62,14 @@
     .video-workbench .generation-result-tabs button { transition: none; }
     .video-workbench .generation-result-tabs button:active { scale: 1; }
 }
+@media (max-width: 767px) {
+    .video-workbench-layout { display: block; padding: 0; }
+    .video-workbench-layout > .wb-surface { border: 0; border-radius: 0; padding: 14px 16px 24px; }
+    .video-workbench .generation-form { height: auto; min-height: 0; }
+    .video-workbench .generation-submit { position: static; grid-template-columns: minmax(0, 1fr); }
+    .video-workbench .generation-form > .thin-scrollbar { overflow: visible; flex: none; }
+}
+@media (max-width: 767px) {
+    .video-ref-image { width: min(75%,240px); height: clamp(130px,21dvh,200px); }
+    .video-ref-image:only-child { width: 100%; }
+}

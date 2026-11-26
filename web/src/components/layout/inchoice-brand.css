@@ -35,3 +35,7 @@
     .cw-brand .inchoice-brand-name { font-size: 20px; }
     .cw-brand .inchoice-brand-caption { display: none; }
 }
+@media (max-width: 767px) {
+    header.wb-sidebar .inchoice-brand-name { font-size: 22px; }
+    header.wb-sidebar .inchoice-brand-caption { display: none; }
+}

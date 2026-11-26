@@ -1,3 +1,4 @@
+import { MobileWorkbenchSwitch, type WorkbenchPane } from "@/components/mobile-workbench-switch";
 import { displayNotice } from "@/hooks/use-display-text";
 import { staticUiText } from "@/lib/static-ui-copy";
 import { uiText, useUiText } from "@/lib/i18n";
@@ -94,6 +95,7 @@ export function SeamlessStitchWorkspace() {
     const [parameters, setParameters, parametersReady] = useGenerationDraft<SeamlessStitchParameters>(draftScope("seamless-stitch:parameters"), readSeamlessParameters(workspaceId === DEFAULT_WORKBENCH_TASK ? searchParams : new URLSearchParams()));
     const [result, setResult] = useState<StitchResult>({ status: "idle" });
     const [historyResult, setHistoryResult] = useState<StitchResult>({ status: "idle" });
+    const [mobilePane, setMobilePane] = useState<WorkbenchPane>("form");
     const [resultView, setResultView] = useState<"current" | "history">("current");
     const displayedResult = resultView === "history" ? historyResult : result;
     const [running, setRunning] = useState(false);
@@ -270,6 +272,7 @@ export function SeamlessStitchWorkspace() {
             return;
         }
         submitLockRef.current = true;
+        setMobilePane("results");
         setRunning(true);
         const ownerId = useUserStore.getState().user?.id;
         const requestId = nanoid();
@@ -400,7 +403,8 @@ export function SeamlessStitchWorkspace() {
 
     return (
         <div className="wb-page stitch-workbench flex h-full min-h-0 flex-col overflow-hidden">
-            <main className="stitch-workbench-layout min-h-0 flex-1">
+            <MobileWorkbenchSwitch pane={mobilePane} onChange={setMobilePane} />
+            <main data-mobile-pane={mobilePane} className="stitch-workbench-layout min-h-0 flex-1">
                 <section {...imageDrop.dropProps} aria-busy={imageDrop.reading || readingSource} className={`wb-surface stitch-form flex min-h-0 flex-col p-4${imageDrop.dragging ? " outline outline-2 outline-offset-2 outline-primary" : ""}`}>
                     <div className="thin-scrollbar stitch-form-fields min-h-0 flex-1 overflow-y-auto">
                     {imageDrop.dragging || imageDrop.reading || readingSource ? <p role="status" className="mb-3 rounded-lg bg-primary/10 p-3 text-sm">{uiText(imageDrop.dragging ? "松开以添加参考图片，不会自动生成。" : "正在读取拖入图片，请稍候。")}</p> : null}

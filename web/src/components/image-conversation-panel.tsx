@@ -752,11 +752,11 @@ function OwnedImageConversationPanel({
                                     if (!event.nativeEvent.isComposing)
                                         handleSubmitShortcut(event, canSend, () => void state.submit());
                                 }}
-                                placeholder="直接说怎么改 · Ctrl / ⌘ + Enter 发送"
+                                placeholder="描述你想怎么改"
                                 style={{ outline: "none" }}
-                                className="block max-h-40 min-h-16 w-full resize-none bg-transparent text-base leading-7 placeholder:text-muted-foreground"
+                                className="block max-h-32 min-h-10 sm:min-h-16 w-full resize-none bg-transparent text-base leading-7 placeholder:text-muted-foreground"
                             />
-                            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                            <div className="mt-1 flex flex-wrap items-center justify-between gap-1 sm:mt-2 sm:gap-2">
                                 <div className="w-full"><ConversationImageModelChoice value={state.imageModel} onChange={state.selectImageModel} disabled={blocked} /></div>
                                 <div className="flex flex-wrap items-center gap-1">
                                     <button
@@ -776,10 +776,10 @@ function OwnedImageConversationPanel({
                                         onClick={() => setPickerOpen(true)}
                                     >
                                         <Images className="size-4" />
-                                        素材库选图
+                                        <span className="sr-only sm:not-sr-only">素材库选图</span><span aria-hidden="true" className="sm:hidden">素材</span>
                                     </button>
                                     <span aria-live="polite" className="text-xs text-muted-foreground">
-                                        当前图 + 附件 共 {state.imageCount}/{IMAGE_AGENT_MAX_IMAGES}{state.remainingImages === 0 ? " · 名额已满" : ""}
+                                        <span className="sr-only sm:not-sr-only">当前图 + 附件 共 </span>{state.imageCount}/{IMAGE_AGENT_MAX_IMAGES}{state.remainingImages === 0 ? " · 名额已满" : ""}
                                     </span>
                                     {selectedCanvasImages.length ? (
                                         <button
@@ -845,7 +845,7 @@ function OwnedImageConversationPanel({
                                 }}
                             />
                         </div>
-                        <p className="text-right text-[11px] leading-4 text-muted-foreground">
+                        <p className="hidden sm:block text-right text-[11px] leading-4 text-muted-foreground">
                             支持粘贴或拖入图片；选图只加入草稿，点击发送后执行。
                         </p>
                     </div>

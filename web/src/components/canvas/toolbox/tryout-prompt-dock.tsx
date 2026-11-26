@@ -35,6 +35,7 @@ export default function TryoutPromptDock({ owner, onRun, onFocus, busy, hidden }
     const [prompt, setPrompt] = useState(""),
         [pending, setPending] = useState(false),
         lock = useRef(false);
+    const [mobileSettings, setMobileSettings] = useState(false);
     const [more, setMore] = useState(false),
         [advanced, setAdvanced] = useState<{ scope: string; values: Record<string, string> }>({ scope: "", values: {} });
     const configured = useToolConfig({ ...base, model: base.imageModel || base.model }, tool),
@@ -125,7 +126,8 @@ export default function TryoutPromptDock({ owner, onRun, onFocus, busy, hidden }
                     {t("生成 1 张")}
                 </button>
             </div>
-            <div className="tpd-settings">
+            <button className="tpd-mobile-toggle" type="button" aria-expanded={mobileSettings} onClick={() => setMobileSettings(open => !open)}>{t("生成设置")}</button>
+            <div className="tpd-settings" data-mobile-open={mobileSettings}>
                 <label>
                     {t("大小")}
                     <select value={size} onChange={(e) => remember({ ...prefs, size: e.target.value })}>
@@ -158,7 +160,7 @@ export default function TryoutPromptDock({ owner, onRun, onFocus, busy, hidden }
                 <span className="tpd-note">{t(reason || "回车生成")}</span>
             </div>
             {more && (
-                <div className="tpd-settings">
+                <div className="tpd-settings" data-mobile-open={mobileSettings}>
                     <span>{t("每次生成 1 张")}</span>
                     {fields.map((f) => (
                         <label key={f.key}>

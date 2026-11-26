@@ -60,7 +60,7 @@ test("all English built-ins show complete details, copy/save the displayed varia
                 parameters: {}, referenceAssetIds: [], notes: `${item.notes}\n\nSources:\n${item.sources.map(reference => `${reference.title}: ${reference.url}`).join("\n")}`,
             }]);
             await page.setViewportSize({ width: 390, height: 844 });
-            expect(await drawer.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+            await expect.poll(() => drawer.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
             await page.screenshot({ path: info.outputPath("general-English-mobile-detail.png"), animations: "disabled" });
             await page.setViewportSize({ width: 1366, height: 900 });
         }

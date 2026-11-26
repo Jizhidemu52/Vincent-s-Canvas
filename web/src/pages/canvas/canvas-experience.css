@@ -21,3 +21,7 @@
 .cw-command-results > button:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
 .cw-command-results > button:active { transform: scale(.97); transition-duration: var(--motion-press, 80ms); }
 @media(prefers-reduced-motion:reduce) { .cw-command-results > button { transition:none; } }
+@media (max-width: 767px) {
+    .cw-workspace [data-testid=canvas-connection-visibility-control] { bottom: max(64px, var(--cw-prompt-dock-space, 0px)); }
+    .cw-workspace .cw-feedback-strip { right: 64px; max-width: calc(100% - 90px); bottom: max(64px, var(--cw-prompt-dock-space, 0px)); }
+}

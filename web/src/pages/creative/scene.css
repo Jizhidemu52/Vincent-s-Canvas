@@ -223,3 +223,10 @@
     .cs-scene-picker { min-width: 0; flex: 1; }
     .cs-scene-picker .ant-select { min-width: 0; width: 100%; }
 }
+@media (max-width: 767px) {
+    .cs-page { display: flex; overflow: hidden; padding-bottom: 0; }
+    .cs-layout { overflow-y: auto; }
+    .cs-form-panel, .cs-stage { padding: 16px; }
+    .cs-submit-panel { position: static; padding: 12px 0 max(8px, env(safe-area-inset-bottom)); }
+    .cs-form-heading h1 { font-size: 22px; }
+}

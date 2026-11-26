@@ -55,7 +55,7 @@ function GeneralPromptCard({ item }: { item: GeneralPrompt }) {
     };
     const actions = <div className="space-y-2">
         <Button block type="primary" className="!h-10" onClick={fill} icon={<Send className="size-4" />}>{fillLabel}</Button>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid gap-2 min-[440px]:grid-cols-2">
             <Button disabled={pending} onClick={() => void copyPrompt()} icon={<Copy className="size-4" />}>{copied ? t("已复制 ✓") : t("复制提示词")}</Button>
             <Button disabled={pending || saved} loading={pending} onClick={() => void run(save)} icon={<Save className="size-4" />}>{saved ? t("已存到我的提示词") : t("存到我的提示词")}</Button>
         </div>
@@ -68,7 +68,7 @@ function GeneralPromptCard({ item }: { item: GeneralPrompt }) {
             <div className="mb-4 flex flex-wrap gap-1">{item.tags.map(tag => <Tag key={tag}>{tag}</Tag>)}</div>
             <div className="mt-auto">{actions}</div>
         </article>
-        <Drawer open={open} onClose={() => setOpen(false)} title={item.title} size="large" footer={actions}>
+        <Drawer open={open} onClose={() => setOpen(false)} title={item.title} size="min(736px, 100vw)" footer={actions}>
             <div className="mb-4 flex flex-wrap gap-1"><Tag>{t("通用提示词")}</Tag><Tag>{t(promptTargetLabels[item.targetTool])}</Tag><Tag>{item.category}</Tag></div>
             <h3 className="mb-2 font-medium">{t("完整提示词")}</h3>
             <p className="whitespace-pre-wrap break-words text-sm leading-7">{item.prompt}</p>

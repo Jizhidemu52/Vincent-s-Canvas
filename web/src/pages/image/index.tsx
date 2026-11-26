@@ -1,3 +1,5 @@
+import { MobileOptions } from "@/components/mobile-options";
+import { MobileWorkbenchSwitch, type WorkbenchPane } from "@/components/mobile-workbench-switch";
 import { uiText, useUiText, getUiLocale } from "@/lib/i18n";
 import { displayNotice, DisplayText, DisplayTranslationPreview, useDisplayText  } from "@/hooks/use-display-text";
 import { GenerationAccountHistory } from "@/components/generation-account-history";
@@ -318,6 +320,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const carryoverValidation = carryoverRequirementsSchema.safeParse(normalizedCarryover);
     const carryoverError = designRequested && !carryoverValidation.success ? uiText("沿用设计要求最多 12 条，每条 800 字符，总计 6000 字符。请调整后再提交。") : "";
     const historyStore = creativePreset ? creativeLogStore : logStore;
+    const [mobilePane, setMobilePane] = useState<WorkbenchPane>("form");
     const [results, setResults] = useState<GenerationResult[]>([]);
     // Browsing history must never replace the slots still owned by a submitted task.
     const displayedResults: GenerationResult[] = previewLog
@@ -754,6 +757,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
 
         pendingRestoreRevision.current += 1;
         observationStopRequested.current = false;
+        setMobilePane("results");
         setRunning(true);
         setActiveTaskId(null);
         activeSubmissionRef.current = true;
@@ -888,7 +892,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const createTask = async () => {
         // Keep this workspace and its observer intact. Close the portal only
         // after the new independent task has been durably registered.
-        if (await workbenchTask.createNewTask()) setLogsOpen(false);
+        if (await workbenchTask.createNewTask()) { setLogsOpen(false); setMobilePane("form"); }
     };
 
     const confirmDeleteSelected = () => {
@@ -1329,7 +1333,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
 
     return (
         <div className="wb-page image-workbench generation-workbench flex h-full flex-col overflow-hidden" style={{ "--generation-submit-height": `${submitToolbarHeight}px` } as CSSProperties}>
-            <main className="image-workbench-layout min-h-0 flex-1">
+            <MobileWorkbenchSwitch pane={mobilePane} onChange={setMobilePane} />
+            <main data-mobile-pane={mobilePane} className="image-workbench-layout min-h-0 flex-1">
                     <div {...imageDrop.dropProps} aria-busy={imageDrop.reading || readingReferences} className={`wb-surface generation-form flex min-w-0 flex-col p-6 lg:min-h-0 lg:overflow-hidden${imageDrop.dragging ? " outline outline-2 outline-offset-2 outline-primary" : ""}`}>
                         {imageDrop.dragging || imageDrop.reading ? <p role="status" className="mb-3 rounded-lg bg-primary/10 p-3 text-sm text-foreground">{uiText(imageDrop.dragging ? "松开以添加参考图片，不会自动生成。" : "正在读取拖入图片，请稍候。")}</p> : null}
                         <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto">
@@ -1371,7 +1376,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                             {uiText("查看我的素材")}</Button>
                                     </div>
                                 </div>
-                                <Input.TextArea aria-label={uiText("图像提示词")} showCount value={prompt} onPaste={event => { const files = pastedImageFiles(event.clipboardData); if (files.length) { event.preventDefault(); void addReferences(files); } }} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} onKeyDown={(event) => handleSubmitShortcut(event, canGenerate && !running, () => void generate())} rows={5} disabled={!requiresPrompt} placeholder={requiresPrompt ? uiText("{placeholder}（Ctrl/⌘ + Enter 提交）", { placeholder: uiText(toolModeConfig.placeholder) }) : uiText("这个模型直接合成参考图，不需要填写文字")} />
+                                <Input.TextArea aria-label={uiText("图像提示词")} showCount value={prompt} onPaste={event => { const files = pastedImageFiles(event.clipboardData); if (files.length) { event.preventDefault(); void addReferences(files); } }} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} onKeyDown={(event) => handleSubmitShortcut(event, canGenerate && !running, () => void generate())} rows={4} disabled={!requiresPrompt} placeholder={requiresPrompt ? uiText(toolModeConfig.placeholder) : uiText("这个模型直接合成参考图，不需要填写文字")} />
                                 <DisplayTranslationPreview text={prompt} />
                             </div> : !quickTool ? <p className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">{uiText("请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。")}</p> : null}
 
@@ -1392,6 +1397,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 onRequestAssets={() => setReferenceAssetPickerOpen(true)}
                                 onRequestClipboard={() => void addReferencesFromClipboard()}
                             />
+                            {!quickTool && <MobileOptions label="模型与出图设置">
                             {!quickTool ? <ImagePrimarySettings config={effectiveConfig} profile={selectedModelProfile} referenceCount={references.length} onConfigChange={updateInputConfig}
                                 modelControl={<ModelPicker toolKey={toolKey} config={effectiveConfig} value={model} capability="image" modelsSource="server" fullWidth disabled={!handoffReady}
                                     onChange={value => {
@@ -1407,6 +1413,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 {references.length ? <ol className="mt-2 space-y-1">{references.map((image, index) => <li key={image.referenceKey}>{uiText("图片{count}", { count: index + 1 })} · {actualPreviewOpen ? display(image.name) : image.name} · {image.role ? actualPreviewOpen ? display(image.role) : image.role : uiText("用途未指定")}</li>)}</ol> : null}
                             </details> : null}
 
+                            </MobileOptions>}
                         </fieldset>
                         </div>
                         <div ref={submitToolbarRef} className="generation-submit shrink-0 pt-4">
@@ -1418,7 +1425,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                     {uiText("切换生成图片模型")}</Button>
                             </div>}
 
-                            <div className="mb-3 rounded-md border border-border bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                            <div className="generation-status mb-3 rounded-md border border-border bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                     <span>{deploymentFeatures.authenticationEnabled ? uiText("个人工作区") : uiText("本机试用")}</span>
                                 </div>

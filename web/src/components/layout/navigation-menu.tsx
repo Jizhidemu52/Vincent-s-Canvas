@@ -23,7 +23,7 @@ const sections: { key: string; label: string; slugs: NavigationToolSlug[] }[] = 
     { key: "manage", label: "管理", slugs: ["admin"] },
 ];
 
-export function NavigationMenu({ onNavigate }: { onNavigate?: () => void }) {
+export function NavigationMenu({ onNavigate, searchText = "" }: { onNavigate?: () => void; searchText?: string }) {
     useUiLocale();
     const { pathname, search } = useLocation();
     const { collapsed, toggleGroup, openGroup, recordRecent } = useNavigationPreferences();
@@ -42,12 +42,15 @@ export function NavigationMenu({ onNavigate }: { onNavigate?: () => void }) {
     }, [pathname, search, user?.id]);
     const available = (slug: NavigationToolSlug) => slug === "admin" ? isAdminRole(user?.role)
         : (slug !== "team" || (deploymentFeatures.rolePortalsEnabled && Boolean(user?.groupId))) && isModuleAvailable(flags, bindings, navigationModuleKey(slug) as ModuleKey);
+    const query = searchText.trim().toLocaleLowerCase();
+    const matches = (label: string) => !query || uiText(label).toLocaleLowerCase().includes(query) || label.includes(query);
     const scenes=isModuleAvailable(flags,bindings,"canvas-tryout")?creativePresets.filter(p=>!isStandaloneCreativePreset(p.id)&&isModuleAvailable(flags,bindings,("creative-"+p.id) as ModuleKey)):[];
     return <div className="space-y-4">
+        {query && !navigationTools.some(tool => available(tool.slug) && matches(tool.label)) && !scenes.some(p => matches(p.title)) && !matches("工作台") && <p role="status">{uiText("没有匹配的工具")}</p>}
         {sections.map(section => {
-            const tools = section.slugs.map(slug => navigationTools.find(tool => tool.slug === slug)!).filter(tool => available(tool.slug));
-            if (!tools.length && section.key !== "workspace") return null;
-            const closed = section.key !== "workspace" && collapsed.includes(section.key);
+            const tools = section.slugs.map(slug => navigationTools.find(tool => tool.slug === slug)!).filter(tool => available(tool.slug) && matches(tool.label));
+            if (!tools.length && (section.key !== "workspace" || !matches("工作台"))) return null;
+            const closed = !query && section.key !== "workspace" && collapsed.includes(section.key);
             return <section key={section.key} className="space-y-2">
                 {section.key === "workspace" ? null : <button type="button" className="flex h-8 w-full items-center justify-between rounded-md px-2 text-xs font-semibold text-muted-foreground hover:bg-muted" aria-expanded={!closed} onClick={() => toggleGroup(section.key)}><span>{uiText(section.label)}</span><ChevronDown className={cn("size-3.5 transition-transform", closed && "-rotate-90")} /></button>}
                 {!closed && <div className="space-y-1">{tools.map(tool => {
@@ -56,9 +59,9 @@ export function NavigationMenu({ onNavigate }: { onNavigate?: () => void }) {
                         <Link to={tool.path} onClick={onNavigate} aria-current={tool.slug === active || tool.slug === "prompts" && active === "my-prompts" ? "page" : undefined} className="wb-nav-link flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg px-3"><Icon className="size-4 shrink-0" /><span className="min-w-0 truncate">{uiText(tool.label)}</span></Link>
                     </div>;
                 })}</div>}
-                {section.key === "workspace" && <Link to="/" onClick={onNavigate} aria-current={pathname === "/" ? "page" : undefined} className="wb-nav-link flex h-9 items-center gap-3 rounded-lg px-3"><Menu className="size-4" />{uiText("工作台")}</Link>}
+                {section.key === "workspace" && matches("工作台") && <Link to="/" onClick={onNavigate} aria-current={pathname === "/" ? "page" : undefined} className="wb-nav-link flex h-9 items-center gap-3 rounded-lg px-3"><Menu className="size-4" />{uiText("工作台")}</Link>}
             </section>;
         })}
-        {scenes.length>0&&<section className="space-y-2"><h3 className="px-2 text-xs font-semibold text-muted-foreground">{uiText("创意场景")}</h3>{scenes.map(p=><Link key={p.id} to={buildCreativePresetHref(p)} onClick={onNavigate} aria-current={pathname===buildCreativePresetHref(p)?"page":undefined} className="wb-nav-link flex h-9 items-center gap-2 rounded-lg px-3"><Layers className="size-4 shrink-0"/>{uiText(p.title)}</Link>)}</section>}
+        {scenes.some(p => matches(p.title))&&<section className="space-y-2"><h3 className="px-2 text-xs font-semibold text-muted-foreground">{uiText("创意场景")}</h3>{scenes.filter(p => matches(p.title)).map(p=><Link key={p.id} to={buildCreativePresetHref(p)} onClick={onNavigate} aria-current={pathname===buildCreativePresetHref(p)?"page":undefined} className="wb-nav-link flex h-9 items-center gap-2 rounded-lg px-3"><Layers className="size-4 shrink-0"/>{uiText(p.title)}</Link>)}</section>}
     </div>;
 }

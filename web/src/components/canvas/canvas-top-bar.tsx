@@ -2,13 +2,11 @@ import { staticUiText } from "@/lib/static-ui-copy";
 import { useDisplayText } from "@/hooks/use-display-text";
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { lazy, Suspense, memo, useEffect, useRef, useState } from "react";
-import { ArrowLeft, BookOpen, Check, Download, Images, Info, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
-import { Dropdown, Popover, Tooltip } from "antd";
+import { ArrowLeft, BookOpen, Check, Download, Images, MoreHorizontal, Pencil, Plus, Settings2, Trash2 } from "lucide-react";
+import { Dropdown, Tooltip } from "antd";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { deploymentFeatures } from "@/lib/deployment-features";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
-import { UsageCollectionNotice } from "@/components/layout/frequent-navigation";
 import { CanvasSaveStatus } from "@/components/canvas/canvas-save-status";
 import { canvasActionMenuItem } from "./canvas-action-menu-item";
 import { LanguageSwitch } from "@/components/layout/language-switch";
@@ -44,6 +42,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
     const display = useDisplayText();
     const titleRef = useRef<HTMLDivElement>(null);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
+    const [optionsOpen, setOptionsOpen] = useState(false);
     const [copied, setCopied] = useState(false);
     const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
@@ -98,12 +97,15 @@ export const CanvasTopBar = memo(function CanvasTopBar({
                 </div>
                 <div className="cw-account-card">
                     {onToggleTryout ? <button type="button" className="cw-share cw-tryout-toggle" aria-expanded={tryoutOpen} onClick={onToggleTryout}>{uiText("试款台")} <kbd aria-hidden="true">T</kbd></button> : null}
-                    <LanguageSwitch compact />
-                    <span className="cw-account-avatar" aria-hidden="true">{userName.slice(0, 1)}</span>
-                    <Tooltip title={userName}><span className="cw-account-name">{userName}</span></Tooltip>
-                    {compactAgentStatus ? <CompactAgentStatus status={compactAgentStatus} onClick={onToggleAgent} /> : null}
-                    <Popover trigger="click" placement="bottomRight" content={<div className="cw-workspace-notice"><strong>{uiText("工作区与数据")}</strong><p>{deploymentFeatures.authenticationEnabled ? uiText("画布按当前账号身份保存，链接不等于公开分享。") : uiText("本地试用：画布保存在当前浏览器。更换设备前请导出备份。")}</p><UsageCollectionNotice compact /></div>}><button type="button" className="cw-icon" aria-label={uiText("工作区与使用记录说明")}><Info size={16} /></button></Popover>
-                    <Suspense fallback={null}><UserStatusActions variant="canvas" /></Suspense>
+                    <button className="cw-mobile-options" type="button" aria-label={uiText("画布设置")} aria-expanded={optionsOpen} onClick={() => setOptionsOpen(open => !open)}><Settings2 size={18} /></button>
+                    <div className="cw-account-options" data-open={optionsOpen}>
+                        <button type="button" className="cw-mobile-copy" onClick={() => { void copyLink(); setOptionsOpen(false); }}>{uiText("复制链接")}</button>
+                        <LanguageSwitch compact />
+                        <span className="cw-account-avatar" aria-hidden="true">{userName.slice(0, 1)}</span>
+                        <Tooltip title={userName}><span className="cw-account-name">{userName}</span></Tooltip>
+                        {compactAgentStatus ? <CompactAgentStatus status={compactAgentStatus} onClick={onToggleAgent} /> : null}
+                        <Suspense fallback={null}><UserStatusActions variant="canvas" /></Suspense>
+                    </div>
                 </div>
             </div>
             {shortcutsOpen ? <Suspense fallback={null}><CanvasShortcutsDialog open onClose={() => setShortcutsOpen(false)} /></Suspense> : null}

@@ -31,3 +31,13 @@
 .home-skeleton { height: 210px; border-radius: var(--ui-radius-panel); background: var(--muted); }
 @media (max-width: 1100px) { .home-tools, .home-project-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .home-content { padding: 28px 20px; } .home-tool { padding: 20px; } .home-tool-top { margin-bottom: 20px; } .home-tool p { min-height: 44px; } .home-project-grid { gap: 12px; } .home-project-preview { height: 120px; } .home-help { margin-top: 24px; } }
+@media (max-width: 767px) {
+    .home-content { padding: 16px; }
+    .home-content > .wb-header .wb-eyebrow { display: none; }
+    .home-tools { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+    .home-tools .home-tool { display: grid; grid-template-columns: 1fr auto; align-items: center; padding: 12px; gap: 8px; }
+    .home-tool-preview { grid-column: 1 / -1; height: 72px; margin: -12px -12px 0; }
+    .home-tool-top, .home-tool p, .home-tool-preview span { display: none; }
+    .home-tool h2 { font-size: 15px; }
+    .home-tool-action { font-size: 0; border: none; padding: 0; margin: 0; }
+}

@@ -1,3 +1,5 @@
+import { MobileOptions } from "@/components/mobile-options";
+import { MobileWorkbenchSwitch, type WorkbenchPane } from "@/components/mobile-workbench-switch";
 import { uiText, useUiText } from "@/lib/i18n";
 import { GenerationAccountHistory } from "@/components/generation-account-history";
 import { DisplayText } from "@/hooks/use-display-text";
@@ -78,20 +80,21 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
     const flags = useModuleStore(state => state.flags);
     const tools = useBusinessConfigStore(state => state.tools);
     const theme = canvasThemes[useThemeStore(state => state.theme)];
+    const [mobilePane, setMobilePane] = useState<WorkbenchPane>("form");
     const [view, setView] = useState<"results" | "history">("history");
     const [tool, setTool] = useState<"selection" | "recolor" | null>(null);
     const [traceImage, setTraceImage] = useState<SceneImage | null>(null);
     const [promptOpen, setPromptOpen] = useState(false);
     const [historySelection, setHistorySelection] = useState(false);
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
-    useEffect(() => { if (ws.recoveredRequestId) setView("results"); }, [ws.recoveredRequestId]);
+    useEffect(() => { if (ws.recoveredRequestId) { setView("results"); setMobilePane("results"); } }, [ws.recoveredRequestId]);
     const summary = sceneSummaries[preset.id]!;
     const examples = designExamplesForScene(preset.id);
     const slots = getSceneSlots(preset.id, ws.form);
     const standalone = isStandaloneCreativePreset(preset.id);
     const available = creativeCatalogPresets.filter(item => isModuleAvailable(flags, tools, `creative-${item.id}` as ModuleKey));
     const [optimizeNext,setOptimizeNext]=useState(false);
-    const submit = () => { setView("results"); void ws.generate(optimizeNext);setOptimizeNext(false); };
+    const submit = () => { setMobilePane("results"); setView("results"); void ws.generate(optimizeNext);setOptimizeNext(false); };
     const historyBusy = ws.loading || ws.historyLoading;
     const selectableLogs = ws.logs.filter(log => !log.unresolvedCount);
     const selectedLogs = selectableLogs.filter(log => selectedLogIds.includes(log.id));
@@ -120,9 +123,10 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
                 <Select aria-label={uiText("切换设计场景")} value={preset.id} variant="borderless" options={available.map(item => ({ value: item.id, label: uiText(item.title || "") }))} onChange={value => { const next = getCreativePreset(value); if (next) navigate(buildCreativePresetHref(next)); }} />
             </div>}
             {canvasEnabled && tryoutEnabled && (preset.id === "virtual-try-on" || preset.id === "garment-colorway") && <Link to="/canvas?tool=tryout" className="cs-back">{uiText("在画布里试款")}<ArrowRight size={16} /></Link>}
-            <Tooltip title={ws.running ? uiText("任务在后台继续，可切换工作区或查看历史。") : ws.loading ? uiText("正在恢复场景草稿…") : undefined}><span className="cs-new"><button className="cs-new" type="button" disabled={ws.running || ws.loading} onClick={() => { ws.reset(); setView("history"); }}><Plus size={15} />{uiText("清空当前草稿")}</button></span></Tooltip>
+            <Tooltip title={ws.running ? uiText("任务在后台继续，可切换工作区或查看历史。") : ws.loading ? uiText("正在恢复场景草稿…") : undefined}><span className="cs-new"><button className="cs-new" type="button" disabled={ws.running || ws.loading} onClick={() => { ws.reset(); setView("history"); setMobilePane("form"); }}><Plus size={15} />{uiText("清空当前草稿")}</button></span></Tooltip>
         </header>
-        <div className="cs-layout">
+        <MobileWorkbenchSwitch pane={mobilePane} onChange={setMobilePane} />
+        <div data-mobile-pane={mobilePane} className="cs-layout">
             <aside className="cs-form-panel" aria-label={uiText("{title}设计参数", { title: uiText(preset.title) })} onKeyDown={event => {
                 if ((event.target as HTMLElement).closest?.("button, a, summary, [role='button']")) return;
                 handleSubmitShortcut(event, !ws.loading && !ws.running && !ws.validation && !ws.quotaBlocked && !ws.uploading, submit);
@@ -138,6 +142,7 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
                     </section>}
                     <section className="cs-business-section"><h2 className="cs-section-label"><span>{slots.length ? "02" : "01"}</span>{preset.id.includes("colorway") ? uiText("选择配色方式") : preset.id === "pattern-craft" ? uiText("选择工艺效果") : preset.id === "text-to-style" ? uiText("描述你的设计") : preset.id === "style-to-sketch" ? uiText("线稿要求") : preset.id === "virtual-try-on" ? uiText("试穿要求") : preset.id === "sketch-to-photo" ? uiText("材质与配色要求") : preset.id === "local-restyle" ? uiText("指定修改部位") : preset.id === "back-design" ? uiText("构思背面结构") : preset.id === "accessory-design" ? uiText("定义辅料外观") : uiText("提取要求")}</h2><SceneFields sceneId={preset.id} form={ws.form} onChange={ws.setForm} disabled={ws.running} sourceImage={ws.images.primary?.dataUrl} hasSecondaryImage={Boolean(ws.images.secondary)}
                         productPicker={supportsSceneProductTarget(preset.id) ? <SceneProductPicker key={ws.images.primary?.id || "empty"} sceneId={preset.id} source={ws.images.primary} disabled={ws.running || ws.uploading || ws.loading} onConfirm={targetProduct => ws.setForm(current => ({ ...current, targetProduct }))} /> : undefined} /></section>
+                    <MobileOptions label="模型与出图设置">
                     <ImageQualityTierPicker profile={ws.profile} size={ws.config.size} quality={ws.config.quality} imageOptions={ws.config.imageOptions} referenceCount={Object.values(ws.images).filter(Boolean).length} disabled={ws.running || ws.loading}
                         onChange={patch => { ws.updateConfig("quality", patch.quality); ws.updateConfig("imageOptions", patch.imageOptions); }} />
                     <details className="cs-output-settings"><summary><span>{uiText("出图设置")}</span><span>{uiText(imageSizeLabel(ws.config.size))} · {uiText(imageQualityLabel(ws.config.quality))} · {ws.count} {uiText(" 张")}<ChevronDown size={13} /></span></summary>
@@ -145,13 +150,14 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
                         <ImageSettingsPanel config={ws.config} referenceCount={Object.values(ws.images).filter(Boolean).length} onConfigChange={ws.updateConfig} theme={theme} showTitle={false} />
                     </details>
                     <details className="cs-prompt-preview" open={promptOpen} onToggle={event => setPromptOpen(event.currentTarget.open)}><summary>{ws.selectedPrompt !== null ? uiText("所选结果的原始提示词") : uiText("查看本次设计输入")}<ChevronDown size={12} /></summary>{ws.selectedPrompt !== null ? <pre aria-label={uiText("设计提示词")}><DisplayText text={ws.selectedPrompt} /></pre> : <GenerationInputList fields={scenePromptInput(preset.id, ws.form).fields} />}{ws.selectedPrompt !== null && <p className="cs-help">{uiText("仅显示原提示词，未改变当前设计要求、模型或参考图。")}</p>}</details>
+                    </MobileOptions>
                 </fieldset>}
                 <div className="cs-submit-panel">
                     {ws.error && <GenerationDiagnostic error={ws.error} />}
                     {ws.notice && <p className="cs-help" role="status">{uiText(ws.notice || "")}</p>}
                     {!ws.error && ws.validation && <p className="cs-validation">{uiText(ws.validation || "")}</p>}
                     {ws.quotaBlocked ? <p role="status" className="cs-validation">{uiText("当前账号暂时无法提交，请联系管理员。")}</p> : null}
-                    <p className="cs-help">{uiText("Ctrl / ⌘ + Enter 提交")}</p>
+                    <p className="cs-help hidden md:block">{uiText("Ctrl / ⌘ + Enter 提交")}</p>
                     {ws.running ? <Button block icon={<Plus size={16} />} disabled={!task.ready || task.creating} loading={task.creating} onClick={() => void task.createNewTask()}>{uiText("新建任务，继续创作")}</Button> : null}
                     <button type="button" className="cs-generate" disabled={ws.loading || ws.running || Boolean(ws.validation) || ws.quotaBlocked} onClick={submit}>{ws.running ? <><LoaderCircle size={16} className="animate-spin" />{ws.optimizing ? uiText("正在优化提示词…") : uiText("正在生成")}<GenerationElapsed startedAt={ws.startedAt} /></> : <><Sparkles size={16} />{uiText("生成{kind}", { kind: preset.title === "以文生款" ? uiText("款式") : preset.title === "款生线稿" ? uiText("线稿") : preset.title === "花型提取" ? uiText("图案") : preset.id === "item-extract" ? uiText("完整单品") : preset.id === "virtual-try-on" ? uiText("试穿效果") : preset.id === "sketch-to-photo" ? uiText("实拍效果") : uiText("设计") })}<span>{ws.count} {uiText(" 张")}</span></>}</button>
                     {ws.running ? <p className="cs-submit-note">{uiText("任务在后台继续，可切换工作区或查看历史。")}</p> : <label className="cs-submit-note"><input type="checkbox" checked={optimizeNext} onChange={e=>setOptimizeNext(e.target.checked)} /> {uiText("本次先优化提示词")}</label>}

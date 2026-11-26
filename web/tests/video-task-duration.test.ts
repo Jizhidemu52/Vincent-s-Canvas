@@ -60,7 +60,7 @@ async function finishRecoveredVideo(completed: Record<string, unknown>, newSubmi
         let completion: Promise<void> | undefined;
         await pageFunction("generate", {
             ...scope, draftReady: true, logsReady: true, workspaceId: "workspace",
-            setPreviewError: noop, setSubmitting: noop, setPreviewLog: noop, setLogs: noop,
+            setMobilePane: noop, setPreviewError: noop, setSubmitting: noop, setPreviewLog: noop, setLogs: noop,
             buildRequestSnapshot: () => ({ text: originalLog.prompt, config: { model: originalLog.model }, references: [], videoReferences: [], audioReferences: [] }),
             buildLog: (value: Record<string, unknown>) => ({ ...originalLog, task: undefined, ...value }),
             workbenchSubmissions: { acquire: () => noop },

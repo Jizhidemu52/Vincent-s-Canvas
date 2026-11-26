@@ -39,10 +39,10 @@ export function AppTopNav() {
                 <NavigationFooter />
             </aside>
             <header className="wb-sidebar fixed inset-x-0 top-0 z-20 flex h-14 items-center justify-between border-b px-4 md:hidden">
-                <Link to="/" className="flex min-w-0 items-center text-foreground" aria-label={uiText("TruCreate · 首页")}><InchoiceBrand className="!w-[144px]" /></Link>
+                <Link to="/" className="flex min-w-0 items-center text-foreground" aria-label={uiText("TruCreate · 首页")}><InchoiceBrand className="!w-[104px]" /></Link>
                 <div className="flex items-center gap-2">
                     {canvasEnabled && <Tooltip title={!hydrated ? uiText("正在读取画布，请稍候") : undefined}><button type="button" disabled={!hydrated} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-input bg-card px-3 text-sm font-medium disabled:opacity-40" onClick={createAndEnter}><Plus className="size-4" />{uiText("新建")}</button></Tooltip>}
-                    <Tooltip title={uiText("导航菜单")}><button type="button" className="inline-flex size-9 items-center justify-center rounded-lg border border-border bg-card text-foreground" onClick={() => setMobileNavOpen(true)} aria-label={uiText("打开导航菜单")}><Menu className="size-5" /></button></Tooltip>
+                    <Tooltip title={uiText("导航菜单")}><button type="button" className="inline-flex h-11 items-center justify-center gap-1.5 rounded-lg px-2 text-sm font-medium text-foreground" onClick={() => setMobileNavOpen(true)} aria-expanded={mobileNavOpen} aria-label={uiText("打开导航菜单")}><Menu className="size-4" />{uiText("全部工具")}</button></Tooltip>
                 </div>
             </header>
         </>}

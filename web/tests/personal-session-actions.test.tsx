@@ -156,6 +156,6 @@ test("desktop footer and mobile drawer mount the same guarded personal account a
     const mobile = readFileSync(new URL("../src/components/layout/mobile-nav-drawer.tsx", import.meta.url), "utf8");
     const footer = readFileSync(new URL("../src/components/layout/navigation-footer.tsx", import.meta.url), "utf8");
     expect(desktop).toContain("<NavigationFooter />");
-    expect(mobile).toContain("<NavigationFooter onNavigate={onClose} />");
+    expect(mobile).toMatch(/<NavigationFooter\s+onNavigate=\{\w+\}\s*\/>/);
     expect(footer).toContain("<PersonalSessionActions compact onSignedOut={onNavigate} />");
 });

@@ -99,3 +99,11 @@
         gap: 4px;
     }
 }
+.tpd-mobile-toggle { display: none; }
+@media (max-width: 767px) {
+    .tryout-prompt-dock { bottom: calc(58px + env(safe-area-inset-bottom)); width: calc(100% - 16px); padding: 6px 8px; }
+    .tpd-mobile-toggle { display: inline-flex; align-items: center; min-height: 32px; color: var(--cw-muted); font-size: 12px; }
+    .tpd-settings[data-mobile-open=false] { display: none; }
+    .tpd-main input { font-size: 16px; }
+    .tpd-main button { min-height: 40px; }
+}

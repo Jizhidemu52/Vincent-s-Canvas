@@ -53,3 +53,6 @@
 @media (max-width:900px) { .tryout-bench { width:260px; } }
 @media (hover:none) { .tb-cell:focus-within .tb-remove { pointer-events:auto; } }
 @media (prefers-reduced-motion:reduce) { .tryout-bench * { transition:none; } }
+@media (max-width: 767px) {
+    .tryout-bench { inset: auto 8px max(8px,env(safe-area-inset-bottom)); width: auto; max-width: none; max-height: 58dvh; background: var(--tb-solid); }
+}

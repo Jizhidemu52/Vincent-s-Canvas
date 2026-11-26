@@ -32,3 +32,13 @@
 .cw-view-menu button { transition: background var(--motion-fast, 120ms) var(--motion-ease), transform var(--motion-press, 80ms) var(--motion-ease); }
 .cw-view-menu button:not(:disabled):active { background: var(--cw-view-hover); transform: scale(.97); transition-duration: var(--motion-press, 80ms); }
 @media (prefers-reduced-motion: reduce) { .cw-view-menu button { transition: none; } }
+.cw-mobile-tool-toggle { display: none; }
+@media (max-width: 767px) {
+    .cw-workspace .cw-dock { flex-wrap: wrap; justify-content: flex-end; gap: 4px; overflow: visible; }
+    .cw-mobile-tool-toggle { order: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 9px; min-height: 44px; background: var(--cw-panel); border: 1px solid var(--cw-border); border-radius: 10px; }
+    .cw-dock .cw-toolbar-primary, .cw-dock .cw-toolbar-secondary { flex: 1; min-width: 0; height: auto; flex-wrap: wrap; justify-content: space-evenly; }
+    .cw-dock[data-expanded=false] .cw-toolbar-primary > :not(:has([data-usage-control="canvas-tool.select"], [data-usage-control="canvas-tool.pan"], [data-usage-control="canvas-tool.upload"], [data-usage-control="canvas-tool.generate"])),
+    .cw-dock[data-expanded=false] .cw-toolbar-secondary { display: none; }
+    .cw-dock[data-expanded=true] > .cw-tools { flex-basis: 100%; }
+    .cw-workspace:has(.cw-dock[data-expanded=true]) .tryout-prompt-dock { visibility: hidden; }
+}

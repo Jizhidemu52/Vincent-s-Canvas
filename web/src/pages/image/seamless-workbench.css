@@ -45,3 +45,10 @@
     .stitch-result-tabs button { transition: none; }
     .stitch-result-tabs button:active { scale: 1; }
 }
+@media (max-width: 767px) {
+    .stitch-workbench-layout { display: block; padding: 0; }
+    .stitch-form, .stitch-result-panel { border: 0; border-radius: 0; }
+    .stitch-form-fields { max-height: none; overflow: visible; }
+    .stitch-submit { position: static; grid-template-columns: minmax(0,1fr); }
+    [data-mobile-pane=form] > .stitch-result-panel, [data-mobile-pane=results] > .stitch-form { display: none; }
+}

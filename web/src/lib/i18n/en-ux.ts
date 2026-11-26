@@ -1,5 +1,14 @@
 /** Employee-facing interaction copy. User content and protocol identifiers are not translation keys. */
 export default {
+    "没有匹配的工具": "No matching tools",
+    "视频与音频参考": "Video and audio references",
+    "动效设置": "Motion settings",
+    "模型与出图设置": "Model and output settings",
+    "描述你想怎么改": "Describe your changes",
+    "工作区视图": "Workspace view",
+    "查看结果": "View results",
+    "生成设置": "Generation settings",
+    "收起工具": "Hide tools",
     "从我的历史移除": "Remove from my history",
     "从本机历史移除": "Remove from this browser’s history",
     "仅从此浏览器的本机列表移除；云端历史、已保存的素材和画布作品不受影响。": "This removes the entry from this browser only. Cloud history, saved assets and canvas work are unchanged.",

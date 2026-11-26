@@ -13,13 +13,15 @@ import "./canvas-toolbar.css";
 
 export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRenderState) {
     const t = useUiText();
+    const [mobileExpanded, setMobileExpanded] = useState(false);
     const [moreOpen, setMoreOpen] = useState(false);
     const localToolsEnabled = useModuleEnabled("canvas-local-tools");
     const flags = useModuleStore(state => state.flags);
     const bindings = useBusinessConfigStore(state => state.tools);
     const { selectedCount, canUndo, canRedo, onAddImage, onAddVideo, onAddAudio, onAddText, onAddConfig, onOpenQuickGenerate, onOpenBatchEdit, onUndo, onRedo, onUpload, onDelete, onClear, onDeselect, onOpenMyAssets, onOpenTools, backgroundMode, showImageInfo, onBackgroundModeChange, onShowImageInfoChange, interactionMode = "select", onInteractionModeChange, children, viewControls } = props;
     return (
-        <div data-testid="canvas-top-tool-rail" className="cw-dock">
+        <div data-testid="canvas-top-tool-rail" className="cw-dock" data-expanded={mobileExpanded}>
+            <button type="button" className="cw-mobile-tool-toggle" aria-expanded={mobileExpanded} onClick={() => setMobileExpanded(open => !open)}><Grid3X3 size={17} />{t(mobileExpanded ? "收起工具" : "工具")}</button>
             <div className="cw-tools cw-surface cw-toolbar-primary" role="group" aria-label={t("画布常用工具")}>
                 {selectedCount > 1 && Boolean(props.selectedImageCount) && props.onDownloadSelection ? <>
                     <Tooltip title={t("仅打包选中的图片，默认保留原文件格式和画质")}><button type="button" className="cw-icon cw-download-selection" data-usage-control="canvas-tool.downloadSelectedImages" onClick={props.onDownloadSelection}><Download className="size-4" /><span>{canvasActionLabel("downloadSelectedImages", "toolbar", props.selectedImageCount)}</span></button></Tooltip>

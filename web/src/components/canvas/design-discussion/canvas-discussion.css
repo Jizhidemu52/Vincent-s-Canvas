@@ -74,3 +74,10 @@
 @media (max-width: 760px) { .canvas-design-discussion .proposal-dialog > footer { gap: 7px; padding-top: 10px; } .canvas-design-discussion .proposal-dialog > footer > div:first-child { display: grid; grid-template-columns: 1fr 1fr; } .canvas-design-discussion .proposal-dialog > footer > div:last-child { display: flex; align-items: center; gap: 10px; } .canvas-design-discussion .proposal-dialog > footer p { flex: 1; } .canvas-design-discussion .proposal-options { margin: 12px 0; } }
 .canvas-design-discussion[data-toolbox-tabs="true"] .studio-panel { top: 112px; }
 @media (max-width: 760px) { .canvas-design-discussion[data-toolbox-tabs="true"] .studio-panel { top: 156px; } }
+@media (max-width: 767px) {
+    .canvas-design-discussion .dd-island { top: 54px; right: 8px; left: auto; width: auto; transform: none; }
+    .dd-island .dd-pill { height: 42px; border-radius: 12px; }
+    .dd-island .dd-launch { padding: 0 8px; gap: 4px; }
+    .dd-island .dd-launch span { max-width: 55px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .dd-island .dd-tasks { position: absolute; right: 0; margin: 4px 0; transform: none; }
+}

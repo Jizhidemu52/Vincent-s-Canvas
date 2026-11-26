@@ -907,7 +907,7 @@ export function CanvasDesignDiscussion({ projectId, writable, getCanvasCenter, o
                         }}
                     >
                         <Sparkles size={17} />
-                        <span>{active.length ? `${active.length} 个创作任务进行中` : "创作随时开始"}</span>
+                        <span className="hidden md:inline">{active.length ? `${active.length} 个创作任务进行中` : "创作随时开始"}</span><span className="md:hidden">{active.length ? `任务 ${active.length}` : "设计讨论"}</span>
                     </button>
                     <button
                         aria-label="查看设计生成任务"
