@@ -10,6 +10,16 @@ const json = (value: unknown) => new Response(JSON.stringify(value), { headers: 
 describe.each(models.map(modelId => [modelId] as const))("APIMart %s static images", modelId => {
   const base = { modelId, prompt: "Edit the ribbon while preserving the product", parameters: {} };
 
+  test("applies the Flare background default to generation and editing, respecting explicit selections", () => {
+    for (const sourceDataUrls of [[], [reference]]) {
+      const input = { ...base, sourceDataUrls };
+      expect(buildApiMartImageRequest(input).payload.background).toBe(modelId === "gpt-image-2.6-flare" ? "opaque" : undefined);
+      for (const background of ["auto", "opaque", "transparent"]) {
+        expect(buildApiMartImageRequest({ ...input, parameters: { background } }).payload.background).toBe(background);
+      }
+    }
+  });
+
   test("keeps the exact model ID and independent quality/resolution for sixteen references and mask", () => {
     expect(apiMartImageModel(modelId)).toBe(modelId);
     const request = buildApiMartImageRequest({ ...base, sourceDataUrls: Array(16).fill(reference), maskDataUrl: mask,

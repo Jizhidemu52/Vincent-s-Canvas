@@ -1,11 +1,14 @@
 import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { MARK_IMAGE_PROVIDER_ID } from "../../../shared/mark-image-models";
 import type { AddressInfo } from "node:net";
 import express, { type ErrorRequestHandler } from "express";
 import type { AppConfig } from "../../src/config";
 import { createDepartmentsRouter } from "../../src/routes/departments";
 import { createInternalAiConfigurationRouter } from "../../src/routes/internal-ai-configuration";
-import { createModelConfigurationRouter } from "../../src/routes/model-configuration";
+import { createModelConfigurationRouter, createPublicModelRouter } from "../../src/routes/model-configuration";
+import { resolveToolExecution } from "../../src/tool-configuration";
+import { prepareTaskEnqueue } from "../../src/tasks";
 import type { AuthenticatedRequest, SessionUser } from "../../src/types";
 import { createIsolatedPostgres } from "../helpers/isolated-postgres";
 
@@ -36,6 +39,7 @@ async function fixture() {
         next();
     });
     app.use("/configuration", createModelConfigurationRouter(postgres.db, config));
+    app.use("/models", createPublicModelRouter(postgres.db));
     app.use("/departments", createDepartmentsRouter(postgres.db));
     app.use("/internal-ai", createInternalAiConfigurationRouter(postgres.db, config));
     app.use(((error, _request, response, _next) => {
@@ -61,6 +65,43 @@ async function fixture() {
         await postgres.close();
     } };
 }
+
+sqlTest("image defaults persist per model and resolve for unbound tasks while respecting explicit model selection", async () => {
+    const state = await fixture();
+    try {
+        await state.db.query("INSERT INTO providers(id,name,protocol,base_url) VALUES($1,'Defaults fixture','apimart','https://api.apimart.ai/v1')", [MARK_IMAGE_PROVIDER_ID]);
+        const flare = randomUUID(), qwen = randomUUID();
+        await state.db.query(`INSERT INTO model_configs(id,provider_id,name,model_id,capabilities) VALUES
+          ($1,$3,'Flare','gpt-image-2.6-flare',ARRAY['generate','edit']),($2,$3,'Qwen','qwen-image-3.0',ARRAY['generate','edit'])`, [flare, qwen, MARK_IMAGE_PROVIDER_ID]);
+        const path = "/configuration/image-defaults";
+        const initial = (await (await fetch(state.url + path)).json()).data;
+        expect(initial.effectiveModelConfigId).toBe(flare);
+        expect(initial.models.find((model: { id: string }) => model.id === flare).imageDefaultBackground).toBe("opaque");
+        const options = { size: "3:4", resolution: "2k", quality: "high", background: "transparent", complexity: "low" };
+        const change = { defaultModelConfigId: qwen, modelConfigId: flare, options };
+        expect((await state.save(path, change, "PUT", { "test-role": "designer" })).status).toBe(403);
+        expect((await state.save(path, change, "PUT")).status).toBe(200);
+        expect((await state.save(path, { ...change, modelConfigId: qwen }, "PUT")).status).toBe(400);
+        const qwenOptions = { resolution: "2k", negative_prompt: "深色渐变", nsfw_check: false };
+        expect((await state.save(path, { modelConfigId: qwen, options: qwenOptions }, "PUT")).status).toBe(200);
+        const after = (await (await fetch(state.url + path)).json()).data;
+        expect(after.modelOptions).toEqual({ [flare]: options, [qwen]: qwenOptions });
+        const publicModels = (await (await fetch(state.url + "/models", { headers: { "test-role": "designer" } })).json()).models;
+        expect(publicModels.find((model: { id: string }) => model.id === qwen).isDefaultImageModel).toBe(true);
+        expect(publicModels.find((model: { id: string }) => model.id === flare).imageDefaultBackground).toBe("transparent");
+        expect((await resolveToolExecution(state.db, { operationType: "image_generation" })).modelConfigId).toBe(qwen);
+        expect((await resolveToolExecution(state.db, { operationType: "image_generation", modelConfigId: flare })).modelConfigId).toBe(flare);
+        const task = { requestId: randomUUID(), userId: randomUUID(), projectId: randomUUID(), departmentId: null, operationType: "image_generation",
+            priority: "normal" as const, prompt: "服装产品图", sourceUrls: [] };
+        expect((await prepareTaskEnqueue(state.db, task)).input.parameters).toMatchObject(qwenOptions);
+        expect((await prepareTaskEnqueue(state.db, { ...task, modelConfigId: flare, parameters: { background: "opaque" } })).input.parameters)
+            .toMatchObject({ ...options, background: "opaque" });
+        expect((await state.save(path, { defaultModelConfigId: null, modelConfigId: flare }, "PUT")).status).toBe(200);
+        const reset = (await (await fetch(state.url + path)).json()).data;
+        expect(reset.effectiveModelConfigId).toBe(flare);
+        expect(reset.modelOptions).toEqual(after.modelOptions);
+    } finally { await state.close(); }
+}, 30_000);
 
 sqlTest("provider creation and edits roll back business data when the real audit INSERT fails", async () => {
     const state = await fixture();

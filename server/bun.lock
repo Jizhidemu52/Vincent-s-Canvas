@@ -9,6 +9,7 @@
         "@aws-sdk/lib-storage": "3.1084.0",
         "@aws-sdk/s3-request-presigner": "^3.1084.0",
         "@lezer/json": "1.0.3",
+        "@xmldom/xmldom": "0.9.12",
         "argon2": "^0.44.0",
         "content-disposition": "^3.0.0",
         "cookie-parser": "^1.4.7",

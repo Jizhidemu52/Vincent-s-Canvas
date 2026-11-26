@@ -17,7 +17,7 @@ import { useEffect } from "react";
 const sections: { key: string; label: string; slugs: NavigationToolSlug[] }[] = [
     { key: "workspace", label: "工作空间", slugs: ["canvas", "gpt-chat"] },
     { key: "create", label: "创作工具", slugs: ["creative", "local-restyle", "garment-colorway", "back-design", "video"] },
-    { key: "image-tools", label: "图像工具", slugs: ["layer-studio", "remove-background", "hd-upscale", "item-extract", "image-edit", "seamless-stitch", "midjourney-blend"] },
+    { key: "image-tools", label: "图像工具", slugs: ["layer-studio", "remove-background", "hd-upscale", "vectorize", "item-extract", "image-edit", "seamless-stitch", "midjourney-blend"] },
     { key: "resources", label: "资源库", slugs: ["assets", "prompts", "my-prompts", "design-library"] },
     { key: "collaborate", label: "协作", slugs: ["team"] },
     { key: "manage", label: "管理", slugs: ["admin"] },

@@ -27,21 +27,23 @@ export function demoAssetPage<T extends ListedAsset>(assets: T[], query: Record<
     prompt: null, metadata: lightAssetMetadata(asset.metadata) })) };
 }
 
-type MediaAsset = { id: string; bytes: Uint8Array; mimeType: string; filename: string; metadata?: Record<string, unknown> };
-const representations = new WeakMap<MediaAsset, { etag: string; mime: string }>();
+type MediaAsset = { id: string; taskId?: string | null; bytes: Uint8Array; mimeType: string; filename: string; metadata?: Record<string, unknown> };
+const representations = new WeakMap<MediaAsset, { etag: string; mime: string; size: number }>();
 export async function demoAssetContentResponse(asset: MediaAsset, request?: Request) {
   let representation = representations.get(asset);
   let bytes: Uint8Array | undefined;
   if (!representation) {
     bytes = asset.bytes;
     const detected = await fileTypeFromBuffer(bytes).catch(() => undefined);
-    representation = { etag: `"${createHash("sha256").update(bytes).digest("hex")}"`,
+    representation = { etag: `"${createHash("sha256").update(bytes).digest("hex")}"`, size: bytes.byteLength,
       mime: detected?.mime || (["text/plain", "application/json"].includes(asset.mimeType) ? asset.mimeType : "application/octet-stream") };
     representations.set(asset, representation);
   }
   const { etag, mime } = representation;
-  const headers = { ...assetResponseHeaders(mime, asset.filename, request ? new URL(request.url).searchParams.get("download") === "1" : false), etag, vary: "Cookie" };
+  const vector = Boolean(asset.taskId && asset.metadata?.recraftVector === true && asset.mimeType === "image/svg+xml");
+  const headers = { ...assetResponseHeaders(vector ? asset.mimeType : mime, asset.filename, request ? new URL(request.url).searchParams.get("download") === "1" : false, vector), etag, vary: "Cookie" };
   if (matchesAssetEtag(request?.headers.get("if-none-match") || undefined, etag)) return new Response(null, { status: 304, headers });
+  if (request?.method === "HEAD") return new Response(null, { headers: { ...headers, "content-length": String(representation.size) } });
   const body = bytes ?? asset.bytes;
   const view = body.buffer instanceof ArrayBuffer
     ? new Uint8Array(body.buffer, body.byteOffset, body.byteLength)
@@ -64,6 +66,7 @@ function drain() {
 }
 export function scheduleDemoAssetThumbnails(asset: MediaAsset) {
   const token = sourceToken(asset);
+  if (asset.taskId && asset.metadata?.recraftVector && asset.mimeType === "image/svg+xml") return;
   if (!/^(image|video)\//.test(asset.mimeType) || !demoAssetByteLength(asset) || pending.has(asset.id) || cache.get(asset.id)?.token === token) return;
   pending.add(asset.id);
   jobs.push(async () => {

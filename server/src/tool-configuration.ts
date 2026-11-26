@@ -7,6 +7,8 @@ import { isQuickImageAction, matchesQuickImageTaskTarget } from "../../shared/qu
 import { QUICK_IMAGE_SNAPSHOT, type QuickImageSnapshot } from "./quick-image-tools";
 import { layerStudioBindingValid } from "./layer-studio-policy";
 import { LAYER_STUDIO_TOOL } from "../../shared/layer-studio";
+import { getDefaultImageModelId, listImageDefaultCandidates, readImageGenerationDefaults } from "./image-generation-defaults";
+import { isRecraftAction, recraftProviderId, recraftTools } from "../../shared/recraft-tools";
 
 export type ToolConfiguration = {
   toolKey: ToolKey;
@@ -67,13 +69,16 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   const quickSnapshot = input[QUICK_IMAGE_SNAPSHOT];
   if (isQuickImage && (!quickSnapshot || quickSnapshot.action !== quickAction)) throw new ToolConfigurationError("QUICK_IMAGE_CONFIGURATION_REQUIRED", "一键工具缺少服务端配置快照");
   if (toolKey === LAYER_STUDIO_TOOL && !configuration.modelConfigId) throw new ToolConfigurationError("MODEL_NOT_CONFIGURED", "管理员尚未配置图层工作区", 503);
-  const selected = toolKey === LAYER_STUDIO_TOOL ? configuration.modelConfigId : isQuickImage ? quickSnapshot!.modelConfigId : isChat ? modelConfiguration.modelConfigId : options.allowModelOverride && requested ? requested : configuration.modelConfigId ?? requested;
+  const selected = toolKey === LAYER_STUDIO_TOOL ? configuration.modelConfigId : isQuickImage ? quickSnapshot!.modelConfigId : isChat ? modelConfiguration.modelConfigId
+    : options.allowModelOverride && requested ? requested : configuration.modelConfigId ?? requested
+      ?? (toolKey !== "midjourney-blend" && ["image_generation", "inpaint", "batch_image"].includes(input.operationType)
+        ? getDefaultImageModelId(await listImageDefaultCandidates(db), (await readImageGenerationDefaults(db)).defaultModelConfigId) : undefined);
   if (isChat && !selected) throw new ToolConfigurationError("CHAT_MODEL_NOT_CONFIGURED", missingChatModelMessage(toolKey), 503);
   if (!selected) throw new ToolConfigurationError("MODEL_REQUIRED", "请先选择一个已启用的模型");
   const result = await db.query<{
-    id: string; modelId: string; enabled: boolean; providerEnabled: boolean; protocol: string;
+    id: string; modelId: string; providerId: string; enabled: boolean; providerEnabled: boolean; protocol: string;
     workflowConfigId: string | null; workflowEnabled: boolean | null; capabilities: string[];
-  }>(`SELECT m.id,m.model_id AS "modelId",m.enabled,p.enabled AS "providerEnabled",p.protocol,m.capabilities,
+  }>(`SELECT m.id,m.model_id AS "modelId",m.enabled,p.enabled AS "providerEnabled",p.protocol,m.capabilities,p.id AS "providerId",
       m.workflow_config_id AS "workflowConfigId",w.enabled AS "workflowEnabled"
       FROM model_configs m JOIN providers p ON p.id=m.provider_id
       LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id
@@ -83,7 +88,9 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   if (!layerStudioBindingValid(toolKey, model)) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "该图片模型与当前工具不兼容，请检查模型配置或蒙版要求");
   if (toolKey === LAYER_STUDIO_TOOL && requested && requested !== model.id) throw new ToolConfigurationError("TOOL_MODEL_CHANGED", "图层工作区配置已变化，请刷新后重试", 409);
   if (model.workflowConfigId && !model.workflowEnabled) throw new ToolConfigurationError("WORKFLOW_DISABLED", "模型工作流未启用");
-  if (isQuickImage && (model.modelId !== quickSnapshot!.modelId || model.protocol !== "apimart" || model.workflowConfigId || !model.capabilities.includes("edit"))) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "一键图片模型已变化，请重新提交");
+  const recraft = isRecraftAction(quickAction) && quickSnapshot?.modelConfigId === recraftTools[quickAction].id;
+  if (model.providerId === recraftProviderId && !recraft) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "Recraft 仅用于图片快捷处理");
+  if (isQuickImage && (model.modelId !== quickSnapshot!.modelId || (recraft ? model.providerId !== recraftProviderId || model.protocol !== "custom" : model.protocol !== "apimart") || model.workflowConfigId || !model.capabilities.includes("edit"))) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "一键图片模型已变化，请重新提交");
   if (!isQuickImage && !isChat && !options.allowModelOverride && configuration.modelConfigId && requested && requested !== model.id && requested !== model.modelId) {
     throw new ToolConfigurationError("TOOL_MODEL_CHANGED", "管理员已更改该板块模型，请刷新模型配置和参数后重试", 409);
   }

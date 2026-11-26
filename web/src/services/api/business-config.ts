@@ -1,6 +1,7 @@
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { getToolDefinition } from "../../../../shared/feature-catalog";
 import type { ApimartImageCost } from "../../../../shared/apimart-image-costs";
+import type { ImageModelDefaults } from "../../../../shared/image-generation-defaults";
 
 export type PublicModel = {
     conversationImage?: boolean;
@@ -16,6 +17,9 @@ export type PublicModel = {
     displayOrder?: number;
     modelIdentityHidden?: boolean;
     imageParameterProfile?: import("@/lib/image-model-settings").ImageParameterProfile;
+    imageDefaultBackground?: ImageModelDefaults["background"];
+    imageDefaults?: ImageModelDefaults;
+    isDefaultImageModel?: boolean;
     imageSupportsMask?: boolean;
     imageSupportsOfficialFallback?: boolean;
     capabilities: string[];
@@ -112,5 +116,5 @@ export function resolveToolModel(config: BusinessConfig, toolKey: string, reques
         const requested = findModel(config, requestedModelId);
         return requested && compatible(requested) ? requested : undefined;
     }
-    return config.models.find(compatible);
+    return config.models.find(model => model.isDefaultImageModel && compatible(model)) ?? config.models.find(compatible);
 }

@@ -6,7 +6,7 @@ const historyOperations = new Set(["image_generation", "inpaint", "upscale", "se
 export const taskHistoryBoards = [
   ...toolDefinitions.filter(tool => tool.parent !== "canvas" && tool.parent !== "gpt-chat" && tool.operations.every(operation => historyOperations.has(operation)))
     .map(tool => tool.toolKey === "image" ? "image-generation" : tool.toolKey),
-  "remove-background", "item-extract", "hd-upscale",
+  "remove-background", "item-extract", "hd-upscale", "vectorize",
 ];
 const boardSchema = z.string().refine(board => taskHistoryBoards.includes(board), "未知的历史记录板块");
 

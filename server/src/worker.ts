@@ -47,6 +47,8 @@ import { inlineProviderImageDataUrl } from "./provider-image-result";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "./image-edit-input";
 import { imageResultExtension, ImageResultPersistenceError, storeImageResult } from "./image-result-storage";
 import { ImageResultProcessingError, validateQuickImageSource } from "./image-result-processing";
+import { isRecraftAction, recraftProviderId, recraftTools } from "../../shared/recraft-tools";
+import { runRecraftImage } from "./recraft-image";
 import { scheduleAssetThumbnails } from "./asset-thumbnails";
 import { assertWorkflowTaskContext, workflowTaskContext, WorkflowTaskPending, type WorkflowTaskContext } from "./workflow-task-context";
 import { resetWorkerHealth, startWorkerHealth } from "./worker-health";
@@ -354,6 +356,12 @@ import { OPENAI_IMAGE_TIMEOUT_MS } from "./opentoken-image";
 import { validateConversationTaskBinding, validateConversationTaskSources } from "./image-conversation-task";
 
 async function executeProvider(task: WorkRow, timing: GenerationTiming) {
+  if (task.provider_id === recraftProviderId) {
+    const action = task.parameters.quickImageAction;
+    if (!isRecraftAction(action) || task.model_config_id !== recraftTools[action].id || task.model_id !== recraftTools[action].endpoint || task.source_urls.length !== 1 || task.workflow_config_id || task.protocol !== "custom") throw new Error("Recraft 工具配置与任务不匹配");
+    const source = await loadSourceAsset(task.source_urls[0]!, task.user_id, 20_000_000);
+    return [await runRecraftImage(action, source, () => claimProviderSubmission(task))];
+  }
   if(task.request_id?.startsWith("preset-gen:")&&(task.protocol!=="apimart"||task.workflow_config_id||!tryoutModels.some(m=>m.modelId===task.model_id)))throw new Error("管理员模特生成绑定已变化，请核对原任务和高清配置");
   if (task.original_size_source_id) {
     const receipt = task.parameters.originalSizeReplay as {modelId?: string;providerId?: string;size?: string} | undefined;

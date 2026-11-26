@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import express, { type ErrorRequestHandler } from "express";
 import { ZodError } from "zod";
 import { MARK_IMAGE_PROVIDER_ID } from "../../../shared/mark-image-models";
+import { recraftTools, isRecraftAction } from "../../../shared/recraft-tools";
 import { quickImageModelId, quickImageTaskTarget, type QuickImageAction } from "../../../shared/quick-image-tools";
 import type { Cache } from "../../src/db";
 import type { PromptCompiler } from "../../src/prompt-compiler";
@@ -22,7 +23,7 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
   const users = new Map<string, SessionUser>(), queued = new Set<string>();
   const sourceByUser = new Map<string, string>();
   let latestUser = "";
-  const sourceBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAQAAAABCAYAAAD5PA/NAAAACXBIWXMAAAAAAAAAAQCEeRdzAAAAGklEQVR4nGPkEpH77+ziyrhl1YL/x/8lOgIAM2oHblsijkgAAAAASUVORK5CYII=", "base64");
+  const sourceBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAAQAAAAB0CZXLAAAAH0lEQVR4nO3BAQ0AAADCoPdPbQ43oAAAAAAAAAAAvg0hAAAB8Wch7gAAAABJRU5ErkJggg==", "base64");
   let optimizerCalls = 0, externalCalls = 0;
   const cache = { eval: async (_script: string, options: { arguments: string[] }) => { queued.add(options.arguments[0]!); return 1; } } as unknown as Cache;
   const compiler = { compile: async () => { optimizerCalls++; throw new Error("Quick actions must not call a prompt optimizer"); } } as unknown as PromptCompiler;
@@ -45,7 +46,9 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
     compilations: Number((await query("SELECT count(*)::int AS count FROM prompt_compilations WHERE user_id=$1", [actor])).rows[0]!.count),
   });
 
+  const originalToken = process.env.RECRAFT_API_TOKEN;
   beforeAll(async () => {
+    process.env.RECRAFT_API_TOKEN = "fixture";
     fetchGuard = spyOn(globalThis, "fetch").mockImplementation(Object.assign((resource: string | URL | Request, init?: RequestInit) => {
       const url = resource instanceof Request ? resource.url : String(resource);
       if (!base || new URL(url).origin !== base) { externalCalls++; throw new Error("QUICK_IMAGE_TEST_EXTERNAL_IO_BLOCKED"); }
@@ -74,6 +77,7 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   }, 30_000);
   afterAll(async () => {
+    if (originalToken === undefined) delete process.env.RECRAFT_API_TOKEN; else process.env.RECRAFT_API_TOKEN = originalToken;
     try {
       if (server) { server.closeAllConnections(); await new Promise<void>(done => server.close(() => done())); }
       await fixture?.close();
@@ -81,18 +85,23 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
     expect(externalCalls).toBe(0); expect(optimizerCalls).toBe(0);
   });
 
-  for (const action of ["remove-background", "hd-upscale", "item-extract"] as const) for (const canvas of [false, true]) {
+  for (const action of ["remove-background", "hd-upscale", "vectorize", "item-extract"] as const) for (const canvas of [false, true]) {
     test(`${action} ${canvas ? "canvas" : "standalone"} accepts no prompt/model and persists only the fixed recipe`, async () => {
       const actor = await user(), value = input(action, canvas);
-      const expectedModel = action === "remove-background" ? maiModel : action === "item-extract" ? flareModel : nanoModel;
+      const expectedModel = isRecraftAction(action) ? recraftTools[action].id : flareModel;
       expect(value).not.toHaveProperty("prompt"); expect(value).not.toHaveProperty("modelConfigId");
       const response = await send(actor, value), body = await response.json();
       expect({ status: response.status, body }).toMatchObject({ status: 201, body: { task: { modelConfigId: expectedModel, toolKey: value.toolKey, credits: 7, optimized: false } } });
       const stored = (await query("SELECT model_config_id,prompt,parameters,source_urls,user_input,prompt_optimized FROM tasks WHERE id=$1", [body.task.id])).rows[0]!;
       expect(stored).toMatchObject({ model_config_id: expectedModel, source_urls: value.sourceUrls, user_input: null, prompt_optimized: false,
-        parameters: { quickImageAction: action, ...quickImageDefaultParameters[action], n: 1, count: 1, quickImage: { action, recipeVersion: quickImageRecipeVersion(action) } } });
-      if (action === "remove-background") { expect(stored.parameters).not.toHaveProperty("size"); expect(stored.parameters).not.toHaveProperty("resolution"); }
-      expect(stored.prompt).toContain(action === "hd-upscale" ? "configured output resolution" : action === "item-extract" ? "flat-lay presentation" : "finished full-color subject image");
+        parameters: { quickImageAction: action, n: 1, count: 1 } });
+      if (isRecraftAction(action)) {
+        expect(stored.prompt).toBe(recraftTools[action].label);
+        expect(stored.parameters.quickImage).toBeUndefined();
+      } else {
+        expect(stored.parameters).toMatchObject({ ...quickImageDefaultParameters[action], quickImage: { action, recipeVersion: quickImageRecipeVersion(action) } });
+        expect(stored.prompt).toContain("flat-lay presentation");
+      }
       expect(stored.prompt).toBe(body.task.prompt); expect(queued.has(body.task.id)).toBe(true);
       const duplicate = await send(actor, value);
       expect(duplicate.status).toBe(200); expect((await duplicate.json()).task.id).toBe(body.task.id);
@@ -101,7 +110,7 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
     });
   }
 
-  test.each(["remove-background", "hd-upscale", "item-extract"] as const)("%s twelve parallel duplicates share one task/reservation and remain employee-isolated", async action => {
+  test.each(["remove-background", "hd-upscale", "vectorize", "item-extract"] as const)("%s twelve parallel duplicates share one task/reservation and remain employee-isolated", async action => {
     const actor = await user(), other = await user(), value = input(action, true, actor);
     const responses = await Promise.all(Array.from({ length: 12 }, () => send(actor, value)));
     expect(responses.every(response => response.status === 200 || response.status === 201)).toBe(true);
@@ -119,7 +128,7 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
       ["UPDATE module_flags SET enabled=false WHERE module_key='image-edit'", "UPDATE module_flags SET enabled=true WHERE module_key='image-edit'", input("remove-background"), 403, "MODULE_DISABLED"],
       ["UPDATE module_flags SET enabled=false WHERE module_key='canvas'", "UPDATE module_flags SET enabled=true WHERE module_key='canvas'", input("hd-upscale", true), 403, "MODULE_DISABLED"],
       ["UPDATE tool_api_configurations SET enabled=false WHERE tool_key='detail-enhance'", "UPDATE tool_api_configurations SET enabled=true WHERE tool_key='detail-enhance'", input("hd-upscale"), 403, "TOOL_DISABLED"],
-      [`UPDATE model_configs SET enabled=false WHERE id='${maiModel}'`, `UPDATE model_configs SET enabled=true WHERE id='${maiModel}'`, input("remove-background"), 400, "MODEL_DISABLED"],
+      [`UPDATE model_configs SET enabled=false WHERE id='${recraftTools["remove-background"].id}'`, `UPDATE model_configs SET enabled=true WHERE id='${recraftTools["remove-background"].id}'`, input("remove-background"), 400, "MODEL_DISABLED"],
     ] as const;
     for (const [disable, restore, value, status, code] of gates) {
       await query(disable);
@@ -140,8 +149,8 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
       promptInput: { scene: "free-optimize", mode: "edit", userText: "FORGED optimize", fields: {}, referenceRoles: [], outputLanguage: "en", hasMask: false } });
     const body = await response.json(); expect(response.status).toBe(201);
     const stored = (await query("SELECT model_config_id,prompt,parameters,user_input,prompt_compilation_id FROM tasks WHERE id=$1", [body.task.id])).rows[0]!;
-    expect(stored.model_config_id).toBe(nanoModel); expect(stored.prompt).not.toContain("FORGED");
-    expect(stored.parameters).toEqual({ tool: "canvas-edit", n: 1, count: 1, size: "auto", resolution: "4k", quickImageAction: "hd-upscale", quickImage: { action: "hd-upscale", recipeVersion: 1, configurationVersion: 0 } });
+    expect(stored.model_config_id).toBe(recraftTools["hd-upscale"].id); expect(stored.prompt).not.toContain("FORGED");
+    expect(stored.parameters).toEqual({ tool: "canvas-edit", n: 1, count: 1, quickImageAction: "hd-upscale" });
     expect(stored.user_input).toBeNull(); expect(stored.prompt_compilation_id).toBeNull(); expect(optimizerCalls).toBe(0);
   });
 
@@ -151,7 +160,7 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
       sections: [{ id: "brief:page-1", figureIds: [] }] }];
     const designRequirements = { title: "开衫", documentIds: ["brief"], subject: "女士开衫", colors: "蓝色", materials: "棉", must: [], avoid: [], unknowns: [],
       referenceFigureIds: [], sources: [{ documentId: "brief", sectionId: "brief:page-1" }] };
-    for (const action of ["remove-background", "hd-upscale", "item-extract"] as const) for (const parameters of [
+    for (const action of ["remove-background", "hd-upscale", "vectorize", "item-extract"] as const) for (const parameters of [
       { designRequirements, designDocumentCatalog },
       { imageAgentProfile: "creative-chat", designRequirements },
       { imageAgentProfile: "creative-chat", designDocumentCatalog },

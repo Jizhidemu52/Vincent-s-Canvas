@@ -77,9 +77,9 @@ test("remove-background exports the same transparent master as PNG or white-back
     expect(api.assetBytes.get(taskId)?.equals(source)).toBe(true);
 });
 
-for (const action of ["remove-background", "hd-upscale", "item-extract"] as const) {
+for (const action of ["remove-background", "hd-upscale", "vectorize", "item-extract"] as const) {
     test(`${action} standalone uses a managed server recipe with no prompt or model input`, async ({ page, api }, testInfo) => {
-        const title = action === "remove-background" ? "一键去背景" : action === "item-extract" ? "提取产品图" : "高清放大";
+        const title = action === "vectorize" ? "图片转矢量图" : action === "remove-background" ? "一键去背景" : action === "item-extract" ? "提取产品图" : "高清放大";
         await managedQuickTask(page, api);
         // A designer need not see or select the privately managed processing model.
         await page.route("**/api/models", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [], prices: [], tools: [] }) }));
@@ -87,7 +87,7 @@ for (const action of ["remove-background", "hd-upscale", "item-extract"] as cons
         await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
         await expect(page.getByRole("link", { name: title, exact: true })).toBeVisible();
         await expectStandaloneActionOnly(page);
-        const submit = page.getByRole("button", { name: title, exact: true });
+        const submit = page.getByRole("button", { name: action === "vectorize" ? "转为 SVG" : title, exact: true });
         await expect(submit).toBeDisabled();
         await uploadStandaloneImage(page);
         await expect(page.getByRole("region", { name: "参考图", exact: true }).getByRole("combobox", { name: "图片1用途", exact: true })).toBeVisible();
@@ -222,7 +222,8 @@ test("selected canvas images show right-side actions, preserve the original and 
     const panel = page.getByTestId("canvas-image-quick-actions");
     await expect(panel).toBeVisible();
     await expect(panel.locator("input, textarea, select")).toHaveCount(0);
-    await expect(panel.getByRole("button")).toHaveCount(2);
+    await expect(panel.getByRole("button")).toHaveCount(3);
+    await expect(panel.getByRole("button", { name: "图片转矢量图" })).toBeVisible();
     await expect(panel.getByText(/内置配方|Nano 2\.1|MAI|4K/)).toHaveCount(0);
     const bounds = (await panel.boundingBox())!; expect(bounds.x).toBeGreaterThan(1000);
     await expect(panel.getByRole("button", { name: "高清放大", exact: true })).toHaveCSS("color", "rgb(23, 23, 23)");

@@ -299,11 +299,15 @@ export function useEffectiveConfig(scope?: "canvas" | "image") {
         const available = models.filter(model => !model.modelId.startsWith("demo-") && model.capabilities.some(capability => capability === "generate" || capability === "edit"));
         // Image defaults seed new work only; callers overlay saved drafts, nodes and explicit choices.
         const imageDefault = scope === "canvas" ? DEFAULT_CANVAS_IMAGE_MODEL : DEFAULT_IMAGE_MODEL;
-        const preferred = scope ? [imageDefault] : [config.imageModel, config.model];
+        const preferred = scope ? [] : [config.imageModel, config.model].filter(value => value !== DEFAULT_IMAGE_MODEL);
         const fallback = scope ? imageDefault : config.imageModel;
-        const imageModel = status === "ready" ? preferredImageModel(available, preferred)?.modelId || fallback : fallback;
+        const selected = status === "ready" ? preferredImageModel(available, preferred) : undefined;
+        const imageModel = selected?.modelId || fallback;
         const textModel = status === "ready" ? resolveToolModel({ models, tools, prices: [] }, "canvas-chat")?.modelId || "" : "";
         return { ...config, channelMode: "local" as const, imageModel, textModel,
+            ...(scope && selected?.imageDefaults?.size ? { size: selected.imageDefaults.size } : {}),
+            ...(scope && selected?.imageDefaults && (selected.imageDefaults.quality || ["gemini", "resolution", "resolution-1k", "pixel", "gpt"].includes(selected.imageParameterProfile || "") && selected.imageDefaults.resolution)
+                ? { quality: selected.imageDefaults.quality || selected.imageDefaults.resolution! } : {}),
             model: scope || config.model === config.imageModel || config.model === DEFAULT_IMAGE_MODEL ? imageModel : config.model };
     }, [config, models, tools, status, scope]);
 }

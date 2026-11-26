@@ -127,7 +127,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     // Structured artwork scenes resolve their background on the server, including direct API callers.
     const serverBackground = options?.promptInput && ["pattern-extract", "pattern-colorway"].includes(options.promptInput.scene);
     const transparent = !serverBackground && !markup && (profile.kind === "standard" || profile.kind === "quality-resolution") && references.length === 1 && !mask
-        && !imageOptions.background && !imageOptions.output_format
+        && !profile.defaultBackground && !imageOptions.background && !imageOptions.output_format
         && await import("@/lib/image-alpha").then(module => module.imageHasTransparency(references[0]!));
     options?.signal?.throwIfAborted();
     return requestQueuedImages({

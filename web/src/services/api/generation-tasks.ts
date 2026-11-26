@@ -184,7 +184,7 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
         const file = dataUrlToFile({ ...reference, dataUrl });
         input.signal?.throwIfAborted();
         const isMarkup = referenceProfile?.supportsMarkup && input.draft?.markupReferenceIndex === referenceIndex;
-        const referenceError = preset ? quickImageReferenceFileError(file) : isMarkup ? file.type !== "image/png" ? "标注层必须为独立透明 PNG" : file.size > 50 * 1024 * 1024 ? "标注层不能超过 50 MB" : "" : imageReferenceFileError(file, referenceProfile!);
+        const referenceError = preset ? quickImageReferenceFileError(file, input.quickImageAction) : isMarkup ? file.type !== "image/png" ? "标注层必须为独立透明 PNG" : file.size > 50 * 1024 * 1024 ? "标注层不能超过 50 MB" : "" : imageReferenceFileError(file, referenceProfile!);
         if (referenceError) throw new Error(referenceError);
         const hash = await fingerprintImage(file);
         assertOwner();

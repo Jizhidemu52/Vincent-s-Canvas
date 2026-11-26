@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import type { AdminQuickImageConfiguration, QuickImageConfigurationInput, QuickImageEligibleModel } from "../../shared/quick-image-configuration";
+import { isRecraftAction } from "../../shared/recraft-tools";
 import { isQuickImageAction, quickImageModelId, type QuickImageAction } from "../../shared/quick-image-tools";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { isQuickImageEligibleModel, quickImageActions, quickImageConfigurationUpdateSchema, validateQuickImageConfiguration } from "./quick-image-configuration";
-import { prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, quickImageDefaultParameters, quickImageDefaultPrompts, quickImageOutputParameters, type QuickImageInput, type QuickImageSnapshot } from "./quick-image-tools";
+import { prepareRecraftTool, prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, quickImageDefaultParameters, quickImageDefaultPrompts, quickImageOutputParameters, type QuickImageInput, type QuickImageSnapshot } from "./quick-image-tools";
 import { ToolConfigurationError } from "./tool-configuration";
 
 type Actor = { id: string; role: string } | null;
@@ -61,6 +62,7 @@ export class DemoQuickImageConfigurationStore {
     const action = input.parameters?.quickImageAction;
     if (!isQuickImageAction(action)) return prepareQuickImageTask(input);
     if (input[QUICK_IMAGE_SNAPSHOT] && !draft) return input;
+    if (isRecraftAction(action) && !draft) return prepareRecraftTool(input, action);
     if (draft) admin(draft.actor);
     const configuration = draft ? { ...draft.configuration, configurationVersion: 0 } : this.read(action);
     if (!configuration.modelConfigId) throw new ToolConfigurationError("MODEL_DISABLED", "管理员尚未配置一键工具的可用模型");

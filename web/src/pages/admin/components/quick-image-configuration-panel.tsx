@@ -91,7 +91,7 @@ function QuickImageConfigurationSession({ owner }: { owner: string }) {
     }, [owner]);
     return <section aria-label={staticUiText("快捷图片处理配置")} className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
-            <div><h3 className="text-base font-semibold">{staticUiText("快捷图片处理")}</h3><p className="mt-1 text-sm text-[var(--muted-foreground)]">{staticUiText("统一配置一键去背景、高清放大与提取产品图；普通使用页面只保留操作入口。")}</p></div>
+            <div><h3 className="text-base font-semibold">{staticUiText("快捷图片处理")}</h3><p className="mt-1 text-sm text-[var(--muted-foreground)]">{staticUiText("可在这里配置提取产品图。去背景、高清放大与图片转矢量图使用 Recraft。")}</p></div>
             <Button icon={<RefreshCw className="size-4" />} loading={loading} onClick={async () => { if (await confirmUnsaved()) void load(); }}>{staticUiText("重新加载")}</Button>
         </div>
         <Alert type="info" showIcon title={staticUiText("保存与试运行相互独立")} description={staticUiText("保存后影响此操作的后续请求；试运行使用当前未保存草稿，只创建 1 个真实任务，不会修改线上配置。离开页面只停止本地查询，不取消任务。")} />

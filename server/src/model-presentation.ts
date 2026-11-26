@@ -2,6 +2,8 @@ import { imageParameterProfile } from "./image-parameter-profile";
 import { isConversationImageModel, MARK_PLATFORM_MODELS, MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { getApimartImageCost } from "../../shared/apimart-image-costs";
 import { isLayerStudioModel, LAYER_STUDIO_MODEL_ID } from "./layer-studio-policy";
+import { apimartGpt26DefaultBackground } from "../../shared/gpt26-image-options";
+import type { ImageModelDefaults } from "../../shared/image-generation-defaults";
 
 const imageCapabilities = ["generate", "edit", "upscale", "remove_background", "batch"];
 
@@ -151,6 +153,9 @@ export function presentPublicModel(model: Record<string, unknown>, role: unknown
   const mark = markPlatformLabel(model);
   const label = studio ? { name: "豆包生图", description: "图片生成、参考图编辑与透明背景；图层拆分使用独立工作区" } : image ? creativeImageLabel(model) : mark;
   const imageCost = getApimartImageCost(model.providerId, model.modelId);
+  const imageDefaults = model.imageDefaults as ImageModelDefaults | undefined;
+  const defaultBackground = imageDefaults?.background ?? (image && model.protocol === "apimart" && !model.workflowConfigId
+    ? apimartGpt26DefaultBackground(model.modelId) : undefined);
   return {
     id: model.id,
     name: label?.name || (hidden ? publicModelName(model) : model.name),
@@ -170,6 +175,9 @@ export function presentPublicModel(model: Record<string, unknown>, role: unknown
     displayOrder: typeof model.displayOrder === "number" && Number.isFinite(model.displayOrder)
       ? model.displayOrder : 1000 + defaultModelOrder(model),
     imageParameterProfile: hidden ? anonymousProfiles[profile] : profile,
+    ...(model.isDefaultImageModel === true ? { isDefaultImageModel: true } : {}),
+    ...(imageDefaults ? { imageDefaults } : {}),
+    ...(defaultBackground ? { imageDefaultBackground: defaultBackground } : {}),
     ...(image && mark ? { imageSupportsMask: /^gpt-image-2\.[56]-(?:flare|sunburst)$/.test(mark.modelId) } : {}),
     ...(studio ? { imageSupportsOfficialFallback: false } : {}),
     ...(image ? { publicName: publicModelName(model), modelIdentityHidden: hidden } : {}),

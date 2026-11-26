@@ -170,8 +170,9 @@ const imageResultCommits = new Map<string, ImageResultCommit>();
 type GenerationToolMode = Exclude<AdminToolMode, "gpt-chat" | "batch-image-edit" | "seamless-stitch">;
 
 const imageToolModes: Record<GenerationToolMode, { title: string; description: string; placeholder: string; button: string; projectId: string; requiresReference: boolean }> = {
-    "remove-background": { title: "一键去背景", description: "上传一张原图，由模型直接生成全彩透明图，可下载透明 PNG 或白底 JPG。原图与结果分别保留，不保证逐像素一致，请检查主体细节与边缘。", placeholder: "", button: "一键去背景", projectId: "tool-remove-background", requiresReference: true },
-    "hd-upscale": { title: "高清放大", description: "上传一张原图，提升图片清晰度，原图保持不变。", placeholder: "", button: "高清放大", projectId: "tool-hd-upscale", requiresReference: true },
+    "remove-background": { title: "一键去背景", description: "上传一张原图，使用 Recraft 去除背景，可下载透明 PNG 或白底 JPG。原图与结果分别保留，不保证逐像素一致，请检查主体细节与边缘。", placeholder: "", button: "一键去背景", projectId: "tool-remove-background", requiresReference: true },
+    "vectorize": { title: "图片转矢量图", description: "上传 PNG、JPEG 或 WebP，使用 Recraft Vectorizer Pro 将轮廓与色块转为可编辑的 SVG 路径。", placeholder: "", button: "转为 SVG", projectId: "tool-vectorize", requiresReference: true },
+    "hd-upscale": { title: "高清放大", description: "上传一张原图，使用 Recraft 高清放大并保留细节，原图保持不变。", placeholder: "", button: "高清放大", projectId: "tool-hd-upscale", requiresReference: true },
     "item-extract": { title: "提取产品图", description: "上传一张产品来源图，生成白底平放的完整产品图。AI 会补足必要遮挡，不是仅删除背景，也不代表真实隐藏结构。", placeholder: "", button: "提取产品图", projectId: "tool-item-extract", requiresReference: true },
     "midjourney-blend": {
         title: "MJ 多图融合",
@@ -286,7 +287,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const config = baseConfig;
     const referenceMode = historyTool === "image-generation" || historyTool === "creative-text-to-style" ? "generate" : "edit";
     const [references, setReferences, referencesReady] = useGenerationDraft<ImageReferenceItem[]>(`${inputDraftScope}:references`, [], async items => initializeImageReferenceRoles(await Promise.all(items.map(async item => ({ ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) }))), referenceMode));
-    const toolKey = requireToolKey(historyTool === "detail-enhance" || historyTool === "hd-upscale" ? "upscale" : historyTool === "image-generation" || historyTool === "midjourney-blend" || historyTool === "creative-text-to-style" ? "image_generation" : "inpaint", historyTool === "remove-background" || historyTool === "item-extract" ? "image-edit" : historyTool === "hd-upscale" ? "detail-enhance" : historyTool);
+    const toolKey = requireToolKey(historyTool === "detail-enhance" || historyTool === "hd-upscale" ? "upscale" : historyTool === "image-generation" || historyTool === "midjourney-blend" || historyTool === "creative-text-to-style" ? "image_generation" : "inpaint", historyTool === "remove-background" || historyTool === "vectorize" || historyTool === "item-extract" ? "image-edit" : historyTool === "hd-upscale" ? "detail-enhance" : historyTool);
     const businessModels = useBusinessConfigStore(state => state.models);
     const blendModels = businessModels.filter(item => item.imageParameterProfile === "blend" || item.imageParameterProfile === "midjourney-blend" || item.modelId === "midjourney-blend");
     const baseImageModel = baseConfig.imageModel || baseConfig.model;
@@ -412,7 +413,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     let previewNegativePrompt = "";
     try { previewNegativePrompt = readImageOptions(effectiveConfig.imageOptions).negative_prompt || ""; } catch { /* Existing submission validation reports invalid image settings. */ }
     const generationCount = quickTool ? 1 : Number(normalizeImageModelSettings(config, selectedModelProfile).count);
-    const quickReferenceError = quickTool ? references.map(reference => quickImageReferenceFileError({ type: reference.type, size: reference.bytes })).find(Boolean) : undefined;
+    const quickReferenceError = quickTool ? references.map(reference => quickImageReferenceFileError({ type: reference.type, size: reference.bytes }, historyTool)).find(Boolean) : undefined;
     const referenceValidation = quickTool
         ? { valid: references.length <= 1 && !quickReferenceError, minimum: 1, maximum: 1, supportsReferences: true, message: references.length > 1 ? uiText("请只添加一张原图") : quickReferenceError }
         : validateImageReferences(adminModelId, references, isBlend ? { ...selectedModelProfile, kind: "midjourney-blend" } : selectedModelProfile);
@@ -673,7 +674,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         if (imageFiles.some(file => !file.type.startsWith("image/"))) throw new Error("请选择图片文件，其他格式无法作为参考图。");
         if (quickTool) {
             if (references.length + imageFiles.length > 1) throw new Error("请只添加一张原图");
-            const error = imageFiles.map(quickImageReferenceFileError).find(Boolean);
+            const error = imageFiles.map(file => quickImageReferenceFileError(file, historyTool)).find(Boolean);
             if (error) throw new Error(error);
         }
         const nextReferences = await Promise.all(
@@ -697,7 +698,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             const blobs = await readClipboardImages(navigator.clipboard);
             if (quickTool) {
                 if (references.length + blobs.length > 1) throw new Error("请只添加一张原图");
-                const error = blobs.map(quickImageReferenceFileError).find(Boolean);
+                const error = blobs.map(file => quickImageReferenceFileError(file, historyTool)).find(Boolean);
                 if (error) throw new Error(error);
             }
             const nextReferences = await Promise.all(

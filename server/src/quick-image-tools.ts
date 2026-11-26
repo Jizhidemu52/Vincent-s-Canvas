@@ -1,16 +1,19 @@
 import { isQuickImageAction, matchesQuickImageTaskTarget, type QuickImageAction } from "../../shared/quick-image-tools";
 import { ToolConfigurationError } from "./tool-configuration";
 import { apiMartImageModel } from "./apimart-image";
+import { isRecraftAction, recraftTools, type RecraftAction } from "../../shared/recraft-tools";
 
 export const QUICK_IMAGE_RECIPE_VERSION = 1;
 export function quickImageRecipeVersion(action: QuickImageAction) { return action === "remove-background" ? 2 : QUICK_IMAGE_RECIPE_VERSION; }
 const DIRECT_CUTOUT_OUTPUT = "Return the finished full-color subject image with the background removed and real transparency in a PNG alpha channel. Do not return a mask, grayscale selection map, solid background or checkerboard. This image is the final result; no mask will be applied to the original.";
 export const quickImageDefaultParameters: Record<QuickImageAction, Readonly<Record<string, unknown>>> = {
+  vectorize: {},
   "remove-background": {},
   "hd-upscale": { size: "auto", resolution: "4k" },
   "item-extract": { size: "auto", resolution: "2k", quality: "medium", background: "opaque", output_format: "png" },
 };
 export const quickImageDefaultPrompts: Record<QuickImageAction, string> = {
+  vectorize: "图片转矢量图",
   "remove-background": [
     "Remove the background from the supplied image and return the complete main foreground subject, whether it is a person, animal, product, matching pair or coordinated set, with all its attached parts.",
     "Preserve the subject's colors, proportions, placement, material, text and visible details. Keep fine hair, fibers, straps, handles, lace and genuine holes; do not add or redesign details.",
@@ -39,6 +42,11 @@ export type QuickImageSnapshot = Readonly<{ action: QuickImageAction; modelConfi
   parameters: Readonly<Record<string, unknown>>; configurationVersion: number; adminTest?: boolean }>;
 /** Symbols cannot be supplied through JSON, and survive server-side object spreads. */
 export const QUICK_IMAGE_SNAPSHOT = Symbol("server quick image snapshot");
+export function prepareRecraftTool<T extends QuickImageInput>(input: T, action: RecraftAction) {
+  const { id, endpoint, label } = recraftTools[action];
+  const snapshot = Object.freeze({ modelConfigId: id, modelId: endpoint, action, prompt: label, parameters: Object.freeze({}), configurationVersion: 1 });
+  return prepareQuickImageTask(input, snapshot);
+}
 export type QuickImageInput = {
   operationType: string; toolKey?: string | null; modelConfigId?: string | null; prompt?: string;
   promptInput?: unknown; sourceUrls: string[]; parameters?: Record<string, unknown>;
@@ -67,6 +75,10 @@ export function prepareQuickImageTask<T extends QuickImageInput>(input: T, snaps
   if (input.sourceUrls.length !== 1 || !input.sourceUrls[0]?.trim()) throw new ToolConfigurationError("QUICK_IMAGE_SOURCE_REQUIRED", "请上传或选择一张需要处理的图片");
   const action = requested;
   if (snapshot && snapshot.action !== action) throw new ToolConfigurationError("QUICK_IMAGE_ACTION_INVALID", "一键图片配置与操作不匹配");
+  if (snapshot && isRecraftAction(action) && snapshot.modelConfigId === recraftTools[action].id) {
+    return { ...input, toolKey: tool, modelConfigId: snapshot.modelConfigId, promptInput: undefined, prompt: snapshot.prompt,
+      parameters: { tool, n: 1, count: 1, quickImageAction: action }, [QUICK_IMAGE_SNAPSHOT]: snapshot };
+  }
   const prompt = snapshot?.prompt ?? quickImageDefaultPrompts[action];
   return {
     ...input, toolKey: tool, modelConfigId: snapshot?.modelConfigId, promptInput: undefined,

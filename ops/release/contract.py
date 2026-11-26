@@ -19,6 +19,9 @@ TASK_REPAIR_MIGRATIONS = ("056_task_repair.sql", "057_task_original_size_reissue
 TRYOUT_MIGRATIONS = ("059_canvas_tryout.sql", "060_material_presets.sql", "061_provider_upload_cache.sql", "062_product_cards.sql", "063_model_library.sql", "064_tryout_model_bindings.sql", "065_apimart_image_callback.sql")
 
 
+IMAGE_TOOL_MIGRATIONS = ("066_image_generation_defaults.sql", "067_recraft_image_tools.sql")
+
+
 class Rejected(ValueError):
     pass
 

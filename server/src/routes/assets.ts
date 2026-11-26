@@ -20,6 +20,7 @@ import type { Database } from "../db";
 import { ObjectStorage } from "../object-storage";
 import { requireRole } from "../rbac";
 import type { AuthenticatedRequest, SessionUser } from "../types";
+import { recraftTools } from "../../../shared/recraft-tools";
 import { allowedAssetMimeTypes, normalizeAssetMime, validateAssetUpload, AssetMediaError, streamAssetContent } from "../asset-delivery";
 import { assetBatchSchema, assetListMetadataFields, assetPage, parseAssetListQuery } from "../asset-query";
 import { scheduleAssetThumbnails } from "../asset-thumbnails";
@@ -61,6 +62,7 @@ const reverseSchema = z.object({ idempotencyKey: z.string().trim().min(8).max(16
 const assetSelect = `a.id,a.owner_user_id AS "ownerUserId",u.display_name AS "ownerName",a.department_id AS "departmentId",d.name AS "departmentName",a.project_id AS "projectId",p.name AS "projectName",a.task_id AS "taskId",a.filename,a.mime_type AS "mimeType",a.byte_size::int AS "byteSize",a.kind,a.source,a.operation_type AS "operationType",a.prompt,m.name AS "modelName",a.status,a.visibility_scope AS "visibilityScope",a.metadata,a.deleted_at AS "deletedAt",a.created_at AS "createdAt"`;
 const primaryImageAssetClause = `NOT (COALESCE(a.metadata->'imageResult'->>'version','')='1' AND COALESCE(a.metadata->'imageResult'->>'role','') IN ('provider-original','export'))`;
 const variantAssetSelect = `a.id,a.owner_user_id AS "ownerUserId",a.task_id AS "taskId",a.filename,a.mime_type AS "mimeType",a.status,a.metadata,a.deleted_at AS "deletedAt"`;
+const recraftVectorField = `EXISTS(SELECT 1 FROM tasks t WHERE t.id=a.task_id AND t.model_config_id='${recraftTools.vectorize.id}') AS "recraftVector"`;
 const assetUrls = `'/api/assets/'||a.id||'/content' AS "contentUrl",CASE WHEN a.kind IN ('image','video') THEN '/api/assets/'||a.id||'/thumb?w=256' END AS "thumbnailUrl",CASE WHEN a.kind IN ('image','video') THEN '/api/assets/'||a.id||'/thumb?w=1024' END AS "previewUrl"`;
 const lightAssetSelect = assetSelect.replace('a.prompt,', `(COALESCE(NULLIF(btrim(a.prompt),''),NULLIF(btrim(a.metadata->>'prompt'),''),NULLIF(btrim(a.metadata->>'recreatePath'),''),NULLIF(btrim(a.metadata->>'content'),'')) IS NOT NULL) AS "canRecreate",NULL::text AS prompt,`).replace('a.metadata,',
   `jsonb_strip_nulls(jsonb_build_object(${assetListMetadataFields.map(key => `'${key}',a.metadata->'${key}'`).join(',')})) AS metadata,`)
@@ -514,8 +516,8 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage, playbac
       const access = accessClause(actor);
       const values = [request.params.id, ...access.values];
       const shifted = access.sql.replace(/\$(\d+)/g, (_, number) => `$${Number(number) + 1}`);
-      const result = await db.query<{ object_key: string; mime_type: string; filename: string }>(
-        `SELECT object_key,mime_type,filename FROM assets a WHERE a.id=$1 AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted}`,
+      const result = await db.query<{ object_key: string; mime_type: string; filename: string; recraftVector: boolean }>(
+        `SELECT object_key,mime_type,filename,${recraftVectorField} FROM assets a WHERE a.id=$1 AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted}`,
         values,
       );
       const asset = result.rows[0];
@@ -542,10 +544,11 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage, playbac
         taskScope = ` AND a.owner_user_id=$${values.length - 1} AND a.task_id=$${values.length} AND EXISTS(SELECT 1 FROM tasks usage_task WHERE usage_task.id=a.task_id AND usage_task.user_id=a.owner_user_id)`;
         response.set('Cache-Control', 'no-store');
       }
-      const result = await db.query<{ object_key: string; thumbnail_key: string | null; mime_type: string; filename: string; kind: string; metadata: Record<string, unknown>; thumbnail_attempts: number; thumbnail_lease_token: string | null }>(
-        `SELECT object_key,thumbnail_${width}_key AS thumbnail_key,mime_type,filename,kind,metadata,thumbnail_attempts,thumbnail_lease_token FROM assets a WHERE a.id=$1 AND a.kind IN ('image','video') AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted}${taskScope}`, values);
+      const result = await db.query<{ object_key: string; thumbnail_key: string | null; mime_type: string; filename: string; kind: string; metadata: Record<string, unknown>; recraftVector: boolean; thumbnail_attempts: number; thumbnail_lease_token: string | null }>(
+        `SELECT object_key,thumbnail_${width}_key AS thumbnail_key,mime_type,filename,kind,metadata,thumbnail_attempts,thumbnail_lease_token,${recraftVectorField} FROM assets a WHERE a.id=$1 AND a.kind IN ('image','video') AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted}${taskScope}`, values);
       const asset = result.rows[0];
       if (!asset) { response.status(404).end(); return; }
+      if (!binding && asset.recraftVector && asset.mime_type === "image/svg+xml") { await streamAssetContent(request, response, storage, asset); return; }
       if (!asset.thumbnail_key) {
         // Usage inspection is read-only: a missing derivative is not permission
         // to read the original or start a thumbnail-generation job.

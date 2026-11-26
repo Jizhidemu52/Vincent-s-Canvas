@@ -21,6 +21,9 @@ import { ImageEditInputError, prepareImageEditInput, type ImageEditInput } from 
 import { deploymentFeatures } from "./deployment-features";
 import { billedDemoCredits, resolveStandaloneDemoUser } from "./demo-standalone-mode";
 import { serveStandaloneWeb } from "./demo-standalone-web";
+import { recraftTools, recraftProviderId, isRecraftAction, type RecraftAction } from "../../shared/recraft-tools";
+import { runRecraftImage, validateRecraftSource } from "./recraft-image";
+import { ProviderSubmissionRejected } from "./provider-submission-policy";
 import { ApiMartImageProviderFailure, ApiMartImageQueryRetryable, apiMartImageModel, preflightApiMartImageRequest, runApiMartImageTask } from "./apimart-image";
 import { createDemoMarkProvider } from "./demo-mark-provider";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
@@ -38,7 +41,7 @@ import { chatUpstreamFailureMessage } from "./chat-upstream-failure";
 import { normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
 import { createDemoProviderVideoSources, resolveOwnedDemoVideoSources } from "./demo-video-sources";
 import { createDemoVideoPlayback } from "./demo-video-playback";
-import { decodeInlineImageResult } from "./demo-task-result-assets";
+import { decodeInlineImageResult, type InlineImageResult } from "./demo-task-result-assets";
 import { ImageResultPersistenceError, imageResultExtension, storeImageResult } from "./image-result-storage";
 import { DemoQuickImageConfigurationStore } from "./demo-quick-image-configuration";
 import { ToolConfigurationError } from "./tool-configuration";
@@ -392,6 +395,10 @@ for (const modelId of supportedVideoModelIds) {
 }
 demoProviders.push(markImageProvider.provider);
 demoModels.push(...markImageProvider.models);
+demoProviders.push({ id: recraftProviderId, name: "Recraft", protocol: "custom", baseUrl: "https://external.api.recraft.ai/v1", enabled: true, hasCredentials: Boolean(process.env.RECRAFT_API_TOKEN?.trim()) });
+for (const tool of Object.values(recraftTools)) {
+  demoModels.push({ id: tool.id, providerId: recraftProviderId, providerName: "Recraft", name: tool.label, modelId: tool.endpoint, enabled: true, capabilities: tool.endpoint === "crispUpscale" ? ["edit","upscale"] : ["edit"], creditCost: 0 });
+}
 assignDemoPublicModelNumbers(demoModels);
 const demoPrices: Array<Record<string, unknown>> = Array.from(
   new Map(toolDefinitions.filter(tool => tool.operationType !== "chat").map((tool) => [tool.operationType, tool])).values(),
@@ -754,8 +761,8 @@ function finishDemoTaskFailure(task: DemoTask, error: unknown, patch: Partial<De
   }
 }
 
-async function completeDemoImageTask(task: DemoTask, ownerUserId: string, resultUrl: string, editInput?: ImageEditInput<DemoAsset>) {
-  const inlineImage = decodeInlineImageResult(resultUrl);
+async function completeDemoImageTask(task: DemoTask, ownerUserId: string, result: string | InlineImageResult, editInput?: ImageEditInput<DemoAsset>) {
+  const inlineImage = typeof result === "string" ? decodeInlineImageResult(result) : result;
   if (!inlineImage) throw new Error("图片结果为空或格式无效，未保存为成功任务");
   const primary = await storeImageResult({
     result: inlineImage, parameters: task.parameters ?? {}, resultIndex: 0,
@@ -764,7 +771,7 @@ async function completeDemoImageTask(task: DemoTask, ownerUserId: string, result
       const filename = `generation-${task.id}${role === "primary" ? "" : `-${role}`}.${imageResultExtension(image.mimeType)}`;
       const existing = [...demoAssets.values()].find(asset => asset.ownerUserId === ownerUserId && asset.taskId === task.id && asset.filename === filename);
       const asset: DemoAsset = { id: existing?.id || crypto.randomUUID(), ownerUserId, filename, taskId: task.id,
-        projectId: task.projectId, mimeType: image.mimeType, bytes: image.bytes, createdAt: existing?.createdAt || now(), metadata };
+        projectId: task.projectId, mimeType: image.mimeType, bytes: image.bytes, createdAt: existing?.createdAt || now(), metadata: task.modelConfigId === recraftTools.vectorize.id ? { ...metadata, recraftVector: true } : metadata };
       saveDemoAsset(asset);
       return { assetId: asset.id, filename, mimeType: asset.mimeType };
     },
@@ -773,7 +780,7 @@ async function completeDemoImageTask(task: DemoTask, ownerUserId: string, result
       saveDemoAssetMetadata([{ ...demoAssetFields(current), metadata: { ...current.metadata, ...metadata } }]);
     },
   });
-  resultUrl = `/api/assets/${primary.assetId}/content`;
+  const resultUrl = `/api/assets/${primary.assetId}/content`;
   updateDemoTask(task, { resultUrls: [resultUrl], status: "success", stage: "succeeded", errorCode: null, failureReason: null, lastFailure: undefined, upstreamResultUrl: undefined, updatedAt: now() });
 }
 
@@ -1264,7 +1271,7 @@ Bun.serve({
     }
     if (
       /^\/api\/assets\/[^/]+\/content$/.test(path) &&
-      request.method === "GET"
+      ["GET", "HEAD"].includes(request.method)
     ) {
       const asset = demoAssets.get(path.split("/")[3]!);
       if (!asset || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId)) || !demoAssetByteLength(asset))
@@ -1462,7 +1469,10 @@ Bun.serve({
         ) || (input.operationType === "seamless_stitch" && Boolean(markImageProvider.apiKey) &&
           markImageProvider.models.some(model => model.id === input.modelConfigId))
       ) {
-        if (!openTokenApiKey && !apiMartApiKey && !markImageProvider.apiKey)
+        const action = input.parameters.quickImageAction;
+        const recraftAction = isRecraftAction(action) && input.modelConfigId === recraftTools[action].id ? action : undefined;
+        if (recraftAction && !process.env.RECRAFT_API_TOKEN?.trim()) return json({ error: "PROVIDER_NOT_CONFIGURED", message: "服务端尚未配置 Recraft API 密钥" }, 503);
+        if (!recraftAction && !openTokenApiKey && !apiMartApiKey && !markImageProvider.apiKey)
           return json(
             {
               error: "PROVIDER_NOT_CONFIGURED",
@@ -1490,7 +1500,7 @@ Bun.serve({
             item.id === input.modelConfigId &&
             typeof item.modelId === "string" &&
             (Boolean(input.parameters.quickImageAction) || isSelectableCreativeModel(item)) &&
-            ((Boolean(openTokenApiKey) &&
+            ((recraftAction && item.providerId === recraftProviderId) || (Boolean(openTokenApiKey) &&
               item.providerId === openTokenProviderId &&
               isOpenTokenImageModel(item.modelId)) ||
               (Boolean(apiMartApiKey) &&
@@ -1533,7 +1543,8 @@ Bun.serve({
         let editInput: ImageEditInput<DemoAsset>;
         try {
           editInput = await prepareImageEditInput(sources, input.parameters || {}, { protocol: model.providerId === openTokenProviderId ? "openai" : "apimart", modelId: imageModelId, operationType: input.operationType! });
-          if (input.parameters.quickImageAction || imageModelId === "seedream-5-5" || imageModelId === QWEN_IMAGE_MODEL) preflightApiMartImageRequest({ modelId: imageModelId, prompt: input.prompt, parameters: input.parameters, sourceImages: editInput.references });
+          if (recraftAction) await validateRecraftSource(recraftAction, sources[0]!);
+          else if (input.parameters.quickImageAction || imageModelId === "seedream-5-5" || imageModelId === QWEN_IMAGE_MODEL) preflightApiMartImageRequest({ modelId: imageModelId, prompt: input.prompt, parameters: input.parameters, sourceImages: editInput.references });
           await validateQuickImageSource(editInput.references[0], input.parameters || {});
         } catch (error) {
           if (error instanceof ImageEditInputError || error instanceof ImageResultProcessingError) return json({ error: error.code, message: error.message }, 400);
@@ -1599,7 +1610,8 @@ Bun.serve({
         Object.assign(task, { ...promptMetadata, prompt: input.prompt || "", parameters: input.parameters || {}, sourceUrls: input.sourceUrls || [], projectId: input.projectId, modelConfigId: input.modelConfigId });
         updateDemoTask(task, {});
         if (features.creditsEnabled) user.creditBalance -= credits;
-        if (model.providerId === openTokenProviderId)
+        if (recraftAction) void runDemoRecraft(task, user, recraftAction, sources[0]!);
+        else if (model.providerId === openTokenProviderId)
           void runOpenTokenImageTaskForDemo(
             task,
             user,
@@ -2224,7 +2236,11 @@ Bun.serve({
         workflowName: null,
       };
       demoModels.push(model);
-      assignDemoPublicModelNumbers(demoModels);
+      demoProviders.push({ id: recraftProviderId, name: "Recraft", protocol: "custom", baseUrl: "https://external.api.recraft.ai/v1", enabled: true, hasCredentials: Boolean(process.env.RECRAFT_API_TOKEN?.trim()) });
+for (const tool of Object.values(recraftTools)) {
+  demoModels.push({ id: tool.id, providerId: recraftProviderId, providerName: "Recraft", name: tool.label, modelId: tool.endpoint, enabled: true, capabilities: tool.endpoint === "crispUpscale" ? ["edit","upscale"] : ["edit"], creditCost: 0 });
+}
+assignDemoPublicModelNumbers(demoModels);
       return json({ model: presentAdminModel(model) }, 201);
     }
     if (
@@ -2248,7 +2264,11 @@ Bun.serve({
         input,
         provider ? { providerName: provider.name } : {},
       );
-      assignDemoPublicModelNumbers(demoModels);
+      demoProviders.push({ id: recraftProviderId, name: "Recraft", protocol: "custom", baseUrl: "https://external.api.recraft.ai/v1", enabled: true, hasCredentials: Boolean(process.env.RECRAFT_API_TOKEN?.trim()) });
+for (const tool of Object.values(recraftTools)) {
+  demoModels.push({ id: tool.id, providerId: recraftProviderId, providerName: "Recraft", name: tool.label, modelId: tool.endpoint, enabled: true, capabilities: tool.endpoint === "crispUpscale" ? ["edit","upscale"] : ["edit"], creditCost: 0 });
+}
+assignDemoPublicModelNumbers(demoModels);
       return json({ model: presentAdminModel(model) });
     }
     if (
@@ -2414,6 +2434,16 @@ Bun.serve({
 });
 
 console.log(`Local demo API listening on http://${demoHost}:${demoPort}`);
+
+async function runDemoRecraft(task: DemoTask, user: (typeof demoAccounts)[number]["user"], action: RecraftAction, source: DemoAsset) {
+  try {
+    const image = await runRecraftImage(action, source, async () => { updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() }); });
+    await completeDemoImageTask(task, user.id, image);
+  } catch (error) {
+    const uncertain = Boolean(task.submissionStartedAt) && !(error instanceof ProviderSubmissionRejected);
+    finishDemoTaskFailure(task, error, { status: uncertain ? "paused" : "failed", failureReason: error instanceof Error ? error.message : "Recraft 图片处理失败" }, user);
+  }
+}
 
 async function runApiMartImageTaskForDemo(
   task: DemoTask,

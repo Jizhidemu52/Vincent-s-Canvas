@@ -186,6 +186,7 @@ function databaseFixture(initialIds: string[] | null = null) {
     if (sql === "COMMIT") { storedIds = stagedIds; audits += stagedAudits; transaction = false; return { rows: [] }; }
     if (sql === "ROLLBACK") { transaction = false; stagedIds = null; stagedAudits = 0; return { rows: [] }; }
     if (sql.includes("pg_advisory_xact_lock")) return { rows: [] };
+    if (sql.includes("FROM image_generation_defaults")) return { rows: [] };
     if (sql.includes("FROM model_configs")) {
       const requested = values.find(Array.isArray) as string[] | undefined;
       let rows = requested ? models.filter(row => requested.includes(row.id)) : models;

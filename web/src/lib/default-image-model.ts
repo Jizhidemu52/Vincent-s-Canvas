@@ -1,7 +1,7 @@
 export const DEFAULT_IMAGE_MODEL = "aplmart-gpt2.6-flare";
 export const DEFAULT_CANVAS_IMAGE_MODEL = "aplmart-gpt2.6-flare";
 
-type ImageModelIdentity = { id?: string; modelId: string; name?: string; publicName?: string };
+type ImageModelIdentity = { id?: string; modelId: string; name?: string; publicName?: string; isDefaultImageModel?: boolean };
 
 /** Resolve the provider-specific public alias, never the ambiguous upstream GPT-2 ID. */
 export function preferredImageModel<T extends ImageModelIdentity>(models: readonly T[], preferred: readonly (string | undefined)[] = []): T | undefined {
@@ -11,5 +11,5 @@ export function preferredImageModel<T extends ImageModelIdentity>(models: readon
         const normalized = separator < 0 ? value : value.slice(separator + 2);
         return models.find(model => [model.id, model.modelId, model.name, model.publicName].includes(normalized));
     };
-    return preferred.map(find).find(Boolean) || find(DEFAULT_IMAGE_MODEL) || find("aplmart-gpt2") || models[0];
+    return preferred.map(find).find(Boolean) || models.find(model => model.isDefaultImageModel) || find(DEFAULT_IMAGE_MODEL) || find("aplmart-gpt2") || models[0];
 }

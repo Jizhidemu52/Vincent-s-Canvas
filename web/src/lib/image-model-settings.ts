@@ -4,7 +4,7 @@ import type { PublicModel } from "@/services/api/business-config";
 import type { ApiUserRole } from "@/services/api/auth";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 import { normalizeImageOptions, readImageOptions } from "./image-advanced-settings";
-import { validateGpt26GifParameters } from "../../../shared/gpt26-image-options";
+import { apimartGpt26DefaultBackground, validateGpt26GifParameters } from "../../../shared/gpt26-image-options";
 import { QWEN_IMAGE_MAX_EDGE, QWEN_IMAGE_MIN_EDGE, QWEN_IMAGE_MODEL, QWEN_IMAGE_RATIOS } from "../../../shared/qwen-image-options";
 
 type InternalImageParameterProfile = "standard" | "gpt" | "gemini" | "midjourney" | "midjourney-blend" | "unverified" | "quality-resolution" | "resolution-1k" | "grok-image" | "mai-image" | "seedream55" | "qwen-image";
@@ -42,6 +42,7 @@ export function imageModelProfile(model: string, models: readonly PublicModel[] 
     const extendedQuality = kind === "standard" && (configuredKind === "standard-flex-plus" || actual === "gpt-image-2.5-flare" || actual === "gpt-image-2.5-sunburst");
     const flexibleSize = kind === "standard" && (extendedQuality || configuredKind === "standard-flex" || actual === "gpt-image-2");
     const constrainedPixels = flexibleSize || independentResolution;
+    const defaultBackground = configured ? configured.imageDefaultBackground : apimartGpt26DefaultBackground(actual);
     const canSeeIdentity = isAdminRole(role);
     return {
         // Ordinary image actions submit exactly one task; file batches are a separate workflow.
@@ -50,6 +51,9 @@ export function imageModelProfile(model: string, models: readonly PublicModel[] 
         sizeConstraints: qwen ? { multiple: 1, minEdge: QWEN_IMAGE_MIN_EDGE, maxEdge: QWEN_IMAGE_MAX_EDGE, maxAspectRatio: 8, minPixels: 0, maxPixels: QWEN_IMAGE_MAX_EDGE ** 2 } : mai ? { multiple: 1, minEdge: 768, maxEdge: mai27 ? Math.floor(maiMaxPixels / 768) : 3072, maxAspectRatio: mai27 ? maiMaxPixels / (768 * 768) : 4, minPixels: 589824, maxPixels: maiMaxPixels } : constrainedPixels ? { multiple: 16, minEdge: 0, maxEdge: 3840, maxAspectRatio: 3, minPixels: 655360, maxPixels: 8294400 } : undefined,
         sizeConstraintMessage: qwen ? "宽高须为 512–2048 范围内的整数。精确像素尺寸优先于分辨率档位。" : mai27 ? "宽高须为不少于 768 的正整数，总像素不超过 4194304。模型将实际输出宽高各向下取整到 32 的倍数；宽高比模式支持 1:4 至 4:1，不支持自适应。" : mai ? "宽高须为不少于 768 的正整数，比例在 1:4 至 4:1 内，总像素不超过 2359296。建议使用 32 的倍数；否则模型会将实际输出宽高各向下取整到 32 的倍数。" : constrainedPixels ? "宽高须为 16 的倍数，单边不超过 3840，长短边比例不超过 3:1，总像素为 655360–8294400。超过 2560 × 1440 的输出为实验尺寸。" : "",
         backgrounds: constrainedPixels || seedream ? ["auto", "opaque", "transparent"] : [],
+        defaultBackground: constrainedPixels ? defaultBackground : undefined,
+        defaultResolution: configured?.imageDefaults?.resolution,
+        modelDefaults: configured?.imageDefaults,
         outputFormats: seedream ? ["png", "jpeg"] : constrainedPixels ? ["png", "jpeg", "webp", ...(gpt26 ? ["gif"] : [])] : [],
         outputCompression: constrainedPixels,
         resolutions: seedream ? ["1k", "1.5k", "2k"] : independentResolution ? ["1k", "2k", "4k"] : grok || mai || qwen ? ["1k", "2k"] : [],
@@ -130,7 +134,9 @@ export function normalizeImageModelSettings(config: Pick<AiConfig, "size" | "qua
 
 /** Apply only to an editable draft after an explicit model selection, never a task snapshot. */
 export function adaptImageModelSettings(config: Pick<AiConfig, "size" | "quality" | "count"> & { imageOptions?: string }, profile: ReturnType<typeof imageModelProfile>) {
-    const settings = normalizeImageModelSettings(config, profile);
+    const defaults = profile.modelDefaults;
+    const defaultQuality = defaults?.quality ?? (profile.qualities.includes(defaults?.resolution || "") ? defaults?.resolution : undefined);
+    const settings = normalizeImageModelSettings({ ...config, size: defaults?.size ?? config.size, quality: defaultQuality ?? config.quality }, profile);
     if (imageModelSettingsError(settings.size, profile, config.imageOptions)) settings.size = imageOutputIsGif(config.imageOptions, profile) ? "auto" : nearestImageSize(settings.size, profile.sizes.filter(size => !imageModelSettingsError(size, profile, undefined)));
     return { ...settings, imageOptions: normalizeImageOptions(config.imageOptions, profile) };
 }

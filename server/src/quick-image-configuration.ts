@@ -1,14 +1,15 @@
 import { z } from "zod";
+import { isRecraftAction } from "../../shared/recraft-tools";
 import type { AdminQuickImageConfiguration, QuickImageConfigurationInput, QuickImageEligibleModel } from "../../shared/quick-image-configuration";
 import { isQuickImageAction, quickImageModelId, type QuickImageAction } from "../../shared/quick-image-tools";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { QWEN_IMAGE_MODEL } from "../../shared/qwen-image-options";
 import { apiMartImageModel, preflightApiMartImageRequest } from "./apimart-image";
 import type { Database } from "./db";
-import { prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, quickImageDefaultParameters, quickImageDefaultPrompts, quickImageOutputParameters, type QuickImageInput, type QuickImageSnapshot } from "./quick-image-tools";
+import { prepareRecraftTool, prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, quickImageDefaultParameters, quickImageDefaultPrompts, quickImageOutputParameters, type QuickImageInput, type QuickImageSnapshot } from "./quick-image-tools";
 import { ToolConfigurationError } from "./tool-configuration";
 
-export const quickImageActions = ["remove-background", "hd-upscale", "item-extract"] as const;
+export const quickImageActions = ["item-extract"] as const;
 export const quickImageActionSchema = z.enum(quickImageActions);
 const scalar = z.union([z.string().max(1000), z.number().finite(), z.boolean()]);
 export const quickImageConfigurationSchema = z.object({ modelConfigId: z.string().uuid(), prompt: z.string().trim().min(1).max(4000),
@@ -82,6 +83,7 @@ export async function prepareConfiguredQuickImageTask<T extends QuickImageInput>
   const action = input.parameters?.quickImageAction;
   if (!isQuickImageAction(action)) return prepareQuickImageTask(input);
   if (input[QUICK_IMAGE_SNAPSHOT] && !draft) return input;
+  if (isRecraftAction(action) && !draft) return prepareRecraftTool(input, action);
   const configuration = draft ? { ...draft, configurationVersion: 0 } : await readQuickImageConfiguration(db, action);
   if (!configuration.modelConfigId) throw new ToolConfigurationError("MODEL_DISABLED", "管理员尚未配置一键工具的可用模型");
   const model = await readQuickImageModel(db, configuration.modelConfigId);

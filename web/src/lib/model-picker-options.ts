@@ -2,7 +2,7 @@ import { modelOptionName, selectableModelsByCapability, type AiConfig, type Mode
 import { DEFAULT_IMAGE_MODEL, preferredImageModel } from "@/lib/default-image-model";
 
 export type ModelPickerSource = "server" | "local";
-type CapabilityModel = { id?: string; modelId: string; name?: string; publicName?: string; capabilities: readonly string[] };
+type CapabilityModel = { id?: string; modelId: string; name?: string; publicName?: string; capabilities: readonly string[]; isDefaultImageModel?: boolean };
 
 /** Presentation only: descriptions never become model names or request identifiers. */
 export function modelLabelWithUsage(name: string, description?: string) {
@@ -24,7 +24,8 @@ export function filterServerModelsByCapability<T extends CapabilityModel>(models
 export function getModelPickerOptions(config: AiConfig, capability: ModelCapability | undefined, models: readonly CapabilityModel[], source: ModelPickerSource, current?: string) {
     if (capability && source === "server") {
         const compatible = filterServerModelsByCapability(models, capability);
-        const preferred = capability === "image" ? compatible.find(model => [model.id, model.modelId, model.name, model.publicName].includes(DEFAULT_IMAGE_MODEL)) : undefined;
+        const preferred = capability === "image" ? compatible.find(model => model.isDefaultImageModel)
+            ?? compatible.find(model => [model.id, model.modelId, model.name, model.publicName].includes(DEFAULT_IMAGE_MODEL)) : undefined;
         return Array.from(new Set([...(preferred ? [preferred.modelId] : []), ...compatible.map(model => model.modelId)]));
     }
     return Array.from(new Set([...(config.channelMode === "local" && !capability ? [current] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model))));

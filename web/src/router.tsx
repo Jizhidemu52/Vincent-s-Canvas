@@ -71,7 +71,7 @@ function moduleRoute(Page: RoutePage, moduleKey: ModuleKey | ((search: string) =
 
 function imageModule(search: string): ModuleKey {
     const tool = new URLSearchParams(search).get("tool");
-    if (tool === "remove-background" || tool === "item-extract") return "image-edit";
+    if (tool === "remove-background" || tool === "vectorize" || tool === "item-extract") return "image-edit";
     if (tool === "hd-upscale") return "detail-enhance";
     return tool === "image-edit" || tool === "seamless-stitch" || tool === "midjourney-blend" ? tool : "image";
 }
@@ -110,6 +110,7 @@ export const router = createBrowserRouter([
             // Keep saved originals/editing accessible when new generation is disabled.
             { path: "/layer-studio", element: protectedRoute(LayerStudioPage) },
             { path: "/remove-background", element: moduleRoute(ImagePage, "image-edit") },
+            { path: "/vectorize", element: moduleRoute(ImagePage, "image-edit") },
             { path: "/hd-upscale", element: moduleRoute(ImagePage, "detail-enhance") },
             { path: "/item-extract", element: moduleRoute(ImagePage, "image-edit") },
             { path: "/video", element: moduleRoute(VideoPage, "video") },

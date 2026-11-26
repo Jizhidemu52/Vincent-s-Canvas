@@ -1,4 +1,6 @@
 import type { Database } from "./db";
+import { isRecraftAction } from "../../shared/recraft-tools";
+import { validateRecraftSource } from "./recraft-image";
 import { ToolConfigurationError } from "./tool-configuration";
 import { ObjectStorage } from "./object-storage";
 import { loadConfig } from "./config";
@@ -50,6 +52,11 @@ export async function preflightStoredQuickImageTask(db: Pick<Database, "query">,
   const source: ProcessedResultImage = { bytes, mimeType: snapshot.mimeType };
   try {
     // Identical adapter path to the worker, before uploads, queue admission or credits.
+    if (isRecraftAction(configuration.action) && !configuration.adminTest) {
+      if (!process.env.RECRAFT_API_TOKEN?.trim()) throw new Error("服务端尚未配置 Recraft API 密钥");
+      await validateRecraftSource(configuration.action, source);
+      return snapshot;
+    }
     preflightApiMartImageRequest({ modelId: configuration.modelId, prompt: input.prompt!, parameters: input.parameters ?? {}, sourceImages: [source] });
     await (runtime.validateSource ?? validateQuickImageSource)(source, input.parameters ?? {});
   } catch (error) { throw new ToolConfigurationError("QUICK_IMAGE_SOURCE_INVALID", error instanceof Error ? error.message : "参考图片或参数无效"); }

@@ -77,6 +77,10 @@ test("content responses read once, respect byte offsets, and answer a matching E
   expect(reads).toBe(1);
   expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([0, 255, 1, 2]));
   expect(response.headers.get("content-disposition")).toContain("attachment");
+  const head = await demoAssetContentResponse(value, new Request("http://localhost/api/assets/response/content", { method: "HEAD" }));
+  expect(head.headers.get("content-length")).toBe("4");
+  expect(await head.text()).toBe("");
+  expect(reads).toBe(1);
   const cached = await demoAssetContentResponse(value, new Request("http://localhost/api/assets/response/content", { headers: { "if-none-match": response.headers.get("etag")! } }));
   expect(cached.status).toBe(304);
   expect(await cached.text()).toBe("");

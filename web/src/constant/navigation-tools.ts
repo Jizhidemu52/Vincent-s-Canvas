@@ -1,4 +1,4 @@
-import { BookMarked, Box, FileText, Grid2x2, ImagePlus, Images, Layers3, Lightbulb, MessageSquare, Palette, RotateCcw, ScanLine, Scissors, ShieldCheck, UserRoundCog, Video } from "lucide-react";
+import { PenTool, BookMarked, Box, FileText, Grid2x2, ImagePlus, Images, Layers3, Lightbulb, MessageSquare, Palette, RotateCcw, ScanLine, Scissors, ShieldCheck, UserRoundCog, Video } from "lucide-react";
 
 import type { AdminOperationType } from "@/lib/admin-domain";
 
@@ -8,6 +8,7 @@ export const navigationTools = [
     { slug: "back-design", path: "/back-design", label: "背面设计", icon: RotateCcw, group: "local" },
     { slug: "layer-studio", path: "/layer-studio", label: "豆包生图", icon: Layers3, group: "local" },
     { slug: "remove-background", path: "/remove-background", label: "一键去背景", icon: Scissors, group: "local" },
+    { slug: "vectorize", path: "/vectorize", label: "图片转矢量图", icon: PenTool, group: "local" },
     { slug: "hd-upscale", path: "/hd-upscale", label: "高清放大", icon: ScanLine, group: "local" },
     { slug: "item-extract", path: "/item-extract", label: "提取产品图", icon: Box, group: "local" },
     {
@@ -108,11 +109,12 @@ export type NavigationToolSlug = (typeof navigationTools)[number]["slug"];
 
 export function navigationModuleKey(slug: NavigationToolSlug) {
     if (slug === "local-restyle" || slug === "garment-colorway" || slug === "back-design") return `creative-${slug}` as const;
-    return slug === "remove-background" || slug === "item-extract" ? "image-edit" : slug === "hd-upscale" ? "detail-enhance" : slug === "my-prompts" ? "prompts" : slug;
+    return slug === "remove-background" || slug === "vectorize" || slug === "item-extract" ? "image-edit" : slug === "hd-upscale" ? "detail-enhance" : slug === "my-prompts" ? "prompts" : slug;
 }
 
 export const navigationToolBilling: Partial<Record<NavigationToolSlug, { operationType: AdminOperationType | "chat"; toolKey: string }>> = {
     "remove-background": { operationType: "inpaint", toolKey: "image-edit" },
+    "vectorize": { operationType: "inpaint", toolKey: "image-edit" },
     "hd-upscale": { operationType: "upscale", toolKey: "detail-enhance" },
     "item-extract": { operationType: "inpaint", toolKey: "image-edit" },
     "gpt-chat": { operationType: "chat", toolKey: "gpt-chat" },

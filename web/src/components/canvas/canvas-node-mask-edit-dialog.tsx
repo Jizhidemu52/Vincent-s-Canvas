@@ -8,11 +8,11 @@ import { Brush, Check, Eraser, RotateCcw, X } from "lucide-react";
 import { ModelPicker } from "@/components/model-picker";
 import type { AiConfig } from "@/stores/use-config-store";
 import { useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
-import { imageQualityLabel } from "@/components/image-settings-panel";
+import { imageOptionLabel, imageQualityLabel } from "@/components/image-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { imageModelSettingsError, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
-import { imageOptionFields, readImageOptions } from "@/lib/image-advanced-settings";
+import { imageOptionFields, imageOptionValue, readImageOptions } from "@/lib/image-advanced-settings";
 import { buildCanvasEditMask, canvasMaskBrushPixels, canvasMaskPoint, canvasMaskPreviewSize, clearMaskCanvas, drawMaskStroke, renderMaskPreview } from "@/lib/canvas/canvas-mask-paint";
 import { canvasMaskAdaptationPlan } from "@/lib/canvas/canvas-mask-adaptation";
 
@@ -345,7 +345,7 @@ export function CanvasNodeMaskEditDialog({
                         </label> : null}
                         {outputFields.map(field => <label key={field.key} className="flex flex-col gap-1 text-xs">
                             <span>{field.label}</span>
-                            {field.options ? <Select aria-label={field.label} value={outputOptions[field.key] || ""} onChange={value => setOutputOption(field.key, value)} options={[{ value: "", label: t("默认") }, ...field.options.map(value => ({ value, label: value }))]} /> : <input aria-label={field.label} type="number" min={field.min} max={field.max} step={field.step} value={outputOptions[field.key] || ""} placeholder={t("默认")} disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(outputOptions.output_format || "png")} className="rounded border px-2 py-2 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => setOutputOption(field.key, event.target.value)} />}
+                            {field.options ? <Select aria-label={field.label} value={imageOptionValue(outputOptions, field.key, profile)} onChange={value => setOutputOption(field.key, value)} options={["", ...field.options].map(value => ({ value, label: imageOptionLabel(value) }))} /> : <input aria-label={field.label} type="number" min={field.min} max={field.max} step={field.step} value={outputOptions[field.key] || ""} placeholder={t("默认")} disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(outputOptions.output_format || "png")} className="rounded border px-2 py-2 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => setOutputOption(field.key, event.target.value)} />}
                             {field.tip ? <span className="leading-5" style={{ color: theme.node.muted }}>{field.tip}</span> : null}
                         </label>)}
                     </div>

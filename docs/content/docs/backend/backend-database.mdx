@@ -5,6 +5,10 @@ description: 正式数据存储边界、员工画布文档、公司设计灵感�
 
 # 数据库结构与迁移
 
+`066_image_generation_defaults.sql` 创建单例表 `image_generation_defaults`。默认模型保存在 `default_model_config_id`，各模型的背景、尺寸、分辨率和画质按配置 UUID 存入 `model_options`。保存配置和写入管理员审计使用同一事务。
+
+`067_recraft_image_tools.sql` 在现有的 `providers` 和 `model_configs` 表中登记 Recraft 及三个图片工具。凭据通过服务端环境变量 `RECRAFT_API_TOKEN` 提供。
+
 迁移 059–061 增加默认关闭的画布试款台、管理员维护的材质预设、试款参考图缓存。员工个人材质仍归本人。普通画布生成继续使用任务专属授权地址。
 
 `provider_upload_cache` 按员工、供应商账号、原图 SHA-256 和规格隔离。快速档最长边默认 1536，高清档保留原始字节。数据库租约合并 API 和 Worker 的并发上传，浏览器不接收供应商地址。三天留存档以实际回执为上限，最多缓存 60 小时，缺少回执到期时间时仅缓存 15 分钟。员工删除素材后不能再通过热缓存取图。过期行分批清理。`provider_upload_task_inputs` 记录任务用过的缓存代次；原任务经复查确认读图失败时，仅失效对应代次，不再提交生成。

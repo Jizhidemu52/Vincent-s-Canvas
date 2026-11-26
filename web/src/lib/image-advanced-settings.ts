@@ -1,7 +1,8 @@
 import type { ReferenceImage } from "@/types/image";
+import type { ImageModelDefaults } from "../../../shared/image-generation-defaults";
 
 export type ImageOptionField = { key: string; label: string; type?: "number" | "boolean" | "json" | "image"; options?: string[]; min?: number; max?: number; step?: number; tip?: string };
-type Profile = { kind: string; mai27?: boolean; outputFormats?: string[]; backgrounds?: string[]; supportsOfficialFallback?: boolean; supportsGif?: boolean; supportsMarkup?: boolean; supportsComplexity?: boolean };
+type Profile = { kind: string; mai27?: boolean; outputFormats?: string[]; backgrounds?: string[]; defaultBackground?: ImageModelDefaults["background"]; defaultResolution?: string; modelDefaults?: ImageModelDefaults; supportsOfficialFallback?: boolean; supportsGif?: boolean; supportsMarkup?: boolean; supportsComplexity?: boolean };
 const boolean = (key: string, label: string, tip?: string): ImageOptionField => ({ key, label, type: "boolean", tip });
 const number = (key: string, label: string, min: number, max: number, step = 1): ImageOptionField => ({ key, label, type: "number", min, max, step });
 const moderation = boolean("nsfw_check", "提交前内容检查", "额外调用渠道内容检查，可能增加费用与耗时；不改变模型自身的安全规则。");
@@ -92,21 +93,30 @@ export function normalizeImageOptions(value: string | undefined, profile: Profil
         normalized[field.key] = raw;
     }
     const resolution = fields.find(field => field.key === "resolution");
-    if (resolution && !normalized.resolution) normalized.resolution = resolution.options![0]!;
+    if (resolution && !normalized.resolution) normalized.resolution = resolution.options?.includes(profile.defaultResolution || "") ? profile.defaultResolution! : resolution.options![0]!;
     if (profile.kind === "seedream55" && normalized.background === "transparent") normalized.output_format = "png";
     return JSON.stringify(normalized);
+}
+
+export function imageOptionValue(options: Record<string, string>, key: string, profile: Pick<Profile, "defaultBackground" | "defaultResolution" | "modelDefaults">) {
+    if (options[key]) return options[key];
+    if (key === "resolution") return profile.defaultResolution || "";
+    if (key === "output_format" && options.background === "transparent" && profile.modelDefaults?.output_format === "jpeg") return "png";
+    if (key !== "background") return String(profile.modelDefaults?.[key as keyof ImageModelDefaults] ?? "");
+    if (profile.defaultBackground === "transparent" && ["jpeg", "gif"].includes(options.output_format || profile.modelDefaults?.output_format || "")) return "opaque";
+    return profile.defaultBackground || "";
 }
 
 export function imageAdvancedParameters(value: string | undefined, profile: Profile): Record<string, unknown> {
     const options = readImageOptions(value);
     const parameters: Record<string, unknown> = {};
     for (const field of imageOptionFields(profile)) {
-        const raw = options[field.key]?.trim();
+        const raw = imageOptionValue(options, field.key, profile).trim();
         if (!raw) continue;
         if (field.type === "image") { imageMarkupReference(value); continue; }
         if (field.key === "resolution" && profile.supportsGif && options.output_format === "gif") continue;
         if (["frame_count", "frame_duration_ms"].includes(field.key) && options.output_format !== "gif") continue;
-        if (field.key === "output_compression" && !["jpeg", "webp"].includes(options.output_format || "png")) continue;
+        if (field.key === "output_compression" && !["jpeg", "webp"].includes(imageOptionValue(options, "output_format", profile) || "png")) continue;
         const key = profile.kind === "midjourney" && field.key === "quality" ? "midjourneyQuality" : field.key;
         if (field.options && !field.options.includes(raw)) throw new Error(`${field.label}不支持 ${raw}`);
         if (field.type === "number") {

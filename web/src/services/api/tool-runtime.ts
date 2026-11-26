@@ -2,7 +2,7 @@ import { getBusinessConfig, resolveToolModel, type BusinessConfig } from "./busi
 import { getToolDefinition, resolveToolKey, type ToolKey } from "../../../../shared/feature-catalog";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
-import { preferredImageModel } from "@/lib/default-image-model";
+import { DEFAULT_IMAGE_MODEL, preferredImageModel } from "@/lib/default-image-model";
 
 export function isImageTool(toolKey: ToolKey) {
     return getToolDefinition(toolKey)?.capabilities.some(capability => ["generate", "edit", "upscale", "batch"].includes(capability)) ?? false;
@@ -30,7 +30,7 @@ export function resolveConfiguredToolModel(business: BusinessConfig, toolKey: To
     const normalized = modelOptionName(requested).trim();
     const model = binding?.modelConfigId
         ? business.models.find(item => item.id === binding.modelConfigId)
-        : normalized
+        : normalized && !(normalized === DEFAULT_IMAGE_MODEL && isImageTool(toolKey) && toolKey !== "midjourney-blend")
             ? business.models.find(item => [item.id, item.modelId, item.name, item.publicName].includes(normalized))
             : isImageTool(toolKey) && toolKey !== "midjourney-blend"
                 ? preferredImageModel(business.models.filter(item => !item.modelId.startsWith("demo-") && getToolDefinition(toolKey)?.capabilities.some(capability => item.capabilities.includes(capability))))

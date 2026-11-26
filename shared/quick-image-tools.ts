@@ -1,11 +1,11 @@
 /** Public board contract only. Prompts and processing rules live exclusively on the server. */
-export type QuickImageAction = "remove-background" | "hd-upscale" | "item-extract";
+export type QuickImageAction = "remove-background" | "hd-upscale" | "item-extract" | "vectorize";
 export function quickImageModelId(action: QuickImageAction) {
-  return action === "remove-background" ? "mai-image-2.6-flash"
+  return action === "vectorize" ? "vectorize" : action === "remove-background" ? "mai-image-2.6-flash"
     : action === "item-extract" ? "gpt-image-2.6-flare" : "gemini-nano-banana-2.1";
 }
 export function isQuickImageAction(value: unknown): value is QuickImageAction {
-  return value === "remove-background" || value === "hd-upscale" || value === "item-extract";
+  return value === "remove-background" || value === "hd-upscale" || value === "item-extract" || value === "vectorize";
 }
 /** Boards reuse existing permission and billing scopes; no new database binding is needed. */
 export function quickImageTaskTarget(action: QuickImageAction, canvas = false) {

@@ -22,6 +22,8 @@ import { readConfigurationExport } from "./configuration-export";
 import { createQuickImageConfigurationRouter, type QuickImageRouterOptions } from "./quick-image-configuration";
 import { layerStudioBindingValid, LAYER_STUDIO_MODEL_ID } from "../layer-studio-policy";
 import { createLayerStudioPricingRouter } from "./layer-studio";
+import { createImageGenerationDefaultsRouter } from "./image-generation-defaults";
+import { getDefaultImageModelId, isGeneralImageDefaultCandidate, readImageGenerationDefaults } from "../image-generation-defaults";
 
 const protocol = z.enum(["openai", "openai-chat", "anthropic", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
 const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "vision", "tools", "video", "audio"])).min(1);
@@ -53,6 +55,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig, 
     });
     router.use("/mark-images", createMarkImageProviderRouter(db, config));
     router.use("/featured-models", createFeaturedModelsRouter(db));
+    router.use("/image-defaults", createImageGenerationDefaultsRouter(db));
     router.use("/quick-images", createQuickImageConfigurationRouter(db, quickImageOptions));
     router.use("/layer-studio-pricing", createLayerStudioPricingRouter(db));
 
@@ -137,6 +140,9 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig, 
                 await assertValidModelReplacement(client, request.params.id, value.replacementModelConfigId ?? null);
                 await client.query(`UPDATE model_configs SET provider_id=$1,workflow_config_id=$2,replacement_model_config_id=$3,name=$4,model_id=$5,capabilities=$6,credit_cost=$7,rmb_cost=$8,concurrency_limit=$9,enabled=$10,updated_at=now() WHERE id=$11`,
                     [value.providerId, value.workflowConfigId ?? null, value.replacementModelConfigId ?? null, value.name, value.modelId, value.capabilities, value.creditCost, value.rmbCost, value.concurrencyLimit, value.enabled, request.params.id]);
+                if (["modelId", "providerId", "workflowConfigId"].some(key => value[key] !== current.rows[0][key])) {
+                    await client.query("UPDATE image_generation_defaults SET model_options=model_options-$1::text,updated_at=now() WHERE model_options ? $1::text", [request.params.id]);
+                }
                 const saved = (await client.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.id=$1`, [request.params.id])).rows[0];
                 await writeAudit(client, { actor, action: "model.updated", targetType: "model", targetId: saved.id, result: "success", detail: { fields: Object.keys(input) }, ip: request.ip });
                 return saved;
@@ -263,13 +269,14 @@ export function createPublicModelRouter(db: Database, creditPolicy: boolean | ((
     router.get("/", async (request, response, next) => {
         try {
             const creditsEnabled = typeof creditPolicy === "function" ? await creditPolicy() : creditPolicy;
-            const [models, prices, tools, featuredIds] = await Promise.all([
+            const [models, prices, tools, featuredIds, defaults] = await Promise.all([
                 db.query(`SELECT m.id,m.public_number AS "publicNumber",m.name,m.model_id AS "modelId",m.workflow_config_id AS "workflowConfigId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",p.id AS "providerId",p.protocol,p.name AS "providerName",p.base_url AS "providerBaseUrl" FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.enabled=true AND p.enabled=true AND (m.workflow_config_id IS NULL OR w.enabled=true) ORDER BY m.public_number NULLS LAST,m.name`),
                 db.query(`SELECT operation_type AS "operationType",label,credits,rmb_cost::float8 AS "rmbCost",version FROM pricing_rule_versions WHERE status='published' ORDER BY operation_type`),
                 db.query(`SELECT t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.enabled,
                     t.credit_cost_override AS "creditCostOverride",t.rmb_cost_override::float8 AS "rmbCostOverride",t.configuration_version AS "configurationVersion",t.allow_raw_prompt AS "allowRawPrompt"
                     FROM tool_api_configurations t`),
                 readFeaturedModelIds(db),
+                readImageGenerationDefaults(db),
             ]);
             const role = (request as AuthenticatedRequest).auth?.role;
             const effectiveTools = applyDefaultChatModel(toolDefinitions.map(definition => ({
@@ -281,8 +288,13 @@ export function createPublicModelRouter(db: Database, creditPolicy: boolean | ((
             const selectedModels = selectCreativeModels(presentedModels);
             const selectedIds = new Set(selectedModels.map(model => model.id));
             const boundIds = new Set(effectiveTools.filter(tool => tool.enabled && tool.modelConfigId).map(tool => tool.modelConfigId));
+            if (presentedModels.some(model => model.id === defaults.defaultModelConfigId && isGeneralImageDefaultCandidate(model))) boundIds.add(defaults.defaultModelConfigId);
             selectedModels.push(...presentedModels.filter(model => model.modelId !== LAYER_STUDIO_MODEL_ID && boundIds.has(model.id) && !selectedIds.has(model.id)));
-            response.json({ models: selectedModels.map((model) => presentPublicModel({ ...model, creditCost: creditsEnabled ? model.creditCost : 0 }, role)), prices: prices.rows.map(price => ({ ...price, credits: creditsEnabled ? price.credits : 0 })), tools: effectiveTools });
+            const defaultModelId = getDefaultImageModelId(selectedModels, defaults.defaultModelConfigId);
+            response.json({ models: selectedModels.map(model => presentPublicModel({
+                ...model, creditCost: creditsEnabled ? model.creditCost : 0, isDefaultImageModel: model.id === defaultModelId,
+                imageDefaults: isGeneralImageDefaultCandidate(model) ? defaults.modelOptions[String(model.id)] : undefined,
+            }, role)), prices: prices.rows.map(price => ({ ...price, credits: creditsEnabled ? price.credits : 0 })), tools: effectiveTools });
         } catch (error) { next(error); }
     });
     return router;

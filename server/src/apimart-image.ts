@@ -2,7 +2,7 @@ import { fetchProviderSubmission } from "./provider-submission-transport";
 import { queryProviderTaskStatus } from "./provider-status-query";
 import { isDefinitiveSubmissionRejection } from "./provider-submission-policy";
 import { apiMartPollIntervalMs } from "./apimart-poll-interval";
-import { validateGpt26GifParameters } from "../../shared/gpt26-image-options";
+import { apimartGpt26DefaultBackground, validateGpt26GifParameters } from "../../shared/gpt26-image-options";
 import { isPublicHttpUrl, normalizeApiMartImageUrl, uploadApiMartImage, validateApiMartGenerationImage } from "./apimart-upload";
 import { buildSeedream55Request, parseSeedream55Manifest, seedream55PollInterval, type Seedream55Manifest } from "./seedream55-image";
 import { QWEN_IMAGE_MAX_EDGE, QWEN_IMAGE_MIN_EDGE, QWEN_IMAGE_MODEL, QWEN_IMAGE_RATIOS, QWEN_IMAGE_REFERENCE_LIMIT, QWEN_IMAGE_REFERENCE_MAX_BYTES, QWEN_IMAGE_REFERENCE_MIMES } from "../../shared/qwen-image-options";
@@ -342,6 +342,8 @@ function buildMarkImageRequest(input: ApiMartImageInput, model: MarkImageModel, 
   if (references.length) payload.image_urls = referencePayload(references, encodeReferences);
   if (gpt) {
     payload.quality = enumParameter(parameters.quality, ["auto", "low", "medium", "high", "xhigh", "max"], "quality", "auto");
+    const defaultBackground = apimartGpt26DefaultBackground(model);
+    if (defaultBackground) payload.background = defaultBackground;
     for (const [key, allowed] of Object.entries({ output_format: gpt26 ? ["png", "jpeg", "webp", "gif"] : ["png", "jpeg", "webp"], background: ["auto", "opaque", "transparent"], moderation: ["auto", "low"] })) {
       if (parameters[key] !== undefined) payload[key] = enumParameter(parameters[key], allowed, key);
     }

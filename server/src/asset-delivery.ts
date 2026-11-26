@@ -68,11 +68,13 @@ export async function validateAssetUpload(bytes: Uint8Array, declared: string) {
   return mime;
 }
 
-export function assetResponseHeaders(mimeType: string, filename: string, download = false) {
+export function assetResponseHeaders(mimeType: string, filename: string, download = false, recraftVector = false) {
   const mime = normalizeAssetMime(mimeType);
-  const inline = allowedAssetMimeTypes.has(mime) && /^(image\/|video\/|audio\/|application\/pdf$)/.test(mime);
+  const allowed = allowedAssetMimeTypes.has(mime) || (recraftVector && mime === "image/svg+xml");
+  const inline = allowed && /^(image\/|video\/|audio\/|application\/pdf$)/.test(mime);
   return {
-    "content-type": allowedAssetMimeTypes.has(mime) ? mime : "application/octet-stream",
+    ...(recraftVector ? { "content-security-policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'" } : {}),
+    "content-type": allowed ? mime : "application/octet-stream",
     "content-disposition": contentDisposition(filename.replace(/[\x00-\x1f\x7f/\\]/g, "_"), { type: inline && !download ? "inline" : "attachment" }),
     "x-content-type-options": "nosniff",
     "cache-control": "private, no-cache",
@@ -145,12 +147,12 @@ export function assetRange(request: Request, size: number, etag?: string, modifi
 
 /** Call only AFTER current-employee authorization, including conditional requests. */
 export async function streamAssetContent(request: Request, response: Response, storage: ObjectStorage,
-  asset: { object_key: string; mime_type: string; filename: string }, options: {
+  asset: { object_key: string; mime_type: string; filename: string; recraftVector?: boolean }, options: {
     cacheControl?: "no-store";
     expectedObject?: { etag: string; length: number };
     beforeSend?: () => Promise<void>;
   } = {}) {
-  const headers = (mime: string) => ({ ...assetResponseHeaders(mime, asset.filename, request.query.download === "1"), ...(options.cacheControl ? { "cache-control": options.cacheControl } : {}) });
+  const headers = (mime: string) => ({ ...assetResponseHeaders(asset.recraftVector && asset.mime_type === "image/svg+xml" ? asset.mime_type : mime, asset.filename, request.query.download === "1", asset.recraftVector), ...(options.cacheControl ? { "cache-control": options.cacheControl } : {}) });
   const controller = new AbortController();
   let body: Readable | undefined;
   const cancel = () => { if (!response.writableFinished) controller.abort(); body?.destroy(); };

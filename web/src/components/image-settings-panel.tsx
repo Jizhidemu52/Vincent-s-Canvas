@@ -6,7 +6,7 @@ import { ChevronDown, CircleHelp, Ratio, Layers2, SlidersHorizontal } from "luci
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig } from "@/stores/use-config-store";
 import { automaticReferenceSizeNotice, gifSizeNotice, imageModelSettingsError, imageOutputIsGif, imageReferenceSizeIsAutomatic, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
-import { imageMarkupReference, imageOptionFields, normalizeImageOptions, readImageOptions } from "@/lib/image-advanced-settings";
+import { imageMarkupReference, imageOptionFields, imageOptionValue, normalizeImageOptions, readImageOptions } from "@/lib/image-advanced-settings";
 import { uploadUserImage } from "@/services/user-image-upload";
 import "./image-settings-panel.css";
 
@@ -213,8 +213,8 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
                 <div className="ip-options-grid">
                     {fields.map(field => {
                         const choices = field.options || (field.type === "boolean" ? ["true", "false"] : undefined);
-                        const value = options[field.key] || "";
-                        const disabled = field.key === "output_compression" && !["jpeg", "webp"].includes(options.output_format || "png");
+                        const value = imageOptionValue(options, field.key, profile);
+                        const disabled = field.key === "output_compression" && !["jpeg", "webp"].includes(imageOptionValue(options, "output_format", profile) || "png");
                         const isLongText = field.type === "json" || ["negative_prompt", "extra"].includes(field.key);
                         const helpId = `${resolutionNoticeId}-${field.key}-help`;
                         const range = field.type === "number" ? field.max === undefined ? uiText("最小 {min}，步长 {step}", { min: field.min ?? "", step: field.step ?? 1 }) : uiText("范围 {min}–{max}{step}", { min: field.min ?? "", max: field.max, step: field.step !== undefined && field.step !== 1 ? uiText("，步长 {step}", { step: field.step }) : "" }) : "";
@@ -236,7 +236,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
                 <div className={dialog ? "ip-dialog-options" : "flex flex-col gap-3 py-2"}>
                     {fields.map(field => <label key={field.key} data-image-field={field.key} className="flex flex-col gap-1 text-xs">
                         <span>{uiText(field.label)}</span>
-                        {field.type === "image" ? <DisplayTranslationScope visible={advancedExpanded}><ImageMarkupInput key={`${markupContext}|${options[field.key] || ""}`} contextKey={markupContext} value={options[field.key] || ""} referenceCount={referenceCount} onChange={value => updateOption(field.key, value)} /></DisplayTranslationScope> : field.options || field.type === "boolean" ? <Select aria-label={uiText(field.label)} value={options[field.key] || ""} className="w-full" onChange={value => updateOption(field.key, value)} options={["", ...(field.options || ["true", "false"])].map(value => ({ value, label: imageOptionLabel(value) }))} /> : <input aria-label={uiText(field.label)} type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} step={field.step} value={options[field.key] || ""} placeholder={uiText("默认")} disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(options.output_format || "png")} className="w-full rounded border px-2 py-1.5 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => updateOption(field.key, event.target.value)} />}
+                        {field.type === "image" ? <DisplayTranslationScope visible={advancedExpanded}><ImageMarkupInput key={`${markupContext}|${options[field.key] || ""}`} contextKey={markupContext} value={options[field.key] || ""} referenceCount={referenceCount} onChange={value => updateOption(field.key, value)} /></DisplayTranslationScope> : field.options || field.type === "boolean" ? <Select aria-label={uiText(field.label)} value={imageOptionValue(options, field.key, profile)} className="w-full" onChange={value => updateOption(field.key, value)} options={["", ...(field.options || ["true", "false"])].map(value => ({ value, label: imageOptionLabel(value) }))} /> : <input aria-label={uiText(field.label)} type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} step={field.step} value={imageOptionValue(options, field.key, profile)} placeholder={uiText("默认")} disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(imageOptionValue(options, "output_format", profile) || "png")} className="w-full rounded border px-2 py-1.5 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => updateOption(field.key, event.target.value)} />}
                         {field.tip ? <span className="leading-5" style={{ color: theme.node.muted }}>{uiText(field.tip || "")}</span> : null}
                     </label>)}
                 </div>
@@ -245,7 +245,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
     );
 }
 
-function imageOptionLabel(value: string) {
+export function imageOptionLabel(value: string) {
     return ({ "": uiText("默认"), true: uiText("开启"), false: uiText("关闭"), auto: uiText("自动"), opaque: uiText("不透明"), transparent: uiText("透明"), png: "PNG", jpeg: "JPEG", webp: "WebP", gif: "GIF", low: uiText("低"), medium: uiText("中"), high: uiText("高") } as Record<string, string>)[value] || value;
 }
 

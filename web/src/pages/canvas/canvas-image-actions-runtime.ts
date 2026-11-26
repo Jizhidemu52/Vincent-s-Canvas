@@ -475,7 +475,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
         try {
             const node = nodesRef.current.find(item => item.id === source.id);
             if (!node || node.type !== CanvasNodeType.Image || !hasCanvasImageSource(node.metadata)) return;
-            const referenceError = quickImageReferenceFileError({ type: node.metadata?.mimeType, size: node.metadata?.bytes });
+            const referenceError = quickImageReferenceFileError({ type: node.metadata?.mimeType, size: node.metadata?.bytes }, action);
             if (referenceError) { message.warning(displayNotice(uiText(referenceError))); return; }
             if (node.metadata?.imageTask || node.metadata?.status === "loading" || nodesRef.current.some(item => item.metadata?.quickImageAction && item.metadata?.generationRecord?.sourceNodeId === node.id && (item.metadata.imageTask || item.metadata.status === "loading"))) {
                 message.warning(uiText("已有图片任务待完成，请先查看原任务")); return;

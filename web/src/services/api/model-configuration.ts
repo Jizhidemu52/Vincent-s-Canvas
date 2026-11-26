@@ -1,5 +1,7 @@
 import type { ModuleKey, ToolKey } from "../../../../shared/feature-catalog";
 import type { ApimartImageCost } from "../../../../shared/apimart-image-costs";
+import type { ImageModelDefaults } from "../../../../shared/image-generation-defaults";
+import type { PublicModel } from "./business-config";
 
 export type ProviderProtocol = "openai" | "openai-chat" | "anthropic" | "gemini" | "apimart" | "volcengine" | "runninghub" | "comfyui" | "custom";
 export type ServerProvider = { id: string; name: string; protocol: ProviderProtocol; baseUrl: string; enabled: boolean; hasCredentials: boolean; createdAt: string; updatedAt: string };
@@ -38,11 +40,26 @@ export type ToolApiConfiguration = {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(path, { ...init, credentials: "include", headers: { "content-type": "application/json", ...init?.headers } });
-    if (!response.ok) { const payload = await response.json().catch(() => ({})) as { message?: string }; throw new Error(payload.message || `请求失败（${response.status}）`); }
+    if (!response.ok) { const payload = await response.json().catch(() => ({})) as { message?: string; msg?: string }; throw new Error(payload.message || payload.msg || `请求失败（${response.status}）`); }
     return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }
 
 const root = "/api/admin/model-configuration";
+export type ImageDefaultsConfiguration = {
+    models: PublicModel[];
+    defaultModelConfigId: string | null;
+    effectiveModelConfigId: string | null;
+    systemDefaultModelConfigId: string | null;
+    modelOptions: Record<string, ImageModelDefaults>;
+};
+export async function getImageDefaults(signal?: AbortSignal) {
+    return (await request<{ data: ImageDefaultsConfiguration }>(`${root}/image-defaults`, { signal, cache: "no-store" })).data;
+}
+export async function saveImageDefaults(defaultModelConfigId: string | null | undefined, modelConfigId: string, options?: ImageModelDefaults) {
+    return (await request<{ data: ImageDefaultsConfiguration }>(`${root}/image-defaults`, {
+        method: "PUT", body: JSON.stringify({ defaultModelConfigId, modelConfigId, options }),
+    })).data;
+}
 export async function exportConfigurationSnapshot(): Promise<Blob> {
     const response = await fetch(`${root}/export`, { credentials: "include", cache: "no-store" });
     if (!response.ok) throw new Error(response.status === 401 ? "登录已失效，请重新登录后导出。"

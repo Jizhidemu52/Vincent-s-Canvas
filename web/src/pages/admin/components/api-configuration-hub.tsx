@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiProviderPanel } from "@/pages/admin/components/api-provider-panel";
 import { InternalAiProviderConfig } from "@/pages/admin/components/internal-ai-provider-config";
 import { HotModelOrderPanel } from "@/pages/admin/components/hot-model-order-panel";
+import { ImageGenerationDefaultsPanel } from "./image-generation-defaults-panel";
 import { ModelPricingPanel } from "@/pages/admin/components/model-pricing-panel";
 import { WorkflowManagementPanel } from "@/pages/admin/components/workflow-management-panel";
 import { QuickImageConfigurationPanel } from "@/pages/admin/components/quick-image-configuration-panel";
@@ -175,6 +176,7 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
                         </section>)}
                     </div>,
                 },
+                ...(isAdmin?[{key:"image-defaults",label:staticUiText("默认图片模型"),children:<ImageGenerationDefaultsPanel/>}]:[]),
                 ...(isAdmin?[{key:"tryout-models",label:staticUiText("试款模型"),children:<TryoutBindingsPanel/>}]:[]),
                 ...(isAdmin?[{key:"tryout-speed",label:staticUiText("试款速度"),children:<TryoutSpeedPanel/>}]:[]),
                 ...(isAdmin?[{key:"tryout-quality",label:staticUiText("上身效果"),children:<TryoutQualityPanel/>}]:[]),

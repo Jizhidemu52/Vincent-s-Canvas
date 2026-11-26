@@ -76,7 +76,7 @@ export type CanvasNodeMetadata = {
     designTask?: { requestId: string; status: string; label: string };
     designExecutionId?: string;
     designProposal?: { title: string; features: string[]; rationale: string; references: Array<{ title: string; image: string }> };
-    quickImageAction?: "remove-background" | "hd-upscale" | "item-extract";
+    quickImageAction?: "remove-background" | "hd-upscale" | "vectorize" | "item-extract";
     locked?: boolean;
     imageAgent?: { parentNodeId?: string; workId: string; version: number; note: import("../../../shared/image-agent/work-note").ImageAgentWorkNote; spec?: import("../../../shared/image-agent-iteration").ImageAgentEditSpec };
     maskAdaptation?: import("@/lib/canvas/canvas-mask-adaptation").CanvasMaskAdaptation;

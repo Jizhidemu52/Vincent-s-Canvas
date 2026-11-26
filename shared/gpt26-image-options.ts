@@ -1,3 +1,7 @@
+export function apimartGpt26DefaultBackground(modelId: unknown): "opaque" | undefined {
+  return modelId === "gpt-image-2.6-flare" ? "opaque" : undefined;
+}
+
 /** APIMart GPT Image 2.6 GIF contract; static-image pixel minimums do not apply. */
 export function validateGpt26GifParameters(parameters: { size?: unknown; frame_count?: unknown; frame_duration_ms?: unknown }) {
   const count = parameters.frame_count ?? 9;
