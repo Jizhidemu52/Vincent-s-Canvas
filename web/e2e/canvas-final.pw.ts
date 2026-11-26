@@ -1,4 +1,4 @@
-import { test, expect, newCanvas, IMAGE } from "./fixtures";
+import { test, expect, newCanvas, uploadImage, IMAGE } from "./fixtures";
 
 for (const dark of [false, true]) test(`canvas final theme, disabled reasons and settings at laptop size dark=${dark}`, async ({ page, api }, info) => {
     await page.setViewportSize({ width: 1366, height: 768 });
@@ -72,6 +72,29 @@ test("reference order boundaries explain why they are disabled without changing 
     expect(api.submissions).toHaveLength(0);
 });
 
+test("failed canvas library read cannot create a blank recent canvas and retries the original", async ({ page, api }, info) => {
+    const id = await newCanvas(page);
+    await expect.poll(() => api.documents.has(id)).toBe(true);
+    await page.addInitScript(() => {
+        const get = IDBObjectStore.prototype.get;
+        IDBObjectStore.prototype.get = function (key) {
+            if (typeof key === "string" && key.endsWith(":project-documents:v1") && !sessionStorage.getItem("allow-library-read")) {
+                throw new DOMException("Test library unavailable", "UnknownError");
+            }
+            return get.call(this, key);
+        };
+    });
+    await page.goto("/canvas?mode=recent");
+    const retry = page.getByRole("button", { name: "重新读取画布" });
+    await expect(retry).toBeVisible();
+    await expect(page.getByText("还没有画布", { exact: true })).toHaveCount(0);
+    await page.screenshot({ path: info.outputPath("library-read-recovery.png") });
+    await page.evaluate(() => sessionStorage.setItem("allow-library-read", "1"));
+    await retry.click();
+    await expect(page).toHaveURL(new RegExp("/canvas/" + id + "(?:\\?.*)?$"));
+    expect(api.documents.size).toBe(1);
+});
+
 test("canvas library has an actionable empty state and inline copy receipt", async ({ page, api }, info) => {
     await page.goto("/canvas");
     const empty = page.locator(".wb-empty");
@@ -88,4 +111,41 @@ test("canvas library has an actionable empty state and inline copy receipt", asy
     expect(await card.evaluate(element => getComputedStyle(element).boxShadow)).toBe("none");
     await page.screenshot({ path: info.outputPath("library-inline-feedback.png"), animations: "disabled" });
     expect(api.submissions).toHaveLength(0);
+});
+
+test("the same account opens saved image nodes after reload and from a fresh browser", async ({ page, api, browser }, info) => {
+    const id = await newCanvas(page);
+    await uploadImage(page, "account-saved.png");
+    await expect.poll(() => api.documents.get(id)?.document?.nodes.length).toBe(1);
+    const nodeId = api.documents.get(id)!.document!.nodes[0].id;
+    await page.reload();
+    await expect(page.locator(`[data-node-id="${nodeId}"]`)).toBeVisible();
+    const fresh = await browser.newContext({ baseURL: new URL(page.url()).origin });
+    try {
+        await api.attach(fresh);
+        const other = await fresh.newPage();
+        await other.goto("/canvas");
+        await other.locator(`[data-canvas-project-id="${id}"]`).click();
+        await expect(other.locator(`[data-node-id="${nodeId}"]`)).toBeVisible();
+        await other.screenshot({ path: info.outputPath("restored-on-new-browser.png") });
+    } finally { await fresh.close(); }
+});
+
+test("an unavailable cloud list in a fresh browser retries without creating another recent canvas", async ({ page, browser, api }) => {
+    const id = await newCanvas(page);
+    await expect.poll(() => api.documents.has(id)).toBe(true);
+    const fresh = await browser.newContext({ baseURL: new URL(page.url()).origin });
+    try {
+        await api.attach(fresh);
+        const other = await fresh.newPage();
+        await other.route("**/api/canvas-documents", route => route.fulfill({ status: 503, json: { message: "暂时无法读取" } }));
+        await other.goto("/canvas?mode=recent");
+        const retry = other.getByRole("button", { name: "重新读取画布" });
+        await expect(retry).toBeVisible();
+        await expect(other.getByText("还没有画布", { exact: true })).toHaveCount(0);
+        await other.unroute("**/api/canvas-documents");
+        await retry.click();
+        await expect(other).toHaveURL(new RegExp("/canvas/" + id));
+        expect(api.documents.size).toBe(1);
+    } finally { await fresh.close(); }
 });

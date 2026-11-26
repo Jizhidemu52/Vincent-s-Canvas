@@ -78,7 +78,7 @@ function harness(options: { preparation?: "ensure" | "hydrate"; unknown?: boolea
             else if (key === "connections") connections.current = typeof value === "function" ? value(connections.current) : value;
             else if (key === "streamedTextById") streamed = typeof value === "function" ? value(streamed) : value;
         } },
-        "@/stores/canvas/use-canvas-store": { useCanvasStore: { getState: () => ({ updateProject: (_project: string, patch: any) => persisted.push(structuredClone(patch.nodes)) }) }, flushCanvasPersistence: async () => {} },
+        "@/stores/canvas/use-canvas-store": { useCanvasStore: { getState: () => ({ updateProject: (_project: string, patch: any) => persisted.push(structuredClone(patch.nodes)) }) }, flushCanvasPersistence: async () => {}, confirmCanvasBeforeImageSubmission: async () => {} },
         "@/components/canvas/canvas-node-generation": { ...nodeGeneration, hydrateNodeGenerationContext: async (context: any) => { if (options.preparation === "hydrate") { preparationEntered = true; await preparation.promise; } return context; } },
         "@/lib/canvas/canvas-generation-model": { ensureCanvasModelsReady: async () => { if (options.preparation === "ensure") { preparationEntered = true; await preparation.promise; } return {}; }, resolveCanvasImageConfig: (input: any, _business: any, refs: boolean) => ({ config: input, toolKey: refs ? "canvas-edit" : "canvas-image" }) },
         "@/lib/canvas/canvas-prompt-history": { rememberCanvasPrompt: async () => {} },

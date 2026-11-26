@@ -7,6 +7,7 @@ import { BookOpen, Download, FileUp, HardDrive, LayoutGrid, MessageSquareText, P
 
 import { CanvasDeleteProjectsDialog } from "@/components/canvas/canvas-delete-projects-dialog";
 import { CanvasProjectGrid } from "./canvas-project-grid";
+import { CanvasLibraryReadError } from "./canvas-library-read-error";
 import { CanvasSaveStatus } from "@/components/canvas/canvas-save-status";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
@@ -41,6 +42,9 @@ export default function CanvasPage() {
     const unloadedProjects = useCanvasStore((state) => state.unloadedProjects);
     const projects = useMemo(() => sortCanvasLibraryProjects(canvasLibrarySummaries(localProjects, unloadedProjects), sort, locale), [localProjects, unloadedProjects, sort, locale]);
     const cloudStatus = useCanvasStore(state => state.cloudStatus);
+    const localReadFailed = useCanvasStore(state => state.libraryReadError);
+    const readFailed = localReadFailed || (!projects.length && (cloudStatus === "error" || cloudStatus === "local-error"));
+    const waitingForList = !hydrated || (!projects.length && ["loading", "syncing", "pending"].includes(cloudStatus));
     const createProject = useCanvasStore((state) => state.createProject);
     const selectedIds = useCanvasUiStore((state) => state.selectedProjectIds);
     const exporting = useCanvasUiStore((state) => state.exportingProjectIds.length > 0);
@@ -107,10 +111,10 @@ export default function CanvasPage() {
     };
 
     useEffect(() => {
-        if (!hydrated || autoOpenRef.current || (mode !== "new" && mode !== "recent")) return;
+        if (!hydrated || (mode === "recent" && (readFailed || waitingForList)) || autoOpenRef.current || (mode !== "new" && mode !== "recent")) return;
         autoOpenRef.current = true;
         enterProject(mode === "new" ? createProject(nextProjectTitle(projects)) : projects[0]?.id || createProject(nextProjectTitle(projects)));
-    }, [createProject, hydrated, mode, projects]);
+    }, [createProject, hydrated, mode, projects, readFailed, waitingForList]);
     useEffect(() => {
         const escape = (event: KeyboardEvent) => {
             if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || useCanvasUiStore.getState().editingProjectId) return;
@@ -122,7 +126,7 @@ export default function CanvasPage() {
         return () => window.removeEventListener("keydown", escape);
     }, [setSelectedIds]);
 
-    if (hydrated && (mode === "new" || mode === "recent")) return <main className="flex h-full items-center justify-center bg-background text-sm text-muted-foreground">{t("正在打开画布...")}</main>;
+    if (hydrated && !readFailed && (mode === "new" || mode === "recent")) return <main className="flex h-full items-center justify-center bg-background text-sm text-muted-foreground">{t("正在打开画布...")}</main>;
 
     return (
         <main ref={scrollRef} className="wb-page h-full overflow-auto">
@@ -132,7 +136,7 @@ export default function CanvasPage() {
                         <p className="wb-eyebrow">{chatMode ? t("在线功能") : t("画布库")}</p>
                         <h1 className="wb-title">{chatMode ? t("对话改图") : t("自由画布")}</h1>
                         {tryoutMode && <p className="wb-description">{t("选择或新建画布，打开试款台。此操作不会生成图片。")}</p>}
-                        {!chatMode ? <p className="wb-description">{t("{count} 个画布", { count: projects.length })} · <CanvasSaveStatus /></p> : null}
+                        {!chatMode && !localReadFailed ? <p className="wb-description">{!waitingForList && !readFailed && <>{t("{count} 个画布", { count: projects.length })} · </>}<CanvasSaveStatus /></p> : null}
                         {chatMode ? <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">{t("选择或新建一个画布后，助手会围绕当前项目内容进行对话、拆解提示词和生成建议，后台会把相关任务归入画布项目历史。")}</p> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -176,7 +180,7 @@ export default function CanvasPage() {
                     </section>
                 ) : null}
 
-                {!hydrated ? (
+                {readFailed ? <CanvasLibraryReadError /> : waitingForList ? (
                     <section aria-label={t("正在加载画布…")} className="grid min-h-[360px] grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 min-[120rem]:grid-cols-5">
                         {Array.from({ length: 10 }, (_, index) => <div key={index} className="wb-surface overflow-hidden p-4"><Skeleton.Node active style={{ width: "100%", height: 128 }} /><Skeleton active title paragraph={{ rows: 2 }} className="mt-4" /></div>)}
                     </section>

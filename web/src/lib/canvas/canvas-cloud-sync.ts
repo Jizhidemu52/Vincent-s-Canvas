@@ -6,6 +6,7 @@ import { mapCanvasAsyncPool } from "./canvas-async-pool";
 type CopyPlan = { key: string; id: string; savedAt: string };
 type BaselineEntry = {
     revision: number; local: string | null;
+    pendingDelete?: boolean;
     redirect?: string; redirectRevision?: number;
     pendingCopy?: CopyPlan;
 };
@@ -69,7 +70,11 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
         return { ...canvasCloudDocument(project), id: plan.id, title: `${project.title}（云端冲突副本）`, persistenceConflict: { projectId: project.id, paths: ["$cloudRevision"], savedAt: plan.savedAt } };
     }
     return {
-        synchronizedProjectIds: (projects: CanvasProject[]) => projects.filter(project => baseline[project.id]?.local === snapshot(project)).map(project => project.id),
+        synchronizedProjectIds: (projects: CanvasProject[]) => projects.filter(project => {
+            const entry = baseline[project.id];
+            return entry && !entry.redirect && !entry.pendingDelete && entry.local === snapshot(project);
+        }).map(project => project.id),
+        pendingDeleteIds: () => Object.keys(baseline).filter(id => baseline[id].pendingDelete),
         async hydrate(local: CanvasProject[], options: { live?: boolean; deferUncached?: boolean } = {}) {
             const documents = await io.list();
             const projects = new Map(local.map(project => [project.id, project]));
@@ -82,13 +87,14 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
                     await stageCachedDocument(ours, await io.get(remote.id));
                     return;
                 }
-                if (!ours && !known && !remote.deleted && options.deferUncached) {
+                if (!ours && known?.pendingDelete) return;
+                if (!ours && !remote.deleted && options.deferUncached) {
                     deferred.set(remote.id, remote);
                     return;
                 }
-                if ((!ours && !known) || (!options.live && clean)) {
+                if (!ours || (!options.live && clean)) {
                     // An unchanged server revision must not discard IndexedDB media caches.
-                    if (clean && remote.revision === known.revision && !remote.deleted) return;
+                    if (ours && clean && remote.revision === known.revision && !remote.deleted) return;
                     const full = remote.deleted ? { ...remote, document: null } : await io.get(remote.id);
                     if (full.document) projects.set(remote.id, full.document);
                     else projects.delete(remote.id);
@@ -112,11 +118,18 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
         },
         async refreshCached(project: CanvasProject) {
             const remote = await io.get(project.id);
-            if (!remote.document) return;
+            if (!remote.document) return project;
+            const entry = baseline[project.id];
+            if (entry && !entry.redirect && !entry.pendingDelete && remote.revision > entry.revision && entry.local === snapshot(project)) {
+                const latest = { ...remote.document, viewport: project.viewport, selectedNodeIds: project.selectedNodeIds };
+                hydrated.set(project.id, { revision: remote.revision, local: snapshot(latest) });
+                return latest;
+            }
             if (sameDocument(project, remote.document) || sameDocument(await io.portable(canvasCloudDocument(structuredClone(project))), remote.document)) {
                 baseline[project.id] = { revision: remote.revision, local: snapshot(project) };
                 await checkpoint();
             }
+            return project;
         },
         async confirmHydrated(projects: CanvasProject[]): Promise<void> {
             // Call after durable local storage, before exposing hydrated projects to
@@ -137,7 +150,8 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
             acceptHydrated(current);
             const initial = structuredClone(baseline);
             Object.setPrototypeOf(initial, null);
-            const ids = new Set(changedIds || [...current.keys(), ...Object.keys(initial)]);
+            const ids = new Set(changedIds ?? current.keys());
+            if (!changedIds) for (const [id, entry] of Object.entries(initial)) if (entry.pendingDelete) ids.add(id);
             const failures: Array<{ id: string; error: unknown }> = [];
 
             async function preserveCopy(ownerId: string, source: CanvasProject, cloudSource: CanvasProject, revision: number, kind: "remote" | "recovery") {
@@ -204,6 +218,11 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
                 const local = current.get(id) || null;
                 const encoded = snapshot(local);
                 const entry = initial[id];
+                if (local && entry?.pendingDelete) delete baseline[id].pendingDelete;
+                if (!local && entry?.local && !entry.pendingDelete) {
+                    baseline[id].pendingDelete = true;
+                    await checkpoint();
+                }
                 if (entry?.local === encoded) continue;
                 if (entry?.redirect && local) {
                     const targetId = entry.redirect;

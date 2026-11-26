@@ -44,6 +44,7 @@ function harness(options: {
     isGenerating?: (nodeId: string) => boolean;
     loadRuntime?: () => Promise<void>;
     persist?: (save: Save, index: number) => Promise<void>;
+    cloudCheckpoint?: () => Promise<void>;
     query?: (query: Query) => Promise<QueuedTask | null>;
     recover?: (id: string, signal: AbortSignal) => Promise<QueuedTask>;
     loadImage?: (url: string) => Promise<typeof image>;
@@ -120,6 +121,7 @@ function harness(options: {
             uploadImage: async (url: string) => { uploads.push(url); return options.loadImage ? options.loadImage(url) : image; },
         },
         "@/stores/canvas/use-canvas-store": {
+            confirmCanvasBeforeImageSubmission: async () => options.cloudCheckpoint?.(),
             useCanvasStore: { getState: () => ({ updateProject(id: string, patch: { nodes: CanvasNodeData[] }) {
                 events.push("store");
                 pendingSave = { projectId: id, nodes: structuredClone(patch.nodes) };
@@ -429,6 +431,20 @@ describe("canvas image submission persistence", () => {
         expect(h.result()!.metadata?.imageTask?.requestId).toBe(`${retry.requestId}:0`);
         expect(h.committed).toHaveLength(1);
         expect(h.committed[0]!.nodes[1]!.metadata?.imageTask?.requestId).toBe(`${retry.requestId}:0`);
+        h.unmount();
+    });
+
+    test("an employee cannot submit a paid image request until the account canvas checkpoint succeeds", async () => {
+        let offline = true;
+        const h = harness({ cloudCheckpoint: async () => { if (offline) throw new Error("cloud offline"); } });
+        const options = await h.action().createOptions("result-node", new AbortController());
+        await expect(options.onSubmissionStarted()).rejects.toThrow("cloud offline");
+        expect(h.committed).toHaveLength(1);
+        expect(h.result()!.metadata?.imageTask).toBeUndefined();
+        offline = false;
+        const retry = await h.action().createOptions("result-node", new AbortController());
+        await retry.onSubmissionStarted();
+        expect(h.result()!.metadata?.imageTask?.requestId).toBe(`${retry.requestId}:0`);
         h.unmount();
     });
 

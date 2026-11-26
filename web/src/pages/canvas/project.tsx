@@ -1,3 +1,4 @@
+import { CanvasLibraryReadError } from "./canvas-library-read-error";
 import { useCanvasEntryUsage } from "@/hooks/use-canvas-entry-usage";
 import { displayNotice } from "@/hooks/use-display-text";
 import { useUiText, uiText } from "@/lib/i18n";
@@ -209,6 +210,7 @@ export default function CanvasPage() {
     // Expiry removes API authority, not the verified owner's mounted draft or edit lock.
     const editorOwner = useUserStore(state => state.user ? `user:${state.user.id}:${state.user.role}` : state.status);
     const hydrated = useCanvasStore(state => state.hydrated);
+    const libraryReadError = useCanvasStore(state => state.libraryReadError);
     const [pageSearch] = useSearchParams();
     const performanceFixture = import.meta.env.DEV && pageSearch.has("fixture") && pageSearch.has("perf");
     const canvasThemeKey = useThemeStore((state) => state.theme);
@@ -218,6 +220,7 @@ export default function CanvasPage() {
         setMounted(true);
     }, []);
 
+    if (mounted && libraryReadError) return <CanvasLibraryReadError />;
     if (!mounted || !hydrated) return <CanvasRefreshShell />;
 
     return <ConfigProvider theme={canvasAntTheme}><App className="h-full"><CanvasGraphProvider key={`${editorOwner}:${graphScopeId}`}><CanvasEditorSession key={`${editorOwner}:${graphScopeId}`} owner={editorOwner} projectId={graphScopeId || ""} enabled={!performanceFixture}>{(flushRef, writable, recoveryRef) => <WirelessCanvasPage sessionFlushRef={flushRef} sessionRecoveryRef={recoveryRef} writable={writable} />}</CanvasEditorSession></CanvasGraphProvider></App></ConfigProvider>;

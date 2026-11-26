@@ -53,7 +53,7 @@ export function createDeferredPersistQueue<T>(delayMs: number, onFlush: (value: 
         schedule(value: T) {
             pending = value;
             hasPending = true;
-            clearScheduledWork();
+            if (timer !== null || idle !== null) return;
             timer = scheduler.setTimeout(() => {
                 timer = null;
                 if (scheduler.requestIdle) {

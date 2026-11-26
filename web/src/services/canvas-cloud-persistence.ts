@@ -20,6 +20,7 @@ export function createCloudCanvasPersistence(owner: string, name: string, hooks:
     let engine: ReturnType<typeof createCanvasCloudSync> | undefined;
     let initializing: Promise<ReturnType<typeof createCanvasCloudSync>> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let scheduledAt = 0;
     let chain = Promise.resolve();
     const loading = new Map<string, Promise<CanvasProject | null>>();
     let dirty = false;
@@ -77,7 +78,13 @@ export function createCloudCanvasPersistence(owner: string, name: string, hooks:
         else { fullSave = true; blockedIds.clear(); }
         dirty = true;
         hooks.status("pending");
+        wakeAfter(delay);
+    }
+    function wakeAfter(delay: number) {
+        const next = Date.now() + delay;
+        if (timer && scheduledAt <= next) return;
         if (timer) clearTimeout(timer);
+        scheduledAt = next;
         timer = setTimeout(() => { timer = undefined; void flush(); }, delay);
     }
     async function flush() {
@@ -108,7 +115,8 @@ export function createCloudCanvasPersistence(owner: string, name: string, hooks:
                     const projects = saveAll ? await readCanvasProjects(name) : [];
                     const merged = new Map(projects.map(project => [project.id, project]));
                     for (const [id, project] of batch) { if (project) merged.set(id, project); else merged.delete(id); }
-                    await sync.save([...merged.values()], saveAll ? undefined : batch.keys(), blockedIds);
+                    const changedIds = saveAll ? new Set([...merged.keys(), ...batch.keys(), ...sync.pendingDeleteIds()]) : batch.keys();
+                    await sync.save([...merged.values()], changedIds, blockedIds);
                     for (const [id, value] of batch) if (!blockedIds.has(id) && outbox.get(id) === value) outbox.delete(id);
                 } catch (error) {
                     if (error instanceof CanvasCloudBatchError) {
@@ -120,6 +128,11 @@ export function createCloudCanvasPersistence(owner: string, name: string, hooks:
                     throw error;
                 }
                 failures = 0;
+                if (!pulled && !outbox.size) {
+                    dirty = true;
+                    fullSave = true;
+                    wakeAfter(0);
+                }
                 if (blockedIds.size) dirty = true;
                 if (hooks.valid()) hooks.status(blockedIds.size ? "error" : dirty ? "pending" : "synced", blockedIds.size ? `部分画布需要处理后重试：${[...blockedIds].join("、")}。其他画布可继续同步。` : undefined);
             } catch (error) {
@@ -127,7 +140,7 @@ export function createCloudCanvasPersistence(owner: string, name: string, hooks:
                 if (hooks.valid()) {
                     hooks.status("error", error instanceof Error ? error.message : "同步失败");
                     failures++;
-                    if (!timer && retryable(error)) timer = setTimeout(() => { timer = undefined; void flush(); }, Math.min(120000, 15000 * 2 ** Math.min(failures - 1, 3)));
+                    if (retryable(error)) wakeAfter(Math.min(120000, 15000 * 2 ** Math.min(failures - 1, 3)));
                 }
             }
         });
@@ -160,7 +173,7 @@ export function createCloudCanvasPersistence(owner: string, name: string, hooks:
                     dirty = true;
                     if (hooks.valid()) {
                         hooks.status("error", error instanceof Error ? error.message : "云端读取失败");
-                        if (!timer) timer = setTimeout(() => { timer = undefined; void flush(); }, 15000);
+                        wakeAfter(15000);
                     }
                     return durable;
                 }
@@ -195,7 +208,18 @@ export function createCloudCanvasPersistence(owner: string, name: string, hooks:
         schedule,
         flush,
         refresh(project: CanvasProject) {
-            return enqueue(async () => { assertOwner(); const sync = await initialize(); await sync.refreshCached(project); assertOwner(); });
+            return enqueue(async () => {
+                assertOwner();
+                const sync = await initialize();
+                const latest = await sync.refreshCached(project);
+                assertOwner();
+                if (latest === project) return project;
+                await writeCanvasProjects(name, collectProjectChanges([project], [latest]));
+                const saved = await readCanvasProject(name, project.id);
+                assertOwner();
+                await sync.confirmHydrated(saved ? [saved] : []);
+                return saved || project;
+            });
         },
         async synchronizedProjectIds(projects: CanvasProject[]) {
             assertOwner();

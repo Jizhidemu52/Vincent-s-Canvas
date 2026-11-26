@@ -82,7 +82,7 @@ test("flush writes the newest value and clears queued work", () => {
     expect(writes).toEqual(["newest"]);
 });
 
-test("cancels a queued idle write when a newer edit arrives", () => {
+test("a newer edit is saved at the already scheduled checkpoint", () => {
     const manual = createScheduler();
     const writes: string[] = [];
     const queue = createDeferredPersistQueue(400, (value: string) => writes.push(value), manual.scheduler);
@@ -91,7 +91,7 @@ test("cancels a queued idle write when a newer edit arrives", () => {
     manual.runTimer();
     queue.schedule("newer");
     manual.runIdle();
-    expect(writes).toEqual([]);
+    expect(writes).toEqual(["newer"]);
 
     manual.runTimer();
     manual.runIdle();

@@ -250,9 +250,49 @@ test("recovery redirection survives restart and handles a new conflict at the re
 test("a local delete first preserves a competing remote edit and then writes a tombstone", async () => {
     const original = project(); const competing = { ...original, title: "远端删除前修改" };
     const h = harness([], [envelope(competing, 2)], known(original));
-    await h.engine.save([]);
+    await h.engine.save([], [original.id]);
     expect(h.remote.get("original")?.deleted).toBe(true);
     expect([...h.remote.values()].find(item => item.id !== "original")?.document?.title).toContain(competing.title);
+});
+
+test("reopening a clean cached browser follows newer account revisions but keeps unsynchronized edits", async () => {
+    const original = project();
+    const newer = { ...original, title: "另一浏览器的新版本" };
+    const h = harness([original], [envelope(newer, 2)], known(original));
+    const edited = { ...original, title: "本机离线编辑" };
+    expect(await h.engine.refreshCached(edited)).toEqual(edited);
+    const refreshed = await h.engine.refreshCached(original);
+    expect(refreshed.title).toBe(newer.title);
+    expect(h.state.persisted[original.id].revision).toBe(1);
+    await h.engine.confirmHydrated([refreshed]);
+    expect(h.state.persisted[original.id].revision).toBe(2);
+    expect(h.state.putCalls).toEqual([]);
+});
+
+test("an empty browser cache with an intact baseline restores the account canvas and never sends a delete", async () => {
+    const saved = project();
+    const h = harness([], [envelope(saved)], known(saved));
+    await h.engine.save([]);
+    expect(h.remote.get(saved.id)?.document).toEqual(saved);
+    await h.engine.hydrate([], { deferUncached: true });
+    expect(h.engine.deferredProjects().map(item => item.id)).toEqual([saved.id]);
+    expect(await h.engine.load(saved.id)).toEqual(saved);
+});
+
+test("a partial save cannot replay another canvas deletion and restoring its content cancels the pending delete", async () => {
+    const original = project();
+    const h = harness([], [envelope(original)], known(original));
+    h.state.beforePut = () => { throw new Error("disconnected"); };
+    await expect(h.engine.save([], [original.id])).rejects.toThrow("disconnected");
+    h.state.beforePut = undefined;
+    const sync = h.restart();
+    const another = project("another");
+    await sync.save([another], [another.id]);
+    expect(h.remote.get(original.id)?.document).toEqual(original);
+    await sync.save([original], [original.id]);
+    expect(sync.pendingDeleteIds()).toEqual([]);
+    await h.restart().save([]);
+    expect(h.remote.get(original.id)?.document).toEqual(original);
 });
 
 test("onCopy mutations cannot corrupt the durable backup or expand the in-flight input traversal", async () => {
@@ -296,7 +336,7 @@ test("deleting a recovery copy during an original edit does not recreate the del
     await h.engine.save(h.state.local);
     const copy = h.state.local.find(item => item.id !== "original")!;
     h.state.local = [{ ...h.state.local[0]!, title: "原编辑器再次修改" }];
-    await h.engine.save(h.state.local);
+    await h.engine.save(h.state.local, ["original", copy.id]);
     expect(h.remote.get(copy.id)?.deleted).toBe(true);
     expect(h.state.local.some(item => item.id === copy.id)).toBe(false);
     const cloudCount = h.remote.size;

@@ -6,7 +6,7 @@ import { getQueuedTask, getQueuedTaskByRequestId, recoverQueuedTask, QueuedTaskF
 import { restoreCanvasMaskResult } from "@/lib/canvas/canvas-mask-adaptation";
 import { requestEdit, requestGeneration } from "@/services/api/image";
 import { uploadImage } from "@/services/image-storage";
-import { flushCanvasPersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { confirmCanvasBeforeImageSubmission, flushCanvasPersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import type { ToolKey } from "../../../../shared/feature-catalog";
@@ -205,6 +205,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
             const previousSourceTaskId = previous?.sourceTaskId;
             try {
                 await patch(nodeId, binding, { imageTask: binding, sourceTaskId: undefined, status: "loading", errorDetails: undefined }, false);
+                await confirmCanvasBeforeImageSubmission(binding.projectId);
                 signal.throwIfAborted();
             } catch (error) {
                 // This callback is awaited before POST: a failed first save is known not to have submitted.

@@ -43,6 +43,7 @@ export type CanvasHistorySnapshot = Pick<CanvasProject, "tryoutKit" | "nodes" | 
 
 type CanvasStore = {
     hydrated: boolean;
+    libraryReadError: boolean;
     cloudStatus: CloudSaveState;
     cloudError: string;
     localSaveFailureCount: number;
@@ -188,16 +189,27 @@ export async function flushCanvasCloudPersistence() {
     await cloudPersistence?.flush();
 }
 
+export async function confirmCanvasBeforeImageSubmission(projectId: string) {
+    if (!cloudPersistence) return;
+    if (!isCanvasOwnerValid()) throw new Error("账号已切换，请重新打开画布");
+    const project = useCanvasStore.getState().openProject(projectId);
+    if (!project) throw new Error("请先打开要保存的画布");
+    await cloudPersistence.flush();
+    if (!(await cloudPersistence.synchronizedProjectIds([project])).includes(projectId)) {
+        throw new Error("画布尚未得到服务器保存确认，本次生图尚未提交。请保留页面，待同步成功后重试。");
+    }
+}
+
 const loadingProjects = new Map<string, Promise<CanvasProject | null>>();
 /** Call only while acquiring the exclusive editor lock, before allowing edits. */
 export async function reloadCanvasProject(id: string): Promise<CanvasProject | null> {
     if (!isCanvasOwnerValid()) throw new Error("账号已切换，请重新打开画布");
-    const project = await readCanvasProject(CANVAS_STORE_KEY, id);
+    const cached = await readCanvasProject(CANVAS_STORE_KEY, id);
     if (!isCanvasOwnerValid()) throw new Error("账号已切换，请重新打开画布");
-    if (!project) return null;
+    if (!cached) return null;
     // An offline cloud checkpoint cannot erase the latest shared local graph.
     // If it differs from remote, ordinary CAS preserves both versions on save.
-    await cloudPersistence?.refresh(project).catch(() => undefined);
+    const project = cloudPersistence ? await cloudPersistence.refresh(cached).catch(() => cached) : cached;
     if (!isCanvasOwnerValid()) throw new Error("账号已切换，请重新打开画布");
     const state = useCanvasStore.getState();
     const projects = [project, ...state.projects.filter(item => item.id !== id)];
@@ -306,6 +318,7 @@ export const useCanvasStore = create<CanvasStore>()(
     persist<CanvasStore>(
         (set, get) => ({
             hydrated: false,
+            libraryReadError: false,
             cloudStatus: cloudPersistence ? "loading" : "local",
             cloudError: "",
             localSaveFailureCount: 0,
@@ -331,6 +344,11 @@ export const useCanvasStore = create<CanvasStore>()(
                     selectedNodeIds: [],
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
+                if (cloudPersistence) queueMicrotask(() => {
+                    if (!isCanvasOwnerValid()) return;
+                    const latest = get().openProject(id);
+                    if (latest) cloudPersistence.schedule(0, new Map([[id, latest]]));
+                });
                 return id;
             },
             importProject: (source) => {
@@ -398,8 +416,9 @@ export const useCanvasStore = create<CanvasStore>()(
                 ({
                     projects: state.projects,
                 }) as StorageValue<CanvasStore>["state"],
-            onRehydrateStorage: () => () => {
-                useCanvasStore.setState({ hydrated: canvasOwnerValid });
+            onRehydrateStorage: () => (_state, error) => {
+                if (!isCanvasOwnerValid()) return;
+                useCanvasStore.setState({ hydrated: !error, libraryReadError: Boolean(error) });
             },
         },
     ),
