@@ -68,7 +68,8 @@ function LayerStudioPane({ ownerId }: { ownerId: string }) {
     const visibleJobs=state.jobs.filter(job=>!state.hiddenHistoryIds?.includes(job.requestId));
     const selected = visibleJobs.find(job => job.requestId === state.selectedRequestId) || visibleJobs[0];
     const [uploading, setUploading] = useState(false);
-    const [pane, setPane] = useState<WorkbenchPane>("form");
+    const [chosenPane, setPane] = useState<WorkbenchPane>();
+    const pane = chosenPane ?? (selected ? "results" : "form");
     const scroller = useRef<HTMLDivElement>(null);
     const showPane = (next: WorkbenchPane) => { setPane(next); scroller.current?.scrollTo(0, 0); };
     const uploadingRef = useRef(false);

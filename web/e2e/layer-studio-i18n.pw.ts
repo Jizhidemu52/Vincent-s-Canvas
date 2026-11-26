@@ -143,6 +143,7 @@ test("English sizing, disabled reasons and errors remain usable at 390 pixels wi
     await expect(pane(page)).toContainText("Layer decomposition requires exactly 1 reference image");
     await pane(page).getByRole("button", { name: "Image generation / editing", exact: true }).click();
     await pane(page).getByRole("textbox", { name: "Image description", exact: true }).fill("Keep the knitted texture and original color");
+    await pane(page).getByRole("button", { name: "Output settings", exact: true }).click();
     await pane(page).getByRole("combobox", { name: "Background", exact: true }).click();
     await page.locator(".ant-select-dropdown:visible").getByText("Transparent", { exact: true }).click();
     await expect(pane(page).getByRole("combobox", { name: "Output format", exact: true })).toBeDisabled();
