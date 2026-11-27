@@ -1,3 +1,4 @@
+import { RecraftOutputInvalid } from "../src/recraft-image";
 import { classifyResultFailure, pauseOwnedTask } from "../src/task-repair";
 import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -228,7 +229,7 @@ isolated("128 recovery/cancel attempts cannot replay an unknown submitted task o
 }, 120_000);
 
 async function productionWorker(dependencies: Record<string, unknown>) {
-  dependencies = { readApiMartVideoReceipt, saveApiMartVideoReceipt, ...dependencies };
+  dependencies = { RecraftOutputInvalid, readApiMartVideoReceipt, saveApiMartVideoReceipt, ...dependencies };
   const file = await Bun.file(new URL("../src/worker.ts", import.meta.url)).text();
   const source = ts.createSourceFile("worker.ts", file, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const code = ["runTask", "deferTask", "assertTaskExecution", "executeApiMartVideo", "executeApiMartImage"].map(name => {

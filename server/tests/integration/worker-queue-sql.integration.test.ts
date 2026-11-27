@@ -1,3 +1,4 @@
+import { RecraftOutputInvalid } from "../../src/recraft-image";
 import { classifyResultFailure, pauseOwnedTask, startTaskRepairScheduler } from "../../src/task-repair";
 import { storeImageResult, imageResultExtension, ImageResultPersistenceError } from "../../src/image-result-storage";
 import { recordAssetEvent } from "../../src/asset-events";
@@ -56,7 +57,7 @@ async function databaseFixture(kind: "image" | "video" = "video") {
 }
 
 async function productionWorker(dependencies: Record<string, unknown>, realResultWriter = false) {
-  dependencies = { disposeProviderResults, WorkflowTaskPending, ApiMartImageQueryRetryable, PromptOptimizationError, readApiMartVideoReceipt, saveApiMartVideoReceipt, ...dependencies };
+  dependencies = { RecraftOutputInvalid, disposeProviderResults, WorkflowTaskPending, ApiMartImageQueryRetryable, PromptOptimizationError, readApiMartVideoReceipt, saveApiMartVideoReceipt, ...dependencies };
   // Exercise the real orchestration/provider functions without importing the
   // worker entrypoint (which intentionally starts configured production services).
   const file = await Bun.file(new URL("../../src/worker.ts", import.meta.url)).text();
