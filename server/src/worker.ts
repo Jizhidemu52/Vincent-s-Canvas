@@ -3,7 +3,7 @@ import { videoFileExtension } from "../../shared/video-output";
 import { createHash, randomUUID } from "node:crypto";
 import { createCache, createDatabase, type Cache, type Database } from "./db";
 import { classifyResultFailure, pauseOwnedTask, startTaskRepairScheduler, type PausedKind } from "./task-repair";
-import { decryptSecret } from "./security";
+import { decryptSecret, encryptSecret } from "./security";
 import {tryoutReferenceService,invalidateTryoutReferences,pruneTryoutReferences,lookupReadyTryoutInputs} from "./tryout-reference";
 import {publishedFabric} from "./tryout-private-assets";
 import {allowedPreset} from "./model-library";
@@ -48,7 +48,7 @@ import { assertImageEditMaskSupport, prepareImageEditInput } from "./image-edit-
 import { imageResultExtension, ImageResultPersistenceError, storeImageResult } from "./image-result-storage";
 import { ImageResultProcessingError, validateQuickImageSource } from "./image-result-processing";
 import { isRecraftAction, recraftProviderId, recraftTools } from "../../shared/recraft-tools";
-import { runRecraftImage } from "./recraft-image";
+import { downloadRecraftResult, isRecraftResult, RecraftOutputInvalid, runRecraftImage } from "./recraft-image";
 import { scheduleAssetThumbnails } from "./asset-thumbnails";
 import { assertWorkflowTaskContext, workflowTaskContext, WorkflowTaskPending, type WorkflowTaskContext } from "./workflow-task-context";
 import { resetWorkerHealth, startWorkerHealth } from "./worker-health";
@@ -79,7 +79,7 @@ type WorkRow = {
   model_config_id: string | null;
   tool_key: string | null;
   result_document: LayerStudioResultDocument | null;
-  upstream_result_document: Seedream55Manifest | ApiMartVideoReceipt | TryoutResultReceipt | null;
+  upstream_result_document: Seedream55Manifest | ApiMartVideoReceipt | TryoutResultReceipt | { kind: "recraft-image"; version: 1; sealed: string } | null;
   prompt: string;
   parameters: Record<string, unknown>;
   source_urls: string[];
@@ -154,7 +154,8 @@ async function runTask(taskId: string) {
   // A durable Seedream receipt remains recoverable even if an administrator
   // changes the model configuration after the paid request completed. A foreign
   // image manifest cannot establish completion for a video/audio task.
-  const isSeedream55 = !task.request_id?.startsWith("tryout:") && ["image_generation", "inpaint", "upscale", "batch_image", "seamless_stitch"].includes(task.operation_type)
+  const recraftReceipt = task.upstream_result_document && "kind" in task.upstream_result_document && task.upstream_result_document.kind === "recraft-image";
+  const isSeedream55 = !recraftReceipt && !task.request_id?.startsWith("tryout:") && ["image_generation", "inpaint", "upscale", "batch_image", "seamless_stitch"].includes(task.operation_type)
     && (task.tool_key === "layer-studio"
     || (task.model_id === "seedream-5-5" && task.protocol === "apimart" && !task.workflow_config_id)
     || (task.upstream_result_document?.version === 1 && !("kind" in task.upstream_result_document)
@@ -179,6 +180,7 @@ async function runTask(taskId: string) {
   let keepModelSlot = false;
   let providerResults: ProviderResult[] = [];
   try {
+    if (recraftReceipt && task.provider_id !== recraftProviderId) throw new RecraftOutputInvalid("Recraft 原结果与当前服务配置不匹配");
     if (task.repair_attempts > 0 && !task.upstream_task_id) throw new TaskExecutionLost("原任务缺少上游身份，不能重新提交");
     const attempted = await db.query<{ attempts: number }>(
       `UPDATE tasks SET attempts=attempts+CASE WHEN upstream_task_id IS NULL AND upstream_submission_started_at IS NULL THEN 1 ELSE 0 END
@@ -253,8 +255,8 @@ async function runTask(taskId: string) {
       : task.parameters.imageAgentProfile && !(error instanceof PromptOptimizationError) && !(error instanceof AssetObjectError) && !(error instanceof ImageResultPersistenceError)
       ? "图片助手任务未完成，请查询任务状态；服务端已隐藏上游内部详情。"
       : error instanceof Error ? error.message.slice(0, 2_000) : "任务执行失败";
-    if (providerProducedResult || task.paused_kind === "result_repair" || (error instanceof Error && "code" in error && error.code === "RESULT_DOWNLOAD_FAILED")) {
-      const decision = layerOutputLimitFailure ? { kind: "needs_review" as const, code: "RESULT_OUTPUT_INVALID" } : classifyResultFailure(error, isSeedream55);
+    if (providerProducedResult || error instanceof RecraftOutputInvalid || task.paused_kind === "result_repair" || (error instanceof Error && "code" in error && error.code === "RESULT_DOWNLOAD_FAILED")) {
+      const decision = layerOutputLimitFailure || error instanceof RecraftOutputInvalid ? { kind: "needs_review" as const, code: "RESULT_OUTPUT_INVALID" } : classifyResultFailure(error, isSeedream55);
       if (decision.code === "STORAGE_ENOSPC") console.error(JSON.stringify({ event: "worker.result_storage_full", taskId: task.id }));
       await pauseOwnedTask(db, task, decision,
         layerOutputLimitFailure ? reason : isSeedream55 && task.upstream_result_document
@@ -359,11 +361,32 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
   if (task.provider_id === recraftProviderId) {
     const action = task.parameters.quickImageAction;
     if (!isRecraftAction(action) || task.model_config_id !== recraftTools[action].id || task.model_id !== recraftTools[action].endpoint || task.source_urls.length !== 1 || task.workflow_config_id || task.protocol !== "custom") throw new Error("Recraft 工具配置与任务不匹配");
+    const key = config.PROVIDER_ENCRYPTION_KEY;
+    if (!key) throw new Error("Recraft 结果回执加密未配置");
+    const binding = [task.id, task.user_id, task.request_id, task.model_config_id, action];
+    if (task.upstream_result_document || task.upstream_task_id) {
+      const receipt = task.upstream_result_document;
+      if (!receipt || !("kind" in receipt) || receipt.kind !== "recraft-image" || receipt.version !== 1) throw new RecraftOutputInvalid("Recraft 原任务缺少已确认的结果回执");
+      let saved;
+      try { saved = JSON.parse(decryptSecret(receipt.sealed, key)); }
+      catch { throw new RecraftOutputInvalid("Recraft 结果回执无法验证"); }
+      if (!saved || JSON.stringify(saved.binding) !== JSON.stringify(binding) || !isRecraftResult(saved.image) || saved.image.image_id !== task.upstream_task_id) throw new RecraftOutputInvalid("Recraft 结果回执与原任务不匹配");
+      return [await downloadRecraftResult(action, saved.image)];
+    }
     const source = await loadSourceAsset(task.source_urls[0]!, task.user_id, 20_000_000);
     const token = task.encrypted_credentials && config.PROVIDER_ENCRYPTION_KEY
       ? (JSON.parse(decryptSecret(task.encrypted_credentials, config.PROVIDER_ENCRYPTION_KEY)) as { apiKey?: string }).apiKey
       : undefined;
-    return [await runRecraftImage(action, source, () => claimProviderSubmission(task), token)];
+    return [await runRecraftImage(action, source, () => claimProviderSubmission(task), token, async image => {
+      const receipt = { kind: "recraft-image" as const, version: 1 as const, sealed: encryptSecret(JSON.stringify({ binding, image }), key) };
+      const saved = await db.query(`UPDATE tasks SET upstream_task_id=$1,upstream_result_document=$2::jsonb,updated_at=now()
+        WHERE id=$3 AND user_id=$4 AND execution_token=$5 AND status='processing' AND lease_expires_at>now()
+        AND upstream_submission_started_at IS NOT NULL AND upstream_task_id IS NULL AND upstream_result_document IS NULL RETURNING id`,
+        [image.image_id, JSON.stringify(receipt), task.id, task.user_id, task.execution_token]);
+      if (saved.rowCount !== 1) throw new TaskExecutionLost("Recraft 原结果回执保存权已改变");
+      task.upstream_task_id = image.image_id;
+      task.upstream_result_document = receipt;
+    })];
   }
   if(task.request_id?.startsWith("preset-gen:")&&(task.protocol!=="apimart"||task.workflow_config_id||!tryoutModels.some(m=>m.modelId===task.model_id)))throw new Error("管理员模特生成绑定已变化，请核对原任务和高清配置");
   if (task.original_size_source_id) {

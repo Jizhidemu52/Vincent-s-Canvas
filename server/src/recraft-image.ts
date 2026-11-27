@@ -1,5 +1,7 @@
 import { DOMParser } from "@xmldom/xmldom";
 import { recraftTools, type RecraftAction } from "../../shared/recraft-tools";
+import { fetchProviderSubmission } from "./provider-submission-transport";
+import { readBoundedImage } from "./seedream55-reference";
 import { inspectEditImage } from "./image-edit-input";
 import { ProviderSubmissionRejected, isDefinitiveSubmissionRejection } from "./provider-submission-policy";
 
@@ -20,35 +22,66 @@ export function assertRecraftVector(bytes: Buffer) {
   for (const element of Array.from(doc.getElementsByTagName("*"))) {
     if (!tags.has(element.tagName) || element.namespaceURI !== doc.documentElement.namespaceURI) throw new Error("矢量结果包含不支持的元素");
     for (const attr of Array.from(element.attributes)) {
+      if (element.tagName === "stop" && attr.name === "class" && /^[\w-]+(?:\s+[\w-]+)*$/.test(attr.value)) continue;
       if (attr.name === "style" && /^\s*display\s*:\s*block\s*;?\s*$/.test(attr.value)) continue;
       if (!attrs.has(attr.name) || (!attr.name.startsWith("xmlns") && /[\\]|\/\*|url\s*\((?!#[\w.-]+\))/i.test(attr.value))) throw new Error("矢量结果包含不支持的属性");
     }
   }
 }
 
-export async function runRecraftImage(action: RecraftAction, source: { bytes: Uint8Array; mimeType: string }, beforeSubmit: () => Promise<void>, token = process.env.RECRAFT_API_TOKEN) {
+export type RecraftResult = { image_id: string; url: string };
+
+export function isRecraftResult(value: unknown): value is RecraftResult {
+  if (!value || typeof value !== "object" || !("image_id" in value) || typeof value.image_id !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.image_id)) return false;
+  if (!("url" in value) || typeof value.url !== "string" || value.url.length > 8192 || !URL.canParse(value.url)) return false;
+  const url = new URL(value.url);
+  return url.origin === "https://img.recraft.ai" && !url.username && !url.password;
+}
+
+export class RecraftOutputInvalid extends Error {}
+
+export async function downloadRecraftResult(action: RecraftAction, image: RecraftResult) {
+  if (!isRecraftResult(image)) throw new RecraftOutputInvalid("Recraft 原结果地址无效");
+  let bytes: Buffer;
+  try {
+    const response = await fetch(image.url, { redirect: "error", signal: AbortSignal.timeout(180_000) });
+    if (!response.ok || !response.body) {
+      await response.body?.cancel();
+      throw new Error("下载未完成");
+    }
+    bytes = await readBoundedImage(response.body, 256 * 1024 * 1024);
+  } catch {
+    throw Object.assign(new Error("Recraft 已完成处理，原结果下载未完成"), { code: "RESULT_DOWNLOAD_FAILED" });
+  }
+  if (action === "vectorize") {
+    try { assertRecraftVector(bytes); }
+    catch (error) { throw new RecraftOutputInvalid(error instanceof Error ? error.message : "矢量结果校验未通过"); }
+    return { bytes, mimeType: "image/svg+xml" };
+  }
+  if (!bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) throw new RecraftOutputInvalid("Recraft 未返回 PNG 图像");
+  return { bytes, mimeType: "image/png" };
+}
+
+export async function runRecraftImage(action: RecraftAction, source: { bytes: Uint8Array; mimeType: string }, beforeSubmit: () => Promise<void>, token = process.env.RECRAFT_API_TOKEN,
+  saveReceipt?: (image: RecraftResult) => Promise<void>, submit = fetchProviderSubmission) {
   if (!token?.trim()) throw new Error("服务端尚未配置 Recraft API 密钥");
   await validateRecraftSource(action, source);
-  const body = JSON.stringify({
-    image_url: `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`,
-    response_format: "b64_json",
-    ...(action === "vectorize" ? { version: "v1_pro" } : { image_format: "png" }),
-  });
+  const body = new FormData();
+  body.set("file", new Blob([Buffer.from(source.bytes)], { type: source.mimeType }), "original." + source.mimeType.split("/")[1]);
+  body.set("response_format", "url");
+  if (action === "vectorize") body.set("version", "v1_pro");
+  else body.set("image_format", "png");
   await beforeSubmit();
-  const response = await fetch(`https://external.api.recraft.ai/v1/images/${recraftTools[action].endpoint}`, {
-    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body, redirect: "error", signal: AbortSignal.timeout(180_000),
+  const response = await submit(`https://external.api.recraft.ai/v1/images/${recraftTools[action].endpoint}`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body, redirect: "error", signal: AbortSignal.timeout(180_000),
   });
   if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
     const message = `Recraft 处理失败（HTTP ${response.status}）`;
     throw isDefinitiveSubmissionRejection(response.status) || response.status === 402 ? new ProviderSubmissionRejected(message) : new Error(message);
   }
-  const result = await response.json() as { image?: { b64_json?: string } };
-  if (typeof result.image?.b64_json !== "string" || !result.image.b64_json.length) throw new Error("Recraft 未返回图片数据");
-  const bytes = Buffer.from(result.image.b64_json, "base64");
-  if (action === "vectorize") {
-    assertRecraftVector(bytes);
-    return { bytes, mimeType: "image/svg+xml" };
-  }
-  if (!bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) throw new Error("Recraft 未返回 PNG 图像");
-  return { bytes, mimeType: "image/png" };
+  const result = await response.json() as { image?: unknown };
+  if (!isRecraftResult(result.image)) throw new RecraftOutputInvalid("Recraft 未返回可验证的原结果链接");
+  await saveReceipt?.(result.image);
+  return downloadRecraftResult(action, result.image);
 }
