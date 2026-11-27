@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
-import { canvasImageSource, hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
+import * as canvasImageSourceModule from "@/lib/canvas/canvas-image-source";
 import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
 import { canvasImageBaseName, canvasImageVersion, originalCanvasImageFileName } from "@/lib/canvas/canvas-image-filename";
 import { createCanvasImageEditVersion } from "@/lib/canvas/canvas-image-edit";
@@ -23,7 +23,7 @@ function harness(metadata: CanvasNodeData["metadata"], options: { resolve?: () =
         "@/lib/i18n": { uiText: (value: string) => value },
         "@/constant/canvas": { NODE_DEFAULT_SIZE: { text: { width: 200, height: 100 } } },
         "@/lib/canvas/canvas-async-pool": { mapCanvasAsyncPool: async (items: unknown[], _limit: number, task: (item: unknown) => Promise<unknown>) => Promise.all(items.map(task)) },
-        "@/lib/canvas/canvas-image-source": { canvasImageSource, hasCanvasImageSource },
+        "@/lib/canvas/canvas-image-source": canvasImageSourceModule,
         "@/lib/canvas/canvas-image-compare-source": { canvasCompareSource },
         "@/lib/canvas/canvas-image-filename": { canvasImageBaseName, canvasImageVersion, originalCanvasImageFileName },
         "@/lib/canvas/canvas-image-tool-loader": { loadCanvasImageTools: async () => ({

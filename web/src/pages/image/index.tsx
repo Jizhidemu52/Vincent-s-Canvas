@@ -72,7 +72,7 @@ import { TaskObservationStoppedError } from "@/services/api/task-observation";
 import { findPendingImageTask, pendingImagesForWorkspace, snapshotImageRequest, updateImageResultForRecord, type PendingImage, type ImageRequestSnapshot } from "./image-pending";
 import { classifyTaskRecovery, submissionInvestigationMessage, watchTaskReconciliation } from "@/services/api/task-result-reconciliation";
 import { restoreGenerationDraft } from "@/services/api/generation-history";
-import { ImageLogThumbnail } from "./image-log-thumbnail";
+import { ImageLogThumbnail } from "@/components/image-log-thumbnail";
 import { GarmentRecipePanel } from "../creative/garment-recipe-panel";
 import { garmentReferencesMatch, type GarmentRecipe } from "@/lib/garment-recipe";
 import { CREATIVE_REQUIREMENT_PLACEHOLDER, type CreativePreset } from "@/lib/creative-presets";
@@ -247,6 +247,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const workbenchTask = useWorkbenchTask();
     const acceptsUrlInput = workbenchTask.id === DEFAULT_WORKBENCH_TASK;
     const quickTool = isQuickImageTool(historyTool);
+    const standaloneImageTool = quickTool && historyTool !== "item-extract";
     const { message, modal } = App.useApp();
     const libraryShare = useDesignLibraryShare();
     const resultCanvas = useResultCanvas();
@@ -1331,6 +1332,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         disabled: !workbenchTask.active || !draftReady || !handoffReady || readingReferences || running || restoringHistory || user?.status !== "active",
     });
 
+    const newImageTaskButton = standaloneImageTool && <Button icon={<Plus className="size-4" />} aria-label={uiText("新建任务，继续创作")} loading={workbenchTask.creating} disabled={!workbenchTask.ready || workbenchTask.creating} onClick={() => void createTask()}>{uiText("新建任务")}</Button>;
     const recoveryControls = running ? <Button block onClick={stopPendingQueries}>{uiText("停止本页查询（不取消服务端任务）")}</Button> : pendingImages.length ? <><Button block onClick={() => void resumePendingImages(pendingImages)}>{pendingStatusCount ? <>{uiText("刷新进度（")}{pendingStatusCount}）</> : uiText("重试保存")}</Button>{pendingImages.some(record => !record.stopped) && <Button block onClick={stopPendingQueries}>{uiText("停止自动刷新")}</Button>}</> : null;
     return (
         <div className="wb-page image-workbench generation-workbench flex h-full flex-col overflow-hidden" style={{ "--generation-submit-height": `${submitToolbarHeight}px` } as CSSProperties}>
@@ -1341,8 +1343,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto">
                         <div>
                             <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                    {creativePreset ? <Link className="wb-eyebrow inline-flex items-center gap-1" to="/creative"><ArrowLeft className="size-3" />{uiText("创意设计")}</Link> : <p className="wb-eyebrow">{uiText("图像工作室")}</p>}<h1 className="wb-title">{uiText(toolModeConfig.title || "")}</h1>
+                                <div className="min-w-0 flex-1">
+                                    {creativePreset ? <Link className="wb-eyebrow inline-flex items-center gap-1" to="/creative"><ArrowLeft className="size-3" />{uiText("创意设计")}</Link> : <p className="wb-eyebrow">{uiText("图像工作室")}</p>}<div className="flex items-center justify-between gap-3"><h1 className="wb-title">{uiText(toolModeConfig.title || "")}</h1>{newImageTaskButton}</div>
                                     <p className="wb-description">{uiText(toolModeConfig.description || "")}</p>
                                 </div>
                             </div>
@@ -1446,7 +1448,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                     <Button size="small" onClick={() => setPendingReadAttempt(value => value + 1)}>{uiText("重试读取原任务")}</Button>
                                 </div> : null}
                             </div>
-                            {running ? <Button block icon={<Plus className="size-4" />} loading={workbenchTask.creating} disabled={!workbenchTask.ready || workbenchTask.creating} onClick={() => void createTask()}>{uiText("新建任务，继续创作")}</Button> : null}
+                            {running && !standaloneImageTool ? <Button block icon={<Plus className="size-4" />} loading={workbenchTask.creating} disabled={!workbenchTask.ready || workbenchTask.creating} onClick={() => void createTask()}>{uiText("新建任务，继续创作")}</Button> : null}
 
                             {/* Keep the primary action bottom-most so a second pointer click cannot hit a newly inserted action. */}
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
@@ -1456,6 +1458,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                     </div>
 
                     <div className="wb-surface image-results-panel thin-scrollbar min-w-0 p-6">
+                        {standaloneImageTool && <div className="image-mobile-next-task">{newImageTaskButton}</div>}
                         {recoveryControls}
                         <div className="image-result-tabs" role="tablist" aria-label={uiText("结果视图")}>
                             <button type="button" role="tab" aria-selected={!logsOpen} onClick={returnToCurrentTask}>{uiText("本次结果")}{running ? <LoaderCircle className="size-4 animate-spin" /> : null}</button>
@@ -1782,6 +1785,7 @@ function LogCard({ log, displayTitle, selected, active, disabled, onSelectedChan
     const display = useDisplayText();
     const thumbnails = log.images.slice(0, 4);
     const title = displayTitle ? uiText(displayTitle) : display(log.title);
+    const sourceName = displayTitle ? log.references[0]?.name : undefined;
 
     return (
         <button
@@ -1794,7 +1798,7 @@ function LogCard({ log, displayTitle, selected, active, disabled, onSelectedChan
                 <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
                     {onSelectedChange && <Checkbox className="mt-1" aria-label={uiText("选择记录：{title}", { title })} disabled={disabled} checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />}
                     <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold leading-5">{title}</div>
+                        <div className="truncate text-sm font-semibold leading-5">{sourceName || title}</div>
                         {thumbnails.length ? (
                             <div className="mt-2 flex gap-1 overflow-hidden">
                                 {thumbnails.map((image, index) => (

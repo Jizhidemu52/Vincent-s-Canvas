@@ -71,6 +71,7 @@ export default {
     "查看输入、参数和任务编号": "View inputs, parameters and task ID",
     "原任务说明：": "Original task note:",
     "任务执行或结果保存存在异常，原记录与已保存原件保留。": "There was a problem running the task or saving its results. The original record and saved originals are preserved.",
+    "用同一账号登录，可在其他设备查看这些记录。": "Sign in to the same account to see these records on another device.",
     "账号云端历史": "Account cloud history",
     "正在读取账号历史": "Loading account history",
     "重新读取本账号的已提交记录": "Reload this account's submitted records",

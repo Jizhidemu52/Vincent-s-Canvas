@@ -217,7 +217,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         ["@/components/generation-queue-progress", "GenerationQueueProgress"],
         ["@/components/reference-images/reference-image-tray", "ReferenceImageTray"], ["@/components/model-picker", "ModelPicker"],
         ["@/components/prompts/prompt-select-dialog", "PromptSelectDialog"], ["@/components/canvas/asset-picker-modal", "AssetPickerModal"],
-        ["./image-log-thumbnail", "ImageLogThumbnail"], ["../creative/garment-recipe-panel", "GarmentRecipePanel"],
+        ["@/components/image-log-thumbnail", "ImageLogThumbnail"], ["../creative/garment-recipe-panel", "GarmentRecipePanel"],
     ]) dependencies[path!] = { [name!]: component(name!) };
     Object.assign(dependencies["@/components/image-settings-panel"], { imageQualityLabel: (value: string) => value, imageSizeLabel: (value: string) => value });
     const workspaceModule = { exports: {} };

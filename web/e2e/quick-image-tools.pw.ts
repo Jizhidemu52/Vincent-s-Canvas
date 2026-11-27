@@ -301,3 +301,43 @@ test("canvas quick tasks stay independent across tools and source images", async
     for (const node of [a, b, c]) await expect(page.locator(`[data-node-id="${node.id}"]`)).toBeAttached();
     expect(api.submissions).toHaveLength(3);
 });
+
+for (const [path, submitLabel] of [["remove-background", "一键去背景"], ["hd-upscale", "高清放大"], ["vectorize", "转为 SVG"]]) {
+    test(`${path} starts a second task while the first runs and lists history vertically`, async ({ page, api }, testInfo) => {
+        await managedQuickTask(page, api);
+        await page.route("**/api/tasks/history?**", route => route.fulfill({ json: {
+            tasks: [...api.tasks.values()].reverse(), hasMore: false, nextCursor: null,
+        } }));
+        api.taskStatus = "processing";
+        await page.goto("/" + path);
+        await uploadStandaloneImage(page);
+        await page.getByRole("button", { name: submitLabel, exact: true }).click();
+        await expect.poll(() => api.submissions.length).toBe(1);
+        await page.getByRole("button", { name: "新建任务，继续创作", exact: true }).click();
+        await uploadStandaloneImage(page);
+        await page.getByRole("button", { name: submitLabel, exact: true }).click();
+        await expect.poll(() => api.submissions.length).toBe(2);
+        expect(api.submissions[0].requestId).not.toBe(api.submissions[1].requestId);
+        for (const task of api.tasks.values()) {
+            task.status = "success";
+            task.resultUrls = [`/api/assets/${task.id}/content`];
+        }
+        await expect(page.getByRole("button", { name: "下载", exact: true })).toBeVisible();
+        await page.getByRole("tab", { name: /^历史记录/ }).click();
+        const cloud = page.getByTestId("account-history").filter({visible:true}).getByRole("group");
+        const local = page.locator(".image-history-card:visible");
+        for (const width of [1440, 390]) {
+            await page.setViewportSize({width, height:900});
+            for (const rows of [cloud, local]) {
+                await expect(rows).toHaveCount(2);
+                const first = await rows.first().boundingBox(), second = await rows.last().boundingBox();
+                expect(second!.y).toBeGreaterThanOrEqual(first!.y+first!.height-1);
+            }
+            expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+            await page.screenshot({path:testInfo.outputPath(`history-${width}.png`)});
+        }
+        await cloud.first().getByRole("button", { name: /查看云端记录/ }).click();
+        await expect(page.getByRole("dialog")).toBeVisible();
+        expect(api.submissions).toHaveLength(2);
+    });
+}
