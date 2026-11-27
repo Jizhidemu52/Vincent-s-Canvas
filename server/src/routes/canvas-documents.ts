@@ -70,7 +70,11 @@ export function createCanvasDocumentsRouter(db: Database) {
                     // Only this owner's exact base document can retain stale IDs; the
                     // final CAS still prevents races, and media reads keep their ACL.
                     const retainedIds = new Set(current ? parseCanvasDocumentWrite(id, { baseRevision, document: current.document }).assetIds : []);
-                    if (unavailableIds.some(assetId => !retainedIds.has(assetId))) throw new CanvasDocumentError("CANVAS_ASSET_FORBIDDEN", "画布包含不存在或无权读取的素材", 403);
+                    const rejectedAssetIds = unavailableIds.filter(assetId => !retainedIds.has(assetId));
+                    if (rejectedAssetIds.length) {
+                        response.status(403).json({ error: "CANVAS_ASSET_FORBIDDEN", message: "画布包含不存在或无权读取的素材", rejectedAssetIds });
+                        return;
+                    }
                 }
             }
             const json = document === null ? null : JSON.stringify(document);

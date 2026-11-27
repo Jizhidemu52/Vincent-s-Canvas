@@ -1,5 +1,5 @@
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
-import { CanvasRevisionConflict, type CloudCanvasAcknowledgement, type CloudCanvasDocument, type CloudCanvasSummary } from "@/services/api/canvas-documents";
+import { CanvasCloudRequestError, CanvasRevisionConflict, type CloudCanvasAcknowledgement, type CloudCanvasDocument, type CloudCanvasSummary } from "@/services/api/canvas-documents";
 import { encodeCanvasProject, parseCanvasProject, serializeCanvasProject } from "./canvas-project-codec";
 import { mapCanvasAsyncPool } from "./canvas-async-pool";
 
@@ -15,7 +15,7 @@ type Dependencies = {
     list: () => Promise<CloudCanvasSummary[]>;
     get: (id: string) => Promise<CloudCanvasDocument>;
     put: (id: string, revision: number, document: CanvasProject | null) => Promise<CloudCanvasAcknowledgement>;
-    portable: (project: CanvasProject) => Promise<CanvasProject>;
+    portable: (project: CanvasProject, rejected?: ReadonlySet<string>) => Promise<CanvasProject>;
     saveBaseline: (value: CanvasCloudBaseline) => Promise<void>;
     newId: () => string;
     onCopy: (copy: CanvasProject) => Promise<void>;
@@ -23,6 +23,34 @@ type Dependencies = {
 export function canvasCloudDocument(project: CanvasProject): CanvasProject {
     const { history: _history, selectedNodeIds: _selection, ...content } = project;
     return { ...content, viewport: { x: 0, y: 0, k: 1 } };
+}
+function mediaReferences(value: unknown, refs: Set<string>, field = "") {
+    if (Array.isArray(value)) { for (const item of value) mediaReferences(item, refs, field); return; }
+    if (value && typeof value === "object") {
+        for (const [key, child] of Object.entries(value)) mediaReferences(child, refs, key);
+    } else if (typeof value === "string") {
+        if (field === "assetId" || field === "serverAssetId" || field === "storageKey" || field === "imageOptions") refs.add(value);
+        else if (field === "references" && /^(image|video|audio|file|media):/.test(value)) refs.add(value);
+        else {
+            const id = value.match(/^\/api\/assets\/([a-f0-9-]{36})\/content\/?$/i)?.[1];
+            if (id) refs.add(id.toLowerCase());
+        }
+    }
+}
+export function canvasMediaSignature(project: CanvasProject | null) {
+    const refs = new Set<string>();
+    if (project) mediaReferences(canvasCloudDocument(project), refs);
+    return JSON.stringify([...refs].sort());
+}
+function rejectedMediaError(project: CanvasProject, error: CanvasCloudRequestError) {
+    const labels = project.nodes.filter(node => {
+        const refs = new Set<string>();
+        mediaReferences(node.metadata, refs);
+        return error.rejectedAssetIds.some(id => refs.has(id));
+    }).map(node => node.title || node.id);
+    const location = labels.length ? `节点「${[...new Set(labels)].slice(0, 3).join("」、「")}」` : "画布引用";
+    const hint = error.rejectedAssetIds.length ? `（素材 ${error.rejectedAssetIds.slice(0, 3).map(id => id.slice(0, 8)).join("、")}）` : "";
+    return new CanvasCloudRequestError(`${location}有无法访问的素材${hint}。请保留本机草稿，重新选择原图或恢复素材访问权限后重试。`, error.status, error.code, error.rejectedAssetIds);
 }
 const snapshot = (project: CanvasProject | null) => project ? serializeCanvasProject(canvasCloudDocument(project)) : null;
 export class CanvasCloudBatchError extends Error {
@@ -196,16 +224,35 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
 
             async function write(id: string, local: CanvasProject | null, revision: number) {
                 const encoded = snapshot(local);
-                const portable = local ? await io.portable(canvasCloudDocument(structuredClone(local))) : null;
+                const source = local ? canvasCloudDocument(structuredClone(local)) : null;
+                let portable = source ? await io.portable(source) : null;
+                async function submit(baseRevision: number) {
+                    try { return await io.put(id, baseRevision, portable); }
+                    catch (error) {
+                        if (!(error instanceof CanvasCloudRequestError) || error.code !== "CANVAS_ASSET_FORBIDDEN" || !source || !portable) throw error;
+                        if (error.rejectedAssetIds.length) {
+                            const repaired = await io.portable(source, new Set(error.rejectedAssetIds));
+                            if (!sameDocument(repaired, portable)) {
+                                portable = repaired;
+                                try { return await io.put(id, baseRevision, repaired); }
+                                catch (second) {
+                                    if (second instanceof CanvasCloudRequestError && second.code === "CANVAS_ASSET_FORBIDDEN") throw rejectedMediaError(repaired, second);
+                                    throw second;
+                                }
+                            }
+                        }
+                        throw rejectedMediaError(portable, error);
+                    }
+                }
                 let saved: CloudCanvasAcknowledgement;
-                try { saved = await io.put(id, revision, portable); }
+                try { saved = await submit(revision); }
                 catch (error) {
                     if (!(error instanceof CanvasRevisionConflict)) throw error;
                     const remote = error.current;
                     if (sameDocument(remote.document, portable)) saved = remote;
                     else if (remote.document) {
                         await preserveCopy(id, remote.document, remote.document, remote.revision, "remote");
-                        saved = await io.put(id, remote.revision, portable);
+                        saved = await submit(remote.revision);
                     } else if (local) {
                         const recovery = await preserveCopy(id, local, portable!, remote.revision, "recovery");
                         baseline[id] = { revision: remote.revision, local: encoded, redirect: recovery.copy.id, redirectRevision: recovery.revision };

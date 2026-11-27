@@ -185,7 +185,7 @@ export async function flushCanvasPersistence() {
 export async function flushCanvasCloudPersistence() {
     if (canvasOwnerValid && lastPersistError) persistQueue.schedule({ name: CANVAS_STORE_KEY, value: { state: useCanvasStore.getState(), version: 0 }, changes: new Map(pendingProjectChanges) });
     await flushCanvasPersistence();
-    cloudPersistence?.schedule(0);
+    cloudPersistence?.retry();
     await cloudPersistence?.flush();
 }
 

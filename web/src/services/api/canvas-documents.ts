@@ -11,8 +11,8 @@ export class CanvasRevisionConflict extends Error {
     constructor(public current: CloudCanvasDocument) { super("画布已在另一处更新"); }
 }
 export class CanvasCloudRequestError extends Error {
-    constructor(message: string, public status = 0, public code?: string) { super(message); }
-    get retryable() { return !this.status || this.status === 408 || this.status === 423 || this.status === 429 || this.status >= 500 || this.code === "CANVAS_ASSET_FORBIDDEN"; }
+    constructor(message: string, public status = 0, public code?: string, public rejectedAssetIds: string[] = []) { super(message); }
+    get retryable() { return !this.status || this.status === 408 || this.status === 423 || this.status === 429 || this.status >= 500; }
 }
 async function request<T>(owner: string, path: string, init?: RequestInit): Promise<T> {
     let response: Response;
@@ -25,7 +25,11 @@ async function request<T>(owner: string, path: string, init?: RequestInit): Prom
     const body = response.headers.get("content-type")?.includes("json") ? await response.json().catch(() => null) : null;
     if (!body) throw new CanvasCloudRequestError(`画布云端返回异常响应（${response.status}），请稍后重试`, response.status >= 400 ? response.status : 502);
     if (response.status === 409 && body.error === "CANVAS_REVISION_CONFLICT") throw new CanvasRevisionConflict(decodeDocument(body.document));
-    if (!response.ok) throw new CanvasCloudRequestError(body.message || body.msg || "画布云端同步失败", response.status, body.error);
+    if (!response.ok) {
+        const rejected = response.status === 403 && body.error === "CANVAS_ASSET_FORBIDDEN" && Array.isArray(body.rejectedAssetIds)
+            ? body.rejectedAssetIds.filter((id: unknown) => typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id)) : [];
+        throw new CanvasCloudRequestError(body.message || body.msg || "画布云端同步失败", response.status, body.error, rejected);
+    }
     return body as T;
 }
 export const listCloudCanvases = (owner: string) => request<{ documents: CloudCanvasSummary[] }>(owner, "");

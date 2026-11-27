@@ -394,7 +394,7 @@ test("canvas API retains inaccessible references only from the matching owner do
         const newReference = "88888888-8888-4888-8888-888888888888";
         const denied = await put(document.id, 2, { ...changed, extra: { assetId: newReference } });
         expect(denied.status).toBe(403);
-        expect(denied.body.error).toBe("CANVAS_ASSET_FORBIDDEN");
+        expect(denied.body).toMatchObject({ error: "CANVAS_ASSET_FORBIDDEN", rejectedAssetIds: [newReference] });
         const copied = { ...changed, id: "copied-canvas" };
         expect((await put(copied.id, 0, copied)).status).toBe(403);
 

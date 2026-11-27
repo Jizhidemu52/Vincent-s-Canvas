@@ -23,8 +23,23 @@ function setup(existingSource?: string) {
     };
     const exported: any = {};
     new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exported);
-    return { ...exported, calls };
+    return { ...exported, calls, stored };
 }
+test("rejected prior uploads use the same owner's original bytes and keep the replacement idempotent", async () => {
+    const io = setup();
+    const input = { storageKey: "image:original", url: "blob:expired" };
+    const rejected = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    io.stored.set("employee-a/image:original", `/api/assets/${rejected}/content`);
+    const result = await io.ensureCloudMedia("employee-a", input, {}, new Set([rejected]));
+    expect(result).toBe(`/api/assets/${assetId}/content`);
+    expect(io.calls[0].bytes).toEqual(original);
+    expect(io.calls[0].options).toEqual({ expectedOwnerId: "employee-a", clientReferenceId: `canvas-repair:${rejected}:image:original` });
+    expect(await io.ensureCloudMedia("employee-a", input)).toBe(result);
+    expect(io.calls).toHaveLength(1);
+    const shared = setup(`/api/assets/${rejected}/content`);
+    expect(await shared.ensureCloudMedia("employee-a", input, {}, new Set([rejected]))).toBe(`/api/assets/${rejected}/content`);
+    expect(shared.calls).toHaveLength(0);
+});
 test("a generated image retaining a server source is reused, not uploaded again", async () => {
     const target = `/api/assets/${assetId}/content`;
     const io = setup(target);

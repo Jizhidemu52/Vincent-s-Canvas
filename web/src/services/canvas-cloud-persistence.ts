@@ -2,7 +2,7 @@ import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { getCloudCanvas, listCloudCanvases, putCloudCanvas, CanvasCloudRequestError } from "./api/canvas-documents";
 import { makeCloudCanvas } from "./canvas-cloud-media";
-import { createCanvasCloudSync, CanvasCloudBatchError, type CanvasCloudBaseline } from "@/lib/canvas/canvas-cloud-sync";
+import { createCanvasCloudSync, CanvasCloudBatchError, canvasMediaSignature, type CanvasCloudBaseline } from "@/lib/canvas/canvas-cloud-sync";
 import { isCanvasStorageQuotaError } from "@/lib/canvas/canvas-storage-capacity";
 import { collectProjectChanges } from "@/lib/canvas/canvas-persistence-merge";
 import { writeCanvasProjects, readCanvasProjects, readCanvasProject } from "@/lib/canvas/canvas-project-storage";
@@ -28,7 +28,8 @@ export function createCloudCanvasPersistence(owner: string, name: string, hooks:
     let fullSave = false;
     let failures = 0;
     const outbox = new Map<string, CanvasProject | null>();
-    const blockedIds = new Set<string>();
+    const blocked = new Map<string, { signature?: string; message: string }>();
+    const blockedMessage = () => [...blocked.values()].map(item => item.message).join("\n");
     const retryable = (value: unknown): boolean => value instanceof CanvasCloudRequestError ? value.retryable
         : value instanceof CanvasCloudBatchError ? value.failures.some(item => retryable(item.error)) : true;
     const baselineKey = `${name}:cloud-baseline:v1`;
@@ -49,7 +50,7 @@ export function createCloudCanvasPersistence(owner: string, name: string, hooks:
                 list: async () => { assertOwner(); const result = await listCloudCanvases(owner); assertOwner(); return result.documents; },
                 get: async id => { assertOwner(); const result = await getCloudCanvas(owner, id); assertOwner(); return result; },
                 put: async (id, revision, document) => { assertOwner(); const result = await putCloudCanvas(owner, id, revision, document); assertOwner(); return result; },
-                portable: async project => { assertOwner(); const result = await makeCloudCanvas(owner, project); assertOwner(); return result; },
+                portable: async (project, rejected) => { assertOwner(); const result = await makeCloudCanvas(owner, project, rejected); assertOwner(); return result; },
                 saveBaseline: async value => {
                     assertOwner();
                     try { await runLocalForageStorage(() => localforage.setItem(baselineKey, value)); }
@@ -74,8 +75,11 @@ export function createCloudCanvasPersistence(owner: string, name: string, hooks:
     }
     function schedule(delay = 1200, changes?: ReadonlyMap<string, CanvasProject | null>) {
         if (!hooks.valid()) return;
-        if (changes) for (const [id, project] of changes) { outbox.set(id, project); blockedIds.delete(id); }
-        else { fullSave = true; blockedIds.clear(); }
+        if (changes) for (const [id, project] of changes) {
+            outbox.set(id, project);
+            if (blocked.get(id)?.signature === undefined) blocked.delete(id);
+        }
+        else fullSave = true;
         dirty = true;
         hooks.status("pending");
         wakeAfter(delay);
@@ -111,18 +115,28 @@ export function createCloudCanvasPersistence(owner: string, name: string, hooks:
                 const batch = new Map(outbox);
                 const saveAll = fullSave;
                 fullSave = false;
+                const attempted = new Map<string, CanvasProject>();
                 try {
                     const projects = saveAll ? await readCanvasProjects(name) : [];
-                    const merged = new Map(projects.map(project => [project.id, project]));
-                    for (const [id, project] of batch) { if (project) merged.set(id, project); else merged.delete(id); }
-                    const changedIds = saveAll ? new Set([...merged.keys(), ...batch.keys(), ...sync.pendingDeleteIds()]) : batch.keys();
-                    await sync.save([...merged.values()], changedIds, blockedIds);
-                    for (const [id, value] of batch) if (!blockedIds.has(id) && outbox.get(id) === value) outbox.delete(id);
+                    for (const project of projects) attempted.set(project.id, project);
+                    for (const [id, project] of batch) { if (project) attempted.set(id, project); else attempted.delete(id); }
+                    const changedIds = saveAll ? new Set([...attempted.keys(), ...batch.keys(), ...sync.pendingDeleteIds()]) : batch.keys();
+                    for (const [id, failure] of blocked) {
+                        if (!saveAll && !batch.has(id)) continue;
+                        const project = attempted.get(id);
+                        if (!project || (failure.signature !== undefined && failure.signature !== canvasMediaSignature(project))) blocked.delete(id);
+                    }
+                    await sync.save([...attempted.values()], changedIds, new Set(blocked.keys()));
+                    for (const [id, value] of batch) if (!blocked.has(id) && outbox.get(id) === value) outbox.delete(id);
                 } catch (error) {
                     if (error instanceof CanvasCloudBatchError) {
                         const failedIds = new Set(error.failures.map(item => item.id));
-                        for (const item of error.failures) if (!retryable(item.error)) blockedIds.add(item.id);
-                        for (const [id, value] of batch) if (!failedIds.has(id) && outbox.get(id) === value) outbox.delete(id);
+                        for (const { id, error: cause } of error.failures) if (!retryable(cause)) {
+                            const project = attempted.get(id);
+                            const signature = cause instanceof CanvasCloudRequestError && cause.code === "CANVAS_ASSET_FORBIDDEN" ? canvasMediaSignature(project ?? null) : undefined;
+                            blocked.set(id, { signature, message: `《${project?.title || id}》${cause instanceof Error ? cause.message : "同步失败"}` });
+                        }
+                        for (const [id, value] of batch) if (!blocked.has(id) && !failedIds.has(id) && outbox.get(id) === value) outbox.delete(id);
                     }
                     fullSave ||= saveAll;
                     throw error;
@@ -133,12 +147,12 @@ export function createCloudCanvasPersistence(owner: string, name: string, hooks:
                     fullSave = true;
                     wakeAfter(0);
                 }
-                if (blockedIds.size) dirty = true;
-                if (hooks.valid()) hooks.status(blockedIds.size ? "error" : dirty ? "pending" : "synced", blockedIds.size ? `部分画布需要处理后重试：${[...blockedIds].join("、")}。其他画布可继续同步。` : undefined);
+                if (blocked.size) dirty = true;
+                if (hooks.valid()) hooks.status(blocked.size ? "error" : dirty ? "pending" : "synced", blocked.size ? blockedMessage() : undefined);
             } catch (error) {
                 dirty = true;
                 if (hooks.valid()) {
-                    hooks.status("error", error instanceof Error ? error.message : "同步失败");
+                    hooks.status("error", blocked.size && !retryable(error) ? blockedMessage() : error instanceof Error ? error.message : "同步失败");
                     failures++;
                     if (retryable(error)) wakeAfter(Math.min(120000, 15000 * 2 ** Math.min(failures - 1, 3)));
                 }
@@ -206,6 +220,7 @@ export function createCloudCanvasPersistence(owner: string, name: string, hooks:
             return operation;
         },
         schedule,
+        retry() { blocked.clear(); schedule(0); },
         flush,
         async confirmImageTask(projectId: string, nodeId: string, requestId: string) {
             await flush();

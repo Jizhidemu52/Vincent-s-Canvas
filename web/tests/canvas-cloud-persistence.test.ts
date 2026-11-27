@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { createCanvasCloudSync, CanvasCloudBatchError, type CanvasCloudBaseline } from "@/lib/canvas/canvas-cloud-sync";
+import { createCanvasCloudSync, CanvasCloudBatchError, canvasMediaSignature, type CanvasCloudBaseline } from "@/lib/canvas/canvas-cloud-sync";
 import { CanvasRevisionConflict, CanvasCloudRequestError, type CloudCanvasDocument } from "@/services/api/canvas-documents";
 import { isCanvasStorageQuotaError, requestCanvasPersistentStorage } from "@/lib/canvas/canvas-storage-capacity";
 import { clearImportedCanvasTasks } from "@/lib/canvas/canvas-import-task-state";
@@ -51,6 +51,7 @@ function harness(remoteDocuments: CloudCanvasDocument[] = [envelope(project())],
         beforeWrite: undefined as (() => Promise<void>) | undefined,
         beforeGet: undefined as (() => Promise<void>) | undefined,
         beforeBaselineRead: undefined as (() => Promise<void>) | undefined,
+        rejectUrl: "", errors: [] as string[],
     };
     const timers = new Map<number, () => void>();
     let timerId = 0;
@@ -63,7 +64,7 @@ function harness(remoteDocuments: CloudCanvasDocument[] = [envelope(project())],
         return clone(state.local);
     };
     const bindings = {
-        CanvasCloudBatchError, CanvasCloudRequestError, isCanvasStorageQuotaError,
+        CanvasCloudBatchError, CanvasCloudRequestError, canvasMediaSignature, isCanvasStorageQuotaError,
         createCanvasCloudSync, collectProjectChanges, nanoid: () => `copy-${++state.nextId}`,
         localforage: {
             getItem: async () => { state.baselineReads += 1; await state.beforeBaselineRead?.(); return clone(state.baseline); },
@@ -76,6 +77,8 @@ function harness(remoteDocuments: CloudCanvasDocument[] = [envelope(project())],
             state.puts.push({ id, revision, document: clone(document) });
             const previous = remote.get(id);
             if (previous ? previous.revision !== revision || (previous.deleted && document) : revision !== 0) throw new CanvasRevisionConflict(clone(previous || envelope(null, 0, id)));
+            if (state.rejectUrl && document?.nodes.some(node => node.metadata?.content === state.rejectUrl))
+                throw new CanvasCloudRequestError("素材不可访问", 403, "CANVAS_ASSET_FORBIDDEN", [state.rejectUrl.split("/")[3]]);
             const saved = envelope(document, (previous?.revision || 0) + 1, id);
             remote.set(id, saved);
             return clone(saved);
@@ -96,12 +99,46 @@ function harness(remoteDocuments: CloudCanvasDocument[] = [envelope(project())],
     const factory = exported.createCloudCanvasPersistence;
     const service = factory(owner, name, {
         valid: () => state.valid,
-        status: (status: string) => state.statuses.push(status),
+        status: (status: string, error?: string) => { state.statuses.push(status); if (error) state.errors.push(error); },
         copy: (value: CanvasProject) => state.copies.push(value),
         unloaded: (values: any[]) => { state.unloaded = values; },
     });
     return { state, remote, timers, service, factory, readCanvasProjects, writeCanvasProjects };
 }
+
+test("a stale revision and rejected media preserve both drafts, isolate the failing project and resume on media replacement", async () => {
+    const base = project("original");
+    const other = project("other");
+    const remoteVersion = { ...base, title: "云端改名" };
+    const local = clone(base);
+    const denied = "/api/assets/aaaaaaaa-2222-4333-8444-555555555555/content";
+    local.nodes[0].metadata!.content = denied;
+    const io = harness([envelope(remoteVersion, 8), envelope(other)], [local, other], { ...known(base), ...known(other) });
+    io.state.rejectUrl = denied;
+    await io.service.hydrate(io.state.local);
+    await io.service.flush();
+    expect(io.state.statuses.at(-1)).toBe("error");
+    expect(io.state.errors.at(-1)).toContain("《完整项目》节点「原稿」");
+    expect(io.remote.get("original")!.document).toEqual(remoteVersion);
+    expect(io.state.local.find(item => item.id === local.id)?.nodes).toEqual(local.nodes);
+    expect(io.state.copies).toHaveLength(1);
+    const attempts = io.state.puts.filter(item => item.id === local.id).length;
+    expect(attempts).toBe(2);
+    const edited = { ...local, title: "本机继续编辑" };
+    const unrelated = { ...other, title: "另一张图独立保存" };
+    io.state.local = [clone(edited), clone(unrelated), ...clone(io.state.copies)];
+    io.service.schedule(0, new Map([[local.id, edited], [other.id, unrelated]]));
+    await io.service.flush();
+    io.service.schedule(); await io.service.flush();
+    expect(io.state.puts.filter(item => item.id === local.id)).toHaveLength(attempts);
+    expect(io.remote.get(other.id)!.document!.title).toBe(unrelated.title);
+    expect(io.state.statuses.at(-1)).toBe("error");
+    expect(io.timers.size).toBe(0);
+    edited.nodes = clone(base.nodes);
+    io.service.schedule(0, new Map([[local.id, edited]])); await io.service.flush();
+    expect(io.remote.get(local.id)!.document!.title).toBe(edited.title);
+    expect(io.state.statuses.at(-1)).toBe("synced");
+});
 
 async function openStore(io: ReturnType<typeof harness>) {
     const userStore = create<any>(() => ({ user: { id: owner, role: "designer" }, status: "authenticated" }));
