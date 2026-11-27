@@ -170,9 +170,14 @@ function AccountHistoryList({ board, ownerId, active, onChange, onViewAll, revis
     const entries = [...tasks.map(task => ({ kind: "task" as const, task, id: `task:${task.id}`, date: task.queuedAt || task.createdAt || "" })),
         ...records.map(record => ({ kind: "local" as const, record, id: `local:${record.id}`, date: record.createdAt }))].sort((left, right) => Date.parse(right.date) - Date.parse(left.date) || left.id.localeCompare(right.id));
     const quick = isQuickImageTool(board) && board !== "item-extract" ? board : undefined;
+    const taskTitle = (task: GenerationHistoryTask) => {
+        if (!quick) return display(t(titleOf(task)));
+        const savedTitle = task.parameters?.quickImageAction ? undefined : task.userInput?.userText?.trim();
+        return sourceNames?.get(task.id) || savedTitle || t(quickImageTitle(quick));
+    };
     if (quick && onViewAll) return <section aria-label={t("最近任务")} className="quick-history-recent">
         <div className="quick-history-heading"><strong>{t("最近任务")}</strong><button type="button" onClick={onViewAll}>{t("全部记录")} <span aria-hidden>›</span></button></div>
-        {entries.slice(0, 2).map(entry => entry.kind === "task" && <QuickHistoryRow key={entry.id} task={entry.task} ownerId={ownerId} title={sourceNames?.get(entry.task.id) || t(quickImageTitle(quick))} onPreview={() => setSelected(entry)} />)}
+        {entries.slice(0, 2).map(entry => entry.kind === "task" && <QuickHistoryRow key={entry.id} task={entry.task} ownerId={ownerId} title={taskTitle(entry.task)} onPreview={() => setSelected(entry)} />)}
         {!entries.length && <p className="text-xs text-muted-foreground">{t(error ? "暂时无法读取最近任务" : loading ? "正在读取…" : "还没有处理过图片")}</p>}
         <Modal title={t("任务详情")} open={selected?.kind === "task"} onCancel={() => setSelected(null)} footer={null} width={840} destroyOnHidden>{selected?.kind === "task" && <HistoryDetail key={selected.task.id} task={selected.task} ownerId={ownerId} board={board} />}</Modal>
     </section>;
@@ -183,9 +188,9 @@ function AccountHistoryList({ board, ownerId, active, onChange, onViewAll, revis
             const removed=new Set(items.map(r=>r.kind+":"+r.id));
             setTasks(old=>old.filter(r=>!removed.has("task:"+r.id)));setRecords(old=>old.filter(r=>!removed.has("local:"+r.id)));
             setSelected(null);onChange?.();await load();
-        }} rows={entries.map(entry => { const title = entry.kind === "task" ? (quick ? quickImageTitle(quick) : titleOf(entry.task)) : entry.record.prompt;
-            return {kind:entry.kind,id:entry.kind==="task"?entry.task.id:entry.record.id,title:display(t(title)).slice(0,80),disabled:entry.kind==="task"&&!historyTaskRemovable(entry.task.status,entry.task.resultDocument?.status),content:quick && entry.kind === "task" ? <QuickHistoryRow task={entry.task} ownerId={ownerId} title={sourceNames?.get(entry.task.id) || t(title)} onPreview={() => setSelected(entry)} /> : <button type="button" onClick={() => setSelected(entry)} className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary" aria-label={t("查看云端记录：{title}", { title: display(t(title)).slice(0, 80) })}>
-            <History size={18} className="shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{display(t(title))}</span><span className="mt-1 block text-xs text-muted-foreground">{formatBeijingDateTime(entry.date)} · {entry.kind === "task" ? <>{t(statusLabels[entry.task.status] || entry.task.status)} · {entry.task.resultUrls?.length || 0}{t(" 份结果")}</> : t(entry.record.operation === "recolor" ? "精确换色 · 最终成果已归档" : "选区合成 · 最终成果已归档")}</span></span><span className="shrink-0 text-xs text-primary">{t("查看")}</span>
+        }} rows={entries.map(entry => { const title = entry.kind === "task" ? taskTitle(entry.task) : display(t(entry.record.prompt));
+            return {kind:entry.kind,id:entry.kind==="task"?entry.task.id:entry.record.id,title:title.slice(0,80),disabled:entry.kind==="task"&&!historyTaskRemovable(entry.task.status,entry.task.resultDocument?.status),content:quick && entry.kind === "task" ? <QuickHistoryRow task={entry.task} ownerId={ownerId} title={title} onPreview={() => setSelected(entry)} /> : <button type="button" onClick={() => setSelected(entry)} className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary" aria-label={t("查看云端记录：{title}", { title: title.slice(0, 80) })}>
+            <History size={18} className="shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{title}</span><span className="mt-1 block text-xs text-muted-foreground">{formatBeijingDateTime(entry.date)} · {entry.kind === "task" ? <>{t(statusLabels[entry.task.status] || entry.task.status)} · {entry.task.resultUrls?.length || 0}{t(" 份结果")}</> : t(entry.record.operation === "recolor" ? "精确换色 · 最终成果已归档" : "选区合成 · 最终成果已归档")}</span></span><span className="shrink-0 text-xs text-primary">{t("查看")}</span>
         </button>}; })}/>
         {loading && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle size={16} className="animate-spin" />{t("正在读取账号历史…")}</p>}
         {error && <div role="alert" className="space-y-2 text-sm text-destructive"><p><DisplayText text={t(error)} /></p><Button size="small" onClick={() => void load(lastRequestedCursor.current)}>{t("重试读取历史")}</Button></div>}
