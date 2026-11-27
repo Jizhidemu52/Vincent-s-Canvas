@@ -81,11 +81,15 @@ function requestOnce(input, body, attempts) {
         pendingSocket = createConnection(...args);
         return pendingSocket;
       };
+      const [opensslMajor, opensslMinor] = process.versions.openssl.split(".").map(Number);
+      const compactRecraftHello = attempts === 1 && new URL(input.url).origin === "https://external.api.recraft.ai"
+        && (opensslMajor > 3 || (opensslMajor === 3 && opensslMinor >= 5));
       request = https.request(input.url, {
         method: input.method,
         headers: { ...input.headers, "content-length": String(body.length), connection: "close" },
         agent,
         rejectUnauthorized: true,
+        ...(compactRecraftHello ? { ecdhCurve: "*X25519:X25519MLKEM768:prime256v1" } : {}),
         secureOptions: constants.SSL_OP_NO_RENEGOTIATION,
       });
       request.on("error", failAttempt);
