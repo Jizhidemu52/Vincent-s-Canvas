@@ -272,6 +272,7 @@ for (const tool of [
     for (const record of records) { expect(record.sha256).toBe(hash(api.assetBytes.get(record.taskId)!)); expect(record.references).toEqual(r.expected.get(record.taskId)!.sources.map(source => source.name)); r.verifiedResults.push(record); }
     await page.reload(); await expect(workbenchPanes(page)).toHaveCount(3); await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
     await active(page).getByRole("tab", { name: /^历史记录/ }).click();
+    if (["/hd-upscale", "/remove-background"].includes(tool.path)) await active(page).locator("summary").filter({hasText:"此浏览器的记录"}).click();
     await expect(active(page).locator("button.image-history-card")).toHaveCount(3);
     await active(page).locator("button.image-history-card").last().click();
     await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();

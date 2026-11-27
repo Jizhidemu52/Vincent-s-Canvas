@@ -99,6 +99,7 @@ for (const route of [
         expect(api.submissions).toHaveLength(6);
         if (route.prompt) await expect(active(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("MULTI_5_独立款式，不改变其他任务");
         await active(page).getByRole("tab", { name: /^历史记录/ }).click();
+        if (["/hd-upscale", "/remove-background"].includes(route.path)) await active(page).locator("summary").filter({hasText:"此浏览器的记录"}).click();
         await expect(active(page).locator("button.image-history-card")).toHaveCount(5);
         await active(page).locator("button.image-history-card").last().click();
         await expect(active(page).getByRole("heading", { name: "历史预览", exact: true })).toBeVisible();
