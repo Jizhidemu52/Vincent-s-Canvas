@@ -8,7 +8,7 @@ import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
 import type { PromptInputData, PromptScene } from "../../../../shared/prompt-contracts";
 import { carryoverRequirementsSchema } from "../../../../shared/design-brief";
 import { ArrowLeft, ArrowRight, BookmarkPlus, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, Share2, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { App, Button, Checkbox, Dropdown, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
@@ -1332,6 +1332,27 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         disabled: !workbenchTask.active || !draftReady || !handoffReady || readingReferences || running || restoringHistory || user?.status !== "active",
     });
 
+    const quickSourceNames = useMemo(() => {
+        const names = new Map<string, string>();
+        if (standaloneImageTool) for (const log of logs) {
+            const name = log.references[0]?.name;
+            if (name) for (const image of log.images) if (image.sourceTaskId) names.set(image.sourceTaskId, name);
+        }
+        return names;
+    }, [standaloneImageTool, logs]);
+    const logPanel = <LogPanel
+        quickTitle={quickTool ? toolModeConfig.title : undefined}
+        logs={logs} unclassifiedLogs={unclassifiedLogs} selectedLogIds={selectedLogIds}
+        activeLogId={previewLog?.id} disabled={deletingLogs || !handoffReady} deleteDisabled={running}
+        createDisabled={!workbenchTask.ready || workbenchTask.creating}
+        onSelectedLogIdsChange={setSelectedLogIds} onCreateTask={() => void createTask()}
+        onDeleteSelected={confirmDeleteSelected} onPreviewLog={log => void previewGenerationLog(log)}
+    />;
+    const showAllHistory = () => {
+        returnToCurrentTask();
+        setMobilePane("results");
+        setLogsOpen(true);
+    };
     const newImageTaskButton = standaloneImageTool && <Button icon={<Plus className="size-4" />} aria-label={uiText("新建任务，继续创作")} loading={workbenchTask.creating} disabled={!workbenchTask.ready || workbenchTask.creating} onClick={() => void createTask()}>{uiText("新建任务")}</Button>;
     const recoveryControls = running ? <Button block onClick={stopPendingQueries}>{uiText("停止本页查询（不取消服务端任务）")}</Button> : pendingImages.length ? <><Button block onClick={() => void resumePendingImages(pendingImages)}>{pendingStatusCount ? <>{uiText("刷新进度（")}{pendingStatusCount}）</> : uiText("重试保存")}</Button>{pendingImages.some(record => !record.stopped) && <Button block onClick={stopPendingQueries}>{uiText("停止自动刷新")}</Button>}</> : null;
     return (
@@ -1346,6 +1367,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 <div className="min-w-0 flex-1">
                                     {creativePreset ? <Link className="wb-eyebrow inline-flex items-center gap-1" to="/creative"><ArrowLeft className="size-3" />{uiText("创意设计")}</Link> : <p className="wb-eyebrow">{uiText("图像工作室")}</p>}<div className="flex items-center justify-between gap-3"><h1 className="wb-title">{uiText(toolModeConfig.title || "")}</h1>{newImageTaskButton}</div>
                                     <p className="wb-description">{uiText(toolModeConfig.description || "")}</p>
+                                    {standaloneImageTool && <GenerationAccountHistory board={historyTool} active={!logsOpen || mobilePane === "form"} onViewAll={showAllHistory}
+                                        revision={`${activeTaskId || ""}:${running}:${logs[0]?.id || ""}`} sourceNames={quickSourceNames} />}
                                 </div>
                             </div>
                         </div>
@@ -1462,16 +1485,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         {recoveryControls}
                         <div className="image-result-tabs" role="tablist" aria-label={uiText("结果视图")}>
                             <button type="button" role="tab" aria-selected={!logsOpen} onClick={returnToCurrentTask}>{uiText("本次结果")}{running ? <LoaderCircle className="size-4 animate-spin" /> : null}</button>
-                            <button type="button" role="tab" aria-selected={logsOpen} onClick={() => setLogsOpen(true)}><History className="size-4" />{uiText("历史记录")}<span>{logs.length}</span></button>
+                            <button type="button" role="tab" aria-selected={logsOpen} onClick={standaloneImageTool ? showAllHistory : () => setLogsOpen(true)}><History className="size-4" />{uiText("历史记录")}{!standaloneImageTool && <span>{logs.length}</span>}</button>
                         </div>
-                        <div className="image-history-panel" hidden={!logsOpen}><GenerationAccountHistory board={historyTool} active={logsOpen} /><LogPanel
-                            quickTitle={quickTool ? toolModeConfig.title : undefined}
-                            logs={logs} unclassifiedLogs={unclassifiedLogs} selectedLogIds={selectedLogIds}
-                            activeLogId={previewLog?.id} disabled={deletingLogs || !handoffReady} deleteDisabled={running}
-                            createDisabled={!workbenchTask.ready || workbenchTask.creating}
-                            onSelectedLogIdsChange={setSelectedLogIds} onCreateTask={() => void createTask()}
-                            onDeleteSelected={confirmDeleteSelected} onPreviewLog={log => void previewGenerationLog(log)}
-                        /></div>
+                        <div className="image-history-panel" hidden={!logsOpen || Boolean(standaloneImageTool && previewLog)}><GenerationAccountHistory board={historyTool} active={logsOpen} sourceNames={quickSourceNames} />{standaloneImageTool ? <details className="quick-local-history"><summary>{uiText("此浏览器的记录")} <span>{logs.length + unclassifiedLogs.length}</span></summary>{logPanel}</details> : logPanel}</div>
                         {!logsOpen || previewLog ? <><div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                             <div>
                                 <h2 className="text-xl font-semibold">{uiText(previewLog ? "历史预览" : "生成结果")}</h2>

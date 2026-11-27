@@ -28,10 +28,10 @@ async function expectStandaloneActionOnly(page: Page) {
     await expect(page.getByText(/后台私有配方|内置配方|Nano 2\.1|MAI|4K|还差：选择模型/)).toHaveCount(0);
 }
 
-async function uploadStandaloneImage(page: Page) {
+async function uploadStandaloneImage(page: Page, file = { name: "原图.png", mimeType: "image/png", buffer: IMAGE }) {
     const chooser = page.waitForEvent("filechooser");
     await page.getByRole("button", { name: "上传图片", exact: true }).click();
-    await (await chooser).setFiles({ name: "原图.png", mimeType: "image/png", buffer: IMAGE });
+    await (await chooser).setFiles(file);
     await expect(page.getByRole("region", { name: "参考图", exact: true })).toContainText("1 张");
 }
 
@@ -103,6 +103,7 @@ for (const action of ["remove-background", "hd-upscale", "vectorize", "item-extr
         await expectStandaloneActionOnly(page);
         await expect.poll(() => page.getByRole("img", { name: "生成结果 1", exact: true }).evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
         await page.getByRole("tab", { name: /^历史记录/ }).click();
+        if (action !== "item-extract") await page.locator(".quick-local-history:visible summary").click();
         await expect(page.getByRole("checkbox", { name: `选择记录：${title}`, exact: true })).toBeVisible();
         await page.screenshot({ path: testInfo.outputPath(`${action}-desktop.png`), fullPage: true });
         await page.setViewportSize({ width: 390, height: 844 });
@@ -310,32 +311,45 @@ for (const [path, submitLabel] of [["remove-background", "一键去背景"], ["h
         } }));
         api.taskStatus = "processing";
         await page.goto("/" + path);
-        await uploadStandaloneImage(page);
+        await uploadStandaloneImage(page, { name: "针织帽.webp", mimeType: "image/webp", buffer: await readFile("public/design-examples/hat.webp") });
         await page.getByRole("button", { name: submitLabel, exact: true }).click();
         await expect.poll(() => api.submissions.length).toBe(1);
         await page.getByRole("button", { name: "新建任务，继续创作", exact: true }).click();
-        await uploadStandaloneImage(page);
+        await uploadStandaloneImage(page, { name: "针织上衣.webp", mimeType: "image/webp", buffer: await readFile("public/design-examples/knit.webp") });
         await page.getByRole("button", { name: submitLabel, exact: true }).click();
         await expect.poll(() => api.submissions.length).toBe(2);
         expect(api.submissions[0].requestId).not.toBe(api.submissions[1].requestId);
+        const files = ["hat", "knit"];
         for (const task of api.tasks.values()) {
+            api.assetBytes.set(task.id, await readFile("public/design-examples/" + files.shift() + ".webp"));
             task.status = "success";
             task.resultUrls = [`/api/assets/${task.id}/content`];
         }
         await expect(page.getByRole("button", { name: "下载", exact: true })).toBeVisible();
-        await page.getByRole("tab", { name: /^历史记录/ }).click();
+        const recent = page.getByRole("region", { name: "最近任务" });
+        await expect(recent.getByRole("button", { name: /^下载结果/ }).first()).toBeVisible();
+        const downloadEvent = page.waitForEvent("download");
+        await recent.getByRole("button", { name: /^下载结果/ }).first().click();
+        const download = await downloadEvent;
+        expect(await readFile((await download.path())!)).toEqual(await readFile("public/design-examples/knit.webp"));
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.getByRole("button", {name:"创作", exact:true}).click();
+        await expect(recent.getByRole("button", { name:/查看云端记录/ }).first()).toBeInViewport();
+        await expect(page.locator(".ant-message-notice")).toHaveCount(0);
+        await page.screenshot({path:testInfo.outputPath("recent-mobile.png")});
+        await recent.getByRole("button", {name:"全部记录"}).click();
         const cloud = page.getByTestId("account-history").filter({visible:true}).getByRole("group");
         const local = page.locator(".image-history-card:visible");
         for (const width of [1440, 390]) {
             await page.setViewportSize({width, height:900});
-            for (const rows of [cloud, local]) {
-                await expect(rows).toHaveCount(2);
-                const first = await rows.first().boundingBox(), second = await rows.last().boundingBox();
-                expect(second!.y).toBeGreaterThanOrEqual(first!.y+first!.height-1);
-            }
+            await expect(cloud).toHaveCount(2);
+            const first = await cloud.first().boundingBox(), second = await cloud.last().boundingBox();
+            expect(second!.y).toBeGreaterThanOrEqual(first!.y + first!.height - 1);
             expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
             await page.screenshot({path:testInfo.outputPath(`history-${width}.png`)});
         }
+        await page.locator(".quick-local-history:visible summary").click();
+        await expect(local).toHaveCount(2);
         await cloud.first().getByRole("button", { name: /查看云端记录/ }).click();
         await expect(page.getByRole("dialog")).toBeVisible();
         expect(api.submissions).toHaveLength(2);

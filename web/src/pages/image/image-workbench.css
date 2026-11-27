@@ -41,6 +41,27 @@
 }
 
 .image-mobile-next-task { display: none; }
+.quick-history-recent { border-block: 1px solid var(--border); margin-block: 14px; padding: 6px 0; }
+.quick-history-recent > p { margin: 0 0 6px; }
+.quick-history-heading, .quick-history-meta, .quick-history-preview, .quick-history-download { display: flex; align-items: center; }
+.quick-history-heading { justify-content: space-between; gap: 8px; font-size: 14px; }
+.quick-history-heading button { min-height: 38px; font-size: 13px; color: var(--muted-foreground); }
+.quick-history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; padding: 6px 0; }
+.quick-history-row + .quick-history-row { border-top: 1px solid var(--border); }
+.quick-history-preview { gap: 10px; min-width: 0; text-align: start; font-size: 14px; }
+.quick-history-preview img { object-fit: contain; }
+.quick-history-placeholder { width: 56px; height: 56px; flex: none; display: grid; place-items: center; background: var(--muted); border-radius: 6px; }
+.quick-history-meta { flex-wrap: wrap; gap: 2px 8px; margin-top: 3px; color: var(--muted-foreground); font-size: 12px; }
+.quick-history-meta [data-status="failed"] { color: var(--destructive); }
+.quick-history-download { min-height: 44px; gap: 4px; padding: 0 6px; font-size: 13px; }
+.quick-history-preview:hover strong, .quick-history-download:hover, .quick-history-heading button:hover { text-decoration: underline; }
+.quick-local-history { margin-top: 12px; border-top: 1px solid var(--border); }
+.quick-local-history > summary { cursor: pointer; padding: 12px 4px; font-size: 14px; }
+.quick-local-history > summary span { margin-inline-start: 4px; color: var(--muted-foreground); }
+@media (max-width: 767px) {
+    .quick-history-recent .quick-history-row ~ .quick-history-row { display: none; }
+    .quick-history-recent .quick-history-preview > span:first-child { width: 44px; height: 44px; }
+}
 .image-workbench .image-history-card > div { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
 .image-workbench .image-history-card-meta { justify-content: flex-end; }
 .image-workbench .image-history-card-meta > div:last-child { flex-basis: auto; }

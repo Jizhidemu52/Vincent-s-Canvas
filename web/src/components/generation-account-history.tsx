@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { saveAs } from "file-saver";
+import { generationDownloadName } from "@/lib/generation-feedback";
 import { isQuickImageTool, quickImageTitle } from "@/lib/quick-image-tools";
 import { ImageLogThumbnail } from "./image-log-thumbnail";
 import { RemovableHistoryList } from "./removable-history-list";
@@ -19,6 +21,36 @@ import type { LocalProcessingRecord } from "../../../shared/local-processing-con
 
 const statusLabels: Record<string, string> = { waiting: "排队中", queued: "排队中", processing: "处理中", paused: "未完成", success: "已完成", failed: "失败", cancelled: "已取消" };
 const titleOf = (task: GenerationHistoryTask) => task.userInput?.userText || task.prompt || "图片处理任务";
+const historyExtensions: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/svg+xml": "svg", "video/mp4": "mp4" };
+const historyExtension = (type: string) => historyExtensions[type.split(";")[0]] || "bin";
+
+function QuickHistoryRow({ task, ownerId, title, onPreview }: { task: GenerationHistoryTask; ownerId: string; title: string; onPreview: () => void }) {
+    const t = useUiText();
+    const [downloading, setDownloading] = useState(false);
+    const [error, setError] = useState("");
+    const result = task.resultUrls?.find(historyAssetPath);
+    const thumbnail = result || task.sourceUrls?.find(historyAssetPath);
+    const date = formatBeijingDateTime(task.queuedAt || task.createdAt);
+    async function download() {
+        if (!result || downloading) return;
+        setDownloading(true);
+        setError("");
+        try {
+            const blob = await readHistoryOriginal(result, ownerId);
+            saveAs(blob, generationDownloadName(title, historyExtension(blob.type)));
+        } catch (reason) {
+            setError(reason instanceof Error ? reason.message : "下载失败，请重试");
+        } finally { setDownloading(false); }
+    }
+    return <div className="quick-history-row">
+        <button type="button" className="quick-history-preview" onClick={onPreview} aria-label={t("查看云端记录：{title}", { title })}>
+            {thumbnail ? <ImageLogThumbnail image={{ dataUrl: thumbnail }} /> : <span className="quick-history-placeholder"><History size={18} /></span>}
+            <span className="min-w-0"><strong className="block truncate">{title}</strong><span className="quick-history-meta"><span data-status={task.status}>{t(statusLabels[task.status] || task.status)}</span><time title={date}>{date === "—" ? date : date.slice(5, 16)}</time></span></span>
+        </button>
+        {result && <button type="button" className="quick-history-download" disabled={downloading} onClick={() => void download()} aria-label={t("下载结果：{title}", { title })}>{downloading ? <LoaderCircle size={16} className="animate-spin" /> : <Download size={16} />}{t("下载")}</button>}
+        {error && <p role="alert" className="col-span-full text-xs text-destructive">{t(error)}</p>}
+    </div>;
+}
 
 function OriginalPreview({ path, ownerId }: { path: string; ownerId: string }) {
     const t = useUiText();
@@ -36,7 +68,7 @@ function OriginalPreview({ path, ownerId }: { path: string; ownerId: string }) {
     }, [path, ownerId, attempt]);
     if (error) return <div role="alert" className="space-y-2 text-sm text-muted-foreground"><p><DisplayText text={t(error)} /></p>{historyAssetPath(path) && <Button onClick={() => setAttempt(value => value + 1)}>{t("重试读取原件")}</Button>}</div>;
     if (!media) return <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle size={16} className="animate-spin" />{t("正在读取所选原件…")}</p>;
-    const extension = media.type === "image/png" ? "png" : media.type === "image/jpeg" ? "jpg" : media.type === "image/webp" ? "webp" : media.type === "video/mp4" ? "mp4" : "bin";
+    const extension = historyExtension(media.type);
     return <div className="space-y-3">
         {media.type.startsWith("image/") ? <img src={media.url} alt={t("账号历史原件")} className="max-h-[55vh] w-full rounded-lg bg-muted object-contain" />
             : media.type.startsWith("video/") ? <video controls preload="metadata" src={media.url} className="max-h-[55vh] w-full rounded-lg bg-muted"><track kind="captions" /></video>
@@ -90,7 +122,9 @@ function LocalProcessingDetail({ record, ownerId }: { record: LocalProcessingRec
 
 type HistorySelection = { kind: "task"; task: GenerationHistoryTask } | { kind: "local"; record: LocalProcessingRecord };
 
-function AccountHistoryList({ board, ownerId, active, onChange }: { board: string; ownerId: string; active: boolean; onChange?:()=>void }) {
+type HistoryPresentation = { onViewAll?: () => void; revision?: string; sourceNames?: Map<string, string> };
+
+function AccountHistoryList({ board, ownerId, active, onChange, onViewAll, revision, sourceNames }: { board: string; ownerId: string; active: boolean; onChange?:()=>void } & HistoryPresentation) {
     const t = useUiText();
     const display = useDisplayText();
     const [tasks, setTasks] = useState<GenerationHistoryTask[]>([]);
@@ -124,11 +158,24 @@ function AccountHistoryList({ board, ownerId, active, onChange }: { board: strin
         if (active) void load();
         else { controller.current?.abort(); setLoading(false); setSelected(null); }
         return () => controller.current?.abort();
-    }, [active, load]);
+    }, [active, load, revision]);
+    const recent = Boolean(onViewAll);
+    const hasRunning = tasks.some(task => ["queued", "waiting", "processing"].includes(task.status));
+    useEffect(() => {
+        if (!active || !recent || !hasRunning) return;
+        const timer = window.setInterval(() => { if (!document.hidden) void load(); }, 10000);
+        return () => window.clearInterval(timer);
+    }, [active, recent, hasRunning, load]);
     if (!active) return null;
     const entries = [...tasks.map(task => ({ kind: "task" as const, task, id: `task:${task.id}`, date: task.queuedAt || task.createdAt || "" })),
         ...records.map(record => ({ kind: "local" as const, record, id: `local:${record.id}`, date: record.createdAt }))].sort((left, right) => Date.parse(right.date) - Date.parse(left.date) || left.id.localeCompare(right.id));
     const quick = isQuickImageTool(board) && board !== "item-extract" ? board : undefined;
+    if (quick && onViewAll) return <section aria-label={t("最近任务")} className="quick-history-recent">
+        <div className="quick-history-heading"><strong>{t("最近任务")}</strong><button type="button" onClick={onViewAll}>{t("全部记录")} <span aria-hidden>›</span></button></div>
+        {entries.slice(0, 2).map(entry => entry.kind === "task" && <QuickHistoryRow key={entry.id} task={entry.task} ownerId={ownerId} title={sourceNames?.get(entry.task.id) || t(quickImageTitle(quick))} onPreview={() => setSelected(entry)} />)}
+        {!entries.length && <p className="text-xs text-muted-foreground">{t(error ? "暂时无法读取最近任务" : loading ? "正在读取…" : "还没有处理过图片")}</p>}
+        <Modal title={t("任务详情")} open={selected?.kind === "task"} onCancel={() => setSelected(null)} footer={null} width={840} destroyOnHidden>{selected?.kind === "task" && <HistoryDetail key={selected.task.id} task={selected.task} ownerId={ownerId} board={board} />}</Modal>
+    </section>;
     return <section className="mb-6 space-y-3" aria-label={t("账号云端历史")} data-testid="account-history">
         <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="flex items-center gap-2 text-base font-semibold"><History size={16} />{t("账号云端历史")}</h2><Tooltip title={t(loading ? "正在读取账号历史" : "重新读取本账号的已提交记录")}><Button size="small" icon={<RefreshCw size={14} />} disabled={loading} onClick={() => void load()}>{t("刷新记录")}</Button></Tooltip></div>
         <p className="text-sm leading-relaxed text-muted-foreground">{t(quick ? "用同一账号登录，可在其他设备查看这些记录。" : "本账号在此板块提交的任务与已归档的处理成果，换浏览器或电脑仍可查看。原浏览器中的旧记录继续保留，不会合并删除或覆盖。")}</p>
@@ -136,10 +183,9 @@ function AccountHistoryList({ board, ownerId, active, onChange }: { board: strin
             const removed=new Set(items.map(r=>r.kind+":"+r.id));
             setTasks(old=>old.filter(r=>!removed.has("task:"+r.id)));setRecords(old=>old.filter(r=>!removed.has("local:"+r.id)));
             setSelected(null);onChange?.();await load();
-        }} rows={entries.map(entry => { const title = entry.kind === "task" ? (quick ? quickImageTitle(quick) : titleOf(entry.task)) : entry.record.prompt; const source = entry.kind === "task" && quick
-            ? [...(entry.task.resultUrls || []), ...(entry.task.sourceUrls || [])].find(historyAssetPath) : undefined;
-            return {kind:entry.kind,id:entry.kind==="task"?entry.task.id:entry.record.id,title:display(t(title)).slice(0,80),disabled:entry.kind==="task"&&!historyTaskRemovable(entry.task.status,entry.task.resultDocument?.status),content:<button type="button" onClick={() => setSelected(entry)} className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary" aria-label={t("查看云端记录：{title}", { title: display(t(title)).slice(0, 80) })}>
-            {source ? <ImageLogThumbnail image={{dataUrl:source}} /> : <History size={18} className="shrink-0 text-muted-foreground" />}<span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{display(t(title))}</span><span className="mt-1 block text-xs text-muted-foreground">{formatBeijingDateTime(entry.date)} · {entry.kind === "task" ? <>{t(statusLabels[entry.task.status] || entry.task.status)} · {entry.task.resultUrls?.length || 0}{t(" 份结果")}</> : t(entry.record.operation === "recolor" ? "精确换色 · 最终成果已归档" : "选区合成 · 最终成果已归档")}</span></span><span className="shrink-0 text-xs text-primary">{t("查看")}</span>
+        }} rows={entries.map(entry => { const title = entry.kind === "task" ? (quick ? quickImageTitle(quick) : titleOf(entry.task)) : entry.record.prompt;
+            return {kind:entry.kind,id:entry.kind==="task"?entry.task.id:entry.record.id,title:display(t(title)).slice(0,80),disabled:entry.kind==="task"&&!historyTaskRemovable(entry.task.status,entry.task.resultDocument?.status),content:quick && entry.kind === "task" ? <QuickHistoryRow task={entry.task} ownerId={ownerId} title={sourceNames?.get(entry.task.id) || t(title)} onPreview={() => setSelected(entry)} /> : <button type="button" onClick={() => setSelected(entry)} className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary" aria-label={t("查看云端记录：{title}", { title: display(t(title)).slice(0, 80) })}>
+            <History size={18} className="shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{display(t(title))}</span><span className="mt-1 block text-xs text-muted-foreground">{formatBeijingDateTime(entry.date)} · {entry.kind === "task" ? <>{t(statusLabels[entry.task.status] || entry.task.status)} · {entry.task.resultUrls?.length || 0}{t(" 份结果")}</> : t(entry.record.operation === "recolor" ? "精确换色 · 最终成果已归档" : "选区合成 · 最终成果已归档")}</span></span><span className="shrink-0 text-xs text-primary">{t("查看")}</span>
         </button>}; })}/>
         {loading && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle size={16} className="animate-spin" />{t("正在读取账号历史…")}</p>}
         {error && <div role="alert" className="space-y-2 text-sm text-destructive"><p><DisplayText text={t(error)} /></p><Button size="small" onClick={() => void load(lastRequestedCursor.current)}>{t("重试读取历史")}</Button></div>}
@@ -149,9 +195,9 @@ function AccountHistoryList({ board, ownerId, active, onChange }: { board: strin
     </section>;
 }
 
-export function GenerationAccountHistory({ board, active = true, onChange }: { board: string; active?: boolean; onChange?:()=>void }) {
+export function GenerationAccountHistory({ board, active = true, onChange, ...presentation }: { board: string; active?: boolean; onChange?:()=>void } & HistoryPresentation) {
     const ownerId = useUserStore(state => state.user?.id);
     const status = useUserStore(state => state.status);
     const pane = useWorkbenchTask();
-    return ownerId && (!deploymentFeatures.authenticationEnabled || status === "authenticated") ? <AccountHistoryList key={`${ownerId}:${board}`} board={board} ownerId={ownerId} active={active && pane.active} onChange={onChange} /> : null;
+    return ownerId && (!deploymentFeatures.authenticationEnabled || status === "authenticated") ? <AccountHistoryList key={`${ownerId}:${board}`} board={board} ownerId={ownerId} active={active && pane.active} onChange={onChange} {...presentation} /> : null;
 }
