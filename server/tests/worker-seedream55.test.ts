@@ -1,3 +1,4 @@
+import { RecraftOutputInvalid } from "../src/recraft-image";
 import { classifyResultFailure, pauseOwnedTask } from "../src/task-repair";
 import { expect, test } from "bun:test";
 import ts from "typescript";
@@ -10,7 +11,7 @@ const source = ts.createSourceFile("worker.ts", worker, ts.ScriptTarget.Latest, 
 function workerFunction(name: string, dependencies: Record<string, unknown>) {
   const node = source.statements.find(statement => ts.isFunctionDeclaration(statement) && statement.name?.text === name)!;
   const code = ts.transpileModule(node.getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
-  return new Function("classifyResultFailure", "pauseOwnedTask", ...Object.keys(dependencies), `${code};return ${name}`)(classifyResultFailure, pauseOwnedTask, ...Object.values(dependencies));
+  return new Function("RecraftOutputInvalid", "classifyResultFailure", "pauseOwnedTask", ...Object.keys(dependencies), `${code};return ${name}`)(RecraftOutputInvalid, classifyResultFailure, pauseOwnedTask, ...Object.values(dependencies));
 }
 const manifest = parseSeedream55Manifest({ data: { result: { images: [{ url: ["https://cdn.example.com/base.png", "https://cdn.example.com/layer.png"] }] } } }, true);
 const task = () => ({ id: "task-one", request_id: "request-one", user_id: "alice", tool_key: "layer-studio", model_id: "seedream-5-5", model_config_id: "model-one", base_url: "https://example.com/v1",

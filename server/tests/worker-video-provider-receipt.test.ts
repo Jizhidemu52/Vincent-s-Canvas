@@ -1,3 +1,4 @@
+import { RecraftOutputInvalid } from "../src/recraft-image";
 import { recraftProviderId } from "../../shared/recraft-tools";
 import { classifyResultFailure, pauseOwnedTask, requeueRepairs } from "../src/task-repair";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -32,7 +33,7 @@ function worker(dependencies: Record<string, unknown>, runTask = false) {
   };
   const names = ["executeProvider", "executeApiMartVideo", "assertTaskExecution", ...(runTask ? ["runTask"] : [])];
   const code = names.map(name => source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name)!.getText(source)).join("\n");
-  return new Function("classifyResultFailure", "pauseOwnedTask", ...Object.keys(deps), `${ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText};return {${names.join(",")}}`)(classifyResultFailure, pauseOwnedTask, ...Object.values(deps));
+  return new Function("RecraftOutputInvalid", "classifyResultFailure", "pauseOwnedTask", ...Object.keys(deps), `${ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText};return {${names.join(",")}}`)(RecraftOutputInvalid, classifyResultFailure, pauseOwnedTask, ...Object.values(deps));
 }
 const url = "https://provider-results.example/original.mp4?signature=private%2Fvalue";
 const task = () => ({ id: randomUUID(), user_id: randomUUID(), model_config_id: randomUUID(), model_id: "gemini-omni-1.2-flash",

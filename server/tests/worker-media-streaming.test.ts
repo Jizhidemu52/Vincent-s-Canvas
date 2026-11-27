@@ -1,3 +1,4 @@
+import { RecraftOutputInvalid } from "../src/recraft-image";
 import { classifyResultFailure, pauseOwnedTask } from "../src/task-repair";
 import { expect, test } from "bun:test";
 import ts from "typescript";
@@ -11,7 +12,7 @@ import { videoFileExtension } from "../../shared/video-output";
 const source = ts.createSourceFile("worker.ts", await Bun.file(new URL("../src/worker.ts", import.meta.url)).text(), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 function functions(names: string[], dependencies: Record<string, unknown>) {
   const code = names.map(name => source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name)!.getText(source)).join("\n");
-  return new Function("classifyResultFailure", "pauseOwnedTask", ...Object.keys(dependencies), `${ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText}; return {${names.join(',')}}`)(classifyResultFailure, pauseOwnedTask, ...Object.values(dependencies));
+  return new Function("RecraftOutputInvalid", "classifyResultFailure", "pauseOwnedTask", ...Object.keys(dependencies), `${ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText}; return {${names.join(',')}}`)(RecraftOutputInvalid, classifyResultFailure, pauseOwnedTask, ...Object.values(dependencies));
 }
 const id = "30000000-0000-4000-8000-000000000001";
 

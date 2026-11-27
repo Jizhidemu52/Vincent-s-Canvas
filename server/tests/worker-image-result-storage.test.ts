@@ -1,3 +1,4 @@
+import { RecraftOutputInvalid } from "../src/recraft-image";
 import { classifyResultFailure, pauseOwnedTask } from "../src/task-repair";
 import { expect, test } from "bun:test";
 import ts from "typescript";
@@ -21,7 +22,7 @@ function declaration(name: string) {
 }
 function functions(names: string[], dependencies: Record<string, unknown>) {
   const code = ts.transpileModule(names.map(declaration).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-  return new Function("classifyResultFailure", "pauseOwnedTask", ...Object.keys(dependencies), `${code}\nreturn { ${names.join(",")} };`)(classifyResultFailure, pauseOwnedTask, ...Object.values(dependencies));
+  return new Function("RecraftOutputInvalid", "classifyResultFailure", "pauseOwnedTask", ...Object.keys(dependencies), `${code}\nreturn { ${names.join(",")} };`)(RecraftOutputInvalid, classifyResultFailure, pauseOwnedTask, ...Object.values(dependencies));
 }
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAFUlEQVR4nGP8////fwYGBgYWEAHCAD4KBAICIHhuAAAAAElFTkSuQmCC", "base64");
