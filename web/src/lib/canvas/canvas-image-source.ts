@@ -1,4 +1,5 @@
-import type { CanvasNodeMetadata } from "@/types/canvas";
+import type { QuickImageAction } from "@/lib/quick-image-tools";
+import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 
 type ImageSourceMetadata = Pick<CanvasNodeMetadata, "content" | "storageKey" | "serverAssetId">;
 
@@ -13,4 +14,8 @@ export function canvasImageSource(metadata?: ImageSourceMetadata) {
 
 export function hasCanvasImageSource<T extends ImageSourceMetadata>(metadata?: T): metadata is T & ({ content: string } | { storageKey: string } | { serverAssetId: string }) {
     return Boolean(metadata?.content || metadata?.storageKey || metadata?.serverAssetId);
+}
+
+export function hasPendingCanvasImageAction(nodes: readonly CanvasNodeData[], sourceId: string, action: QuickImageAction) {
+    return nodes.some(({ metadata }) => metadata?.quickImageAction === action && metadata.generationRecord?.sourceNodeId === sourceId && (metadata.imageTask || metadata.status === "loading"));
 }

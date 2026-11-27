@@ -266,3 +266,38 @@ test("selected canvas images show right-side actions, preserve the original and 
     expect(small.x).toBeGreaterThanOrEqual(0); expect(small.x + small.width).toBeLessThanOrEqual(390);
     await page.screenshot({ path: testInfo.outputPath("canvas-actions-390.png") });
 });
+
+test("canvas quick tasks stay independent across tools and source images", async ({ page, api }, testInfo) => {
+    await managedQuickTask(page, api);
+    api.taskStatus = "processing";
+    const id = await newCanvas(page);
+    await uploadImage(page, "第一张.png");
+    const panel = page.getByTestId("canvas-image-quick-actions");
+    const remove = panel.getByRole("button", { name: "一键去背景", exact: true });
+    const upscale = panel.getByRole("button", { name: "高清放大", exact: true });
+    await remove.click();
+    await expect(remove).toBeDisabled();
+    await upscale.click();
+    await expect(upscale).toBeDisabled();
+    await expect.poll(() => api.submissions.length).toBe(2);
+    await uploadImage(page, "第二张.png");
+    await remove.click();
+    await expect.poll(() => api.submissions.length).toBe(3);
+    const tasks = [...api.tasks.values()];
+    expect(new Set(tasks.map(task => task.requestId)).size).toBe(3);
+    await page.screenshot({ path: testInfo.outputPath("canvas-three-active-tasks.png") });
+    for (const task of tasks.reverse()) {
+        task.status = "success";
+        task.resultUrls = [`/api/assets/${task.id}/content`];
+    }
+    await expect.poll(() => api.document(id)?.nodes.filter(node => node.metadata?.quickImageAction && node.metadata.status === "success").length).toBe(3);
+    const nodes = api.document(id)!.nodes;
+    expect(nodes).toHaveLength(5);
+    const [a, b, c] = nodes.filter(node => node.metadata?.quickImageAction);
+    expect(a.metadata.generationRecord.sourceNodeId).toBe(b.metadata.generationRecord.sourceNodeId);
+    expect(c.metadata.generationRecord.sourceNodeId).not.toBe(a.metadata.generationRecord.sourceNodeId);
+    expect(a.position).not.toEqual(b.position);
+    await page.reload();
+    for (const node of [a, b, c]) await expect(page.locator(`[data-node-id="${node.id}"]`)).toBeAttached();
+    expect(api.submissions).toHaveLength(3);
+});

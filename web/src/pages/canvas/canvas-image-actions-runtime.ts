@@ -11,7 +11,7 @@ import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { currentToolConfig } from "@/hooks/use-tool-config";
 import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
 import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
-import { canvasImageSource, hasCanvasImageSource } from "@/lib/canvas/canvas-image-source";
+import { canvasImageSource, hasCanvasImageSource, hasPendingCanvasImageAction } from "@/lib/canvas/canvas-image-source";
 import { canvasImageBaseName, canvasImageVersion, originalCanvasImageFileName } from "@/lib/canvas/canvas-image-filename";
 import { loadCanvasImageTools } from "@/lib/canvas/canvas-image-tool-loader";
 import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
@@ -467,7 +467,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
         };
 
     const quickImageNode = async (source: CanvasNodeData, action: QuickImageAction) => {
-        const key = `quick-image:${source.id}`;
+        const key = `quick-image:${source.id}:${action}`;
         if (generationDispatchLocksRef.current.has(key)) return;
         generationDispatchLocksRef.current.add(key);
         let childId: string | undefined;
@@ -477,8 +477,8 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             if (!node || node.type !== CanvasNodeType.Image || !hasCanvasImageSource(node.metadata)) return;
             const referenceError = quickImageReferenceFileError({ type: node.metadata?.mimeType, size: node.metadata?.bytes }, action);
             if (referenceError) { message.warning(displayNotice(uiText(referenceError))); return; }
-            if (node.metadata?.imageTask || node.metadata?.status === "loading" || nodesRef.current.some(item => item.metadata?.quickImageAction && item.metadata?.generationRecord?.sourceNodeId === node.id && (item.metadata.imageTask || item.metadata.status === "loading"))) {
-                message.warning(uiText("已有图片任务待完成，请先查看原任务")); return;
+            if (node.metadata?.imageTask || node.metadata?.status === "loading" || hasPendingCanvasImageAction(nodesRef.current, node.id, action)) {
+                message.warning(uiText("这项处理正在进行中")); return;
             }
             if (!isModuleAvailable(useModuleStore.getState().flags, useBusinessConfigStore.getState().tools, "canvas-edit")) { message.warning(uiText("当前图片编辑功能已停用")); return; }
             if (useUserStore.getState().user?.status !== "active" || !await waitForWriteAccess() || !isImageSourceCurrent(node)) return;
@@ -488,10 +488,10 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             const size = fitNodeSize(node.metadata?.naturalWidth || node.width, node.metadata?.naturalHeight || node.height, 320, 320);
             childId = nanoid();
             const generationRecord = createCanvasGenerationRecord({ id: nanoid(), sourceNodeId: node.id, prompt: "", references, nodes: nodesRef.current, config, generationType: "edit" });
-            setNodes(previous => [...previous, { id: childId!, type: CanvasNodeType.Image, title: `${node.title || "图片"} · ${title}`, position: placeCanvasImageOutputs(nodesRef.current, [node], size, node.position, 96), ...size,
+            setNodes(previous => [...previous, { id: childId!, type: CanvasNodeType.Image, title: `${node.title || "图片"} · ${title}`, position: placeCanvasImageOutputs(previous, [node], size, node.position, 96), ...size,
                 metadata: { ...buildImageGenerationMetadata("edit", config, 1, references), quickImageAction: action, generationRecord, compareSources: [canvasCompareSource(node.metadata || {})], status: NODE_STATUS_LOADING } }]);
             setConnections(previous => [...previous, { id: nanoid(), fromNodeId: node.id, toNodeId: childId! }]);
-            setSelectedNodeIds(new Set([childId])); setContextMenu(null); setDialogNodeId(null);
+            setContextMenu(null); setDialogNodeId(null);
             controller = startGenerationRequest(childId, node.id, childId);
             const task = await createOptions(childId, controller, undefined, "canvas-edit");
             if (!isImageSourceCurrent(node)) throw new Error("原图片已发生变化，请重新发起操作");
